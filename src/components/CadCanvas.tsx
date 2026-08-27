@@ -1,8 +1,7 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   BuildingLoop,
   AnalysisPointResult,
-  Point2D,
 } from '../types/geometry';
 
 interface CadCanvasProps {
@@ -30,13 +29,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   showShadowingLines,
   showSunlightLines,
 }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Viewport state (pan & zoom)
   const [viewState, setViewState] = useState({
-    panX: 400,
-    panY: 350,
-    scale: 12, // pixels per meter
+    panX: 500,
+    panY: 450,
+    scale: 14, // pixels per meter
   });
 
   const [isPanning, setIsPanning] = useState(false);
@@ -44,40 +44,70 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
   // World <-> Screen coordinate conversions
-  const worldToScreen = (wx: number, wy: number) => {
-    return {
-      sx: viewState.panX + wx * viewState.scale,
-      sy: viewState.panY - wy * viewState.scale, // Y-up in CAD
-    };
-  };
+  const worldToScreen = useCallback(
+    (wx: number, wy: number) => {
+      return {
+        sx: viewState.panX + wx * viewState.scale,
+        sy: viewState.panY - wy * viewState.scale, // Y-up in CAD
+      };
+    },
+    [viewState]
+  );
 
-  const screenToWorld = (sx: number, sy: number) => {
-    return {
-      wx: (sx - viewState.panX) / viewState.scale,
-      wy: -(sy - viewState.panY) / viewState.scale,
-    };
-  };
+  const screenToWorld = useCallback(
+    (sx: number, sy: number) => {
+      return {
+        wx: (sx - viewState.panX) / viewState.scale,
+        wy: -(sy - viewState.panY) / viewState.scale,
+      };
+    },
+    [viewState]
+  );
 
-  // Render loop
+  // Resize Observer for 100% fullscreen canvas sizing
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  // Main Render Loop
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Handle canvas resizing
-    canvas.width = canvas.parentElement?.clientWidth || 800;
-    canvas.height = canvas.parentElement?.clientHeight || 600;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = container.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
-    // 1. Clear background
-    ctx.fillStyle = '#0f172a'; // Tailwind slate-900
+    // 1. Clean CAD background
+    ctx.fillStyle = '#020617'; // slate-950
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Draw CAD Grid
-    ctx.strokeStyle = '#1e293b';
+    // 2. High-precision dynamic CAD Grid
+    ctx.strokeStyle = '#0f172a';
     ctx.lineWidth = 1;
     const gridStep = 5; // meters
     const topLeftWorld = screenToWorld(0, 0);
@@ -101,9 +131,29 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     }
     ctx.stroke();
 
-    // Draw Main Axes
+    // Minor 1m Subgrid when zoomed in
+    if (viewState.scale > 10) {
+      ctx.strokeStyle = '#09101d';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let gx = minGridX; gx <= maxGridX; gx += 1) {
+        if (gx % gridStep === 0) continue;
+        const { sx } = worldToScreen(gx, 0);
+        ctx.moveTo(sx, 0);
+        ctx.lineTo(sx, height);
+      }
+      for (let gy = minGridY; gy <= maxGridY; gy += 1) {
+        if (gy % gridStep === 0) continue;
+        const { sy } = worldToScreen(0, gy);
+        ctx.moveTo(0, sy);
+        ctx.lineTo(width, sy);
+      }
+      ctx.stroke();
+    }
+
+    // Origin Axes (0,0)
     const originScreen = worldToScreen(0, 0);
-    ctx.strokeStyle = '#334155';
+    ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(0, originScreen.sy);
@@ -112,7 +162,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     ctx.lineTo(originScreen.sx, height);
     ctx.stroke();
 
-    // 3. Draw Buildings
+    // 3. Render Buildings
     for (const bldg of buildings) {
       const isSelected = bldg.id === selectedBuildingId;
       const isTested = bldg.isTested;
@@ -125,36 +175,47 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       });
       ctx.closePath();
 
-      // Building Fill
+      // Premium Fill styling
       if (isTested) {
-        ctx.fillStyle = isSelected ? 'rgba(59, 130, 246, 0.35)' : 'rgba(59, 130, 246, 0.2)';
+        ctx.fillStyle = isSelected ? 'rgba(59, 130, 246, 0.28)' : 'rgba(59, 130, 246, 0.16)';
       } else {
-        ctx.fillStyle = isSelected ? 'rgba(148, 163, 184, 0.35)' : 'rgba(71, 85, 105, 0.25)';
+        ctx.fillStyle = isSelected ? 'rgba(148, 163, 184, 0.25)' : 'rgba(71, 85, 105, 0.18)';
       }
       ctx.fill();
 
-      // Building Stroke
-      ctx.strokeStyle = isTested ? '#60a5fa' : '#94a3b8';
-      ctx.lineWidth = isSelected ? 3 : 2;
+      // Clean Stroke
+      ctx.strokeStyle = isTested ? '#3b82f6' : '#64748b';
+      ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
-      // Building Label
+      // Center Name Tag
       if (bldg.vertices.length > 0) {
         const centroid = bldg.vertices.reduce(
           (acc, v) => ({ x: acc.x + v.x / bldg.vertices.length, y: acc.y + v.y / bldg.vertices.length }),
           { x: 0, y: 0 }
         );
         const { sx, sy } = worldToScreen(centroid.x, centroid.y);
+
+        // Badge pill
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(sx - 70, sy - 18, 140, 36, 8);
+        ctx.fill();
+        ctx.strokeStyle = isSelected ? '#3b82f6' : '#334155';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
         ctx.fillStyle = '#f8fafc';
-        ctx.font = '11px sans-serif';
+        ctx.font = 'bold 11px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(`${bldg.name}`, sx, sy);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(`H = ${bldg.defaultHeight}m`, sx, sy + 14);
+        ctx.fillText(`${bldg.name}`, sx, sy - 2);
+
+        ctx.fillStyle = isTested ? '#60a5fa' : '#94a3b8';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.fillText(`H = ${bldg.defaultHeight}m ${bldg.isTested ? '• BADANY' : ''}`, sx, sy + 11);
       }
 
-      // Draw Facade Normals
+      // Draw Normals
       if (showNormals) {
         ctx.strokeStyle = '#f59e0b';
         ctx.lineWidth = 1.5;
@@ -162,7 +223,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           const midX = (seg.p1.x + seg.p2.x) / 2;
           const midY = (seg.p1.y + seg.p2.y) / 2;
           const { sx: mx, sy: my } = worldToScreen(midX, midY);
-          const { sx: nx, sy: ny } = worldToScreen(midX + seg.normal.x * 1.5, midY + seg.normal.y * 1.5);
+          const { sx: nx, sy: ny } = worldToScreen(midX + seg.normal.x * 2.0, midY + seg.normal.y * 2.0);
 
           ctx.beginPath();
           ctx.moveTo(mx, my);
@@ -170,7 +231,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           ctx.stroke();
 
           // Arrowhead
-          const headLen = 5;
+          const headLen = 6;
           const angle = Math.atan2(ny - my, nx - mx);
           ctx.beginPath();
           ctx.moveTo(nx, ny);
@@ -182,35 +243,34 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 4. Draw Analysis Offset Lines & Sample Points
-    const offsetDistance = 0.6; // meters
+    // 4. Render Analytical Lines & Sample Points
+    const offsetDistance = 0.8; // meters
 
     for (const res of analysisResults) {
       const { point, normal, shadowing, sunlight } = res;
       const isSelectedPoint = selectedPointResult?.id === res.id;
 
-      // § 12 (Inner offset / Direct point)
+      // § 12 (Inner offset / Direct facade points)
       if (showShadowingLines) {
         const { sx, sy } = worldToScreen(point.x, point.y);
         ctx.beginPath();
-        ctx.arc(sx, sy, isSelectedPoint ? 6 : 3.5, 0, 2 * Math.PI);
+        ctx.arc(sx, sy, isSelectedPoint ? 6 : 4, 0, 2 * Math.PI);
         ctx.fillStyle = shadowing.isCompliant ? '#10b981' : '#f43f5e';
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = isSelectedPoint ? 2 : 1;
+        ctx.lineWidth = isSelectedPoint ? 2.5 : 1;
         ctx.stroke();
       }
 
-      // § 56 (Outer offset line)
+      // § 56 (Outer offset solar points)
       if (showSunlightLines) {
         const outerX = point.x + normal.x * offsetDistance;
         const outerY = point.y + normal.y * offsetDistance;
         const { sx, sy } = worldToScreen(outerX, outerY);
 
         ctx.beginPath();
-        ctx.arc(sx, sy, isSelectedPoint ? 6 : 3.5, 0, 2 * Math.PI);
+        ctx.arc(sx, sy, isSelectedPoint ? 6 : 4, 0, 2 * Math.PI);
 
-        // Sunlight Color scale: Red (<1.5h), Yellow (1.5h-3h), Green (>=3h)
         if (sunlight.totalHours >= 3.0) {
           ctx.fillStyle = '#10b981'; // Green
         } else if (sunlight.totalHours >= 1.5) {
@@ -225,14 +285,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 5. Draw Solar Fan / Shadowing Rays for Selected Point
+    // 5. Render Ray Casting Fan for Selected Point
     if (selectedPointResult) {
       const { point, shadowing } = selectedPointResult;
       const { sx: px, sy: py } = worldToScreen(point.x, point.y);
 
-      // Draw rays
       for (const ray of shadowing.rays) {
-        const dist = Math.min(ray.hitDistance, 25);
+        const dist = Math.min(ray.hitDistance, 28);
         const rad = (ray.worldAngleDeg * Math.PI) / 180;
         const targetWorldX = point.x + Math.cos(rad) * dist;
         const targetWorldY = point.y + Math.sin(rad) * dist;
@@ -241,11 +300,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         ctx.beginPath();
         ctx.moveTo(px, py);
         ctx.lineTo(rx, ry);
-        ctx.strokeStyle = ray.isFree ? 'rgba(52, 211, 153, 0.25)' : 'rgba(248, 113, 113, 0.35)';
+        ctx.strokeStyle = ray.isFree ? 'rgba(52, 211, 153, 0.35)' : 'rgba(244, 63, 94, 0.45)';
         ctx.lineWidth = 1;
         ctx.stroke();
       }
     }
+
+    ctx.restore();
   }, [
     buildings,
     selectedBuildingId,
@@ -255,6 +316,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     showNormals,
     showShadowingLines,
     showSunlightLines,
+    worldToScreen,
+    screenToWorld,
   ]);
 
   // Mouse interaction handlers
@@ -263,20 +326,20 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
     setViewState((prev) => ({
       ...prev,
-      scale: Math.max(2, Math.min(80, prev.scale * zoomFactor)),
+      scale: Math.max(3, Math.min(100, prev.scale * zoomFactor)),
     }));
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
+    const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const world = screenToWorld(sx, sy);
 
-    // Check if clicked near an analysis point
+    // Check if clicked on an analysis point
     let clickedPoint: AnalysisPointResult | null = null;
-    let minDist = 1.0; // 1 meter threshold
+    let minDist = 1.2;
 
     for (const res of analysisResults) {
       const d = Math.hypot(res.point.x - world.wx, res.point.y - world.wy);
@@ -294,7 +357,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     // Check if clicked inside a building
     let clickedBuildingId: string | null = null;
     for (const bldg of buildings) {
-      // Simplified bounding box / point check
       const minX = Math.min(...bldg.vertices.map((v) => v.x));
       const maxX = Math.max(...bldg.vertices.map((v) => v.x));
       const minY = Math.min(...bldg.vertices.map((v) => v.y));
@@ -318,7 +380,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!dragStart) return;
-    const rect = canvasRef.current?.getBoundingClientRect();
+    const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
@@ -348,14 +410,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full overflow-hidden select-none">
+    <div ref={containerRef} className="w-full h-full relative overflow-hidden select-none">
       <canvas
         ref={canvasRef}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        className="w-full h-full cursor-crosshair block"
+        className="w-full h-full cursor-grab active:cursor-grabbing block"
       />
     </div>
   );
