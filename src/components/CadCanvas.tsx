@@ -111,12 +111,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     });
   }, [buildings]);
 
-  // Fit to extents on initial mount, when buildings change or when fitTrigger is updated
+  // Fit to extents ONLY on initial mount and when user explicitly triggers fitTrigger
   useEffect(() => {
     fitToExtents();
     const t = setTimeout(fitToExtents, 100);
     return () => clearTimeout(t);
-  }, [buildings, fitTrigger]);
+  }, [fitTrigger]);
 
   // Main Render Loop (Draws onto Canvas)
   useEffect(() => {

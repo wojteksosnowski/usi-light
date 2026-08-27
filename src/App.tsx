@@ -125,6 +125,7 @@ export const App: React.FC = () => {
           setBuildings(parsed);
           setSelectedBuildingId(parsed[0].id);
           setSelectedPointResult(null);
+          setFitKey((prev) => prev + 1);
         } else {
           alert('Nie znaleziono zamkniętych polilinii w pliku DXF.');
         }
@@ -406,6 +407,7 @@ export const App: React.FC = () => {
                 setBuildings(createSampleBuildings());
                 setSelectedBuildingId('bldg-1');
                 setSelectedPointResult(null);
+                setFitKey((prev) => prev + 1);
               }}
               className="btn-secondary"
             >
