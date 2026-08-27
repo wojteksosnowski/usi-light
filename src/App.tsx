@@ -535,19 +535,27 @@ export const App: React.FC = () => {
         </div>
 
         {/* Legend Overlay at Bottom-Left */}
-        <div className="cad-legend-bottom">
-          <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>Legenda:</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10b981' }} />
-            <span>Zgodne (§ 12 / &ge; 3.0 h)</span>
+        <div className="cad-legend-bottom" style={{ gap: '14px' }}>
+          <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '11px' }}>LEGENDA:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: '12px', height: '4px', backgroundColor: '#10b981', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px' }}>§ 12 Zgodne</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
-            <span>1.5 h - 3.0 h (§ 56)</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: '12px', height: '4px', backgroundColor: '#f43f5e', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px' }}>§ 12 Niezgodne</span>
           </div>
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#f43f5e' }} />
-            <span>Niezgodne / &lt; 1.5 h</span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>§ 56 Nasłonecznienie:</span>
+            <div style={{ display: 'flex', height: '6px', width: '80px', borderRadius: '3px', overflow: 'hidden' }}>
+              <span style={{ flex: 1, backgroundColor: '#3b0764' }} title="0h (Fiolet)" />
+              <span style={{ flex: 1, backgroundColor: '#7e22ce' }} title="1.0h" />
+              <span style={{ flex: 1, backgroundColor: '#c026d3' }} title="2.0h" />
+              <span style={{ flex: 1, backgroundColor: '#ea580c' }} title="3.0h (Zgodne)" />
+              <span style={{ flex: 1, backgroundColor: '#fb923c' }} title="4.0h+ (Pomarańcz)" />
+            </div>
+            <span style={{ fontSize: '10px', color: '#cbd5e1' }}>0h &rarr; 4h+ (krok 30m)</span>
           </div>
         </div>
 

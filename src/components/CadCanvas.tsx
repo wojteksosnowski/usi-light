@@ -308,46 +308,100 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 4. Render Analytical Lines & Sample Points
-    const offsetDistance = 0.8; // meters
+    // 4. Render Analytical Bands & Lines adjacent to building facades
+    // Helper function for Purple-to-Orange sunlight color scale in 30-minute steps
+    const getSunlightColor = (hours: number) => {
+      // Step to nearest 0.5h (30 min)
+      const steppedHours = Math.floor(hours * 2) / 2;
+      
+      // Color Palette: Deep Violet (0h) -> Purple (1h) -> Magenta/Pink (2h) -> Coral/Amber (3h) -> Bright Orange (4h+)
+      if (steppedHours < 0.5) return '#3b0764'; // very dark purple (<30 min)
+      if (steppedHours < 1.0) return '#581c87'; // dark violet (30 min)
+      if (steppedHours < 1.5) return '#7e22ce'; // violet (1.0 h)
+      if (steppedHours < 2.0) return '#a855f7'; // bright purple (1.5 h)
+      if (steppedHours < 2.5) return '#c026d3'; // fuchsia / magenta (2.0 h)
+      if (steppedHours < 3.0) return '#e11d48'; // rose / coral (2.5 h)
+      if (steppedHours < 3.5) return '#ea580c'; // rich orange (3.0 h - standard met)
+      if (steppedHours < 4.0) return '#f97316'; // vibrant orange (3.5 h)
+      return '#fb923c'; // bright warm orange (4.0 h+)
+    };
 
+    // Group analysis points by segment for smooth continuous band rendering
+    const pointsBySegment = new Map<string, typeof analysisResults>();
     for (const res of analysisResults) {
-      const { point, normal, shadowing, sunlight } = res;
-      const isSelectedPoint = selectedPointResult?.id === res.id;
-
-      // § 12 (Inner offset / Direct facade points)
-      if (showShadowingLines) {
-        const { sx, sy } = worldToScreen(point.x, point.y);
-        ctx.beginPath();
-        ctx.arc(sx, sy, isSelectedPoint ? 6 : 4, 0, 2 * Math.PI);
-        ctx.fillStyle = shadowing.isCompliant ? '#10b981' : '#f43f5e';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = isSelectedPoint ? 2.5 : 1;
-        ctx.stroke();
+      if (!pointsBySegment.has(res.segmentId)) {
+        pointsBySegment.set(res.segmentId, []);
       }
+      pointsBySegment.get(res.segmentId)!.push(res);
+    }
 
-      // § 56 (Outer offset solar points)
-      if (showSunlightLines) {
-        const outerX = point.x + normal.x * offsetDistance;
-        const outerY = point.y + normal.y * offsetDistance;
-        const { sx, sy } = worldToScreen(outerX, outerY);
+    const bandThickness = Math.max(3, Math.min(10, viewState.scale * 0.35)); // Screen pixels thickness
+    const offsetDistance = 0.45; // meters in world space for outer sunlight band
 
-        ctx.beginPath();
-        ctx.arc(sx, sy, isSelectedPoint ? 6 : 4, 0, 2 * Math.PI);
+    pointsBySegment.forEach((points) => {
+      if (points.length < 2) return;
 
-        if (sunlight.totalHours >= 3.0) {
-          ctx.fillStyle = '#10b981'; // Green
-        } else if (sunlight.totalHours >= 1.5) {
-          ctx.fillStyle = '#f59e0b'; // Amber/Yellow
-        } else {
-          ctx.fillStyle = '#ef4444'; // Red
+      // Sort points along segment by ratio
+      points.sort((a, b) => a.shadowing.offsetRatio - b.shadowing.offsetRatio);
+
+      for (let i = 0; i < points.length - 1; i++) {
+        const pA = points[i];
+        const pB = points[i + 1];
+
+        // --- § 12 Shadowing Band (Inner facade ribbon / line) ---
+        if (showShadowingLines) {
+          const sA = worldToScreen(pA.point.x, pA.point.y);
+          const sB = worldToScreen(pB.point.x, pB.point.y);
+
+          ctx.beginPath();
+          ctx.moveTo(sA.sx, sA.sy);
+          ctx.lineTo(sB.sx, sB.sy);
+          ctx.strokeStyle = pA.shadowing.isCompliant && pB.shadowing.isCompliant ? '#10b981' : '#f43f5e';
+          ctx.lineWidth = bandThickness;
+          ctx.lineCap = 'round';
+          ctx.stroke();
         }
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+
+        // --- § 56 Sunlight Band (Outer facade ribbon in violet-to-orange scale) ---
+        if (showSunlightLines) {
+          const normA = pA.normal;
+          const normB = pB.normal;
+
+          const outA = {
+            x: pA.point.x + normA.x * offsetDistance,
+            y: pA.point.y + normA.y * offsetDistance,
+          };
+          const outB = {
+            x: pB.point.x + normB.x * offsetDistance,
+            y: pB.point.y + normB.y * offsetDistance,
+          };
+
+          const sOutA = worldToScreen(outA.x, outA.y);
+          const sOutB = worldToScreen(outB.x, outB.y);
+
+          const avgHours = (pA.sunlight.totalHours + pB.sunlight.totalHours) / 2;
+          ctx.beginPath();
+          ctx.moveTo(sOutA.sx, sOutA.sy);
+          ctx.lineTo(sOutB.sx, sOutB.sy);
+          ctx.strokeStyle = getSunlightColor(avgHours);
+          ctx.lineWidth = bandThickness;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+        }
       }
+    });
+
+    // Highlight selected point marker if active
+    if (selectedPointResult) {
+      const { point } = selectedPointResult;
+      const { sx, sy } = worldToScreen(point.x, point.y);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 7, 0, 2 * Math.PI);
+      ctx.fillStyle = '#6366f1';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
     }
 
     // 5. Render Ray Casting Fan for Selected Point
