@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { BuildingLoop, AnalysisPointResult, ProjectSettings } from './types/geometry';
@@ -15,13 +15,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   Move,
-  Eye,
-  Sliders,
   ChevronLeft,
   ChevronRight,
-  Maximize2,
-  Compass,
-  FileSpreadsheet,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -139,262 +134,268 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
+    <div className="app-container">
       {/* Collapsible Left Sidebar */}
-      <aside
-        className={`relative h-full bg-slate-900/95 backdrop-blur-md border-r border-slate-800 flex flex-col transition-all duration-300 z-30 shadow-2xl ${
-          isSidebarOpen ? 'w-96 min-w-[24rem]' : 'w-0 min-w-0 border-r-0 overflow-hidden'
-        }`}
-      >
-        {/* App Header */}
-        <div className="p-4 border-b border-slate-800/80 bg-slate-950/60 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-amber-500 via-indigo-600 to-blue-600 shadow-lg shadow-indigo-500/20">
-              <Sparkles className="w-5 h-5 text-white" />
+      <aside className={`app-sidebar ${!isSidebarOpen ? 'collapsed' : ''}`}>
+        {/* Header */}
+        <div className="sidebar-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div
+              style={{
+                padding: '8px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #f59e0b, #6366f1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Sparkles size={20} color="#fff" />
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-wide text-white flex items-center gap-2">
-                USI Light <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-300 border border-indigo-500/40">2.5D CAD</span>
-              </h1>
-              <p className="text-xs text-slate-400">Analiza nasłonecznienia & przesłaniania</p>
+              <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#fff' }}>USI Light 2.5D</div>
+              <div style={{ fontSize: '11px', color: '#94a3b8' }}>Analiza § 12 & § 56 WT</div>
             </div>
           </div>
           <button
             onClick={() => setIsSidebarOpen(false)}
             title="Schowaj panel boczny"
-            className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              padding: '6px',
+            }}
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft size={20} />
           </button>
         </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
-          {/* Section: Status Bilansu */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">
-              <span>Zbiorczy Bilans Zgodności</span>
-              <span className="text-[11px] font-medium text-slate-500">{stats.total} pkt pomiarowych</span>
+        {/* Scrollable Body */}
+        <div className="sidebar-body custom-scrollbar">
+          {/* Section: Zbiorczy Bilans Zgodności */}
+          <div className="ui-card">
+            <div className="ui-title">
+              <span>Bilans Zgodności</span>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 'normal' }}>
+                {stats.total} pkt pomiarowych
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               {/* § 12 Card */}
               <div
-                className={`p-3.5 rounded-xl border transition-all shadow-sm ${
-                  stats.pct12 === 100
-                    ? 'bg-emerald-950/25 border-emerald-500/30'
-                    : 'bg-rose-950/25 border-rose-500/30'
-                }`}
+                style={{
+                  padding: '12px',
+                  borderRadius: '10px',
+                  backgroundColor: stats.pct12 === 100 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(244, 63, 94, 0.1)',
+                  border: `1px solid ${stats.pct12 === 100 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
+                }}
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                    <Shield className="w-4 h-4 text-emerald-400" />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#e2e8f0' }}>
+                    <Shield size={14} color="#34d399" />
                     <span>§ 12 Przesłan.</span>
                   </div>
                   {stats.pct12 === 100 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <CheckCircle2 size={14} color="#34d399" />
                   ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    <AlertTriangle size={14} color="#fb7185" />
                   )}
                 </div>
-                <div className="text-2xl font-black tracking-tight text-white mb-1">
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
                   {stats.pct12}%
                 </div>
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-emerald-400 h-full transition-all duration-500"
-                    style={{ width: `${stats.pct12}%` }}
-                  />
+                <div style={{ width: '100%', height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${stats.pct12}%`, height: '100%', backgroundColor: '#10b981', transition: 'width 0.3s' }} />
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1.5">
-                  Spełnione: <span className="text-slate-200 font-semibold">{stats.compliant12}</span> / {stats.total}
+                <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '6px' }}>
+                  Zgodne: <b>{stats.compliant12}</b> / {stats.total}
                 </div>
               </div>
 
               {/* § 56 Card */}
               <div
-                className={`p-3.5 rounded-xl border transition-all shadow-sm ${
-                  stats.pct56 >= 80
-                    ? 'bg-amber-950/25 border-amber-500/30'
-                    : 'bg-rose-950/25 border-rose-500/30'
-                }`}
+                style={{
+                  padding: '12px',
+                  borderRadius: '10px',
+                  backgroundColor: stats.pct56 >= 80 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(244, 63, 94, 0.1)',
+                  border: `1px solid ${stats.pct56 >= 80 ? 'rgba(245, 158, 11, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
+                }}
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                    <Sun className="w-4 h-4 text-amber-400" />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#e2e8f0' }}>
+                    <Sun size={14} color="#fbbf24" />
                     <span>§ 56 Nasłon.</span>
                   </div>
                   {stats.pct56 >= 80 ? (
-                    <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                    <CheckCircle2 size={14} color="#fbbf24" />
                   ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    <AlertTriangle size={14} color="#fb7185" />
                   )}
                 </div>
-                <div className="text-2xl font-black tracking-tight text-white mb-1">
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
                   {stats.pct56}%
                 </div>
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-amber-400 h-full transition-all duration-500"
-                    style={{ width: `${stats.pct56}%` }}
-                  />
+                <div style={{ width: '100%', height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${stats.pct56}%`, height: '100%', backgroundColor: '#f59e0b', transition: 'width 0.3s' }} />
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1.5">
-                  Spełnione: <span className="text-slate-200 font-semibold">{stats.compliant56}</span> / {stats.total}
+                <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '6px' }}>
+                  Zgodne: <b>{stats.compliant56}</b> / {stats.total}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Section: Przełączniki warstw analitycznych (Modern Toggle Buttons) */}
-          <div className="bg-slate-800/50 p-3.5 rounded-2xl border border-slate-700/60 space-y-2.5">
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-indigo-400" />
-              <span>Widoczność Warstw Analitycznych</span>
+          {/* Section: Przełączniki warstw */}
+          <div className="ui-card">
+            <div className="ui-title">
+              <span>Warstwy analityczne</span>
+              <Layers size={14} color="#818cf8" />
             </div>
 
-            <div className="grid grid-cols-1 gap-2 pt-1">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 type="button"
                 onClick={() => setShowShadowingLines(!showShadowingLines)}
-                className={`flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium transition cursor-pointer ${
-                  showShadowingLines
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/80'
-                }`}
+                className={`btn-tile ${showShadowingLines ? 'active-emerald' : 'inactive'}`}
               >
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${showShadowingLines ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showShadowingLines ? '#34d399' : '#64748b' }} />
                   <span>Przesłanianie § 12 (Wewnętrzny obrys)</span>
                 </div>
-                <span className="text-[10px] font-bold uppercase">{showShadowingLines ? 'WŁ' : 'WYŁ'}</span>
+                <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowingLines ? 'WŁ' : 'WYŁ'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowSunlightLines(!showSunlightLines)}
-                className={`flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium transition cursor-pointer ${
-                  showSunlightLines
-                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/80'
-                }`}
+                className={`btn-tile ${showSunlightLines ? 'active-amber' : 'inactive'}`}
               >
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${showSunlightLines ? 'bg-amber-400' : 'bg-slate-600'}`} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showSunlightLines ? '#fbbf24' : '#64748b' }} />
                   <span>Nasłonecznienie § 56 (Zewnętrzny pas)</span>
                 </div>
-                <span className="text-[10px] font-bold uppercase">{showSunlightLines ? 'WŁ' : 'WYŁ'}</span>
+                <span style={{ fontSize: '10px', fontWeight: 700 }}>{showSunlightLines ? 'WŁ' : 'WYŁ'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowNormals(!showNormals)}
-                className={`flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium transition cursor-pointer ${
-                  showNormals
-                    ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 shadow-sm'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/80'
-                }`}
+                className={`btn-tile ${showNormals ? 'active-indigo' : 'inactive'}`}
               >
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${showNormals ? 'bg-indigo-400' : 'bg-slate-600'}`} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showNormals ? '#818cf8' : '#64748b' }} />
                   <span>Wektory normalne fasad (Zwrot ścian)</span>
                 </div>
-                <span className="text-[10px] font-bold uppercase">{showNormals ? 'WŁ' : 'WYŁ'}</span>
+                <span style={{ fontSize: '10px', fontWeight: 700 }}>{showNormals ? 'WŁ' : 'WYŁ'}</span>
               </button>
             </div>
           </div>
 
-          {/* Section: Edycja zaznaczonego budynku */}
+          {/* Section: Parametry zaznaczonego obiektu */}
           {selectedBuilding ? (
-            <div className="bg-slate-800/50 p-3.5 rounded-2xl border border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                  <Building className="w-4 h-4 text-indigo-400" />
-                  <span>Edycja Obiektu 2.5D</span>
-                </div>
-                <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
-                  {selectedBuilding.segments.length} fasad
-                </span>
+            <div className="ui-card">
+              <div className="ui-title">
+                <span>Edycja Obiektu 2.5D</span>
+                <Building size={14} color="#818cf8" />
               </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1 text-[11px] font-medium">Nazwa bryły</label>
-                <input
-                  type="text"
-                  value={selectedBuilding.name}
-                  onChange={(e) => updateSelectedBuilding({ name: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div>
-                  <label className="block text-slate-400 mb-1 text-[11px] font-medium">Wysokość H (m)</label>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa bryły</label>
                   <input
-                    type="number"
-                    step="0.5"
-                    value={selectedBuilding.defaultHeight}
-                    onChange={(e) =>
-                      updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })
-                    }
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-indigo-500"
+                    type="text"
+                    value={selectedBuilding.name}
+                    onChange={(e) => updateSelectedBuilding({ name: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: '8px',
+                      padding: '7px 10px',
+                      color: '#fff',
+                      fontSize: '12px',
+                    }}
                   />
                 </div>
-                <div>
-                  <label className="block text-slate-400 mb-1 text-[11px] font-medium">Parapet H_okna (m)</label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={selectedBuilding.hWindowBottom}
-                    onChange={(e) =>
-                      updateSelectedBuilding({ hWindowBottom: parseFloat(e.target.value) || 0.85 })
-                    }
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-indigo-500"
-                  />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Wysokość H (m)</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={selectedBuilding.defaultHeight}
+                      onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
+                      style={{
+                        width: '100%',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: '8px',
+                        padding: '7px 10px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Parapet H_okna (m)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={selectedBuilding.hWindowBottom}
+                      onChange={(e) => updateSelectedBuilding({ hWindowBottom: parseFloat(e.target.value) || 0.85 })}
+                      style={{
+                        width: '100%',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: '8px',
+                        padding: '7px 10px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {/* Status Buttons */}
-              <div className="grid grid-cols-1 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
-                  className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-medium transition cursor-pointer ${
-                    selectedBuilding.isTested
-                      ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
-                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  <span>Obiekt badany (Projektowany)</span>
-                  <span className="text-[10px] font-bold">{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
-                </button>
+                {/* Status Toggle Buttons */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
+                    className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
+                  >
+                    <span>Obiekt badany (Projektowany)</span>
+                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
-                  className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-medium transition cursor-pointer ${
-                    selectedBuilding.isCityCentre
-                      ? 'bg-amber-600/20 border-amber-500/50 text-amber-300'
-                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
-                  <span className="text-[10px] font-bold">{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
+                    className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
+                  >
+                    <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
+                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800 text-center text-slate-500 text-xs">
+            <div className="ui-card" style={{ textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
               Kliknij dowolny budynek na rzucie CAD, aby edytować jego parametry.
             </div>
           )}
 
-          {/* Section: Akcje CAD & Import */}
-          <div className="space-y-2 pt-2">
-            <label className="flex items-center justify-center gap-2.5 w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-semibold py-2.5 px-4 rounded-xl cursor-pointer transition shadow-lg shadow-indigo-600/20">
-              <Upload className="w-4 h-4" />
-              <span>Wgraj własny plik DXF</span>
-              <input type="file" accept=".dxf" onChange={handleFileUpload} className="hidden" />
+          {/* Section: Akcje Główne */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <label className="btn-primary">
+              <Upload size={16} />
+              <span>Wgraj plik DXF</span>
+              <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
             </label>
 
             <button
@@ -404,99 +405,127 @@ export const App: React.FC = () => {
                 setSelectedBuildingId('bldg-1');
                 setSelectedPointResult(null);
               }}
-              className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 px-3 rounded-xl transition border border-slate-700/60"
+              className="btn-secondary"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw size={15} />
               <span>Załaduj scenę wzorcową</span>
             </button>
           </div>
         </div>
 
-        {/* Footer info */}
-        <div className="p-3 border-t border-slate-800 bg-slate-950/80 text-[11px] text-slate-400 flex items-center gap-2">
-          <Move className="w-4 h-4 text-indigo-400 shrink-0" />
-          <span>Przeciągaj obiekty myszą. Analiza przelicza się w czasie rzeczywistym.</span>
+        {/* Footer */}
+        <div className="sidebar-footer">
+          <Move size={16} color="#818cf8" style={{ flexShrink: 0 }} />
+          <span>Przeciągaj obiekty myszą. Analiza przelicza się na żywo.</span>
         </div>
       </aside>
 
       {/* Main Fullscreen CAD Viewport */}
-      <main className="flex-1 h-full relative overflow-hidden bg-slate-950 flex flex-col">
-        {/* Floating Top Toolbar */}
-        <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-2xl border border-slate-800/80 shadow-2xl">
+      <main className="cad-viewport">
+        {/* Floating Top HUD */}
+        <div className="cad-hud-top">
           {!isSidebarOpen && (
             <button
               onClick={() => setIsSidebarOpen(true)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '10px',
+                background: 'var(--accent-indigo)',
+                color: '#fff',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 'bold',
+              }}
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight size={14} />
               <span>Pokaż panel</span>
             </button>
           )}
 
-          {/* Quick Stats Pill */}
-          <div className="flex items-center gap-3 px-3 py-1.5 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-              <span className="text-slate-300 font-medium">§ 12: <b className="text-white">{stats.pct12}%</b></span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
+              <span style={{ color: '#94a3b8' }}>§ 12: <b style={{ color: '#fff' }}>{stats.pct12}%</b></span>
             </div>
-            <div className="h-4 w-px bg-slate-700" />
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-              <span className="text-slate-300 font-medium">§ 56: <b className="text-white">{stats.pct56}%</b></span>
+            <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+              <span style={{ color: '#94a3b8' }}>§ 56: <b style={{ color: '#fff' }}>{stats.pct56}%</b></span>
             </div>
           </div>
 
-          <div className="h-4 w-px bg-slate-700" />
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
-          {/* Quick View Controls */}
           <button
             onClick={() => setShowShadowingLines(!showShadowingLines)}
-            title="Przełącz widok § 12"
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              showShadowingLines ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
-            }`}
+            style={{
+              padding: '5px 9px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: showShadowingLines ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+              color: showShadowingLines ? '#6ee7b7' : '#94a3b8',
+            }}
           >
             § 12
           </button>
           <button
             onClick={() => setShowSunlightLines(!showSunlightLines)}
-            title="Przełącz widok § 56"
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              showSunlightLines ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-white'
-            }`}
+            style={{
+              padding: '5px 9px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: showSunlightLines ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
+              color: showSunlightLines ? '#fcd34d' : '#94a3b8',
+            }}
           >
             § 56
           </button>
           <button
             onClick={() => setShowNormals(!showNormals)}
-            title="Przełącz wektory normalne"
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              showNormals ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'
-            }`}
+            style={{
+              padding: '5px 9px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: showNormals ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+              color: showNormals ? '#a5b4fc' : '#94a3b8',
+            }}
           >
             Wektory
           </button>
         </div>
 
         {/* Legend Overlay at Bottom-Left */}
-        <div className="absolute bottom-4 left-4 z-20 bg-slate-900/90 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-slate-800/80 shadow-2xl text-xs text-slate-300 flex items-center gap-4">
-          <div className="font-semibold text-slate-200">Legenda:</div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-emerald-500" />
+        <div className="cad-legend-bottom">
+          <span style={{ fontWeight: 'bold', color: '#e2e8f0' }}>Legenda:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10b981' }} />
             <span>Zgodne (§ 12 / &ge; 3.0 h)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-amber-500" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
             <span>1.5 h - 3.0 h (§ 56)</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-rose-500" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#f43f5e' }} />
             <span>Niezgodne / &lt; 1.5 h</span>
           </div>
         </div>
 
-        {/* The CAD Canvas Container */}
-        <div className="flex-1 w-full h-full relative">
+        {/* The CAD Canvas Element */}
+        <div className="cad-canvas-wrapper">
           <CadCanvas
             buildings={buildings}
             selectedBuildingId={selectedBuildingId}
@@ -511,7 +540,7 @@ export const App: React.FC = () => {
           />
         </div>
 
-        {/* Point Inspector Modal */}
+        {/* Floating Point Inspector Modal */}
         <PointInspectorModal
           pointResult={selectedPointResult}
           onClose={() => setSelectedPointResult(null)}

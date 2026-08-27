@@ -18,116 +18,121 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
   const isCompliant56 = sunlight.isCompliant;
 
   return (
-    <div className="absolute top-4 right-4 w-96 max-h-[90vh] bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl p-5 text-white overflow-y-auto z-40 animate-in fade-in slide-in-from-right-4">
+    <div className="inspector-card">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-            <Compass className="w-5 h-5" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b', paddingBottom: '10px', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ padding: '8px', borderRadius: '10px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
+            <Compass size={18} />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-100">Punkt pomiarowy fasady</h3>
-            <p className="text-[11px] text-slate-400 font-mono">
-              Współrzędne: X={point.x.toFixed(2)}m, Y={point.y.toFixed(2)}m
-            </p>
+            <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#f8fafc' }}>Punkt fasady</div>
+            <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>
+              X={point.x.toFixed(2)}m, Y={point.y.toFixed(2)}m
+            </div>
           </div>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+          style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
         >
-          <X className="w-4 h-4" />
+          <X size={18} />
         </button>
       </div>
 
       {/* § 12 Przesłanianie Box */}
-      <div className="mb-4 bg-slate-950/60 rounded-xl p-3.5 border border-slate-800 shadow-sm">
-        <div className="flex items-center justify-between mb-2.5">
-          <div className="flex items-center gap-2">
-            {isCompliant12 ? (
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
-            )}
-            <span className="text-xs font-bold text-slate-200">§ 12 Przesłanianie</span>
+      <div style={{ backgroundColor: 'rgba(2, 6, 23, 0.7)', borderRadius: '12px', padding: '12px', border: '1px solid #1e293b', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {isCompliant12 ? <ShieldCheck size={16} color="#34d399" /> : <ShieldAlert size={16} color="#fb7185" />}
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#e2e8f0' }}>§ 12 Przesłanianie</span>
           </div>
           <span
-            className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold uppercase ${
-              isCompliant12
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-            }`}
+            style={{
+              fontSize: '10px',
+              fontWeight: 'bold',
+              padding: '2px 8px',
+              borderRadius: '999px',
+              backgroundColor: isCompliant12 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)',
+              color: isCompliant12 ? '#6ee7b7' : '#fda4af',
+              border: `1px solid ${isCompliant12 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'}`,
+            }}
           >
             {isCompliant12 ? 'ZGODNE' : 'NIEZGODNE'}
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80">
-            <div className="text-slate-400 text-[10px] uppercase font-semibold">Ciągły kąt wolny</div>
-            <div className="font-bold text-base text-slate-100 mt-0.5">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+          <div style={{ backgroundColor: '#0f172a', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+            <div style={{ color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', fontWeight: 600 }}>Ciągły kąt wolny</div>
+            <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#f8fafc', marginTop: '2px' }}>
               {shadowing.maxContinuousFreeSpanDeg.toFixed(1)}°
             </div>
-            <div className="text-slate-500 text-[10px]">Wymóg: min. 60.0°</div>
+            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 60°</div>
           </div>
-          <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80">
-            <div className="text-slate-400 text-[10px] uppercase font-semibold">Suma kątów wolnych</div>
-            <div className="font-bold text-base text-slate-100 mt-0.5">
+          <div style={{ backgroundColor: '#0f172a', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+            <div style={{ color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', fontWeight: 600 }}>Suma kątów wolnych</div>
+            <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#f8fafc', marginTop: '2px' }}>
               {shadowing.totalFreeSpanDeg.toFixed(1)}°
             </div>
-            <div className="text-slate-500 text-[10px]">Wymóg: min. 75.0°</div>
+            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 75°</div>
           </div>
         </div>
       </div>
 
       {/* § 56 Nasłonecznienie Box */}
-      <div className="mb-2 bg-slate-950/60 rounded-xl p-3.5 border border-slate-800 shadow-sm">
-        <div className="flex items-center justify-between mb-2.5">
-          <div className="flex items-center gap-2">
-            <Sun className="w-4 h-4 text-amber-400" />
-            <span className="text-xs font-bold text-slate-200">§ 56 Nasłonecznienie (21 III)</span>
+      <div style={{ backgroundColor: 'rgba(2, 6, 23, 0.7)', borderRadius: '12px', padding: '12px', border: '1px solid #1e293b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Sun size={16} color="#fbbf24" />
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#e2e8f0' }}>§ 56 Nasłonecznienie (21 III)</span>
           </div>
           <span
-            className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold uppercase ${
-              isCompliant56
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-            }`}
+            style={{
+              fontSize: '10px',
+              fontWeight: 'bold',
+              padding: '2px 8px',
+              borderRadius: '999px',
+              backgroundColor: isCompliant56 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)',
+              color: isCompliant56 ? '#6ee7b7' : '#fda4af',
+              border: `1px solid ${isCompliant56 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'}`,
+            }}
           >
             {isCompliant56 ? 'ZGODNE' : 'NIEZGODNE'}
           </span>
         </div>
 
-        <div className="flex items-center justify-between bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80 mb-3">
-          <div className="flex items-center gap-2 text-xs">
-            <Clock className="w-4 h-4 text-amber-400" />
-            <span className="text-slate-300 font-medium">Czas słońca:</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#94a3b8' }}>
+            <Clock size={14} color="#fbbf24" />
+            <span>Czas słońca:</span>
           </div>
-          <div className="text-base font-bold text-amber-300">
+          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#fcd34d' }}>
             {sunlight.totalHours.toFixed(2)} h ({sunlight.totalMinutes} min)
           </div>
         </div>
 
         {/* Timeline Bar */}
-        <div className="text-[10px] text-slate-400 font-semibold uppercase mb-1.5">
-          Wykres nasłonecznienia minuta po minucie:
+        <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '4px' }}>
+          Oś nasłonecznienia minuta po minucie:
         </div>
-        <div className="flex w-full h-3 rounded-full overflow-hidden bg-slate-950 border border-slate-800">
+        <div style={{ display: 'flex', width: '100%', height: '10px', borderRadius: '5px', overflow: 'hidden', backgroundColor: '#020617', border: '1px solid #1e293b' }}>
           {sunlight.timeSlots.map((slot, idx) => (
             <div
               key={idx}
               title={`${slot.time} - ${slot.isDirectSunlight ? 'Bezpośrednie słońce' : 'Cień / Brak kąta'}`}
-              className={`flex-1 transition-all ${
-                slot.isDirectSunlight
-                  ? 'bg-amber-400'
+              style={{
+                flex: 1,
+                backgroundColor: slot.isDirectSunlight
+                  ? '#f59e0b'
                   : slot.isAngleAbove12Deg
-                  ? 'bg-slate-700'
-                  : 'bg-slate-950'
-              }`}
+                  ? '#334155'
+                  : '#020617',
+              }}
             />
           ))}
         </div>
-        <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#64748b', fontFamily: 'monospace', marginTop: '4px' }}>
           <span>{sunlight.timeSlots[0]?.time}</span>
           <span>{sunlight.timeSlots[Math.floor(sunlight.timeSlots.length / 2)]?.time}</span>
           <span>{sunlight.timeSlots[sunlight.timeSlots.length - 1]?.time}</span>
