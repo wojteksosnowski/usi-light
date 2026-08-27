@@ -425,7 +425,7 @@ export const App: React.FC = () => {
       </aside>
 
       {/* Main Fullscreen CAD Viewport */}
-      <main className="cad-viewport">
+      <main className="cad-viewport" style={{ flex: 1, width: '100%', height: '100vh', position: 'relative', overflow: 'hidden' }}>
         {/* Floating Top HUD */}
         <div className="cad-hud-top">
           {!isSidebarOpen && (
@@ -552,7 +552,7 @@ export const App: React.FC = () => {
         </div>
 
         {/* The CAD Canvas Element */}
-        <div className="cad-canvas-wrapper">
+        <div className="cad-canvas-wrapper" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', overflow: 'hidden' }}>
           <CadCanvas
             buildings={buildings}
             selectedBuildingId={selectedBuildingId}

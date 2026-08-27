@@ -118,29 +118,57 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     return () => clearTimeout(t);
   }, [fitTrigger]);
 
+  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
+    width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  });
+
+  // Observe container size accurately
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateDimensions = () => {
+      const rect = container.getBoundingClientRect();
+      const w = Math.max(200, Math.floor(rect.width || window.innerWidth - 380));
+      const h = Math.max(200, Math.floor(rect.height || window.innerHeight));
+      setCanvasDimensions((prev) => {
+        if (prev.width !== w || prev.height !== h) {
+          return { width: w, height: h };
+        }
+        return prev;
+      });
+    };
+
+    updateDimensions();
+    const observer = new ResizeObserver(updateDimensions);
+    observer.observe(container);
+    window.addEventListener('resize', updateDimensions);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateDimensions);
+    };
+  }, []);
+
   // Main Render Loop (Draws onto Canvas)
   useEffect(() => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = container.getBoundingClientRect();
-    const width = Math.max(100, rect.width || window.innerWidth - 380);
-    const height = Math.max(100, rect.height || window.innerHeight);
+    const width = canvasDimensions.width;
+    const height = canvasDimensions.height;
 
-    // Use direct 1:1 pixel buffer
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
     }
 
     // 1. Clean background
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#020617'; // Dark CAD slate
+    ctx.fillStyle = '#020617';
     ctx.fillRect(0, 0, width, height);
 
     // 2. High-precision dynamic CAD Grid
