@@ -29,6 +29,20 @@ export function parseDxfContent(dxfText: string): BuildingLoop[] {
     return [];
   }
 
+  // Check if DXF coordinates are in millimeters (e.g. dimensions > 1000m)
+  let maxCoord = 0;
+  for (const entity of parsed.entities) {
+    if (entity.vertices) {
+      for (const v of entity.vertices) {
+        if (Math.abs(v.x) > maxCoord) maxCoord = Math.abs(v.x);
+        if (Math.abs(v.y) > maxCoord) maxCoord = Math.abs(v.y);
+      }
+    }
+  }
+
+  // If coordinates exceed typical building sites (e.g. > 1500m), scale from mm to meters
+  const scaleUnit = maxCoord > 1000 ? 0.001 : 1.0;
+
   const loops: BuildingLoop[] = [];
   let buildingCount = 1;
 
@@ -37,8 +51,8 @@ export function parseDxfContent(dxfText: string): BuildingLoop[] {
     if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
       if (entity.vertices && entity.vertices.length >= 3) {
         const rawPoints: Point2D[] = entity.vertices.map((v: any) => ({
-          x: v.x,
-          y: v.y,
+          x: v.x * scaleUnit,
+          y: v.y * scaleUnit,
         }));
 
         // Remove closing duplicate vertex if present
