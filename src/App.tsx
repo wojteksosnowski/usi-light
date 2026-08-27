@@ -341,7 +341,7 @@ export const App: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1 text-[11px] font-medium">Parapet $H_{{w}}$ (m)</label>
+                  <label className="block text-slate-400 mb-1 text-[11px] font-medium">Parapet H_okna (m)</label>
                   <input
                     type="number"
                     step="0.05"
@@ -483,15 +483,15 @@ export const App: React.FC = () => {
           <div className="font-semibold text-slate-200">Legenda:</div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full bg-emerald-500" />
-            <span>Zgodne (§ 12 / $\ge 3\text{h}$)</span>
+            <span>Zgodne (§ 12 / &ge; 3.0 h)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full bg-amber-500" />
-            <span>$1.5\text{h} - 3.0\text{h}$ (§ 56)</span>
+            <span>1.5 h - 3.0 h (§ 56)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full bg-rose-500" />
-            <span>Niezgodne / $< 1.5\text{h}$</span>
+            <span>Niezgodne / &lt; 1.5 h</span>
           </div>
         </div>
 
