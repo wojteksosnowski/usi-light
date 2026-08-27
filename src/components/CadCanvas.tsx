@@ -72,10 +72,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     if (!container || buildings.length === 0) return;
 
     const rect = container.getBoundingClientRect();
-    const width = rect.width || window.innerWidth - 380;
-    const height = rect.height || window.innerHeight;
-
-    if (width <= 0 || height <= 0) return;
+    const width = rect.width > 50 ? rect.width : window.innerWidth - 380;
+    const height = rect.height > 50 ? rect.height : window.innerHeight;
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -98,59 +96,29 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
 
-    // Available screen space with padding (margin 25%)
-    const paddingFactor = 0.70;
-    const scaleX = (width * paddingFactor) / bboxWidth;
-    const scaleY = (height * paddingFactor) / bboxHeight;
-    const newScale = Math.min(scaleX, scaleY);
+    // Margin factor 65%
+    const scaleX = (width * 0.65) / bboxWidth;
+    const scaleY = (height * 0.65) / bboxHeight;
+    const newScale = Math.max(0.001, Math.min(100, Math.min(scaleX, scaleY)));
 
-    // Calculate pan coordinates to put (centerX, centerY) right at screen center
     const panX = width / 2 - centerX * newScale;
-    const panY = height / 2 + centerY * newScale; // Y-up inverted
+    const panY = height / 2 + centerY * newScale;
 
     setViewState({
       panX,
       panY,
-      scale: Math.max(0.0001, newScale),
+      scale: newScale,
     });
   }, [buildings]);
 
   // Fit to extents on initial mount, when buildings change or when fitTrigger is updated
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fitToExtents();
-    }, 50);
-    return () => clearTimeout(timer);
+    fitToExtents();
+    const t = setTimeout(fitToExtents, 100);
+    return () => clearTimeout(t);
   }, [buildings, fitTrigger]);
 
-  // Resize Observer for 100% fullscreen canvas sizing
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const updateSize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = container.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(100, Math.round(rect.width));
-      const h = Math.max(100, Math.round(rect.height));
-
-      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        canvas.style.width = `${w}px`;
-        canvas.style.height = `${h}px`;
-      }
-    };
-
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
-
-  // Main Render Loop
+  // Main Render Loop (Draws onto Canvas)
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -158,30 +126,27 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
     const rect = container.getBoundingClientRect();
-    const width = Math.max(100, rect.width);
-    const height = Math.max(100, rect.height);
+    const width = Math.max(100, rect.width || window.innerWidth - 380);
+    const height = Math.max(100, rect.height || window.innerHeight);
 
-    if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
+    // Use direct 1:1 pixel buffer
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
     }
 
-    ctx.save();
+    // 1. Clean background
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
-    // 1. Clean CAD background
-    ctx.fillStyle = '#020617'; // slate-950
+    ctx.fillStyle = '#020617'; // Dark CAD slate
     ctx.fillRect(0, 0, width, height);
 
     // 2. High-precision dynamic CAD Grid
     ctx.strokeStyle = '#0f172a';
     ctx.lineWidth = 1;
-    const gridStep = Math.max(1, Math.pow(10, Math.floor(Math.log10(50 / Math.max(0.001, viewState.scale))))); // Dynamic grid step
+    const gridStep = Math.max(1, Math.pow(10, Math.floor(Math.log10(60 / Math.max(0.001, viewState.scale)))));
     const topLeftWorld = screenToWorld(0, 0);
     const bottomRightWorld = screenToWorld(width, height);
 
