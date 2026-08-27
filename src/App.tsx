@@ -17,6 +17,7 @@ import {
   Move,
   ChevronLeft,
   ChevronRight,
+  Maximize2,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -25,6 +26,7 @@ export const App: React.FC = () => {
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>('bldg-1');
   const [selectedPointResult, setSelectedPointResult] = useState<AnalysisPointResult | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [fitKey, setFitKey] = useState<number>(0);
 
   // Settings
   const [settings, setSettings] = useState<ProjectSettings>({
@@ -505,6 +507,29 @@ export const App: React.FC = () => {
           >
             Wektory
           </button>
+
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+          <button
+            onClick={() => setFitKey((prev) => prev + 1)}
+            title="Dopasuj widok do obiektów (Zoom Extents)"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: '1px solid #334155',
+              backgroundColor: 'rgba(30, 41, 59, 0.8)',
+              color: '#f8fafc',
+            }}
+          >
+            <Maximize2 size={13} />
+            <span>Centruj</span>
+          </button>
         </div>
 
         {/* Legend Overlay at Bottom-Left */}
@@ -537,6 +562,7 @@ export const App: React.FC = () => {
             showNormals={showNormals}
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
+            fitTrigger={fitKey}
           />
         </div>
 

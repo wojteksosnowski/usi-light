@@ -15,6 +15,7 @@ interface CadCanvasProps {
   showNormals: boolean;
   showShadowingLines: boolean;
   showSunlightLines: boolean;
+  fitTrigger?: number;
 }
 
 export const CadCanvas: React.FC<CadCanvasProps> = ({
@@ -28,6 +29,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   showNormals,
   showShadowingLines,
   showSunlightLines,
+  fitTrigger,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -63,6 +65,57 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     },
     [viewState]
   );
+
+  // Automatically center & fit view to buildings bounding box
+  const fitToExtents = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || buildings.length === 0) return;
+
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const bldg of buildings) {
+      for (const v of bldg.vertices) {
+        if (v.x < minX) minX = v.x;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.y > maxY) maxY = v.y;
+      }
+    }
+
+    if (minX === Infinity) return;
+
+    const bboxWidth = Math.max(10, maxX - minX);
+    const bboxHeight = Math.max(10, maxY - minY);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // Available screen space with padding (20% margin)
+    const paddingFactor = 0.75;
+    const scaleX = (rect.width * paddingFactor) / bboxWidth;
+    const scaleY = (rect.height * paddingFactor) / bboxHeight;
+    const newScale = Math.max(0.1, Math.min(60, Math.min(scaleX, scaleY)));
+
+    // Calculate pan coordinates to put (centerX, centerY) right at screen center
+    const panX = rect.width / 2 - centerX * newScale;
+    const panY = rect.height / 2 + centerY * newScale; // Y-up inverted
+
+    setViewState({
+      panX,
+      panY,
+      scale: newScale,
+    });
+  }, [buildings]);
+
+  // Fit to extents on initial mount, when buildings change or when fitTrigger is updated
+  useEffect(() => {
+    fitToExtents();
+  }, [buildings, fitTrigger]);
 
   // Resize Observer for 100% fullscreen canvas sizing
   useEffect(() => {
