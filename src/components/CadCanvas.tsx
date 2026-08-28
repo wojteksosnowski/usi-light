@@ -422,24 +422,130 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 5. Render Ray Casting Fan for Selected Point
+    // 5. Render Ray Casting Fan for Selected Point — sector arc visualization
     if (selectedPointResult) {
       const { point, shadowing } = selectedPointResult;
       const { sx: px, sy: py } = worldToScreen(point.x, point.y);
+      const rays = shadowing.rays;
 
-      for (const ray of shadowing.rays) {
-        const dist = Math.min(ray.hitDistance, 28);
-        const rad = (ray.worldAngleDeg * Math.PI) / 180;
-        const targetWorldX = point.x + Math.cos(rad) * dist;
-        const targetWorldY = point.y + Math.sin(rad) * dist;
-        const { sx: rx, sy: ry } = worldToScreen(targetWorldX, targetWorldY);
+      if (rays.length > 0) {
+        // Group rays into continuous same-state sectors
+        type RaySector = { isFree: boolean; rays: typeof rays };
+        const sectorGroups: RaySector[] = [];
+        let curSector: RaySector | null = null;
 
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(rx, ry);
-        ctx.strokeStyle = ray.isFree ? 'rgba(52, 211, 153, 0.35)' : 'rgba(244, 63, 94, 0.45)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        for (const ray of rays) {
+          if (!curSector || curSector.isFree !== ray.isFree) {
+            curSector = { isFree: ray.isFree, rays: [] };
+            sectorGroups.push(curSector);
+          }
+          curSector.rays.push(ray);
+        }
+
+        ctx.save();
+        for (const sector of sectorGroups) {
+          const first = sector.rays[0];
+          const last = sector.rays[sector.rays.length - 1];
+          const isFree = sector.isFree;
+
+          // Compute reach distance for this sector:
+          // - Free sector: show actual hit distance (or reqDistance as reference) in green
+          // - Blocked sector: show reqDistance (= deltaH, how far it SHOULD be) in red
+          // Use the closest-obstacle req distance for blocked, or min hitDistance for free
+          let dist: number;
+          if (isFree) {
+            // For free sector, show the reqDistance of the nearest obstacle that WAS far enough,
+            // or a fixed sensible distance if totally open sky (hitDistance = 999)
+            const minReqInSector = sector.rays.reduce((mn, r) =>
+              r.reqDistance > 0 ? Math.min(mn, r.reqDistance) : mn, 999
+            );
+            dist = Math.min(
+              minReqInSector < 999 ? minReqInSector : 20.0,
+              35.0
+            );
+          } else {
+            // Blocked: length = reqDistance (the required clearance that is violated)
+            const maxReq = sector.rays.reduce((mx, r) => Math.max(mx, r.reqDistance), 0);
+            dist = Math.min(maxReq > 0 ? maxReq : 15.0, 35.0);
+          }
+
+          const strokeColor = isFree ? 'rgba(52, 211, 153, 0.7)' : 'rgba(244, 63, 94, 0.7)';
+          const fillColor   = isFree ? 'rgba(52, 211, 153, 0.08)' : 'rgba(244, 63, 94, 0.08)';
+          const lineWidth   = isFree ? 1.5 : 1.5;
+
+          const startRad = (first.worldAngleDeg * Math.PI) / 180;
+          const endRad   = (last.worldAngleDeg  * Math.PI) / 180;
+
+          // First edge ray
+          const x1 = point.x + Math.cos(startRad) * dist;
+          const y1 = point.y + Math.sin(startRad) * dist;
+          const { sx: sx1, sy: sy1 } = worldToScreen(x1, y1);
+
+          // Last edge ray
+          const x2 = point.x + Math.cos(endRad) * dist;
+          const y2 = point.y + Math.sin(endRad) * dist;
+          const { sx: sx2, sy: sy2 } = worldToScreen(x2, y2);
+
+          // Radius in screen pixels
+          const radiusPx = dist * viewState.scale;
+
+          // Normalise arc direction: canvas arcs need start < end for CCW
+          // worldAngleDeg may wrap; use angleDeg (relative to normal, -78..+78) for arc
+          const startWorldRad = startRad;
+          let   endWorldRad   = endRad;
+          // Determine true angular sweep direction (always CCW from first to last in world)
+          // We'll draw arc from min to max world angle of this sector
+          const firstWorldDeg = first.worldAngleDeg;
+          const lastWorldDeg  = last.worldAngleDeg;
+          // Compute sweep (may cross 360)
+          let sweep = ((lastWorldDeg - firstWorldDeg) + 360) % 360;
+          if (sweep > 180) sweep = sweep - 360; // prefer short arc
+
+          // Filled sector wedge
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(sx1, sy1);
+          ctx.arc(px, py, radiusPx, startWorldRad, startWorldRad + sweep * (Math.PI / 180), sweep < 0);
+          ctx.closePath();
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+
+          // Edge rays
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(sx1, sy1);
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(sx2, sy2);
+          ctx.stroke();
+
+          // Connecting arc at radius
+          ctx.beginPath();
+          ctx.arc(px, py, radiusPx, startWorldRad, startWorldRad + sweep * (Math.PI / 180), sweep < 0);
+          ctx.stroke();
+
+          // Small tick at reqDistance on free sectors to show required clearance reference
+          if (isFree) {
+            // Find median ray in sector to draw tick
+            const midRay = sector.rays[Math.floor(sector.rays.length / 2)];
+            const midRad = (midRay.worldAngleDeg * Math.PI) / 180;
+            const txW = point.x + Math.cos(midRad) * dist;
+            const tyW = point.y + Math.sin(midRad) * dist;
+            const { sx: tsx, sy: tsy } = worldToScreen(txW, tyW);
+            ctx.save();
+            ctx.fillStyle = 'rgba(52, 211, 153, 0.9)';
+            ctx.font = `bold ${Math.max(9, Math.min(12, viewState.scale * 0.3))}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${dist.toFixed(0)}m`, tsx, tsy - 10);
+            ctx.restore();
+          }
+        }
+        ctx.restore();
       }
     }
 
