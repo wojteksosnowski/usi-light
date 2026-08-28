@@ -16,6 +16,7 @@ interface CadCanvasProps {
   showShadowingLines: boolean;
   showSunlightLines: boolean;
   fitTrigger?: number;
+  onInteractionChange?: (isInteracting: boolean) => void;
 }
 
 export const CadCanvas: React.FC<CadCanvasProps> = ({
@@ -30,6 +31,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   showShadowingLines,
   showSunlightLines,
   fitTrigger,
+  onInteractionChange,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -231,6 +233,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     for (const bldg of buildings) {
       const isSelected = bldg.id === selectedBuildingId;
       const isTested = bldg.isTested;
+      const isIncluded = bldg.isIncluded !== false;
 
       ctx.beginPath();
       bldg.vertices.forEach((v, idx) => {
@@ -240,18 +243,27 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       });
       ctx.closePath();
 
-      // Premium Fill styling
-      if (isTested) {
+      // Fill styling
+      if (!isIncluded) {
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+      } else if (isTested) {
         ctx.fillStyle = isSelected ? 'rgba(59, 130, 246, 0.28)' : 'rgba(59, 130, 246, 0.16)';
       } else {
         ctx.fillStyle = isSelected ? 'rgba(148, 163, 184, 0.25)' : 'rgba(71, 85, 105, 0.18)';
       }
       ctx.fill();
 
-      // Clean Stroke
-      ctx.strokeStyle = isTested ? '#3b82f6' : '#64748b';
+      // Clean Stroke (dashed if excluded from calculation)
+      ctx.save();
+      if (!isIncluded) {
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = isSelected ? '#94a3b8' : '#475569';
+      } else {
+        ctx.strokeStyle = isTested ? '#3b82f6' : '#64748b';
+      }
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
+      ctx.restore();
 
       // Center Name Tag
       if (bldg.vertices.length > 0) {
@@ -264,20 +276,26 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         // Badge pill
         ctx.fillStyle = '#0f172a';
         ctx.beginPath();
-        ctx.roundRect(sx - 70, sy - 18, 140, 36, 8);
+        ctx.roundRect(sx - 75, sy - 18, 150, 36, 8);
         ctx.fill();
-        ctx.strokeStyle = isSelected ? '#3b82f6' : '#334155';
+        ctx.strokeStyle = isSelected ? '#3b82f6' : (!isIncluded ? '#475569' : '#334155');
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        ctx.fillStyle = '#f8fafc';
+        ctx.fillStyle = !isIncluded ? '#94a3b8' : '#f8fafc';
         ctx.font = 'bold 11px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(`${bldg.name}`, sx, sy - 2);
 
-        ctx.fillStyle = isTested ? '#60a5fa' : '#94a3b8';
-        ctx.font = '10px Inter, sans-serif';
-        ctx.fillText(`H = ${bldg.defaultHeight}m ${bldg.isTested ? '• BADANY' : ''}`, sx, sy + 11);
+        if (!isIncluded) {
+          ctx.fillStyle = '#f87171';
+          ctx.font = '9px Inter, sans-serif';
+          ctx.fillText(`(WYŁĄCZONY Z KALKULACJI)`, sx, sy + 11);
+        } else {
+          ctx.fillStyle = isTested ? '#60a5fa' : '#94a3b8';
+          ctx.font = '10px Inter, sans-serif';
+          ctx.fillText(`H = ${bldg.defaultHeight}m ${bldg.isTested ? '• BADANY' : ''}`, sx, sy + 11);
+        }
       }
 
       // Draw Normals
@@ -425,6 +443,72 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
+    // 6. Dimension Annotations for Selected Building
+    const activeSelectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
+    if (activeSelectedBuilding) {
+      ctx.save();
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      for (const seg of activeSelectedBuilding.segments) {
+        const midX = (seg.p1.x + seg.p2.x) / 2;
+        const midY = (seg.p1.y + seg.p2.y) / 2;
+        const labelWorldX = midX + seg.normal.x * 1.0;
+        const labelWorldY = midY + seg.normal.y * 1.0;
+        const { sx, sy } = worldToScreen(labelWorldX, labelWorldY);
+
+        const text = `${seg.length.toFixed(1)}m`;
+        const textWidth = ctx.measureText(text).width;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(sx - textWidth / 2 - 4, sy - 8, textWidth + 8, 16, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#e0e7ff';
+        ctx.fillText(text, sx, sy);
+      }
+      ctx.restore();
+    }
+
+    // 7. Visual Metric Scale Bar (bottom-right)
+    {
+      ctx.save();
+      const margin = 24;
+      const targetPixels = 100;
+      const rawMeters = targetPixels / Math.max(0.0001, viewState.scale);
+      const exp = Math.floor(Math.log10(rawMeters));
+      const frac = rawMeters / Math.pow(10, exp);
+      let niceFrac = 1;
+      if (frac >= 5) niceFrac = 5;
+      else if (frac >= 2) niceFrac = 2;
+      const niceMeters = niceFrac * Math.pow(10, exp);
+      const barPixels = niceMeters * viewState.scale;
+
+      const barX = width - margin - barPixels;
+      const barY = height - margin;
+
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(barX, barY - 6);
+      ctx.lineTo(barX, barY);
+      ctx.lineTo(barX + barPixels, barY);
+      ctx.lineTo(barX + barPixels, barY - 6);
+      ctx.stroke();
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      const label = niceMeters >= 1000 ? `${(niceMeters / 1000).toFixed(1)} km` : `${niceMeters} m`;
+      ctx.fillText(label, barX + barPixels / 2, barY - 10);
+      ctx.restore();
+    }
+
     ctx.restore();
   }, [
     buildings,
@@ -491,9 +575,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       onSelectBuilding(clickedBuildingId);
       setIsDraggingBuilding(true);
       setDragStart({ x: world.wx, y: world.wy });
+      onInteractionChange?.(true);
     } else {
       setIsPanning(true);
       setDragStart({ x: sx, y: sy });
+      onInteractionChange?.(true);
     }
   };
 
@@ -523,6 +609,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   };
 
   const handleMouseUp = () => {
+    if (isPanning || isDraggingBuilding) {
+      onInteractionChange?.(false);
+    }
     setIsPanning(false);
     setIsDraggingBuilding(false);
     setDragStart(null);
@@ -536,6 +625,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
         className="w-full h-full cursor-grab active:cursor-grabbing block"
       />
     </div>

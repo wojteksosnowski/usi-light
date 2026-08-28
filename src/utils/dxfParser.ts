@@ -12,10 +12,161 @@ interface DxfEntity {
   shape?: boolean;
 }
 
+export type DxfUnitOption = 'auto' | 'm' | 'dm' | 'cm' | 'mm';
+
+export interface DxfUnitInfo {
+  unit: DxfUnitOption;
+  scale: number;
+  unitName: string;
+  source: string;
+  insunits?: number;
+}
+
+export interface DxfParseResult {
+  buildings: BuildingLoop[];
+  unitInfo: DxfUnitInfo;
+}
+
 /**
- * Parses raw DXF string into 2.5D BuildingLoops.
+ * Determines the scale multiplier to convert DXF units into meters (m).
  */
-export function parseDxfContent(dxfText: string): BuildingLoop[] {
+export function resolveDxfScale(
+  parsedHeader: any,
+  maxCoord: number,
+  unitOption: DxfUnitOption = 'auto'
+): DxfUnitInfo {
+  if (unitOption === 'm') {
+    return {
+      unit: 'm',
+      scale: 1.0,
+      unitName: 'Metry [m]',
+      source: 'Wymuszone przez użytkownika (1 j. = 1.0 m)',
+    };
+  }
+  if (unitOption === 'dm') {
+    return {
+      unit: 'dm',
+      scale: 0.1,
+      unitName: 'Decymetry [dm]',
+      source: 'Wymuszone przez użytkownika (1 j. = 0.1 m)',
+    };
+  }
+  if (unitOption === 'cm') {
+    return {
+      unit: 'cm',
+      scale: 0.01,
+      unitName: 'Centymetry [cm]',
+      source: 'Wymuszone przez użytkownika (1 j. = 0.01 m / 100 j. = 1m)',
+    };
+  }
+  if (unitOption === 'mm') {
+    return {
+      unit: 'mm',
+      scale: 0.001,
+      unitName: 'Milimetry [mm]',
+      source: 'Wymuszone przez użytkownika (1 j. = 0.001 m / 1000 j. = 1m)',
+    };
+  }
+
+  // Auto mode: check header $INSUNITS
+  const insunitsRaw = parsedHeader?.['$INSUNITS'] ?? parsedHeader?.INSUNITS;
+  const insunits =
+    typeof insunitsRaw === 'number'
+      ? insunitsRaw
+      : insunitsRaw !== undefined && insunitsRaw !== null
+      ? parseInt(String(insunitsRaw), 10)
+      : undefined;
+
+  if (insunits !== undefined && !isNaN(insunits) && insunits > 0) {
+    switch (insunits) {
+      case 1:
+        return {
+          unit: 'auto',
+          scale: 0.0254,
+          unitName: 'Cale (in)',
+          source: 'Wykryto z nagłówka DXF ($INSUNITS = 1)',
+          insunits,
+        };
+      case 2:
+        return {
+          unit: 'auto',
+          scale: 0.3048,
+          unitName: 'Stopy (ft)',
+          source: 'Wykryto z nagłówka DXF ($INSUNITS = 2)',
+          insunits,
+        };
+      case 4:
+        return {
+          unit: 'auto',
+          scale: 0.001,
+          unitName: 'Milimetry [mm]',
+          source: 'Wykryto z nagłówka DXF ($INSUNITS = 4: mm)',
+          insunits,
+        };
+      case 5:
+        return {
+          unit: 'auto',
+          scale: 0.01,
+          unitName: 'Centymetry [cm]',
+          source: 'Wykryto z nagłówka DXF ($INSUNITS = 5: cm)',
+          insunits,
+        };
+      case 6:
+        return {
+          unit: 'auto',
+          scale: 1.0,
+          unitName: 'Metry [m]',
+          source: 'Wykryto z nagłówka DXF ($INSUNITS = 6: m)',
+          insunits,
+        };
+      case 14:
+        return {
+          unit: 'auto',
+          scale: 0.1,
+          unitName: 'Decymetry [dm]',
+          source: 'Wykryto z nagłówka DXF ($INSUNITS = 14: dm)',
+          insunits,
+        };
+      default:
+        break;
+    }
+  }
+
+  // Fallback heuristic based on geometry coordinate magnitudes
+  if (maxCoord > 1000) {
+    return {
+      unit: 'auto',
+      scale: 0.001,
+      unitName: 'Milimetry [mm]',
+      source: 'Auto-detekcja heurystyczna (koordynaty > 1000)',
+      insunits: insunits || 0,
+    };
+  } else if (maxCoord > 200) {
+    return {
+      unit: 'auto',
+      scale: 0.01,
+      unitName: 'Centymetry [cm]',
+      source: 'Auto-detekcja heurystyczna (koordynaty 200-1000)',
+      insunits: insunits || 0,
+    };
+  } else {
+    return {
+      unit: 'auto',
+      scale: 1.0,
+      unitName: 'Metry [m]',
+      source: 'Auto-detekcja (standard: metry)',
+      insunits: insunits || 0,
+    };
+  }
+}
+
+/**
+ * Parses raw DXF string into 2.5D BuildingLoops with unit metadata.
+ */
+export function parseDxfWithMetadata(
+  dxfText: string,
+  unitOption: DxfUnitOption = 'auto'
+): DxfParseResult {
   const parser = new DxfParser();
   let parsed: any;
   try {
@@ -26,10 +177,13 @@ export function parseDxfContent(dxfText: string): BuildingLoop[] {
   }
 
   if (!parsed || !parsed.entities) {
-    return [];
+    return {
+      buildings: [],
+      unitInfo: resolveDxfScale(parsed?.header, 0, unitOption),
+    };
   }
 
-  // Check if DXF coordinates are in millimeters (e.g. dimensions > 1000m)
+  // Find max coordinate in entities to assist heuristic auto-detection
   let maxCoord = 0;
   for (const entity of parsed.entities) {
     if (entity.vertices) {
@@ -40,8 +194,8 @@ export function parseDxfContent(dxfText: string): BuildingLoop[] {
     }
   }
 
-  // If coordinates exceed typical building sites (e.g. > 1500m), scale from mm to meters
-  const scaleUnit = maxCoord > 1000 ? 0.001 : 1.0;
+  const unitInfo = resolveDxfScale(parsed.header, maxCoord, unitOption);
+  const scaleUnit = unitInfo.scale;
 
   const loops: BuildingLoop[] = [];
   let buildingCount = 1;
@@ -115,7 +269,20 @@ export function parseDxfContent(dxfText: string): BuildingLoop[] {
     }
   }
 
-  return loops;
+  return {
+    buildings: loops,
+    unitInfo,
+  };
+}
+
+/**
+ * Parses raw DXF string into 2.5D BuildingLoops.
+ */
+export function parseDxfContent(
+  dxfText: string,
+  unitOption: DxfUnitOption = 'auto'
+): BuildingLoop[] {
+  return parseDxfWithMetadata(dxfText, unitOption).buildings;
 }
 
 /**

@@ -1,9 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { BuildingLoop, AnalysisPointResult, ProjectSettings } from './types/geometry';
-import { createSampleBuildings, parseDxfContent } from './utils/dxfParser';
-import { runFullAnalysis } from './engine/analysisEngine';
+import {
+  createSampleBuildings,
+  parseDxfWithMetadata,
+  DxfUnitOption,
+  DxfUnitInfo,
+} from './utils/dxfParser';
+import { runFullAnalysis, AnalysisAccuracyOptions } from './engine/analysisEngine';
 import {
   Sun,
   Shield,
@@ -18,7 +23,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize2,
+  Sliders,
+  Activity,
 } from 'lucide-react';
+
+export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
 
 export const App: React.FC = () => {
   // State
@@ -28,12 +37,21 @@ export const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [fitKey, setFitKey] = useState<number>(0);
 
+  // Dynamic Variable Accuracy State (Live vs Stillness Progressive Refinement)
+  const [isInteracting, setIsInteracting] = useState<boolean>(false);
+  const [accuracyStage, setAccuracyStage] = useState<AccuracyStage>('final');
+
+  // DXF Units State
+  const [dxfUnit, setDxfUnit] = useState<DxfUnitOption>('auto');
+  const [lastDxfText, setLastDxfText] = useState<string | null>(null);
+  const [dxfImportInfo, setDxfImportInfo] = useState<DxfUnitInfo | null>(null);
+
   // Settings
   const [settings, setSettings] = useState<ProjectSettings>({
     latitude: 52.2297, // Warszawa
     longitude: 21.0122,
     isCityCentreDefault: false,
-    samplingInterval: 0.5,
+    samplingInterval: 0.25, // Target precision 0.25m
     equinoxDate: 'spring',
   });
 
@@ -42,10 +60,54 @@ export const App: React.FC = () => {
   const [showShadowingLines, setShowShadowingLines] = useState<boolean>(true);
   const [showSunlightLines, setShowSunlightLines] = useState<boolean>(true);
 
-  // Run Realtime Calculation
+  // Progressive Accuracy Refinement Effect
+  // When interacting/moving: use fast low-resolution mesh (1.5m).
+  // When still: automatically refine in stages stopping at target 0.25m.
+  useEffect(() => {
+    if (isInteracting) {
+      setAccuracyStage('live');
+      return;
+    }
+
+    // Schedule progressive refinement when idle
+    const t1 = setTimeout(() => {
+      setAccuracyStage((prev) => (prev === 'live' ? 'stage1' : prev));
+    }, 100);
+
+    const t2 = setTimeout(() => {
+      setAccuracyStage((prev) => (prev === 'live' || prev === 'stage1' ? 'stage2' : prev));
+    }, 250);
+
+    const t3 = setTimeout(() => {
+      setAccuracyStage('final'); // Stop at target 0.25m
+    }, 500);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [buildings, isInteracting]);
+
+  // Current calculation accuracy parameters based on active refinement stage
+  const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
+    switch (accuracyStage) {
+      case 'live':
+        return { samplingInterval: 1.5, angleStepDeg: 2.0, sunlightStepMinutes: 15 };
+      case 'stage1':
+        return { samplingInterval: 1.0, angleStepDeg: 1.0, sunlightStepMinutes: 10 };
+      case 'stage2':
+        return { samplingInterval: 0.5, angleStepDeg: 0.5, sunlightStepMinutes: 5 };
+      case 'final':
+      default:
+        return { samplingInterval: 0.25, angleStepDeg: 0.5, sunlightStepMinutes: 5 };
+    }
+  }, [accuracyStage]);
+
+  // Run Calculation with Variable Precision
   const analysisResults = useMemo(() => {
-    return runFullAnalysis(buildings, settings);
-  }, [buildings, settings]);
+    return runFullAnalysis(buildings, settings, currentAccuracyOptions);
+  }, [buildings, settings, currentAccuracyOptions]);
 
   // Overall Statistics
   const stats = useMemo(() => {
@@ -69,6 +131,7 @@ export const App: React.FC = () => {
 
   // Move building handler
   const handleBuildingMove = (id: string, dx: number, dy: number) => {
+    if (!isInteracting) setIsInteracting(true);
     setBuildings((prev) =>
       prev.map((bldg) => {
         if (bldg.id !== id) return bldg;
@@ -120,11 +183,13 @@ export const App: React.FC = () => {
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const parsed = parseDxfContent(text);
-        if (parsed.length > 0) {
-          setBuildings(parsed);
-          setSelectedBuildingId(parsed[0].id);
+        setLastDxfText(text);
+        const result = parseDxfWithMetadata(text, dxfUnit);
+        if (result.buildings.length > 0) {
+          setBuildings(result.buildings);
+          setSelectedBuildingId(result.buildings[0].id);
           setSelectedPointResult(null);
+          setDxfImportInfo(result.unitInfo);
           setFitKey((prev) => prev + 1);
         } else {
           alert('Nie znaleziono zamkniętych polilinii w pliku DXF.');
@@ -134,6 +199,27 @@ export const App: React.FC = () => {
       }
     };
     reader.readAsText(file);
+    // Reset file input value to allow re-uploading the same file if needed
+    e.target.value = '';
+  };
+
+  // Handle changing DXF Units
+  const handleDxfUnitChange = (newUnit: DxfUnitOption) => {
+    setDxfUnit(newUnit);
+    if (lastDxfText) {
+      try {
+        const result = parseDxfWithMetadata(lastDxfText, newUnit);
+        if (result.buildings.length > 0) {
+          setBuildings(result.buildings);
+          setSelectedBuildingId(result.buildings[0].id);
+          setSelectedPointResult(null);
+          setDxfImportInfo(result.unitInfo);
+          setFitKey((prev) => prev + 1);
+        }
+      } catch (err) {
+        console.error('Błąd przy przeliczaniu jednostek DXF:', err);
+      }
+    }
   };
 
   return (
@@ -365,8 +451,58 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Real-world metric dimensions display */}
+                {(() => {
+                  const xs = selectedBuilding.vertices.map((v) => v.x);
+                  const ys = selectedBuilding.vertices.map((v) => v.y);
+                  const w = Math.max(...xs) - Math.min(...xs);
+                  const h = Math.max(...ys) - Math.min(...ys);
+                  const perimeter = selectedBuilding.segments.reduce((sum, s) => sum + s.length, 0);
+                  const isHuge = w > 200 || h > 200;
+
+                  return (
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        backgroundColor: isHuge ? 'rgba(244, 63, 94, 0.15)' : 'rgba(15, 23, 42, 0.7)',
+                        border: `1px solid ${isHuge ? 'rgba(244, 63, 94, 0.35)' : 'var(--border-light)'}`,
+                        fontSize: '11px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: '#94a3b8' }}>Rzut (Szer × Głęb):</span>
+                        <b style={{ color: isHuge ? '#fca5a5' : '#38bdf8', fontFamily: 'monospace' }}>
+                          {w.toFixed(2)} m × {h.toFixed(2)} m
+                        </b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: '#94a3b8' }}>Obwód fasad:</span>
+                        <span style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>{perimeter.toFixed(2)} m</span>
+                      </div>
+                      {isHuge && (
+                        <div style={{ fontSize: '10px', color: '#fda4af', marginTop: '2px' }}>
+                          ⚠️ Bardzo duży rzut ({w.toFixed(0)}m)! Jeśli budynek miał mieć np. 10m, zmień jednostkę DXF na <b>cm</b> lub <b>mm</b>.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Status Toggle Buttons */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
+                    className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
+                  >
+                    <span>Uwzględnij w kalkulacji</span>
+                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
@@ -393,6 +529,116 @@ export const App: React.FC = () => {
             </div>
           )}
 
+          {/* Section: Jednostki DXF / Rysunku */}
+          <div className="ui-card">
+            <div className="ui-title">
+              <span>Jednostki DXF / Skala</span>
+              <Sliders size={14} color="#818cf8" />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                Jednostka rysunku DXF:
+              </div>
+
+              {/* Unit Selector Segmented Buttons */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(5, 1fr)',
+                  gap: '4px',
+                  backgroundColor: 'var(--bg-input)',
+                  padding: '4px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-light)',
+                }}
+              >
+                {(
+                  [
+                    { id: 'auto', label: 'Auto' },
+                    { id: 'm', label: 'm' },
+                    { id: 'dm', label: 'dm' },
+                    { id: 'cm', label: 'cm' },
+                    { id: 'mm', label: 'mm' },
+                  ] as const
+                ).map((tab) => {
+                  const isActive = dxfUnit === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => handleDxfUnitChange(tab.id)}
+                      style={{
+                        padding: '6px 2px',
+                        fontSize: '11px',
+                        fontWeight: isActive ? 700 : 500,
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        backgroundColor: isActive ? 'var(--accent-indigo)' : 'transparent',
+                        color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                      }}
+                      title={
+                        tab.id === 'auto'
+                          ? 'Automatyczne wykrywanie jednostki z nagłówka $INSUNITS lub skali geometrii'
+                          : `Wymuś skalę: 1 jednostka DXF = 1 ${tab.id}`
+                      }
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Status / Active Info Banner */}
+              {dxfImportInfo ? (
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                    fontSize: '11px',
+                    color: '#cbd5e1',
+                    lineHeight: '1.4',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontWeight: 600,
+                      color: '#e0e7ff',
+                      marginBottom: '2px',
+                    }}
+                  >
+                    <span>Skala importu:</span>
+                    <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                      {dxfImportInfo.unitName}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                    {dxfImportInfo.source}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '10px', color: '#64748b', lineHeight: '1.3' }}>
+                  {dxfUnit === 'auto'
+                    ? 'Automatycznie odczytuje $INSUNITS z pliku DXF lub dopasowuje skalę (mm/cm/m).'
+                    : `Wymuszenie: 1 jednostka = ${
+                        dxfUnit === 'm'
+                          ? '1 metr (1.0)'
+                          : dxfUnit === 'cm'
+                          ? '1 centymetr (0.01 m)'
+                          : '1 milimetr (0.001 m)'
+                      }.`}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Section: Akcje Główne */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <label className="btn-primary">
@@ -407,6 +653,8 @@ export const App: React.FC = () => {
                 setBuildings(createSampleBuildings());
                 setSelectedBuildingId('bldg-1');
                 setSelectedPointResult(null);
+                setLastDxfText(null);
+                setDxfImportInfo(null);
                 setFitKey((prev) => prev + 1);
               }}
               className="btn-secondary"
@@ -512,6 +760,56 @@ export const App: React.FC = () => {
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
+          {/* Dynamic Accuracy Refinement Badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              backgroundColor:
+                accuracyStage === 'final'
+                  ? 'rgba(16, 185, 129, 0.15)'
+                  : accuracyStage === 'live'
+                  ? 'rgba(245, 158, 11, 0.15)'
+                  : 'rgba(99, 102, 241, 0.15)',
+              border: `1px solid ${
+                accuracyStage === 'final'
+                  ? 'rgba(16, 185, 129, 0.3)'
+                  : accuracyStage === 'live'
+                  ? 'rgba(245, 158, 11, 0.3)'
+                  : 'rgba(99, 102, 241, 0.3)'
+              }`,
+              color:
+                accuracyStage === 'final'
+                  ? '#6ee7b7'
+                  : accuracyStage === 'live'
+                  ? '#fcd34d'
+                  : '#a5b4fc',
+              fontSize: '11px',
+              fontWeight: 600,
+            }}
+            title={
+              accuracyStage === 'final'
+                ? 'Osiągnięto docelową dokładność obliczeń (krok 0.25m)'
+                : 'Trwa adaptacyjne przeliczanie i zagęszczanie siatki (docelowo 0.25m)'
+            }
+          >
+            <Activity size={13} />
+            <span>
+              {accuracyStage === 'live'
+                ? 'Live: 1.5m (60fps)'
+                : accuracyStage === 'stage1'
+                ? 'Dociąganie: 1.0m'
+                : accuracyStage === 'stage2'
+                ? 'Dociąganie: 0.5m'
+                : 'Dokładność: 0.25m'}
+            </span>
+          </div>
+
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
           <button
             onClick={() => setFitKey((prev) => prev + 1)}
             title="Dopasuj widok do obiektów (Zoom Extents)"
@@ -573,6 +871,7 @@ export const App: React.FC = () => {
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
             fitTrigger={fitKey}
+            onInteractionChange={setIsInteracting}
           />
         </div>
 

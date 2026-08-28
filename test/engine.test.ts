@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { calculateSignedArea, isPolygonCCW, calculateOutwardNormal } from '../src/utils/math2d';
 import { calculateSolarPosition } from '../src/utils/solar';
-import { analyzeShadowingAtPoint } from '../src/engine/analysisEngine';
-import { createSampleBuildings } from '../src/utils/dxfParser';
+import { analyzeShadowingAtPoint, runFullAnalysis } from '../src/engine/analysisEngine';
+import { createSampleBuildings, resolveDxfScale } from '../src/utils/dxfParser';
 
 describe('2.5D Geometry & Normals', () => {
   it('should correctly detect CCW orientation and outward normal', () => {
@@ -51,3 +51,150 @@ describe('Shadowing Engine (§ 12)', () => {
     expect(res.rays.length).toBeGreaterThan(0);
   });
 });
+
+describe('DXF Unit Resolution & Scaling', () => {
+  it('should resolve explicit user unit choices', () => {
+    expect(resolveDxfScale({}, 100, 'm').scale).toBe(1.0);
+    expect(resolveDxfScale({}, 100, 'cm').scale).toBe(0.01);
+    expect(resolveDxfScale({}, 100, 'mm').scale).toBe(0.001);
+  });
+
+  it('should resolve $INSUNITS header correctly when in auto mode', () => {
+    expect(resolveDxfScale({ $INSUNITS: 4 }, 50, 'auto').scale).toBe(0.001); // mm
+    expect(resolveDxfScale({ $INSUNITS: 5 }, 50, 'auto').scale).toBe(0.01); // cm
+    expect(resolveDxfScale({ $INSUNITS: 6 }, 50, 'auto').scale).toBe(1.0); // m
+  });
+
+  it('should fallback to heuristic scaling when $INSUNITS is missing in auto mode', () => {
+    expect(resolveDxfScale({}, 2500, 'auto').scale).toBe(0.001); // >1000 => mm
+    expect(resolveDxfScale({}, 450, 'auto').scale).toBe(0.01); // 200..1000 => cm
+    expect(resolveDxfScale({}, 35, 'auto').scale).toBe(1.0); // <=200 => m
+  });
+});
+
+describe('Variable Accuracy & Multi-stage Refinement', () => {
+  it('should compute significantly fewer points in live mode (1.5m) and refine to 0.25m in final mode', () => {
+    const buildings = createSampleBuildings();
+    const settings = {
+      latitude: 52.23,
+      longitude: 21.01,
+      isCityCentreDefault: false,
+      samplingInterval: 0.25,
+      equinoxDate: 'spring' as const,
+    };
+
+    // Live mode (1.5m spatial step, 15 min solar step)
+    const liveResults = runFullAnalysis(buildings, settings, {
+      samplingInterval: 1.5,
+      angleStepDeg: 2.0,
+      sunlightStepMinutes: 15,
+    });
+
+    // Final target mode (0.25m spatial step, 5 min solar step)
+    const finalResults = runFullAnalysis(buildings, settings, {
+      samplingInterval: 0.25,
+      angleStepDeg: 0.5,
+      sunlightStepMinutes: 5,
+    });
+
+    expect(liveResults.length).toBeGreaterThan(0);
+    expect(finalResults.length).toBeGreaterThan(liveResults.length * 3); // 0.25m has >4x denser sampling than 1.5m
+
+    // Verify sunlight time resolution steps
+    expect(liveResults[0].sunlight.timeSlots.length).toBeLessThan(finalResults[0].sunlight.timeSlots.length);
+    expect(finalResults[0].sunlight.timeSlots.length).toBeGreaterThanOrEqual(100); // 5-minute steps across day
+  });
+
+  it('should instantly cull North-facing facades without redundant calculations', async () => {
+    const { analyzeSunlightAtPoint } = await import('../src/engine/analysisEngine');
+    const settings = {
+      latitude: 52.23,
+      longitude: 21.01,
+      isCityCentreDefault: false,
+      samplingInterval: 0.25,
+      equinoxDate: 'spring' as const,
+    };
+
+    // North wall segment with normal (0, 1) pointing directly North
+    const northSegment = {
+      id: 'north-wall',
+      p1: { x: 30, y: 22 },
+      p2: { x: 10, y: 22 },
+      normal: { x: 0, y: 1 }, // Directly North (0 deg azimuth)
+      length: 20,
+      angleRad: Math.PI,
+      hTop: 15.0,
+      hWindowBottom: 0.85,
+      isCityCentre: false,
+      buildingType: 'residential' as const,
+    };
+
+    const res = analyzeSunlightAtPoint({ x: 20, y: 22 }, northSegment, 0.5, [], 'bldg-1', settings, 5);
+
+    expect(res.totalMinutes).toBe(0);
+    expect(res.totalHours).toBe(0);
+    expect(res.isCompliant).toBe(false);
+    expect(res.timeSlots.every(slot => !slot.isDirectSunlight)).toBe(true);
+  });
+
+  it('strictly disqualifies sunlight rays with incidence angle < 12 degrees to the facade plane (§ 56 ust. 5)', async () => {
+    const { analyzeSunlightAtPoint } = await import('../src/engine/analysisEngine');
+    const settings = {
+      latitude: 52.23,
+      longitude: 21.01,
+      isCityCentreDefault: false,
+      samplingInterval: 0.25,
+      equinoxDate: 'spring' as const,
+    };
+
+    // South wall segment with normal (0, -1) pointing South
+    const southSegment = {
+      id: 'south-wall',
+      p1: { x: 10, y: 10 },
+      p2: { x: 30, y: 10 },
+      normal: { x: 0, y: -1 }, // South
+      length: 20,
+      angleRad: 0,
+      hTop: 15.0,
+      hWindowBottom: 0.85,
+      isCityCentre: false,
+      buildingType: 'residential' as const,
+    };
+
+    const res = analyzeSunlightAtPoint({ x: 20, y: 10 }, southSegment, 0.5, [], 'bldg-1', settings, 5);
+
+    // Each time slot must satisfy: isDirectSunlight can only be true when isAngleAbove12Deg is true
+    for (const slot of res.timeSlots) {
+      if (slot.isDirectSunlight) {
+        expect(slot.isAngleAbove12Deg).toBe(true);
+        expect(slot.isSunAboveHorizon).toBe(true);
+      }
+    }
+  });
+
+  it('completely ignores buildings marked with isIncluded = false from § 12 and § 56 calculations', async () => {
+    const { analyzeShadowingAtPoint } = await import('../src/engine/analysisEngine');
+    const buildings = createSampleBuildings();
+    // Building B (bldg-2) is an obstacle to South
+    const target = buildings[0]; // Badany
+    const southSeg = target.segments[0];
+    const point = { x: 20, y: 10 };
+
+    // With building B included (default):
+    const resWithObstacle = analyzeShadowingAtPoint(point, southSeg, 0.5, buildings, target.id, 0.5);
+    const directRayWith = resWithObstacle.rays.find(r => Math.abs(r.angleDeg) < 0.1);
+    expect(directRayWith?.isFree).toBe(false); // blocked by Building B
+
+    // Mark building B as excluded (isIncluded = false)
+    buildings[1].isIncluded = false;
+    buildings[2].isIncluded = false; // Exclude building C as well
+
+    const resWithoutObstacle = analyzeShadowingAtPoint(point, southSeg, 0.5, buildings, target.id, 0.5);
+    const directRayWithout = resWithoutObstacle.rays.find(r => Math.abs(r.angleDeg) < 0.1);
+    expect(directRayWithout?.isFree).toBe(true); // obstacle ignored, ray is completely free
+    expect(resWithoutObstacle.isCompliant).toBe(true);
+  });
+});
+
+
+

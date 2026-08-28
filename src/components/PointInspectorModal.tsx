@@ -113,14 +113,25 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
         </div>
 
         {/* Timeline Bar */}
-        <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '4px' }}>
-          Oś nasłonecznienia minuta po minucie:
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+          <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>
+            Oś nasłonecznienia:
+          </span>
+          <span style={{ fontSize: '9px', color: '#cbd5e1' }}>
+            Kąt padania na rzucie ≥ 12° (§ 56 ust. 5)
+          </span>
         </div>
         <div style={{ display: 'flex', width: '100%', height: '10px', borderRadius: '5px', overflow: 'hidden', backgroundColor: '#020617', border: '1px solid #1e293b' }}>
           {sunlight.timeSlots.map((slot, idx) => (
             <div
               key={idx}
-              title={`${slot.time} - ${slot.isDirectSunlight ? 'Bezpośrednie słońce' : 'Cień / Brak kąta'}`}
+              title={`${slot.time} — ${
+                slot.isDirectSunlight
+                  ? 'Bezpośrednie słońce (Kąt ≥ 12°)'
+                  : slot.isAngleAbove12Deg
+                  ? 'Zacienione przez przeszkodę'
+                  : 'Brak nasłonecznienia (Kąt padania < 12° lub z tyłu ściany)'
+              }`}
               style={{
                 flex: 1,
                 backgroundColor: slot.isDirectSunlight

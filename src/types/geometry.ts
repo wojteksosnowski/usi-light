@@ -28,6 +28,7 @@ export interface BuildingLoop {
   name: string;
   layer: string;
   isTested: boolean; // True for the building under analysis, false for existing/obstacles
+  isIncluded?: boolean; // True (default) if included in calculations (as tested or obstacle); false to ignore
   isCityCentre: boolean;
   buildingType: BuildingType;
   defaultHeight: number;

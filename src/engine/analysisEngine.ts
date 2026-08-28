@@ -27,13 +27,13 @@ export function analyzeShadowingAtPoint(
   segment: FacadeSegment,
   offsetRatio: number,
   allBuildings: BuildingLoop[],
-  targetBuildingId: string
+  targetBuildingId: string,
+  angleStepDeg: number = 0.5
 ): ShadowingResult {
   const normal = segment.normal;
   const normalAngleRad = Math.atan2(normal.y, normal.x);
 
   const rays: ShadowingResult['rays'] = [];
-  const angleStepDeg = 0.5; // High resolution angular ray marching
   const minAngleDeg = -78; // 12 deg cutoff from wall plane on left
   const maxAngleDeg = 78; // 12 deg cutoff from wall plane on right
 
@@ -51,6 +51,8 @@ export function analyzeShadowingAtPoint(
 
     // Check collision with every segment of every building
     for (const bldg of allBuildings) {
+      if (bldg.isIncluded === false) continue;
+
       // Check if it's an obstacle
       for (const seg of bldg.segments) {
         // Skip self-segment
@@ -157,36 +159,38 @@ export function analyzeShadowingAtPoint(
 /**
  * Evaluates § 56 sunlight duration at point P on equinox.
  */
-export function analyzeSunlightAtPoint(
-  point: Point2D,
-  segment: FacadeSegment,
-  offsetRatio: number,
-  allBuildings: BuildingLoop[],
-  targetBuildingId: string,
-  settings: ProjectSettings
-): SunlightResult {
-  const normal = segment.normal;
-  const normalAngleRad = Math.atan2(normal.y, normal.x);
+export interface SolarTrajectorySlot {
+  timeStr: string;
+  hourDec: number;
+  azimuthDeg: number;
+  elevationDeg: number;
+  sunDir: Vector2D;
+  isSunAboveHorizon: boolean;
+}
 
-  // Time window: T_peak +- 5h (or +-4h for childcare)
-  const isChildcare = segment.buildingType === 'childcare';
-  const hoursRadius = isChildcare ? 4 : 5;
+// Precompute cos(78 deg) - minimal dot product for incidence angle >= 12 deg from wall surface
+const COS_78_DEG = Math.cos(78.0 * DEG2RAD);
 
-  // Find solar noon on March 21
+/**
+ * Computes and caches daily solar path trajectory for the equinox analysis window.
+ */
+export function computeDailySolarTrajectory(
+  settings: ProjectSettings,
+  stepMinutes: number = 5,
+  isChildcare: boolean = false
+): SolarTrajectorySlot[] {
   const month = settings.equinoxDate === 'autumn' ? 9 : 3;
   const day = settings.equinoxDate === 'autumn' ? 23 : 21;
 
   const noonPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, 12.0);
   const noonHour = noonPos.solarNoonDecimal;
+  const hoursRadius = isChildcare ? 4 : 5;
 
   const startHour = Math.max(5.0, noonHour - hoursRadius);
   const endHour = Math.min(19.0, noonHour + hoursRadius);
 
-  const stepMinutes = 5; // 5-minute time integration steps
   const totalSteps = Math.round(((endHour - startHour) * 60) / stepMinutes);
-
-  const timeSlots: SunlightTimeSlot[] = [];
-  let totalMinutesSunlight = 0;
+  const trajectory: SolarTrajectorySlot[] = [];
 
   for (let s = 0; s <= totalSteps; s++) {
     const currentHourDec = startHour + (s * stepMinutes) / 60;
@@ -195,13 +199,94 @@ export function analyzeSunlightAtPoint(
     const timeStr = `${String(hourInt).padStart(2, '0')}:${String(minInt).padStart(2, '0')}`;
 
     const pos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, currentHourDec);
+    const isAbove = pos.elevationDeg > 0;
 
-    // If sun is below horizon
-    if (pos.elevationDeg <= 0) {
+    const sunAzimuthMathRad = ((90 - pos.azimuthDeg + 360) % 360) * DEG2RAD;
+    const sunDir: Vector2D = {
+      x: Math.cos(sunAzimuthMathRad),
+      y: Math.sin(sunAzimuthMathRad),
+    };
+
+    trajectory.push({
+      timeStr,
+      hourDec: currentHourDec,
+      azimuthDeg: pos.azimuthDeg,
+      elevationDeg: pos.elevationDeg,
+      sunDir,
+      isSunAboveHorizon: isAbove,
+    });
+  }
+
+  return trajectory;
+}
+
+/**
+ * Evaluates § 56 sunlight duration at point P on equinox.
+ * Uses orientation-aware culling to eliminate calculations for North-facing facades.
+ */
+export function analyzeSunlightAtPoint(
+  point: Point2D,
+  segment: FacadeSegment,
+  offsetRatio: number,
+  allBuildings: BuildingLoop[],
+  targetBuildingId: string,
+  settings: ProjectSettings,
+  stepMinutes: number = 5,
+  precomputedTrajectory?: SolarTrajectorySlot[]
+): SunlightResult {
+  const normal = segment.normal;
+  const isChildcare = segment.buildingType === 'childcare';
+
+  const trajectory =
+    precomputedTrajectory ??
+    computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
+
+  // 1. Orientation culling check:
+  // Can this facade orientation EVER receive direct sunlight in the analysis window (noon +- 5h)?
+  let canReceiveSunlight = false;
+  for (const slot of trajectory) {
+    if (slot.isSunAboveHorizon) {
+      const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
+      if (dot >= COS_78_DEG) {
+        canReceiveSunlight = true;
+        break;
+      }
+    }
+  }
+
+  // Fast-path: North-facing facades (or facades turned away from the entire solar arc)
+  // receive 0 minutes of sunlight — skip 100% of raycasts!
+  if (!canReceiveSunlight) {
+    const emptySlots: SunlightTimeSlot[] = trajectory.map((slot) => ({
+      time: slot.timeStr,
+      azimuthDeg: slot.azimuthDeg,
+      elevationDeg: slot.elevationDeg,
+      isSunAboveHorizon: slot.isSunAboveHorizon,
+      isAngleAbove12Deg: false,
+      isDirectSunlight: false,
+    }));
+
+    return {
+      point,
+      segmentId: segment.id,
+      offsetRatio,
+      totalMinutes: 0,
+      totalHours: 0,
+      isCompliant: false,
+      timeSlots: emptySlots,
+    };
+  }
+
+  // 2. Perform raycast analysis only for active solar trajectory slots
+  const timeSlots: SunlightTimeSlot[] = [];
+  let totalMinutesSunlight = 0;
+
+  for (const slot of trajectory) {
+    if (!slot.isSunAboveHorizon) {
       timeSlots.push({
-        time: timeStr,
-        azimuthDeg: pos.azimuthDeg,
-        elevationDeg: pos.elevationDeg,
+        time: slot.timeStr,
+        azimuthDeg: slot.azimuthDeg,
+        elevationDeg: slot.elevationDeg,
         isSunAboveHorizon: false,
         isAngleAbove12Deg: false,
         isDirectSunlight: false,
@@ -209,30 +294,15 @@ export function analyzeSunlightAtPoint(
       continue;
     }
 
-    // Solar ray incoming vector (from Sun to Point, or from Point to Sun)
-    // Azimuth: 0=N (+Y), 90=E (+X), 180=S (-Y), 270=W (-X)
-    // Mathematical angle: theta = (90 - Azimuth) * DEG2RAD
-    const sunAzimuthMathRad = ((90 - pos.azimuthDeg + 360) % 360) * DEG2RAD;
-    const sunDir: Vector2D = {
-      x: Math.cos(sunAzimuthMathRad),
-      y: Math.sin(sunAzimuthMathRad),
-    };
-
-    // Check angle between sun ray and facade normal
-    // Dot product: normal . sunDir
-    const dot = normal.x * sunDir.x + normal.y * sunDir.y;
-    // Angle in plane relative to normal
-    const angleWithNormalRad = Math.acos(Math.max(-1, Math.min(1, dot)));
-    const angleWithNormalDeg = angleWithNormalRad * RAD2DEG;
-
-    // § 56 ust. 5: Angle on plan >= 12 deg from wall surface => <= 78 deg from normal
-    const isAngleAbove12Deg = angleWithNormalDeg <= 78.0;
+    const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
+    // Angle on plan >= 12 deg from wall surface => <= 78 deg from normal (dot >= COS_78_DEG)
+    const isAngleAbove12Deg = dot >= COS_78_DEG;
 
     if (!isAngleAbove12Deg) {
       timeSlots.push({
-        time: timeStr,
-        azimuthDeg: pos.azimuthDeg,
-        elevationDeg: pos.elevationDeg,
+        time: slot.timeStr,
+        azimuthDeg: slot.azimuthDeg,
+        elevationDeg: slot.elevationDeg,
         isSunAboveHorizon: true,
         isAngleAbove12Deg: false,
         isDirectSunlight: false,
@@ -246,12 +316,13 @@ export function analyzeSunlightAtPoint(
     let maxObstacleAngleDeg = 0;
 
     for (const bldg of allBuildings) {
+      if (bldg.isIncluded === false) continue;
+
       for (const seg of bldg.segments) {
         if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
 
-        const hit = raySegmentIntersection(point, sunDir, seg.p1, seg.p2);
+        const hit = raySegmentIntersection(point, slot.sunDir, seg.p1, seg.p2);
         if (hit.hit && hit.distance > 0.05) {
-          // Calculate obstruction elevation angle beta = arctan( (H_top - H_window_bottom) / distance )
           const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
           const betaDeg = Math.atan2(deltaH, hit.distance) * RAD2DEG;
 
@@ -259,8 +330,7 @@ export function analyzeSunlightAtPoint(
             maxObstacleAngleDeg = betaDeg;
           }
 
-          // If sun elevation gamma <= beta, sunlight is blocked
-          if (pos.elevationDeg <= betaDeg) {
+          if (slot.elevationDeg <= betaDeg) {
             isBlocked = true;
             blockingObstacleId = bldg.id;
             break;
@@ -276,9 +346,9 @@ export function analyzeSunlightAtPoint(
     }
 
     timeSlots.push({
-      time: timeStr,
-      azimuthDeg: pos.azimuthDeg,
-      elevationDeg: pos.elevationDeg,
+      time: slot.timeStr,
+      azimuthDeg: slot.azimuthDeg,
+      elevationDeg: slot.elevationDeg,
       isSunAboveHorizon: true,
       isAngleAbove12Deg: true,
       isDirectSunlight,
@@ -303,20 +373,35 @@ export function analyzeSunlightAtPoint(
   };
 }
 
+export interface AnalysisAccuracyOptions {
+  samplingInterval?: number; // Distance between test points along facade (e.g. 1.5m live -> 0.25m final)
+  angleStepDeg?: number; // Angular ray resolution (e.g. 2.0 deg live -> 0.5 deg final)
+  sunlightStepMinutes?: number; // Solar timeline resolution (e.g. 15 min live -> 5 min final)
+}
+
 /**
  * Runs full batch analysis on all facade segments of tested building(s).
  */
 export function runFullAnalysis(
   buildings: BuildingLoop[],
-  settings: ProjectSettings
+  settings: ProjectSettings,
+  options?: AnalysisAccuracyOptions
 ): AnalysisPointResult[] {
   const results: AnalysisPointResult[] = [];
 
-  const testedBuildings = buildings.filter((b) => b.isTested);
+  const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false);
+  const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
+  const angleStep = options?.angleStepDeg ?? 0.5;
+  const sunlightStep = options?.sunlightStepMinutes ?? 5;
+
+  // Precompute solar trajectories once for standard residential and childcare segments
+  const standardTrajectory = computeDailySolarTrajectory(settings, sunlightStep, false);
+  const childcareTrajectory = computeDailySolarTrajectory(settings, sunlightStep, true);
 
   for (const bldg of testedBuildings) {
     for (const seg of bldg.segments) {
-      const sampled = sampleSegmentPoints(seg.p1, seg.p2, settings.samplingInterval);
+      const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
+      const trajectory = seg.buildingType === 'childcare' ? childcareTrajectory : standardTrajectory;
 
       sampled.forEach((sample, idx) => {
         const shadowing = analyzeShadowingAtPoint(
@@ -324,7 +409,8 @@ export function runFullAnalysis(
           seg,
           sample.ratio,
           buildings,
-          bldg.id
+          bldg.id,
+          angleStep
         );
 
         const sunlight = analyzeSunlightAtPoint(
@@ -333,7 +419,9 @@ export function runFullAnalysis(
           sample.ratio,
           buildings,
           bldg.id,
-          settings
+          settings,
+          sunlightStep,
+          trajectory
         );
 
         results.push({
