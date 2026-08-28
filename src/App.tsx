@@ -8,7 +8,12 @@ import {
   DxfUnitOption,
   DxfUnitInfo,
 } from './utils/dxfParser';
-import { runFullAnalysis, AnalysisAccuracyOptions } from './engine/analysisEngine';
+import {
+  runFullAnalysis,
+  analyzeShadowingAtPoint,
+  analyzeSunlightAtPoint,
+  AnalysisAccuracyOptions,
+} from './engine/analysisEngine';
 import {
   Sun,
   Shield,
@@ -25,6 +30,7 @@ import {
   Maximize2,
   Sliders,
   Activity,
+  MapPin,
 } from 'lucide-react';
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
@@ -33,7 +39,6 @@ export const App: React.FC = () => {
   // State
   const [buildings, setBuildings] = useState<BuildingLoop[]>(createSampleBuildings());
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>('bldg-1');
-  const [selectedPointResult, setSelectedPointResult] = useState<AnalysisPointResult | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [fitKey, setFitKey] = useState<number>(0);
 
@@ -45,6 +50,17 @@ export const App: React.FC = () => {
   const [dxfUnit, setDxfUnit] = useState<DxfUnitOption>('auto');
   const [lastDxfText, setLastDxfText] = useState<string | null>(null);
   const [dxfImportInfo, setDxfImportInfo] = useState<DxfUnitInfo | null>(null);
+
+  // Polish Cities list with accurate geographic coordinates
+  const POLISH_CITIES = [
+    { name: 'Warszawa', lat: 52.2297, lon: 21.0122 },
+    { name: 'Gdańsk',   lat: 54.3520, lon: 18.6466 },
+    { name: 'Wrocław',  lat: 51.1079, lon: 17.0385 },
+    { name: 'Kraków',   lat: 50.0647, lon: 19.9450 },
+    { name: 'Poznań',   lat: 52.4064, lon: 16.9252 },
+  ];
+
+  const [selectedCity, setSelectedCity] = useState<string>('Warszawa');
 
   // Settings
   const [settings, setSettings] = useState<ProjectSettings>({
@@ -108,6 +124,57 @@ export const App: React.FC = () => {
   const analysisResults = useMemo(() => {
     return runFullAnalysis(buildings, settings, currentAccuracyOptions);
   }, [buildings, settings, currentAccuracyOptions]);
+
+  const [selectedPointKey, setSelectedPointKey] = useState<{
+    buildingId: string;
+    segmentId: string;
+    offsetRatio: number;
+  } | null>(null);
+
+  // Directly evaluate selected point at its EXACT pinned offsetRatio on the segment
+  // (so its position on the wall is 100% fixed and never moves when background mesh precision changes)
+  const selectedPointResult = useMemo<AnalysisPointResult | null>(() => {
+    if (!selectedPointKey) return null;
+    const bldg = buildings.find((b) => b.id === selectedPointKey.buildingId);
+    if (!bldg) return null;
+    const seg = bldg.segments.find((s) => s.id === selectedPointKey.segmentId);
+    if (!seg) return null;
+
+    const r = selectedPointKey.offsetRatio;
+    const exactPoint = {
+      x: seg.p1.x + r * (seg.p2.x - seg.p1.x),
+      y: seg.p1.y + r * (seg.p2.y - seg.p1.y),
+    };
+
+    const shadowRes = analyzeShadowingAtPoint(
+      exactPoint,
+      seg,
+      r,
+      buildings,
+      bldg.id,
+      currentAccuracyOptions.angleStepDeg
+    );
+
+    const sunRes = analyzeSunlightAtPoint(
+      exactPoint,
+      seg,
+      r,
+      buildings,
+      bldg.id,
+      settings,
+      currentAccuracyOptions.sunlightStepMinutes
+    );
+
+    return {
+      id: `pinned-${bldg.id}-${seg.id}-${r.toFixed(4)}`,
+      point: exactPoint,
+      normal: seg.normal,
+      buildingId: bldg.id,
+      segmentId: seg.id,
+      shadowing: shadowRes,
+      sunlight: sunRes,
+    };
+  }, [selectedPointKey, buildings, settings, currentAccuracyOptions]);
 
   // Overall Statistics
   const stats = useMemo(() => {
@@ -188,7 +255,7 @@ export const App: React.FC = () => {
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
           setSelectedBuildingId(result.buildings[0].id);
-          setSelectedPointResult(null);
+          setSelectedPointKey(null);
           setDxfImportInfo(result.unitInfo);
           setFitKey((prev) => prev + 1);
         } else {
@@ -212,7 +279,7 @@ export const App: React.FC = () => {
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
           setSelectedBuildingId(result.buildings[0].id);
-          setSelectedPointResult(null);
+          setSelectedPointKey(null);
           setDxfImportInfo(result.unitInfo);
           setFitKey((prev) => prev + 1);
         }
@@ -337,6 +404,80 @@ export const App: React.FC = () => {
             </div>
           </div>
 
+          {/* Section: Lokalizacja / Miasto (Słońce § 56) */}
+          <div className="ui-card">
+            <div className="ui-title">
+              <span>Lokalizacja (Kąt słońca § 56)</span>
+              <MapPin size={14} color="#f59e0b" />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(5, 1fr)',
+                  gap: '4px',
+                  backgroundColor: 'var(--bg-input)',
+                  padding: '4px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-light)',
+                }}
+              >
+                {POLISH_CITIES.map((city) => {
+                  const isActive = selectedCity === city.name;
+                  return (
+                    <button
+                      key={city.name}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCity(city.name);
+                        setSettings((prev) => ({
+                          ...prev,
+                          latitude: city.lat,
+                          longitude: city.lon,
+                        }));
+                      }}
+                      style={{
+                        padding: '6px 2px',
+                        fontSize: '11px',
+                        fontWeight: isActive ? 700 : 500,
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        backgroundColor: isActive ? '#f59e0b' : 'transparent',
+                        color: isActive ? '#000000' : 'var(--text-secondary)',
+                      }}
+                      title={`${city.name} (${city.lat}° N, ${city.lon}° E)`}
+                    >
+                      {city.name}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Coordinates info pill */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '11px',
+                  color: '#94a3b8',
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                  border: '1px solid rgba(245, 158, 11, 0.2)',
+                }}
+              >
+                <span>Współrzędne:</span>
+                <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
+                  {settings.latitude.toFixed(2)}° N, {settings.longitude.toFixed(2)}° E
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Section: Przełączniki warstw */}
           <div className="ui-card">
             <div className="ui-title">
@@ -410,45 +551,24 @@ export const App: React.FC = () => {
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Wysokość H (m)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={selectedBuilding.defaultHeight}
-                      onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
-                      style={{
-                        width: '100%',
-                        backgroundColor: 'var(--bg-input)',
-                        border: '1px solid var(--border-light)',
-                        borderRadius: '8px',
-                        padding: '7px 10px',
-                        color: '#fff',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Parapet H_okna (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      value={selectedBuilding.hWindowBottom}
-                      onChange={(e) => updateSelectedBuilding({ hWindowBottom: parseFloat(e.target.value) || 0.85 })}
-                      style={{
-                        width: '100%',
-                        backgroundColor: 'var(--bg-input)',
-                        border: '1px solid var(--border-light)',
-                        borderRadius: '8px',
-                        padding: '7px 10px',
-                        color: '#fff',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                      }}
-                    />
-                  </div>
+                <div style={{ marginBottom: '10px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Wysokość przesłaniania H (m)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={selectedBuilding.defaultHeight}
+                    onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: '8px',
+                      padding: '7px 10px',
+                      color: '#fff',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                    }}
+                  />
                 </div>
 
                 {/* Real-world metric dimensions display */}
@@ -652,7 +772,7 @@ export const App: React.FC = () => {
               onClick={() => {
                 setBuildings(createSampleBuildings());
                 setSelectedBuildingId('bldg-1');
-                setSelectedPointResult(null);
+                setSelectedPointKey(null);
                 setLastDxfText(null);
                 setDxfImportInfo(null);
                 setFitKey((prev) => prev + 1);
@@ -866,7 +986,17 @@ export const App: React.FC = () => {
             onBuildingMove={handleBuildingMove}
             analysisResults={analysisResults}
             selectedPointResult={selectedPointResult}
-            onSelectPointResult={setSelectedPointResult}
+            onSelectPointResult={(res) => {
+              if (!res) {
+                setSelectedPointKey(null);
+              } else {
+                setSelectedPointKey({
+                  buildingId: res.buildingId,
+                  segmentId: res.segmentId,
+                  offsetRatio: res.shadowing.offsetRatio,
+                });
+              }
+            }}
             showNormals={showNormals}
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
@@ -878,7 +1008,7 @@ export const App: React.FC = () => {
         {/* Floating Point Inspector Modal */}
         <PointInspectorModal
           pointResult={selectedPointResult}
-          onClose={() => setSelectedPointResult(null)}
+          onClose={() => setSelectedPointKey(null)}
         />
       </main>
     </div>

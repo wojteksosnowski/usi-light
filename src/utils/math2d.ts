@@ -137,11 +137,12 @@ export function sampleSegmentPoints(
   const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
   if (len === 0) return [{ point: p1, ratio: 0.5 }];
 
-  const count = Math.max(1, Math.floor(len / interval));
+  const count = Math.max(1, Math.round(len / interval));
   const points: { point: Point2D; ratio: number }[] = [];
 
-  for (let i = 0; i <= count; i++) {
-    const ratio = i / count;
+  // Sample interior points along the segment (avoiding degenerate 0.0 and 1.0 exact corner vertices)
+  for (let i = 0; i < count; i++) {
+    const ratio = (i + 0.5) / count;
     points.push({
       point: {
         x: p1.x + ratio * (p2.x - p1.x),

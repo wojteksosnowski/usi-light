@@ -48,6 +48,7 @@ export interface ShadowingSector {
   endAngleDeg: number;
   spanDeg: number;
   isFree: boolean;
+  isTolerated?: boolean; // Blocked sector <= 15° permitted under § 12 ust. 2
   minObstacleDistance?: number;
   requiredDistance?: number;
 }

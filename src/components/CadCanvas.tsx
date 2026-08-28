@@ -229,7 +229,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     ctx.lineTo(originScreen.sx, height);
     ctx.stroke();
 
-    // 3. Render Buildings
+    // 3. Render Building Fills (base level)
     for (const bldg of buildings) {
       const isSelected = bldg.id === selectedBuildingId;
       const isTested = bldg.isTested;
@@ -243,7 +243,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       });
       ctx.closePath();
 
-      // Fill styling
       if (!isIncluded) {
         ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
       } else if (isTested) {
@@ -252,14 +251,182 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         ctx.fillStyle = isSelected ? 'rgba(148, 163, 184, 0.25)' : 'rgba(71, 85, 105, 0.18)';
       }
       ctx.fill();
+    }
 
-      // Clean Stroke (dashed if excluded from calculation)
+    // 4. Render Analytical Bands & Lines adjacent to building facades
+    // Helper function for Purple-to-Orange sunlight color scale in 30-minute steps (with 0.85 opacity)
+    const getSunlightColor = (hours: number) => {
+      // Step to nearest 0.5h (30 min)
+      const steppedHours = Math.floor(hours * 2) / 2;
+      
+      // Color Palette: Deep Violet (0h) -> Purple (1h) -> Magenta/Pink (2h) -> Coral/Amber (3h) -> Bright Orange (4h+)
+      if (steppedHours < 0.5) return 'rgba(59, 7, 100, 0.85)';   // very dark purple (<30 min)
+      if (steppedHours < 1.0) return 'rgba(88, 28, 135, 0.85)';  // dark violet (30 min)
+      if (steppedHours < 1.5) return 'rgba(126, 34, 206, 0.85)'; // violet (1.0 h)
+      if (steppedHours < 2.0) return 'rgba(168, 85, 247, 0.85)'; // bright purple (1.5 h)
+      if (steppedHours < 2.5) return 'rgba(192, 38, 211, 0.85)'; // fuchsia / magenta (2.0 h)
+      if (steppedHours < 3.0) return 'rgba(225, 29, 72, 0.85)';  // rose / coral (2.5 h)
+      if (steppedHours < 3.5) return 'rgba(234, 88, 12, 0.85)';  // rich orange (3.0 h - standard met)
+      if (steppedHours < 4.0) return 'rgba(249, 115, 22, 0.85)'; // vibrant orange (3.5 h)
+      return 'rgba(251, 146, 60, 0.85)';                         // bright warm orange (4.0 h+)
+    };
+
+    // Group analysis points by building+segment for smooth continuous band rendering.
+    // Key = "buildingId|segmentId" to guarantee isolation between buildings even if
+    // segment IDs were ever non-unique across buildings.
+    const pointsBySegment = new Map<string, typeof analysisResults>();
+    for (const res of analysisResults) {
+      const key = `${res.buildingId}|${res.segmentId}`;
+      if (!pointsBySegment.has(key)) {
+        pointsBySegment.set(key, []);
+      }
+      pointsBySegment.get(key)!.push(res);
+    }
+
+    // Band thickness in pixels and offset in world space so bands border right against the facade line
+    const bandThickness = Math.max(3, Math.min(8, viewState.scale * 0.28)); // Screen pixels thickness
+    const halfBandWorld = (bandThickness / 2) / Math.max(0.001, viewState.scale);
+
+    ctx.save();
+    pointsBySegment.forEach((points) => {
+      if (points.length === 0) return;
+
+      // Sort points along segment by ratio
+      points.sort((a, b) => a.shadowing.offsetRatio - b.shadowing.offsetRatio);
+
+      // Find original facade segment
+      const bldg = buildings.find((b) => b.id === points[0].buildingId);
+      const seg = bldg?.segments.find((s) => s.id === points[0].segmentId);
+      if (!seg) return;
+
+      const norm = seg.normal;
+      const dx = seg.p2.x - seg.p1.x;
+      const dy = seg.p2.y - seg.p1.y;
+
+      // --- § 12 Shadowing Band (INSIDE the building, clinging directly to the wall) ---
+      if (showShadowingLines) {
+        interface ShadowInterval {
+          isCompliant: boolean;
+          startRatio: number;
+          endRatio: number;
+        }
+        const intervals: ShadowInterval[] = [];
+        const n = points.length;
+
+        for (let i = 0; i < n; i++) {
+          const p = points[i];
+          const prevRatio = i === 0 ? 0.0 : (points[i - 1].shadowing.offsetRatio + p.shadowing.offsetRatio) / 2;
+          const nextRatio = i === n - 1 ? 1.0 : (p.shadowing.offsetRatio + points[i + 1].shadowing.offsetRatio) / 2;
+
+          const lastInt = intervals[intervals.length - 1];
+          if (lastInt && lastInt.isCompliant === p.shadowing.isCompliant) {
+            lastInt.endRatio = nextRatio;
+          } else {
+            intervals.push({
+              isCompliant: p.shadowing.isCompliant,
+              startRatio: prevRatio,
+              endRatio: nextRatio,
+            });
+          }
+        }
+
+        for (const inter of intervals) {
+          const w1 = {
+            x: seg.p1.x + inter.startRatio * dx - norm.x * halfBandWorld,
+            y: seg.p1.y + inter.startRatio * dy - norm.y * halfBandWorld,
+          };
+          const w2 = {
+            x: seg.p1.x + inter.endRatio * dx - norm.x * halfBandWorld,
+            y: seg.p1.y + inter.endRatio * dy - norm.y * halfBandWorld,
+          };
+
+          const s1 = worldToScreen(w1.x, w1.y);
+          const s2 = worldToScreen(w2.x, w2.y);
+
+          ctx.beginPath();
+          ctx.moveTo(s1.sx, s1.sy);
+          ctx.lineTo(s2.sx, s2.sy);
+          ctx.strokeStyle = inter.isCompliant ? 'rgba(16, 185, 129, 0.85)' : 'rgba(244, 63, 94, 0.85)';
+          ctx.lineWidth = bandThickness;
+          ctx.lineCap = 'butt';
+          ctx.stroke();
+        }
+      }
+
+      // --- § 56 Sunlight Band (OUTSIDE the building, clinging directly to the wall) ---
+      if (showSunlightLines) {
+        interface SunlightInterval {
+          color: string;
+          startRatio: number;
+          endRatio: number;
+        }
+        const intervals: SunlightInterval[] = [];
+        const n = points.length;
+
+        for (let i = 0; i < n; i++) {
+          const p = points[i];
+          const color = getSunlightColor(p.sunlight.totalHours);
+          const prevRatio = i === 0 ? 0.0 : (points[i - 1].shadowing.offsetRatio + p.shadowing.offsetRatio) / 2;
+          const nextRatio = i === n - 1 ? 1.0 : (p.shadowing.offsetRatio + points[i + 1].shadowing.offsetRatio) / 2;
+
+          const lastInt = intervals[intervals.length - 1];
+          if (lastInt && lastInt.color === color) {
+            lastInt.endRatio = nextRatio;
+          } else {
+            intervals.push({
+              color,
+              startRatio: prevRatio,
+              endRatio: nextRatio,
+            });
+          }
+        }
+
+        for (const inter of intervals) {
+          const w1 = {
+            x: seg.p1.x + inter.startRatio * dx + norm.x * halfBandWorld,
+            y: seg.p1.y + inter.startRatio * dy + norm.y * halfBandWorld,
+          };
+          const w2 = {
+            x: seg.p1.x + inter.endRatio * dx + norm.x * halfBandWorld,
+            y: seg.p1.y + inter.endRatio * dy + norm.y * halfBandWorld,
+          };
+
+          const s1 = worldToScreen(w1.x, w1.y);
+          const s2 = worldToScreen(w2.x, w2.y);
+
+          ctx.beginPath();
+          ctx.moveTo(s1.sx, s1.sy);
+          ctx.lineTo(s2.sx, s2.sy);
+          ctx.strokeStyle = inter.color;
+          ctx.lineWidth = bandThickness;
+          ctx.lineCap = 'butt';
+          ctx.stroke();
+        }
+      }
+    });
+    ctx.restore();
+
+    // 4.1. Render Building Outlines, Normals & Name Tags (OVER the analytical ribbons)
+    for (const bldg of buildings) {
+      const isSelected = bldg.id === selectedBuildingId;
+      const isTested = bldg.isTested;
+      const isIncluded = bldg.isIncluded !== false;
+
+      ctx.beginPath();
+      bldg.vertices.forEach((v, idx) => {
+        const { sx, sy } = worldToScreen(v.x, v.y);
+        if (idx === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      });
+      ctx.closePath();
+
+      // Clean Stroke (drawn above analytical bands)
       ctx.save();
       if (!isIncluded) {
         ctx.setLineDash([5, 5]);
         ctx.strokeStyle = isSelected ? '#94a3b8' : '#475569';
       } else {
-        ctx.strokeStyle = isTested ? '#3b82f6' : '#64748b';
+        ctx.strokeStyle = isTested ? '#60a5fa' : '#64748b';
       }
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
@@ -326,92 +493,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 4. Render Analytical Bands & Lines adjacent to building facades
-    // Helper function for Purple-to-Orange sunlight color scale in 30-minute steps
-    const getSunlightColor = (hours: number) => {
-      // Step to nearest 0.5h (30 min)
-      const steppedHours = Math.floor(hours * 2) / 2;
-      
-      // Color Palette: Deep Violet (0h) -> Purple (1h) -> Magenta/Pink (2h) -> Coral/Amber (3h) -> Bright Orange (4h+)
-      if (steppedHours < 0.5) return '#3b0764'; // very dark purple (<30 min)
-      if (steppedHours < 1.0) return '#581c87'; // dark violet (30 min)
-      if (steppedHours < 1.5) return '#7e22ce'; // violet (1.0 h)
-      if (steppedHours < 2.0) return '#a855f7'; // bright purple (1.5 h)
-      if (steppedHours < 2.5) return '#c026d3'; // fuchsia / magenta (2.0 h)
-      if (steppedHours < 3.0) return '#e11d48'; // rose / coral (2.5 h)
-      if (steppedHours < 3.5) return '#ea580c'; // rich orange (3.0 h - standard met)
-      if (steppedHours < 4.0) return '#f97316'; // vibrant orange (3.5 h)
-      return '#fb923c'; // bright warm orange (4.0 h+)
-    };
-
-    // Group analysis points by building+segment for smooth continuous band rendering.
-    // Key = "buildingId|segmentId" to guarantee isolation between buildings even if
-    // segment IDs were ever non-unique across buildings.
-    const pointsBySegment = new Map<string, typeof analysisResults>();
-    for (const res of analysisResults) {
-      const key = `${res.buildingId}|${res.segmentId}`;
-      if (!pointsBySegment.has(key)) {
-        pointsBySegment.set(key, []);
-      }
-      pointsBySegment.get(key)!.push(res);
-    }
-
-    const bandThickness = Math.max(3, Math.min(10, viewState.scale * 0.35)); // Screen pixels thickness
-    const offsetDistance = 0.45; // meters in world space for outer sunlight band
-
-    pointsBySegment.forEach((points) => {
-      if (points.length < 2) return;
-
-      // Sort points along segment by ratio
-      points.sort((a, b) => a.shadowing.offsetRatio - b.shadowing.offsetRatio);
-
-      for (let i = 0; i < points.length - 1; i++) {
-        const pA = points[i];
-        const pB = points[i + 1];
-
-        // --- § 12 Shadowing Band (Inner facade ribbon / line) ---
-        if (showShadowingLines) {
-          const sA = worldToScreen(pA.point.x, pA.point.y);
-          const sB = worldToScreen(pB.point.x, pB.point.y);
-
-          ctx.beginPath();
-          ctx.moveTo(sA.sx, sA.sy);
-          ctx.lineTo(sB.sx, sB.sy);
-          ctx.strokeStyle = pA.shadowing.isCompliant && pB.shadowing.isCompliant ? '#10b981' : '#f43f5e';
-          ctx.lineWidth = bandThickness;
-          ctx.lineCap = 'round';
-          ctx.stroke();
-        }
-
-        // --- § 56 Sunlight Band (Outer facade ribbon in violet-to-orange scale) ---
-        if (showSunlightLines) {
-          const normA = pA.normal;
-          const normB = pB.normal;
-
-          const outA = {
-            x: pA.point.x + normA.x * offsetDistance,
-            y: pA.point.y + normA.y * offsetDistance,
-          };
-          const outB = {
-            x: pB.point.x + normB.x * offsetDistance,
-            y: pB.point.y + normB.y * offsetDistance,
-          };
-
-          const sOutA = worldToScreen(outA.x, outA.y);
-          const sOutB = worldToScreen(outB.x, outB.y);
-
-          const avgHours = (pA.sunlight.totalHours + pB.sunlight.totalHours) / 2;
-          ctx.beginPath();
-          ctx.moveTo(sOutA.sx, sOutA.sy);
-          ctx.lineTo(sOutB.sx, sOutB.sy);
-          ctx.strokeStyle = getSunlightColor(avgHours);
-          ctx.lineWidth = bandThickness;
-          ctx.lineCap = 'round';
-          ctx.stroke();
-        }
-      }
-    });
-
     // Highlight selected point marker if active
     if (selectedPointResult) {
       const { point } = selectedPointResult;
@@ -431,61 +512,81 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       const { sx: px, sy: py } = worldToScreen(point.x, point.y);
       const rays = shadowing.rays;
 
-      if (rays.length > 0) {
-        // Group rays into continuous same-state sectors
-        type RaySector = { isFree: boolean; rays: typeof rays };
-        const sectorGroups: RaySector[] = [];
-        let curSector: RaySector | null = null;
+      const sectors = shadowing.sectors;
 
-        for (const ray of rays) {
-          if (!curSector || curSector.isFree !== ray.isFree) {
-            curSector = { isFree: ray.isFree, rays: [] };
-            sectorGroups.push(curSector);
-          }
-          curSector.rays.push(ray);
+      if (sectors && sectors.length > 0) {
+        const normalWorldDeg = (Math.atan2(selectedPointResult.normal.y, selectedPointResult.normal.x) * 180) / Math.PI;
+
+        // Calculate precise continuous boundary angles for each sector
+        const sectorBoundariesDeg: { startWorldDeg: number; endWorldDeg: number; spanDeg: number }[] = [];
+
+        for (let i = 0; i < sectors.length; i++) {
+          const s = sectors[i];
+          const startRelDeg = s.startAngleDeg;
+          const endRelDeg = s.endAngleDeg;
+          const spanDeg = s.spanDeg;
+
+          const startWorldDeg = ((normalWorldDeg + startRelDeg) % 360 + 360) % 360;
+          const endWorldDeg = ((normalWorldDeg + endRelDeg) % 360 + 360) % 360;
+
+          sectorBoundariesDeg.push({ startWorldDeg, endWorldDeg, spanDeg });
         }
 
         ctx.save();
-        for (const sector of sectorGroups) {
-          const first = sector.rays[0];
-          const last = sector.rays[sector.rays.length - 1];
+        for (let sIdx = 0; sIdx < sectors.length; sIdx++) {
+          const sector = sectors[sIdx];
           const isFree = sector.isFree;
+          const isTolerated = (sector as any).isTolerated === true;
+          const { startWorldDeg, endWorldDeg, spanDeg } = sectorBoundariesDeg[sIdx];
 
           // Compute reach distance for this sector:
-          // Rule: when a sector is bounded by obstacles of different heights,
-          // the arc radius = the TALLER obstacle's required distance (§ 12).
-          // - Free sector: use the max reqDistance of obstacles that are far enough
-          // - Blocked sector: use the max reqDistance (the violated clearance)
+          const bldgOfPoint = buildings.find((b) => b.id === selectedPointResult.buildingId);
+          const isCityCentre = bldgOfPoint?.isCityCentre ?? false;
+          const maxAllowedReq = isCityCentre ? 17.5 : 35.0;
+
+          // Find required distance of bounding obstacles
           let dist: number;
           if (isFree) {
-            // For free sector: radius = max reqDistance of any obstacle visible from this sector
-            // (or a sensible default if totally open sky)
-            const maxReqInSector = sector.rays.reduce((mx, r) =>
-              r.reqDistance > 0 ? Math.max(mx, r.reqDistance) : mx, 0
-            );
-            dist = Math.min(
-              maxReqInSector > 0 ? maxReqInSector : 20.0,
-              35.0
-            );
+            const prevSector = sIdx > 0 ? sectors[sIdx - 1] : null;
+            const nextSector = sIdx < sectors.length - 1 ? sectors[sIdx + 1] : null;
+
+            const prevReq = prevSector ? (prevSector.requiredDistance ?? 0) : 0;
+            const nextReq = nextSector ? (nextSector.requiredDistance ?? 0) : 0;
+            const boundingReq = Math.max(sector.requiredDistance ?? 0, prevReq, nextReq);
+
+            dist = boundingReq > 0
+              ? Math.min(boundingReq, maxAllowedReq)
+              : maxAllowedReq;
           } else {
-            // Blocked: radius = max reqDistance (the tallest obstacle = tightest constraint)
-            const maxReq = sector.rays.reduce((mx, r) => Math.max(mx, r.reqDistance), 0);
-            dist = Math.min(maxReq > 0 ? maxReq : 15.0, 35.0);
+            const req = sector.requiredDistance ?? 0;
+            dist = Math.min(req > 0 ? req : maxAllowedReq, maxAllowedReq);
           }
 
-          const strokeColor = isFree ? 'rgba(52, 211, 153, 0.7)' : 'rgba(244, 63, 94, 0.7)';
-          const fillColor   = isFree ? 'rgba(52, 211, 153, 0.08)' : 'rgba(244, 63, 94, 0.08)';
-          const lineWidth   = isFree ? 1.5 : 1.5;
+          // Color classification: Green (Free) | Yellow (Tolerated <=15° in >=75° window) | Red (Blocked)
+          let strokeColor = 'rgba(244, 63, 94, 0.85)';
+          let fillColor   = 'rgba(244, 63, 94, 0.12)';
+          let textColor   = '#f87171';
 
-          const startRad = (first.worldAngleDeg * Math.PI) / 180;
-          const endRad   = (last.worldAngleDeg  * Math.PI) / 180;
+          if (isFree) {
+            strokeColor = 'rgba(52, 211, 153, 0.85)';
+            fillColor   = 'rgba(52, 211, 153, 0.12)';
+            textColor   = '#34d399';
+          } else if (isTolerated) {
+            strokeColor = 'rgba(234, 179, 8, 0.9)'; // Yellow
+            fillColor   = 'rgba(234, 179, 8, 0.18)';
+            textColor   = '#facc15';
+          }
 
-          // First edge ray
+          const lineWidth = 1.5;
+          const startRad = (startWorldDeg * Math.PI) / 180;
+          const endRad   = (endWorldDeg * Math.PI) / 180;
+
+          // First edge ray endpoint
           const x1 = point.x + Math.cos(startRad) * dist;
           const y1 = point.y + Math.sin(startRad) * dist;
           const { sx: sx1, sy: sy1 } = worldToScreen(x1, y1);
 
-          // Last edge ray
+          // Last edge ray endpoint
           const x2 = point.x + Math.cos(endRad) * dist;
           const y2 = point.y + Math.sin(endRad) * dist;
           const { sx: sx2, sy: sy2 } = worldToScreen(x2, y2);
@@ -493,25 +594,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           // Radius in screen pixels
           const radiusPx = dist * viewState.scale;
 
-          // ── Arc angle conversion: world (Y-up) → canvas (Y-down) ──────────
-          // In world space angles increase CCW; canvas has Y flipped so angles
-          // increase CW.  A world angle θ maps to canvas angle −θ.
-          // The anticlockwise flag also flips: CCW in world (sweep > 0) →
-          // anticlockwise=true in canvas.
-          const firstWorldDeg = first.worldAngleDeg;
-          const lastWorldDeg  = last.worldAngleDeg;
+          // Angular sweep in world space (CCW: sweep = endRelDeg - startRelDeg > 0)
+          const sweep = spanDeg;
 
-          // Angular sweep of this sector in world space (signed, short arc)
-          let sweep = ((lastWorldDeg - firstWorldDeg) + 360) % 360;
-          if (sweep > 180) sweep = sweep - 360; // prefer short arc
-
-          // Canvas angles are the negation of world angles
           const startCanvasRad = -startRad;
-          const endCanvasRad   = -endRad;
-          // CCW in world (sweep > 0)  →  anticlockwise=true in canvas
-          const ccwInCanvas = sweep > 0;
+          const endCanvasRad   = -(startRad + (sweep * Math.PI) / 180);
+          const ccwInCanvas    = true; // CCW in world is anticlockwise=true in canvas (Y-down)
 
-          // Filled sector wedge
+          // 1. Filled sector wedge
           ctx.beginPath();
           ctx.moveTo(px, py);
           ctx.lineTo(sx1, sy1);
@@ -520,7 +610,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           ctx.fillStyle = fillColor;
           ctx.fill();
 
-          // Edge rays
+          // 2. Edge rays
           ctx.beginPath();
           ctx.moveTo(px, py);
           ctx.lineTo(sx1, sy1);
@@ -533,25 +623,51 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           ctx.lineTo(sx2, sy2);
           ctx.stroke();
 
-          // Connecting arc at radius
+          // 3. Connecting arc at radius
           ctx.beginPath();
           ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
           ctx.stroke();
 
-          // Small tick at reqDistance on free sectors to show required clearance reference
-          if (isFree) {
-            // Find median ray in sector to draw tick
-            const midRay = sector.rays[Math.floor(sector.rays.length / 2)];
-            const midRad = (midRay.worldAngleDeg * Math.PI) / 180;
-            const txW = point.x + Math.cos(midRad) * dist;
-            const tyW = point.y + Math.sin(midRad) * dist;
-            const { sx: tsx, sy: tsy } = worldToScreen(txW, tyW);
+          // 4. Sector Angle Label inside the sector (e.g. "58.0°" or "34.5°") + distance label
+          {
+            const midAngleWorldDeg = startWorldDeg + sweep / 2;
+            const midRad = (midAngleWorldDeg * Math.PI) / 180;
+
+            // Position label inside the sector at ~60% of reach distance
+            const labelDist = Math.max(2.5, dist * 0.65);
+            const lxW = point.x + Math.cos(midRad) * labelDist;
+            const lyW = point.y + Math.sin(midRad) * labelDist;
+            const { sx: lsx, sy: lsy } = worldToScreen(lxW, lyW);
+
             ctx.save();
-            ctx.fillStyle = 'rgba(52, 211, 153, 0.9)';
-            ctx.font = `bold ${Math.max(9, Math.min(12, viewState.scale * 0.3))}px monospace`;
+            ctx.font = `bold ${Math.max(10, Math.min(13, viewState.scale * 0.32))}px monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(`${dist.toFixed(0)}m`, tsx, tsy - 10);
+
+            const angleText = `${spanDeg.toFixed(1)}°`;
+            const textWidth = ctx.measureText(angleText).width;
+
+            // Badge pill
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(lsx - textWidth / 2 - 5, lsy - 9, textWidth + 10, 18, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = textColor;
+            ctx.fillText(angleText, lsx, lsy);
+
+            // Arc radius tick near arc boundary
+            if (isFree || dist >= 10) {
+              const txW = point.x + Math.cos(midRad) * dist;
+              const tyW = point.y + Math.sin(midRad) * dist;
+              const { sx: tsx, sy: tsy } = worldToScreen(txW, tyW);
+              ctx.fillStyle = strokeColor;
+              ctx.font = `bold ${Math.max(9, Math.min(11, viewState.scale * 0.28))}px monospace`;
+              ctx.fillText(`${dist.toFixed(0)}m`, tsx, tsy - 8);
+            }
             ctx.restore();
           }
         }
@@ -656,9 +772,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     const sy = e.clientY - rect.top;
     const world = screenToWorld(sx, sy);
 
-    // Check if clicked on an analysis point
+    // Check if clicked near an analysis point or facade segment
     let clickedPoint: AnalysisPointResult | null = null;
-    let minDist = 1.2;
+    let minDist = 1.0;
 
     for (const res of analysisResults) {
       const d = Math.hypot(res.point.x - world.wx, res.point.y - world.wy);
@@ -670,6 +786,60 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
     if (clickedPoint) {
       onSelectPointResult(clickedPoint);
+      return;
+    }
+
+    // Check if clicked near any building facade segment (project onto wall)
+    let closestSegHit: { bldgId: string; segId: string; ratio: number } | null = null;
+    let minSegDist = 0.8; // meters
+
+    for (const bldg of buildings) {
+      for (const seg of bldg.segments) {
+        const dx = seg.p2.x - seg.p1.x;
+        const dy = seg.p2.y - seg.p1.y;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq < 1e-4) continue;
+
+        const u = ((world.wx - seg.p1.x) * dx + (world.wy - seg.p1.y) * dy) / lenSq;
+        const clampedU = Math.max(0.02, Math.min(0.98, u));
+        const px = seg.p1.x + clampedU * dx;
+        const py = seg.p1.y + clampedU * dy;
+        const dist = Math.hypot(world.wx - px, world.wy - py);
+
+        if (dist < minSegDist) {
+          minSegDist = dist;
+          closestSegHit = { bldgId: bldg.id, segId: seg.id, ratio: clampedU };
+        }
+      }
+    }
+
+    if (closestSegHit) {
+      onSelectPointResult({
+        id: `pinned-${closestSegHit.bldgId}-${closestSegHit.segId}-${closestSegHit.ratio.toFixed(4)}`,
+        point: { x: 0, y: 0 },
+        normal: { x: 0, y: 0 },
+        buildingId: closestSegHit.bldgId,
+        segmentId: closestSegHit.segId,
+        shadowing: {
+          point: { x: 0, y: 0 },
+          segmentId: closestSegHit.segId,
+          offsetRatio: closestSegHit.ratio,
+          isCompliant: false,
+          maxContinuousFreeSpanDeg: 0,
+          totalFreeSpanDeg: 0,
+          sectors: [],
+          rays: [],
+        },
+        sunlight: {
+          point: { x: 0, y: 0 },
+          segmentId: closestSegHit.segId,
+          offsetRatio: closestSegHit.ratio,
+          totalHours: 0,
+          totalMinutes: 0,
+          isCompliant: false,
+          timeSlots: [],
+        },
+      });
       return;
     }
 

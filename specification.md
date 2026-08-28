@@ -67,8 +67,7 @@ $$D_{base} = \begin{cases} \Delta H & \text{dla } \Delta H \le 35\text{ m} \\ 35
 
 
 3. **Filtry wyjątków geometrycznych:**
-* Elementy drugorzędne (§ 12 ust. 6): obiekty wysunięte $\le 1.8\text{ m}$ z tej samej ściany są ignorowane.
-* Obiekty smukłe (§ 12 ust. 4): szerokość rzutu równoległego do ściany $\le 3\text{ m}$ przy odległości $\ge 10\text{ m}$ nie stanowi przesłonięcia.
+* Zgodnie z wytycznymi projektu, **nie uwzględniamy wyjątków z § 12 ust. 4** (obiekty smukłe) oraz **§ 12 ust. 6** (elementy drugorzędne $\le 1.8\text{ m}$). Wszystkie ściany i obiekty są traktowane wprost jako potencjalne przeszkody przesłaniania.
 
 
 4. **Weryfikacja warunku kątowego (Ray Marching 2D):**

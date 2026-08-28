@@ -68,14 +68,14 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
             <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#f8fafc', marginTop: '2px' }}>
               {shadowing.maxContinuousFreeSpanDeg.toFixed(1)}°
             </div>
-            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 60°</div>
+            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 60.0°</div>
           </div>
           <div style={{ backgroundColor: '#0f172a', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-            <div style={{ color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', fontWeight: 600 }}>Suma kątów wolnych</div>
+            <div style={{ color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', fontWeight: 600 }}>Kąt w oknie (przeszkoda ≤15°)</div>
             <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#f8fafc', marginTop: '2px' }}>
               {shadowing.totalFreeSpanDeg.toFixed(1)}°
             </div>
-            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 75°</div>
+            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 60° w oknie ≥75°</div>
           </div>
         </div>
       </div>
