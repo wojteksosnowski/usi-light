@@ -84,21 +84,26 @@ describe('Variable Accuracy & Multi-stage Refinement', () => {
     };
 
     // Live mode (1.5m spatial step, 15 min solar step)
-    const liveResults = runFullAnalysis(buildings, settings, {
+    const liveOutput = runFullAnalysis(buildings, settings, {
       samplingInterval: 1.5,
       angleStepDeg: 2.0,
       sunlightStepMinutes: 15,
     });
 
     // Final target mode (0.25m spatial step, 5 min solar step)
-    const finalResults = runFullAnalysis(buildings, settings, {
+    const finalOutput = runFullAnalysis(buildings, settings, {
       samplingInterval: 0.25,
       angleStepDeg: 0.5,
       sunlightStepMinutes: 5,
     });
 
+    const liveResults = liveOutput.results;
+    const finalResults = finalOutput.results;
+
     expect(liveResults.length).toBeGreaterThan(0);
     expect(finalResults.length).toBeGreaterThan(liveResults.length * 3); // 0.25m has >4x denser sampling than 1.5m
+    expect(finalOutput.avgShadowingMs).toBeGreaterThanOrEqual(0);
+    expect(finalOutput.avgSunlightMs).toBeGreaterThanOrEqual(0);
 
     // Verify sunlight time resolution steps
     expect(liveResults[0].sunlight.timeSlots.length).toBeLessThan(finalResults[0].sunlight.timeSlots.length);

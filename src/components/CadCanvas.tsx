@@ -11,6 +11,7 @@ interface CadCanvasProps {
   onBuildingMove: (id: string, dx: number, dy: number) => void;
   analysisResults: AnalysisPointResult[];
   selectedPointResult: AnalysisPointResult | null;
+  activePointMode?: 'shadowing' | 'sunlight';
   onSelectPointResult: (res: AnalysisPointResult | null) => void;
   showNormals: boolean;
   showShadowingLines: boolean;
@@ -26,6 +27,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   onBuildingMove,
   analysisResults,
   selectedPointResult,
+  activePointMode = 'shadowing',
   onSelectPointResult,
   showNormals,
   showShadowingLines,
@@ -506,172 +508,327 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 5. Render Ray Casting Fan for Selected Point — sector arc visualization
+    // 5. Render Ray Casting Fan or Twarowski's Linijka Słońca for Selected Point
     if (selectedPointResult) {
-      const { point, shadowing } = selectedPointResult;
+      const { point, shadowing, sunlight } = selectedPointResult;
       const { sx: px, sy: py } = worldToScreen(point.x, point.y);
-      const rays = shadowing.rays;
 
-      const sectors = shadowing.sectors;
+      if (activePointMode === 'sunlight') {
+        // ───────────────────────────────────────────────────────────────────
+        // LINIJKA SŁOŃCA (Mieczysław Twarowski) VISUALIZATION
+        // ───────────────────────────────────────────────────────────────────
+        // 1. Top vertex of triangle is at the tested point P.
+        // 2. Base is parallel to East-West axis (horizontal line Y_base < point.y, i.e. to the South).
+        // 3. Triangle height = shadow length of obstacle of height H (default building height or 15m).
+        const bldgOfPoint = buildings.find((b) => b.id === selectedPointResult.buildingId);
+        const heightH = Math.max(5, bldgOfPoint?.defaultHeight ?? 15);
 
-      if (sectors && sectors.length > 0) {
-        const normalWorldDeg = (Math.atan2(selectedPointResult.normal.y, selectedPointResult.normal.x) * 180) / Math.PI;
-
-        // Calculate precise continuous boundary angles for each sector
-        const sectorBoundariesDeg: { startWorldDeg: number; endWorldDeg: number; spanDeg: number }[] = [];
-
-        for (let i = 0; i < sectors.length; i++) {
-          const s = sectors[i];
-          const startRelDeg = s.startAngleDeg;
-          const endRelDeg = s.endAngleDeg;
-          const spanDeg = s.spanDeg;
-
-          const startWorldDeg = ((normalWorldDeg + startRelDeg) % 360 + 360) % 360;
-          const endWorldDeg = ((normalWorldDeg + endRelDeg) % 360 + 360) % 360;
-
-          sectorBoundariesDeg.push({ startWorldDeg, endWorldDeg, spanDeg });
+        // Find max solar noon elevation or use typical ~38° on equinox in Poland
+        const slots = sunlight.timeSlots;
+        let noonElevationDeg = 38.0;
+        for (const s of slots) {
+          if (s.elevationDeg > noonElevationDeg) noonElevationDeg = s.elevationDeg;
         }
+        const noonElevRad = (noonElevationDeg * Math.PI) / 180;
+        const shadowLengthH = heightH / Math.tan(noonElevRad); // Distance from point P to southern base line (meters)
 
-        ctx.save();
-        for (let sIdx = 0; sIdx < sectors.length; sIdx++) {
-          const sector = sectors[sIdx];
-          const isFree = sector.isFree;
-          const isTolerated = (sector as any).isTolerated === true;
-          const { startWorldDeg, endWorldDeg, spanDeg } = sectorBoundariesDeg[sIdx];
+        const yBaseWorld = point.y - shadowLengthH;
+        const { sy: syBase } = worldToScreen(point.x, yBaseWorld);
 
-          // Compute reach distance for this sector:
-          const bldgOfPoint = buildings.find((b) => b.id === selectedPointResult.buildingId);
-          const isCityCentre = bldgOfPoint?.isCityCentre ?? false;
-          const maxAllowedReq = isCityCentre ? 17.5 : 35.0;
+        // Calculate intersection of each solar ray with the horizontal baseline Y = yBaseWorld
+        // Ray from P in direction of sun: X_base = point.x + shadowLengthH * tan(azimuth - 180°)
+        // Only include and draw slots where angle of incidence to the wall is >= 12 deg (i.e. <= 78 deg from facade normal)
+        const validSlots = slots.filter((s) => s.isSunAboveHorizon && s.elevationDeg > 0.5 && s.isAngleAbove12Deg);
 
-          // Find required distance of bounding obstacles
-          let dist: number;
-          if (isFree) {
-            const prevSector = sIdx > 0 ? sectors[sIdx - 1] : null;
-            const nextSector = sIdx < sectors.length - 1 ? sectors[sIdx + 1] : null;
+        if (validSlots.length >= 2) {
+          ctx.save();
 
-            const prevReq = prevSector ? (prevSector.requiredDistance ?? 0) : 0;
-            const nextReq = nextSector ? (nextSector.requiredDistance ?? 0) : 0;
-            const boundingReq = Math.max(sector.requiredDistance ?? 0, prevReq, nextReq);
+          // Calculate base endpoints for each time slot
+          const slotCoords: {
+            time: string;
+            isDirect: boolean;
+            isBlocked: boolean;
+            wx: number;
+            wy: number;
+            sx: number;
+            sy: number;
+          }[] = [];
 
-            dist = boundingReq > 0
-              ? Math.min(boundingReq, maxAllowedReq)
-              : maxAllowedReq;
-          } else {
-            const req = sector.requiredDistance ?? 0;
-            dist = Math.min(req > 0 ? req : maxAllowedReq, maxAllowedReq);
+          for (const s of validSlots) {
+            const azMathRad = ((90 - s.azimuthDeg + 360) % 360) * (Math.PI / 180);
+            const dirX = Math.cos(azMathRad);
+            const dirY = Math.sin(azMathRad);
+
+            // In world space, sun direction is towards South when dirY < 0.
+            // Baseline is at Y = point.y - shadowLengthH (deltaY = -shadowLengthH).
+            if (Math.abs(dirY) > 1e-4 && dirY < 0) {
+              const t = -shadowLengthH / dirY;
+              const wx = point.x + dirX * t;
+              const wy = yBaseWorld;
+              const { sx, sy } = worldToScreen(wx, wy);
+
+              slotCoords.push({
+                time: s.time,
+                isDirect: s.isDirectSunlight,
+                isBlocked: !s.isDirectSunlight,
+                wx,
+                wy,
+                sx,
+                sy,
+              });
+            }
           }
 
-          // Color classification: Green (Free) | Yellow (Tolerated <=15° in >=75° window) | Red (Blocked)
-          let strokeColor = 'rgba(244, 63, 94, 0.85)';
-          let fillColor   = 'rgba(244, 63, 94, 0.12)';
-          let textColor   = '#f87171';
+          // Render triangular sectors between consecutive time slots
+          for (let i = 0; i < slotCoords.length - 1; i++) {
+            const c1 = slotCoords[i];
+            const c2 = slotCoords[i + 1];
 
-          if (isFree) {
-            strokeColor = 'rgba(52, 211, 153, 0.85)';
-            fillColor   = 'rgba(52, 211, 153, 0.12)';
-            textColor   = '#34d399';
-          } else if (isTolerated) {
-            strokeColor = 'rgba(234, 179, 8, 0.9)'; // Yellow
-            fillColor   = 'rgba(234, 179, 8, 0.18)';
-            textColor   = '#facc15';
-          }
+            const isDirect = c1.isDirect || c2.isDirect;
+            const isBlocked = c1.isBlocked || c2.isBlocked;
 
-          const lineWidth = 1.5;
-          const startRad = (startWorldDeg * Math.PI) / 180;
-          const endRad   = (endWorldDeg * Math.PI) / 180;
-
-          // First edge ray endpoint
-          const x1 = point.x + Math.cos(startRad) * dist;
-          const y1 = point.y + Math.sin(startRad) * dist;
-          const { sx: sx1, sy: sy1 } = worldToScreen(x1, y1);
-
-          // Last edge ray endpoint
-          const x2 = point.x + Math.cos(endRad) * dist;
-          const y2 = point.y + Math.sin(endRad) * dist;
-          const { sx: sx2, sy: sy2 } = worldToScreen(x2, y2);
-
-          // Radius in screen pixels
-          const radiusPx = dist * viewState.scale;
-
-          // Angular sweep in world space (CCW: sweep = endRelDeg - startRelDeg > 0)
-          const sweep = spanDeg;
-
-          const startCanvasRad = -startRad;
-          const endCanvasRad   = -(startRad + (sweep * Math.PI) / 180);
-          const ccwInCanvas    = true; // CCW in world is anticlockwise=true in canvas (Y-down)
-
-          // 1. Filled sector wedge
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(sx1, sy1);
-          ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
-          ctx.closePath();
-          ctx.fillStyle = fillColor;
-          ctx.fill();
-
-          // 2. Edge rays
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(sx1, sy1);
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = lineWidth;
-          ctx.stroke();
-
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(sx2, sy2);
-          ctx.stroke();
-
-          // 3. Connecting arc at radius
-          ctx.beginPath();
-          ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
-          ctx.stroke();
-
-          // 4. Sector Angle Label inside the sector (e.g. "58.0°" or "34.5°") + distance label
-          {
-            const midAngleWorldDeg = startWorldDeg + sweep / 2;
-            const midRad = (midAngleWorldDeg * Math.PI) / 180;
-
-            // Position label inside the sector at ~60% of reach distance
-            const labelDist = Math.max(2.5, dist * 0.65);
-            const lxW = point.x + Math.cos(midRad) * labelDist;
-            const lyW = point.y + Math.sin(midRad) * labelDist;
-            const { sx: lsx, sy: lsy } = worldToScreen(lxW, lyW);
-
-            ctx.save();
-            ctx.font = `bold ${Math.max(10, Math.min(13, viewState.scale * 0.32))}px monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            const angleText = `${spanDeg.toFixed(1)}°`;
-            const textWidth = ctx.measureText(angleText).width;
-
-            // Badge pill
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.roundRect(lsx - textWidth / 2 - 5, lsy - 9, textWidth + 10, 18, 4);
+            ctx.moveTo(px, py);
+            ctx.lineTo(c1.sx, c1.sy);
+            ctx.lineTo(c2.sx, c2.sy);
+            ctx.closePath();
+
+            if (isDirect) {
+              ctx.fillStyle = 'rgba(245, 158, 11, 0.28)';
+              ctx.fill();
+              ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)';
+            } else if (isBlocked) {
+              ctx.fillStyle = 'rgba(100, 116, 139, 0.2)';
+              ctx.fill();
+              ctx.strokeStyle = 'rgba(100, 116, 139, 0.4)';
+            } else {
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.15)';
+              ctx.fill();
+              ctx.strokeStyle = 'rgba(51, 65, 85, 0.3)';
+            }
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+
+          // Draw baseline of Twarowski's triangle (East-West line on the South)
+          if (slotCoords.length >= 2) {
+            const first = slotCoords[0];
+            const last = slotCoords[slotCoords.length - 1];
+
+            ctx.beginPath();
+            ctx.moveTo(first.sx, first.sy);
+            ctx.lineTo(last.sx, last.sy);
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Draw hour ticks and labels on the base line
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+
+            // Mark every full hour
+            for (const c of slotCoords) {
+              if (c.time.endsWith(':00')) {
+                // Tick
+                ctx.beginPath();
+                ctx.moveTo(c.sx, c.sy - 3);
+                ctx.lineTo(c.sx, c.sy + 5);
+                ctx.strokeStyle = c.isDirect ? '#fbbf24' : '#94a3b8';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Hour Text
+                ctx.fillStyle = c.isDirect ? '#fcd34d' : '#94a3b8';
+                ctx.fillText(c.time, c.sx, c.sy + 7);
+              }
+            }
+
+            // Top title badge on top of triangle
+            const badgeY = py - 20;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 1;
+            const titleText = `Linijka Słońca (H=${heightH.toFixed(0)}m, Czas: ${sunlight.totalHours.toFixed(2)}h)`;
+            const tw = ctx.measureText(titleText).width;
+            ctx.beginPath();
+            ctx.roundRect(px - tw / 2 - 8, badgeY - 8, tw + 16, 20, 6);
             ctx.fill();
             ctx.stroke();
 
-            ctx.fillStyle = textColor;
-            ctx.fillText(angleText, lsx, lsy);
-
-            // Arc radius tick near arc boundary
-            if (isFree || dist >= 10) {
-              const txW = point.x + Math.cos(midRad) * dist;
-              const tyW = point.y + Math.sin(midRad) * dist;
-              const { sx: tsx, sy: tsy } = worldToScreen(txW, tyW);
-              ctx.fillStyle = strokeColor;
-              ctx.font = `bold ${Math.max(9, Math.min(11, viewState.scale * 0.28))}px monospace`;
-              ctx.fillText(`${dist.toFixed(0)}m`, tsx, tsy - 8);
-            }
-            ctx.restore();
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(titleText, px, badgeY + 2);
           }
+
+          ctx.restore();
         }
-        ctx.restore();
+      } else {
+        // ───────────────────────────────────────────────────────────────────
+        // § 12 PRZESŁANIANIE (SHADOWING SECTORS) VISUALIZATION
+        // ───────────────────────────────────────────────────────────────────
+        const sectors = shadowing.sectors;
+
+        if (sectors && sectors.length > 0) {
+          const normalWorldDeg = (Math.atan2(selectedPointResult.normal.y, selectedPointResult.normal.x) * 180) / Math.PI;
+
+          // Calculate precise continuous boundary angles for each sector
+          const sectorBoundariesDeg: { startWorldDeg: number; endWorldDeg: number; spanDeg: number }[] = [];
+
+          for (let i = 0; i < sectors.length; i++) {
+            const s = sectors[i];
+            const startRelDeg = s.startAngleDeg;
+            const endRelDeg = s.endAngleDeg;
+            const spanDeg = s.spanDeg;
+
+            const startWorldDeg = ((normalWorldDeg + startRelDeg) % 360 + 360) % 360;
+            const endWorldDeg = ((normalWorldDeg + endRelDeg) % 360 + 360) % 360;
+
+            sectorBoundariesDeg.push({ startWorldDeg, endWorldDeg, spanDeg });
+          }
+
+          ctx.save();
+          for (let sIdx = 0; sIdx < sectors.length; sIdx++) {
+            const sector = sectors[sIdx];
+            const isFree = sector.isFree;
+            const isTolerated = (sector as any).isTolerated === true;
+            const { startWorldDeg, endWorldDeg, spanDeg } = sectorBoundariesDeg[sIdx];
+
+            // Compute reach distance for this sector:
+            const bldgOfPoint = buildings.find((b) => b.id === selectedPointResult.buildingId);
+            const isCityCentre = bldgOfPoint?.isCityCentre ?? false;
+            const maxAllowedReq = isCityCentre ? 17.5 : 35.0;
+
+            // Find required distance of bounding obstacles
+            let dist: number;
+            if (isFree) {
+              const prevSector = sIdx > 0 ? sectors[sIdx - 1] : null;
+              const nextSector = sIdx < sectors.length - 1 ? sectors[sIdx + 1] : null;
+
+              const prevReq = prevSector ? (prevSector.requiredDistance ?? 0) : 0;
+              const nextReq = nextSector ? (nextSector.requiredDistance ?? 0) : 0;
+              const boundingReq = Math.max(sector.requiredDistance ?? 0, prevReq, nextReq);
+
+              dist = boundingReq > 0
+                ? Math.min(boundingReq, maxAllowedReq)
+                : maxAllowedReq;
+            } else {
+              const req = sector.requiredDistance ?? 0;
+              dist = Math.min(req > 0 ? req : maxAllowedReq, maxAllowedReq);
+            }
+
+            // Color classification: Green (Free) | Yellow (Tolerated <=15° in >=75° window) | Red (Blocked)
+            let strokeColor = 'rgba(244, 63, 94, 0.85)';
+            let fillColor   = 'rgba(244, 63, 94, 0.12)';
+            let textColor   = '#f87171';
+
+            if (isFree) {
+              strokeColor = 'rgba(52, 211, 153, 0.85)';
+              fillColor   = 'rgba(52, 211, 153, 0.12)';
+              textColor   = '#34d399';
+            } else if (isTolerated) {
+              strokeColor = 'rgba(234, 179, 8, 0.9)'; // Yellow
+              fillColor   = 'rgba(234, 179, 8, 0.18)';
+              textColor   = '#facc15';
+            }
+
+            const lineWidth = 1.5;
+            const startRad = (startWorldDeg * Math.PI) / 180;
+            const endRad   = (endWorldDeg * Math.PI) / 180;
+
+            // First edge ray endpoint
+            const x1 = point.x + Math.cos(startRad) * dist;
+            const y1 = point.y + Math.sin(startRad) * dist;
+            const { sx: sx1, sy: sy1 } = worldToScreen(x1, y1);
+
+            // Last edge ray endpoint
+            const x2 = point.x + Math.cos(endRad) * dist;
+            const y2 = point.y + Math.sin(endRad) * dist;
+            const { sx: sx2, sy: sy2 } = worldToScreen(x2, y2);
+
+            // Radius in screen pixels
+            const radiusPx = dist * viewState.scale;
+
+            // Angular sweep in world space (CCW: sweep = endRelDeg - startRelDeg > 0)
+            const sweep = spanDeg;
+
+            const startCanvasRad = -startRad;
+            const endCanvasRad   = -(startRad + (sweep * Math.PI) / 180);
+            const ccwInCanvas    = true; // CCW in world is anticlockwise=true in canvas (Y-down)
+
+            // 1. Filled sector wedge
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(sx1, sy1);
+            ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
+            ctx.closePath();
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+
+            // 2. Edge rays
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(sx1, sy1);
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(sx2, sy2);
+            ctx.stroke();
+
+            // 3. Connecting arc at radius
+            ctx.beginPath();
+            ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
+            ctx.stroke();
+
+            // 4. Sector Angle Label inside the sector (e.g. "58.0°" or "34.5°") + distance label
+            {
+              const midAngleWorldDeg = startWorldDeg + sweep / 2;
+              const midRad = (midAngleWorldDeg * Math.PI) / 180;
+
+              // Position label inside the sector at ~60% of reach distance
+              const labelDist = Math.max(2.5, dist * 0.65);
+              const lxW = point.x + Math.cos(midRad) * labelDist;
+              const lyW = point.y + Math.sin(midRad) * labelDist;
+              const { sx: lsx, sy: lsy } = worldToScreen(lxW, lyW);
+
+              ctx.save();
+              ctx.font = `bold ${Math.max(10, Math.min(13, viewState.scale * 0.32))}px monospace`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+
+              const angleText = `${spanDeg.toFixed(1)}°`;
+              const textWidth = ctx.measureText(angleText).width;
+
+              // Badge pill
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+              ctx.strokeStyle = strokeColor;
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.roundRect(lsx - textWidth / 2 - 5, lsy - 9, textWidth + 10, 18, 4);
+              ctx.fill();
+              ctx.stroke();
+
+              ctx.fillStyle = textColor;
+              ctx.fillText(angleText, lsx, lsy);
+
+              // Arc radius tick near arc boundary
+              if (isFree || dist >= 10) {
+                const txW = point.x + Math.cos(midRad) * dist;
+                const tyW = point.y + Math.sin(midRad) * dist;
+                const { sx: tsx, sy: tsy } = worldToScreen(txW, tyW);
+                ctx.fillStyle = strokeColor;
+                ctx.font = `bold ${Math.max(9, Math.min(11, viewState.scale * 0.28))}px monospace`;
+                ctx.fillText(`${dist.toFixed(0)}m`, tsx, tsy - 8);
+              }
+              ctx.restore();
+            }
+          }
+          ctx.restore();
+        }
       }
     }
 

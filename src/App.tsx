@@ -31,6 +31,8 @@ import {
   Sliders,
   Activity,
   MapPin,
+  Timer,
+  Zap,
 } from 'lucide-react';
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
@@ -39,6 +41,7 @@ export const App: React.FC = () => {
   // State
   const [buildings, setBuildings] = useState<BuildingLoop[]>(createSampleBuildings());
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>('bldg-1');
+  const [activePointMode, setActivePointMode] = useState<'shadowing' | 'sunlight'>('shadowing');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [fitKey, setFitKey] = useState<number>(0);
 
@@ -121,9 +124,13 @@ export const App: React.FC = () => {
   }, [accuracyStage]);
 
   // Run Calculation with Variable Precision
-  const analysisResults = useMemo(() => {
+  const analysisOutput = useMemo(() => {
     return runFullAnalysis(buildings, settings, currentAccuracyOptions);
   }, [buildings, settings, currentAccuracyOptions]);
+
+  const analysisResults = analysisOutput.results;
+  const avgShadowingMs = analysisOutput.avgShadowingMs;
+  const avgSunlightMs = analysisOutput.avgSunlightMs;
 
   const [selectedPointKey, setSelectedPointKey] = useState<{
     buildingId: string;
@@ -928,6 +935,31 @@ export const App: React.FC = () => {
             </span>
           </div>
 
+          {/* Performance per point benchmark badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid #334155',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+            }}
+            title={`Średni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms`}
+          >
+            <Timer size={12} color="#94a3b8" />
+            <span style={{ color: '#34d399', fontWeight: 600 }}>
+              §12: {avgShadowingMs < 0.01 ? '<0.01' : avgShadowingMs.toFixed(2)}ms
+            </span>
+            <span style={{ color: '#475569' }}>|</span>
+            <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+              §56: {avgSunlightMs < 0.01 ? '<0.01' : avgSunlightMs.toFixed(2)}ms
+            </span>
+          </div>
+
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
           <button
@@ -986,6 +1018,7 @@ export const App: React.FC = () => {
             onBuildingMove={handleBuildingMove}
             analysisResults={analysisResults}
             selectedPointResult={selectedPointResult}
+            activePointMode={activePointMode}
             onSelectPointResult={(res) => {
               if (!res) {
                 setSelectedPointKey(null);
@@ -1008,6 +1041,8 @@ export const App: React.FC = () => {
         {/* Floating Point Inspector Modal */}
         <PointInspectorModal
           pointResult={selectedPointResult}
+          activeMode={activePointMode}
+          onModeChange={setActivePointMode}
           onClose={() => setSelectedPointKey(null)}
         />
       </main>

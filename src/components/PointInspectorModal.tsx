@@ -4,11 +4,15 @@ import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
 
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
+  activeMode?: 'shadowing' | 'sunlight';
+  onModeChange?: (mode: 'shadowing' | 'sunlight') => void;
   onClose: () => void;
 }
 
 export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
   pointResult,
+  activeMode = 'shadowing',
+  onModeChange,
   onClose,
 }) => {
   if (!pointResult) return null;
@@ -40,12 +44,27 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
         </button>
       </div>
 
-      {/* § 12 Przesłanianie Box */}
-      <div style={{ backgroundColor: 'rgba(2, 6, 23, 0.7)', borderRadius: '12px', padding: '12px', border: '1px solid #1e293b', marginBottom: '12px' }}>
+      {/* § 12 Przesłanianie Box (Clickable to activate shadowing visualization) */}
+      <div
+        onClick={() => onModeChange?.('shadowing')}
+        style={{
+          backgroundColor: activeMode === 'shadowing' ? 'rgba(30, 41, 59, 0.9)' : 'rgba(2, 6, 23, 0.7)',
+          borderRadius: '12px',
+          padding: '12px',
+          border: activeMode === 'shadowing' ? '2px solid #34d399' : '1px solid #1e293b',
+          marginBottom: '12px',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          boxShadow: activeMode === 'shadowing' ? '0 0 16px rgba(52, 211, 153, 0.2)' : 'none',
+        }}
+        title="Kliknij, aby włączyć wizualizację przesłaniania § 12"
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {isCompliant12 ? <ShieldCheck size={16} color="#34d399" /> : <ShieldAlert size={16} color="#fb7185" />}
-            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#e2e8f0' }}>§ 12 Przesłanianie</span>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: activeMode === 'shadowing' ? '#34d399' : '#e2e8f0' }}>
+              § 12 Przesłanianie {activeMode === 'shadowing' ? '• WIDOK CAD' : ''}
+            </span>
           </div>
           <span
             style={{
@@ -80,12 +99,26 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
         </div>
       </div>
 
-      {/* § 56 Nasłonecznienie Box */}
-      <div style={{ backgroundColor: 'rgba(2, 6, 23, 0.7)', borderRadius: '12px', padding: '12px', border: '1px solid #1e293b' }}>
+      {/* § 56 Nasłonecznienie Box (Clickable to activate Linijka Słońca Twarowskiego) */}
+      <div
+        onClick={() => onModeChange?.('sunlight')}
+        style={{
+          backgroundColor: activeMode === 'sunlight' ? 'rgba(30, 41, 59, 0.9)' : 'rgba(2, 6, 23, 0.7)',
+          borderRadius: '12px',
+          padding: '12px',
+          border: activeMode === 'sunlight' ? '2px solid #f59e0b' : '1px solid #1e293b',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          boxShadow: activeMode === 'sunlight' ? '0 0 16px rgba(245, 158, 11, 0.2)' : 'none',
+        }}
+        title="Kliknij, aby włączyć wizualizację nasłonecznienia (Linijka Słońca Twarowskiego)"
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Sun size={16} color="#fbbf24" />
-            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#e2e8f0' }}>§ 56 Nasłonecznienie (21 III)</span>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: activeMode === 'sunlight' ? '#fbbf24' : '#e2e8f0' }}>
+              § 56 Linijka Słońca {activeMode === 'sunlight' ? '• WIDOK CAD' : ''}
+            </span>
           </div>
           <span
             style={{

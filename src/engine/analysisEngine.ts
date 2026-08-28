@@ -490,21 +490,20 @@ export function analyzeSunlightAtPoint(
     computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
 
   // 1. Orientation culling check:
-  // Can this facade orientation EVER receive direct sunlight in the analysis window (noon +- 5h)?
-  let canReceiveSunlight = false;
+  // Find which slots actually strike this facade at an angle >= 12 deg (relative to wall plane, <= 78 deg from normal)
+  const activeSlots: { slot: SolarTrajectorySlot; dot: number }[] = [];
   for (const slot of trajectory) {
-    if (slot.isSunAboveHorizon) {
+    if (slot.isSunAboveHorizon && slot.elevationDeg > 0) {
       const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
       if (dot >= COS_78_DEG) {
-        canReceiveSunlight = true;
-        break;
+        activeSlots.push({ slot, dot });
       }
     }
   }
 
-  // Fast-path: North-facing facades (or facades turned away from the entire solar arc)
-  // receive 0 minutes of sunlight — skip 100% of raycasts!
-  if (!canReceiveSunlight) {
+  // Fast-path: If no solar slots can hit this wall at >= 12 deg (e.g. North facades or shaded orientations),
+  // return immediately without running ANY ray-casts.
+  if (activeSlots.length === 0) {
     const emptySlots: SunlightTimeSlot[] = trajectory.map((slot) => ({
       time: slot.timeStr,
       azimuthDeg: slot.azimuthDeg,
@@ -525,85 +524,105 @@ export function analyzeSunlightAtPoint(
     };
   }
 
-  // 2. Perform raycast analysis only for active solar trajectory slots
-  const timeSlots: SunlightTimeSlot[] = [];
+  // Pre-filter obstacle segments: only keep segments that are in front of this wall plane
+  // (at least one vertex has dot >= -0.01) and belong to included buildings
+  interface ObstacleCandidate {
+    seg: FacadeSegment;
+    bldgId: string;
+  }
+  const obstacleCandidates: ObstacleCandidate[] = [];
+  for (const bldg of allBuildings) {
+    if (bldg.isIncluded === false) continue;
+    for (const seg of bldg.segments) {
+      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+
+      const v1x = seg.p1.x - point.x;
+      const v1y = seg.p1.y - point.y;
+      const v2x = seg.p2.x - point.x;
+      const v2y = seg.p2.y - point.y;
+      const dot1 = v1x * normal.x + v1y * normal.y;
+      const dot2 = v2x * normal.x + v2y * normal.y;
+
+      // If both endpoints are strictly behind the facade plane, rays with dot >= COS_78_DEG cannot hit it
+      if (dot1 < -0.01 && dot2 < -0.01) continue;
+
+      obstacleCandidates.push({ seg, bldgId: bldg.id });
+    }
+  }
+
+  // 2. Perform raycast analysis ONLY for valid slots that meet the >= 12 deg criterion
+  const activeResultsMap = new Map<
+    string,
+    { isDirect: boolean; blockingId?: string; maxAngle: number }
+  >();
   let totalMinutesSunlight = 0;
 
-  for (const slot of trajectory) {
-    if (!slot.isSunAboveHorizon) {
-      timeSlots.push({
-        time: slot.timeStr,
-        azimuthDeg: slot.azimuthDeg,
-        elevationDeg: slot.elevationDeg,
-        isSunAboveHorizon: false,
-        isAngleAbove12Deg: false,
-        isDirectSunlight: false,
-      });
-      continue;
-    }
-
-    const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
-    // Angle on plan >= 12 deg from wall surface => <= 78 deg from normal (dot >= COS_78_DEG)
-    const isAngleAbove12Deg = dot >= COS_78_DEG;
-
-    if (!isAngleAbove12Deg) {
-      timeSlots.push({
-        time: slot.timeStr,
-        azimuthDeg: slot.azimuthDeg,
-        elevationDeg: slot.elevationDeg,
-        isSunAboveHorizon: true,
-        isAngleAbove12Deg: false,
-        isDirectSunlight: false,
-      });
-      continue;
-    }
-
-    // Raycast towards sun to find obstacles in 2.5D
+  for (const { slot } of activeSlots) {
+    const sunDir = slot.sunDir;
     let isBlocked = false;
     let blockingObstacleId: string | undefined = undefined;
     let maxObstacleAngleDeg = 0;
 
-    for (const bldg of allBuildings) {
-      if (bldg.isIncluded === false) continue;
+    for (const cand of obstacleCandidates) {
+      const seg = cand.seg;
 
-      for (const seg of bldg.segments) {
-        if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+      // Quick backface check: skip obstacle segments whose outward normal points away from the ray
+      const dotNormal = sunDir.x * seg.normal.x + sunDir.y * seg.normal.y;
+      if (dotNormal >= -1e-4) continue;
 
-        const hit = raySegmentIntersection(point, slot.sunDir, seg.p1, seg.p2);
-        if (hit.hit && hit.distance > 0.05) {
-          const deltaH = Math.max(0, seg.hTop);
-          const betaDeg = Math.atan2(deltaH, hit.distance) * RAD2DEG;
+      const hit = raySegmentIntersection(point, sunDir, seg.p1, seg.p2);
+      if (hit.hit && hit.distance > 0.05) {
+        const deltaH = Math.max(0, seg.hTop);
+        const betaDeg = Math.atan2(deltaH, hit.distance) * RAD2DEG;
 
-          if (betaDeg > maxObstacleAngleDeg) {
-            maxObstacleAngleDeg = betaDeg;
-          }
+        if (betaDeg > maxObstacleAngleDeg) {
+          maxObstacleAngleDeg = betaDeg;
+        }
 
-          if (slot.elevationDeg <= betaDeg) {
-            isBlocked = true;
-            blockingObstacleId = bldg.id;
-            break;
-          }
+        if (slot.elevationDeg <= betaDeg) {
+          isBlocked = true;
+          blockingObstacleId = cand.bldgId;
+          break;
         }
       }
-      if (isBlocked) break;
     }
 
-    const isDirectSunlight = !isBlocked;
-    if (isDirectSunlight) {
+    const isDirect = !isBlocked;
+    if (isDirect) {
       totalMinutesSunlight += stepMinutes;
     }
 
-    timeSlots.push({
+    activeResultsMap.set(slot.timeStr, {
+      isDirect,
+      blockingId: blockingObstacleId,
+      maxAngle: maxObstacleAngleDeg,
+    });
+  }
+
+  // Build complete timeSlots for inspection
+  const timeSlots: SunlightTimeSlot[] = trajectory.map((slot) => {
+    const activeRes = activeResultsMap.get(slot.timeStr);
+    if (activeRes) {
+      return {
+        time: slot.timeStr,
+        azimuthDeg: slot.azimuthDeg,
+        elevationDeg: slot.elevationDeg,
+        isSunAboveHorizon: true,
+        isAngleAbove12Deg: true,
+        isDirectSunlight: activeRes.isDirect,
+        blockingObstacleId: activeRes.blockingId,
+        blockingAngleDeg: activeRes.maxAngle,
+      };
+    }
+    return {
       time: slot.timeStr,
       azimuthDeg: slot.azimuthDeg,
       elevationDeg: slot.elevationDeg,
-      isSunAboveHorizon: true,
-      isAngleAbove12Deg: true,
-      isDirectSunlight,
-      blockingObstacleId,
-      blockingAngleDeg: maxObstacleAngleDeg,
-    });
-  }
+      isSunAboveHorizon: slot.isSunAboveHorizon,
+      isAngleAbove12Deg: false,
+      isDirectSunlight: false,
+    };
+  });
 
   const totalHours = totalMinutesSunlight / 60;
   // Requirement: >= 3.0h (or 1.5h in city centre)
@@ -627,6 +646,13 @@ export interface AnalysisAccuracyOptions {
   sunlightStepMinutes?: number; // Solar timeline resolution (e.g. 15 min live -> 5 min final)
 }
 
+export interface AnalysisBatchOutput {
+  results: AnalysisPointResult[];
+  avgShadowingMs: number;
+  avgSunlightMs: number;
+  totalPoints: number;
+}
+
 /**
  * Runs full batch analysis on all facade segments of tested building(s).
  */
@@ -634,7 +660,7 @@ export function runFullAnalysis(
   buildings: BuildingLoop[],
   settings: ProjectSettings,
   options?: AnalysisAccuracyOptions
-): AnalysisPointResult[] {
+): AnalysisBatchOutput {
   const results: AnalysisPointResult[] = [];
 
   const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false);
@@ -646,12 +672,19 @@ export function runFullAnalysis(
   const standardTrajectory = computeDailySolarTrajectory(settings, sunlightStep, false);
   const childcareTrajectory = computeDailySolarTrajectory(settings, sunlightStep, true);
 
+  let totalShadowingTimeMs = 0;
+  let totalSunlightTimeMs = 0;
+  let pointCount = 0;
+
   for (const bldg of testedBuildings) {
     for (const seg of bldg.segments) {
       const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
       const trajectory = seg.buildingType === 'childcare' ? childcareTrajectory : standardTrajectory;
 
       sampled.forEach((sample, idx) => {
+        pointCount++;
+
+        const tShadow0 = performance.now();
         const shadowing = analyzeShadowingAtPoint(
           sample.point,
           seg,
@@ -660,7 +693,9 @@ export function runFullAnalysis(
           bldg.id,
           angleStep
         );
+        totalShadowingTimeMs += performance.now() - tShadow0;
 
+        const tSun0 = performance.now();
         const sunlight = analyzeSunlightAtPoint(
           sample.point,
           seg,
@@ -671,6 +706,7 @@ export function runFullAnalysis(
           sunlightStep,
           trajectory
         );
+        totalSunlightTimeMs += performance.now() - tSun0;
 
         results.push({
           id: `${bldg.id}-${seg.id}-p${idx}`,
@@ -685,5 +721,13 @@ export function runFullAnalysis(
     }
   }
 
-  return results;
+  const avgShadowingMs = pointCount > 0 ? totalShadowingTimeMs / pointCount : 0;
+  const avgSunlightMs = pointCount > 0 ? totalSunlightTimeMs / pointCount : 0;
+
+  return {
+    results,
+    avgShadowingMs,
+    avgSunlightMs,
+    totalPoints: pointCount,
+  };
 }
