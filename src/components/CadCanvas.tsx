@@ -344,13 +344,16 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       return '#fb923c'; // bright warm orange (4.0 h+)
     };
 
-    // Group analysis points by segment for smooth continuous band rendering
+    // Group analysis points by building+segment for smooth continuous band rendering.
+    // Key = "buildingId|segmentId" to guarantee isolation between buildings even if
+    // segment IDs were ever non-unique across buildings.
     const pointsBySegment = new Map<string, typeof analysisResults>();
     for (const res of analysisResults) {
-      if (!pointsBySegment.has(res.segmentId)) {
-        pointsBySegment.set(res.segmentId, []);
+      const key = `${res.buildingId}|${res.segmentId}`;
+      if (!pointsBySegment.has(key)) {
+        pointsBySegment.set(key, []);
       }
-      pointsBySegment.get(res.segmentId)!.push(res);
+      pointsBySegment.get(key)!.push(res);
     }
 
     const bandThickness = Math.max(3, Math.min(10, viewState.scale * 0.35)); // Screen pixels thickness
@@ -449,22 +452,23 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           const isFree = sector.isFree;
 
           // Compute reach distance for this sector:
-          // - Free sector: show actual hit distance (or reqDistance as reference) in green
-          // - Blocked sector: show reqDistance (= deltaH, how far it SHOULD be) in red
-          // Use the closest-obstacle req distance for blocked, or min hitDistance for free
+          // Rule: when a sector is bounded by obstacles of different heights,
+          // the arc radius = the TALLER obstacle's required distance (§ 12).
+          // - Free sector: use the max reqDistance of obstacles that are far enough
+          // - Blocked sector: use the max reqDistance (the violated clearance)
           let dist: number;
           if (isFree) {
-            // For free sector, show the reqDistance of the nearest obstacle that WAS far enough,
-            // or a fixed sensible distance if totally open sky (hitDistance = 999)
-            const minReqInSector = sector.rays.reduce((mn, r) =>
-              r.reqDistance > 0 ? Math.min(mn, r.reqDistance) : mn, 999
+            // For free sector: radius = max reqDistance of any obstacle visible from this sector
+            // (or a sensible default if totally open sky)
+            const maxReqInSector = sector.rays.reduce((mx, r) =>
+              r.reqDistance > 0 ? Math.max(mx, r.reqDistance) : mx, 0
             );
             dist = Math.min(
-              minReqInSector < 999 ? minReqInSector : 20.0,
+              maxReqInSector > 0 ? maxReqInSector : 20.0,
               35.0
             );
           } else {
-            // Blocked: length = reqDistance (the required clearance that is violated)
+            // Blocked: radius = max reqDistance (the tallest obstacle = tightest constraint)
             const maxReq = sector.rays.reduce((mx, r) => Math.max(mx, r.reqDistance), 0);
             dist = Math.min(maxReq > 0 ? maxReq : 15.0, 35.0);
           }
@@ -489,23 +493,29 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           // Radius in screen pixels
           const radiusPx = dist * viewState.scale;
 
-          // Normalise arc direction: canvas arcs need start < end for CCW
-          // worldAngleDeg may wrap; use angleDeg (relative to normal, -78..+78) for arc
-          const startWorldRad = startRad;
-          let   endWorldRad   = endRad;
-          // Determine true angular sweep direction (always CCW from first to last in world)
-          // We'll draw arc from min to max world angle of this sector
+          // ── Arc angle conversion: world (Y-up) → canvas (Y-down) ──────────
+          // In world space angles increase CCW; canvas has Y flipped so angles
+          // increase CW.  A world angle θ maps to canvas angle −θ.
+          // The anticlockwise flag also flips: CCW in world (sweep > 0) →
+          // anticlockwise=true in canvas.
           const firstWorldDeg = first.worldAngleDeg;
           const lastWorldDeg  = last.worldAngleDeg;
-          // Compute sweep (may cross 360)
+
+          // Angular sweep of this sector in world space (signed, short arc)
           let sweep = ((lastWorldDeg - firstWorldDeg) + 360) % 360;
           if (sweep > 180) sweep = sweep - 360; // prefer short arc
+
+          // Canvas angles are the negation of world angles
+          const startCanvasRad = -startRad;
+          const endCanvasRad   = -endRad;
+          // CCW in world (sweep > 0)  →  anticlockwise=true in canvas
+          const ccwInCanvas = sweep > 0;
 
           // Filled sector wedge
           ctx.beginPath();
           ctx.moveTo(px, py);
           ctx.lineTo(sx1, sy1);
-          ctx.arc(px, py, radiusPx, startWorldRad, startWorldRad + sweep * (Math.PI / 180), sweep < 0);
+          ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
           ctx.closePath();
           ctx.fillStyle = fillColor;
           ctx.fill();
@@ -525,7 +535,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
           // Connecting arc at radius
           ctx.beginPath();
-          ctx.arc(px, py, radiusPx, startWorldRad, startWorldRad + sweep * (Math.PI / 180), sweep < 0);
+          ctx.arc(px, py, radiusPx, startCanvasRad, endCanvasRad, ccwInCanvas);
           ctx.stroke();
 
           // Small tick at reqDistance on free sectors to show required clearance reference

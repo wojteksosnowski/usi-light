@@ -13,6 +13,7 @@ import {
 import {
   raySegmentIntersection,
   sampleSegmentPoints,
+  distancePointToSegment,
 } from '../utils/math2d';
 import { calculateSolarPosition } from '../utils/solar';
 
@@ -21,6 +22,24 @@ const RAD2DEG = 180 / Math.PI;
 
 /**
  * Evaluates § 12 shadowing for a single point P on a facade.
+ *
+ * Two-phase algorithm:
+ *
+ * Phase 1 — Pre-filter obstacle segments (dramatically reduces candidate count):
+ *   A. Skip segments whose INTERIOR side faces the test point — rays from
+ *      outside always hit the exterior of a closed building first.
+ *   B. Skip segments where BOTH endpoints project behind the tested facade
+ *      plane — no ray in the ±78° forward arc can reach them.
+ *   C. Skip segments whose minimum distance to the test point is ≥ dReq —
+ *      the entire segment is outside the required-clearance circle.
+ *      distancePointToSegment handles long segments correctly: even if both
+ *      endpoints are far, the perpendicular foot on a long segment can be
+ *      within range.
+ *   D. Skip self-building segments within 1.8 m (§ 12 ust. 6).
+ *   Then use circle–segment intersection to clip each candidate to the
+ *   portion actually within the dReq radius.
+ *
+ * Phase 2 — Cast rays only against the small candidate list.
  */
 export function analyzeShadowingAtPoint(
   point: Point2D,
@@ -33,11 +52,113 @@ export function analyzeShadowingAtPoint(
   const normal = segment.normal;
   const normalAngleRad = Math.atan2(normal.y, normal.x);
 
-  const rays: ShadowingResult['rays'] = [];
-  const minAngleDeg = -78; // 12 deg cutoff from wall plane on left
-  const maxAngleDeg = 78; // 12 deg cutoff from wall plane on right
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHASE 1 – Build pre-filtered candidate list
+  // ─────────────────────────────────────────────────────────────────────────
 
-  for (let aDeg = minAngleDeg; aDeg <= maxAngleDeg; aDeg += angleStepDeg) {
+  interface Candidate {
+    seg: FacadeSegment;
+    bldgId: string;
+    dReq: number;
+    /** Clipped endpoints — the portion of the segment inside the dReq circle. */
+    clipP1: Point2D;
+    clipP2: Point2D;
+  }
+
+  const candidates: Candidate[] = [];
+
+  for (const bldg of allBuildings) {
+    if (bldg.isIncluded === false) continue;
+
+    for (const seg of bldg.segments) {
+      // Self-segment skip
+      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+
+      // ── Filter A: test point must be on the EXTERIOR side of the obstacle. ──
+      // dot(testPoint − seg.p1, seg.outwardNormal) > 0.
+      // If negative, any ray from the test point hits the interior face of the
+      // obstacle, which is always shielded by the building's own exterior walls.
+      const dotExt =
+        (point.x - seg.p1.x) * seg.normal.x +
+        (point.y - seg.p1.y) * seg.normal.y;
+      if (dotExt <= 0) continue;
+
+      // ── Filter B: both obstacle endpoints behind the tested facade plane. ──
+      // Rays in the ±78° arc travel into the outward half-plane of the tested
+      // facade. If both obstacle endpoints project negatively onto the tested
+      // facade normal, no forward ray can reach either of them.
+      const dp1 = (seg.p1.x - point.x) * normal.x + (seg.p1.y - point.y) * normal.y;
+      const dp2 = (seg.p2.x - point.x) * normal.x + (seg.p2.y - point.y) * normal.y;
+      if (dp1 < 0 && dp2 < 0) continue;
+
+      // ── Required clearance for this obstacle ──
+      const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
+      const dBase  = Math.min(deltaH, 35.0);
+      const dReq   = segment.isCityCentre || bldg.isCityCentre
+        ? 0.5 * dBase
+        : dBase;
+      if (dReq <= 0) continue;
+
+      // ── Filter C: minimum distance from test point to segment < dReq. ──
+      // distancePointToSegment returns the distance to the closest point on
+      // the finite segment (not its infinite extension), so it correctly
+      // handles long segments: if both endpoints are beyond dReq but the
+      // perpendicular foot is within the segment bounds and closer than dReq,
+      // the segment is kept as a candidate.
+      const closestDist = distancePointToSegment(point, seg.p1, seg.p2);
+      if (closestDist >= dReq) continue;
+
+      // ── Filter D: self-building 1.8 m rule (§ 12 ust. 6) ──
+      if (bldg.id === targetBuildingId && closestDist <= 1.8) continue;
+
+      // ── Circle–segment intersection ──────────────────────────────────────
+      // Clip the segment to the circle of radius dReq centred at `point`.
+      // Only the clipped portion can produce a blocked ray.
+      //
+      // Parametric segment: P(t) = p1 + t·(p2−p1),  t ∈ [0, 1]
+      // Circle equation:    |P(t) − point|² = dReq²
+      // Expanding:          segLen2·t² + B·t + C = 0
+      const dx     = seg.p2.x - seg.p1.x;
+      const dy     = seg.p2.y - seg.p1.y;
+      const segLen2 = dx * dx + dy * dy;
+      if (segLen2 < 1e-9) continue; // degenerate zero-length segment
+
+      const ox    = seg.p1.x - point.x;
+      const oy    = seg.p1.y - point.y;
+      const B_c   = 2 * (ox * dx + oy * dy);
+      const C_c   = ox * ox + oy * oy - dReq * dReq;
+      const disc  = B_c * B_c - 4 * segLen2 * C_c;
+
+      let tStart = 0;
+      let tEnd   = 1;
+
+      if (disc >= 0) {
+        const sq = Math.sqrt(disc);
+        const t1 = (-B_c - sq) / (2 * segLen2);
+        const t2 = (-B_c + sq) / (2 * segLen2);
+        tStart = Math.max(0, Math.min(t1, t2));
+        tEnd   = Math.min(1, Math.max(t1, t2));
+        if (tEnd <= tStart + 1e-9) continue; // circle only grazes — ignore
+      }
+      // disc < 0 → whole segment is inside the circle (tStart=0, tEnd=1)
+
+      candidates.push({
+        seg,
+        bldgId: bldg.id,
+        dReq,
+        clipP1: { x: seg.p1.x + tStart * dx, y: seg.p1.y + tStart * dy },
+        clipP2: { x: seg.p1.x + tEnd   * dx, y: seg.p1.y + tEnd   * dy },
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHASE 2 – Cast rays against pre-filtered candidates only
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const rays: ShadowingResult['rays'] = [];
+
+  for (let aDeg = -78; aDeg <= 78; aDeg += angleStepDeg) {
     const worldAngleRad = normalAngleRad + aDeg * DEG2RAD;
     const rayDir: Vector2D = {
       x: Math.cos(worldAngleRad),
@@ -46,69 +167,46 @@ export function analyzeShadowingAtPoint(
 
     let closestHitDist = Infinity;
     let closestReqDist = 0;
-    let hitPoint: Point2D | undefined = undefined;
-    let hitObstacleId: string | undefined = undefined;
+    let hitPoint: Point2D | undefined;
+    let hitObstacleId: string | undefined;
 
-    // Check collision with every segment of every building
-    for (const bldg of allBuildings) {
-      if (bldg.isIncluded === false) continue;
-
-      // Check if it's an obstacle
-      for (const seg of bldg.segments) {
-        // Skip self-segment
-        if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
-
-        const hit = raySegmentIntersection(point, rayDir, seg.p1, seg.p2);
-        if (hit.hit && hit.distance < closestHitDist) {
-          // Calculate delta H = H_top - H_window_bottom
-          const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
-
-          // § 12 ust. 1 pkt 1: D_base = deltaH (if <= 35m) or 35m (if > 35m)
-          const dBase = Math.min(deltaH, 35.0);
-
-          // § 12 ust. 5: Zabudowa śródmiejska - reduce by up to half (0.5 * D_base)
-          const dReq = (segment.isCityCentre || bldg.isCityCentre) ? 0.5 * dBase : dBase;
-
-          // § 12 ust. 6: Secondary elements <= 1.8m from the same wall
-          if (bldg.id === targetBuildingId && hit.distance <= 1.8) {
-            continue;
-          }
-
-          // § 12 ust. 4: Slender objects (width <= 3m at distance >= 10m)
-          // Simplified for now - can be flagged per object
-          closestHitDist = hit.distance;
-          closestReqDist = dReq;
-          hitPoint = hit.point;
-          hitObstacleId = bldg.id;
-        }
+    for (const cand of candidates) {
+      const hit = raySegmentIntersection(point, rayDir, cand.seg.p1, cand.seg.p2);
+      if (hit.hit && hit.distance < closestHitDist) {
+        closestHitDist = hit.distance;
+        closestReqDist = cand.dReq;
+        hitPoint       = hit.point;
+        hitObstacleId  = cand.bldgId;
       }
     }
 
     const isFree = closestHitDist === Infinity || closestHitDist >= closestReqDist;
 
     rays.push({
-      angleDeg: aDeg,
-      worldAngleDeg: (worldAngleRad * RAD2DEG + 360) % 360,
+      angleDeg:      aDeg,
+      worldAngleDeg: ((worldAngleRad * RAD2DEG) + 360) % 360,
       isFree,
-      hitDistance: closestHitDist === Infinity ? 999 : closestHitDist,
-      reqDistance: closestReqDist,
+      hitDistance:   closestHitDist === Infinity ? 999 : closestHitDist,
+      reqDistance:   closestReqDist,
       hitPoint,
-      obstacleId: hitObstacleId,
+      obstacleId:    hitObstacleId,
     });
   }
 
-  // Aggregate rays into continuous sectors
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHASE 3 – Aggregate rays into continuous sectors (unchanged)
+  // ─────────────────────────────────────────────────────────────────────────
+
   const sectors: ShadowingSector[] = [];
   let currentSector: ShadowingSector | null = null;
 
-  for (let i = 0; i < rays.length; i++) {
-    const ray = rays[i];
+  for (const ray of rays) {
     if (!currentSector) {
       currentSector = {
         startAngleDeg: ray.angleDeg,
-        endAngleDeg: ray.angleDeg,
-        spanDeg: angleStepDeg,
-        isFree: ray.isFree,
+        endAngleDeg:   ray.angleDeg,
+        spanDeg:       angleStepDeg,
+        isFree:        ray.isFree,
       };
     } else if (currentSector.isFree === ray.isFree) {
       currentSector.endAngleDeg = ray.angleDeg;
@@ -117,15 +215,13 @@ export function analyzeShadowingAtPoint(
       sectors.push(currentSector);
       currentSector = {
         startAngleDeg: ray.angleDeg,
-        endAngleDeg: ray.angleDeg,
-        spanDeg: angleStepDeg,
-        isFree: ray.isFree,
+        endAngleDeg:   ray.angleDeg,
+        spanDeg:       angleStepDeg,
+        isFree:        ray.isFree,
       };
     }
   }
-  if (currentSector) {
-    sectors.push(currentSector);
-  }
+  if (currentSector) sectors.push(currentSector);
 
   // Calculate maximum continuous free span and total free span
   let maxContinuousFreeSpanDeg = 0;
@@ -134,9 +230,7 @@ export function analyzeShadowingAtPoint(
   for (const s of sectors) {
     if (s.isFree) {
       totalFreeSpanDeg += s.spanDeg;
-      if (s.spanDeg > maxContinuousFreeSpanDeg) {
-        maxContinuousFreeSpanDeg = s.spanDeg;
-      }
+      if (s.spanDeg > maxContinuousFreeSpanDeg) maxContinuousFreeSpanDeg = s.spanDeg;
     }
   }
 
