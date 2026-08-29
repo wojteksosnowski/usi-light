@@ -675,159 +675,243 @@ export function analyzeSunlightAtPointSegments(
   const t0 = performance.now();
   const normal = segment.normal;
   const isChildcare = segment.buildingType === 'childcare';
-  const trajectory =
-    precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
 
-  // Pre-filter obstacle candidates in front of facade plane
-  interface ObstacleCand {
-    seg: FacadeSegment;
+  const month = settings.equinoxDate === 'autumn' ? 9 : 3;
+  const day = settings.equinoxDate === 'autumn' ? 23 : 21;
+
+  // 1. Solar equinox analysis window (azimuth limits)
+  const noonPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, 12.0);
+  const noonHour = noonPos.solarNoonDecimal;
+  const hoursRadius = isChildcare ? 4 : 5;
+
+  const startHour = Math.max(5.0, noonHour - hoursRadius);
+  const endHour = Math.min(19.0, noonHour + hoursRadius);
+
+  const startPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, startHour);
+  const endPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, endHour);
+
+  const azSolarMin = Math.min(startPos.azimuthDeg, endPos.azimuthDeg);
+  const azSolarMax = Math.max(startPos.azimuthDeg, endPos.azimuthDeg);
+
+  // Facade normal azimuth (geographic degrees)
+  const normalAzimuth = ((Math.atan2(normal.x, normal.y) * RAD2DEG + 360) % 360);
+
+  // Active facade view range (normalAzimuth ± 78°, incidence angle >= 12°)
+  const azActiveMin = Math.max(azSolarMin, normalAzimuth - 78.0);
+  const azActiveMax = Math.min(azSolarMax, normalAzimuth + 78.0);
+
+  if (azActiveMax <= azActiveMin + 0.1) {
+    const trajectory =
+      precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
+    const emptySlots: SunlightTimeSlot[] = trajectory.map((slot) => ({
+      time: slot.timeStr,
+      azimuthDeg: slot.azimuthDeg,
+      elevationDeg: slot.elevationDeg,
+      isSunAboveHorizon: slot.isSunAboveHorizon,
+      isAngleAbove12Deg: false,
+      isDirectSunlight: false,
+    }));
+
+    return {
+      point,
+      segmentId: segment.id,
+      offsetRatio,
+      totalMinutes: 0,
+      totalHours: 0,
+      isCompliant: false,
+      timeSlots: emptySlots,
+      sectors: [],
+      _segMethodMs: performance.now() - t0,
+    };
+  }
+
+  // 2. Metoda Płaszczyzny Słonecznej E-W (współczynnik nachylenia płaszczyzny k = tan(latitude))
+  const latRad = settings.latitude * DEG2RAD;
+  const k = Math.tan(latRad);
+
+  interface BlockedInterval {
+    startAz: number;
+    endAz: number;
     bldgId: string;
   }
-  const obstacleCandidates: ObstacleCand[] = [];
+  const rawBlocked: BlockedInterval[] = [];
+
   for (const bldg of allBuildings) {
     if (bldg.isIncluded === false) continue;
     for (const seg of bldg.segments) {
       if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
 
+      // Filtrowanie 1: punkt badany musi znajdować się po zewnętrznej stronie przeszkody
+      const dotExt = (point.x - seg.p1.x) * seg.normal.x + (point.y - seg.p1.y) * seg.normal.y;
+      if (dotExt <= 0) continue;
+
+      // Filtrowanie 2: przynajmniej jeden wierzchołek musi leżeć przed płaszczyzną fasady badanej
       const v1x = seg.p1.x - point.x;
       const v1y = seg.p1.y - point.y;
       const v2x = seg.p2.x - point.x;
       const v2y = seg.p2.y - point.y;
-      const dot1 = v1x * normal.x + v1y * normal.y;
-      const dot2 = v2x * normal.x + v2y * normal.y;
+      if (v1x * normal.x + v1y * normal.y < -0.01 && v2x * normal.x + v2y * normal.y < -0.01) continue;
 
-      if (dot1 < -0.01 && dot2 < -0.01) continue;
-      obstacleCandidates.push({ seg, bldgId: bldg.id });
-    }
-  }
+      // Wysokość przeszkody ponad parapet okna
+      const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
+      if (deltaH <= 0) continue;
 
-  const timeSlots: SunlightTimeSlot[] = [];
-  let totalMinutesSunlight = 0;
+      // L = deltaH * tan(latitude) -> zasięg graniczny płaszczyzny cienia na południe
+      const L = deltaH * k;
+      const yLine = point.y - L; // Prosta graniczna E-W
+      const yPoint = point.y;    // Linia punktu P
 
-  interface ActiveInterval {
-    timeStr: string;
-    hourDec: number;
-    azimuthDeg: number;
-    elevationDeg: number;
-    isDirect: boolean;
-    blockingObstacleId?: string;
-    blockingAngleDeg?: number;
-  }
-  const activeIntervals: ActiveInterval[] = [];
+      let p1 = { x: seg.p1.x, y: seg.p1.y };
+      let p2 = { x: seg.p2.x, y: seg.p2.y };
 
-  for (const slot of trajectory) {
-    const dotFacing = slot.sunDir.x * normal.x + slot.sunDir.y * normal.y;
-    const isAngleAbove12Deg = dotFacing >= COS_78_DEG - 1e-4;
+      // Zasada 1: oba punkty na południe od linii cienia (y < yLine) -> nie rzucają cienia
+      if (p1.y < yLine && p2.y < yLine) continue;
 
-    if (!slot.isSunAboveHorizon || !isAngleAbove12Deg) {
-      timeSlots.push({
-        time: slot.timeStr,
-        azimuthDeg: slot.azimuthDeg,
-        elevationDeg: slot.elevationDeg,
-        isSunAboveHorizon: slot.isSunAboveHorizon,
-        isAngleAbove12Deg: false,
-        isDirectSunlight: false,
-      });
-      continue;
-    }
+      // Zasada 2: oba punkty na północ od punktu P (za plecami w osi Słońca) -> nie rzucają cienia
+      if (p1.y > yPoint && p2.y > yPoint) continue;
 
-    const sunDir = slot.sunDir;
-    let isBlocked = false;
-    let blockingObstacleId: string | undefined = undefined;
-    let maxObstacleAngleDeg = 0;
+      // Zasada 3: przycięcie do prostej E-W (yLine) – podział na część rzucającą cień i bez cienia
+      if (p1.y < yLine) {
+        const t = (yLine - p1.y) / (p2.y - p1.y);
+        p1 = { x: p1.x + t * (p2.x - p1.x), y: yLine };
+      } else if (p2.y < yLine) {
+        const t = (yLine - p1.y) / (p2.y - p1.y);
+        p2 = { x: p1.x + t * (p2.x - p1.x), y: yLine };
+      }
 
-    for (const cand of obstacleCandidates) {
-      const seg = cand.seg;
-      const dotNormal = sunDir.x * seg.normal.x + sunDir.y * seg.normal.y;
-      if (dotNormal >= -1e-4) continue;
+      // Przycięcie do linii punktu P w osi Y
+      if (p1.y > yPoint) {
+        const t = (yPoint - p1.y) / (p2.y - p1.y);
+        p1 = { x: p1.x + t * (p2.x - p1.x), y: yPoint };
+      } else if (p2.y > yPoint) {
+        const t = (yPoint - p1.y) / (p2.y - p1.y);
+        p2 = { x: p1.x + t * (p2.x - p1.x), y: yPoint };
+      }
 
-      const hit = raySegmentIntersection(point, sunDir, seg.p1, seg.p2);
-      if (hit.hit && hit.distance > 0.05) {
-        const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
-        const betaDeg = Math.atan2(deltaH, hit.distance) * RAD2DEG;
-        if (betaDeg > maxObstacleAngleDeg) {
-          maxObstacleAngleDeg = betaDeg;
+      if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 0.05) continue;
+
+      // Zabezpieczenie przed osobliwością styku narożnika w odległości 0m od punktu P
+      const d1 = Math.hypot(p1.x - point.x, p1.y - point.y);
+      const d2 = Math.hypot(p2.x - point.x, p2.y - point.y);
+      if (d1 < 0.05) {
+        p1.x = p1.x + 0.05 * (p2.x - p1.x);
+        p1.y = p1.y + 0.05 * (p2.y - p1.y);
+      }
+      if (d2 < 0.05) {
+        p2.x = p2.x + 0.05 * (p1.x - p2.x);
+        p2.y = p2.y + 0.05 * (p1.y - p2.y);
+      }
+
+      // Azymuty z punktu P do przyciętego odcinka rzucającego cień
+      const az1 = ((Math.atan2(p1.x - point.x, p1.y - point.y) * RAD2DEG + 360) % 360);
+      const az2 = ((Math.atan2(p2.x - point.x, p2.y - point.y) * RAD2DEG + 360) % 360);
+
+      const intervals: [number, number][] = [];
+      if (Math.abs(az1 - az2) > 180) {
+        const minA = Math.min(az1, az2);
+        const maxA = Math.max(az1, az2);
+        intervals.push([maxA, 360]);
+        intervals.push([0, minA]);
+      } else {
+        intervals.push([Math.min(az1, az2), Math.max(az1, az2)]);
+      }
+
+      for (const [bStart, bEnd] of intervals) {
+        const candStart = Math.max(azActiveMin, bStart);
+        const candEnd   = Math.min(azActiveMax, bEnd);
+        if (candEnd > candStart + 0.01) {
+          rawBlocked.push({ startAz: candStart, endAz: candEnd, bldgId: bldg.id });
         }
-        if (slot.elevationDeg <= betaDeg) {
-          isBlocked = true;
-          blockingObstacleId = cand.bldgId;
+      }
+    }
+  }
+
+  // 3. Scalanie przedziałów cienia
+  rawBlocked.sort((a, b) => a.startAz - b.startAz);
+  const mergedBlocked: { startAz: number; endAz: number }[] = [];
+  for (const b of rawBlocked) {
+    if (mergedBlocked.length === 0) {
+      mergedBlocked.push({ startAz: b.startAz, endAz: b.endAz });
+    } else {
+      const last = mergedBlocked[mergedBlocked.length - 1];
+      if (b.startAz <= last.endAz + 0.05) {
+        last.endAz = Math.max(last.endAz, b.endAz);
+      } else {
+        mergedBlocked.push({ startAz: b.startAz, endAz: b.endAz });
+      }
+    }
+  }
+
+  // 4. Wyznaczanie wolnych sektorów nasłonecznienia i obliczanie czasu
+  const sectors: import('../types/geometry').SunlightSector[] = [];
+  let cursor = azActiveMin;
+  let totalHours = 0;
+
+  function addFreeSector(startAz: number, endAz: number) {
+    const rawH1 = getHourAtSolarAzimuth(startAz, settings.latitude, settings.longitude, month, day);
+    const rawH2 = getHourAtSolarAzimuth(endAz, settings.latitude, settings.longitude, month, day);
+    const hStart = Math.min(rawH1, rawH2);
+    const hEnd   = Math.max(rawH1, rawH2);
+    const secHours = hEnd - hStart;
+
+    const h1Int = Math.floor(hStart);
+    const m1Int = Math.round((hStart - h1Int) * 60);
+    const h2Int = Math.floor(hEnd);
+    const m2Int = Math.round((hEnd - h2Int) * 60);
+
+    sectors.push({
+      startAzimuthDeg: startAz,
+      endAzimuthDeg: endAz,
+      spanDeg: Math.abs(endAz - startAz),
+      isDirectSunlight: true,
+      startTimeStr: `${String(h1Int).padStart(2, '0')}:${String(m1Int).padStart(2, '0')}`,
+      endTimeStr: `${String(h2Int).padStart(2, '0')}:${String(m2Int).padStart(2, '0')}`,
+      hours: secHours,
+    });
+    totalHours += secHours;
+  }
+
+  for (const b of mergedBlocked) {
+    if (b.startAz > cursor + 0.01) {
+      addFreeSector(cursor, b.startAz);
+    }
+    cursor = Math.max(cursor, b.endAz);
+  }
+
+  if (cursor < azActiveMax - 0.01) {
+    addFreeSector(cursor, azActiveMax);
+  }
+
+  // Generowanie timeSlots dla osi timeline w UI (z sektorów geometrycznych)
+  const trajectory =
+    precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
+
+  const timeSlots: SunlightTimeSlot[] = trajectory.map((slot) => {
+    const isAbove = slot.isSunAboveHorizon && slot.elevationDeg > 0;
+    const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
+    const isAngleAbove12Deg = isAbove && dot >= COS_78_DEG;
+
+    let isDirect = false;
+    if (isAngleAbove12Deg) {
+      for (const sec of sectors) {
+        if (slot.azimuthDeg >= sec.startAzimuthDeg - 0.05 && slot.azimuthDeg <= sec.endAzimuthDeg + 0.05) {
+          isDirect = true;
           break;
         }
       }
     }
 
-    const isDirect = !isBlocked;
-    if (isDirect) {
-      totalMinutesSunlight += stepMinutes;
-    }
-
-    timeSlots.push({
+    return {
       time: slot.timeStr,
       azimuthDeg: slot.azimuthDeg,
       elevationDeg: slot.elevationDeg,
-      isSunAboveHorizon: true,
-      isAngleAbove12Deg: true,
+      isSunAboveHorizon: isAbove,
+      isAngleAbove12Deg,
       isDirectSunlight: isDirect,
-      blockingObstacleId,
-      blockingAngleDeg: maxObstacleAngleDeg,
-    });
+    };
+  });
 
-    activeIntervals.push({
-      timeStr: slot.timeStr,
-      hourDec: slot.hourDec,
-      azimuthDeg: slot.azimuthDeg,
-      elevationDeg: slot.elevationDeg,
-      isDirect,
-      blockingObstacleId,
-      blockingAngleDeg: maxObstacleAngleDeg,
-    });
-  }
-
-  // Build continuous unshadowed sectors from active intervals
-  const sectors: import('../types/geometry').SunlightSector[] = [];
-  let currentSector: ActiveInterval[] = [];
-
-  for (let i = 0; i < activeIntervals.length; i++) {
-    const item = activeIntervals[i];
-    if (item.isDirect) {
-      currentSector.push(item);
-    } else {
-      if (currentSector.length > 0) {
-        const first = currentSector[0];
-        const last = currentSector[currentSector.length - 1];
-        const spanMinutes = currentSector.length * stepMinutes;
-        const spanHours = spanMinutes / 60;
-        sectors.push({
-          startAzimuthDeg: Math.min(first.azimuthDeg, last.azimuthDeg),
-          endAzimuthDeg: Math.max(first.azimuthDeg, last.azimuthDeg),
-          spanDeg: Math.abs(last.azimuthDeg - first.azimuthDeg),
-          isDirectSunlight: true,
-          startTimeStr: first.timeStr,
-          endTimeStr: last.timeStr,
-          hours: spanHours,
-        });
-        currentSector = [];
-      }
-    }
-  }
-
-  if (currentSector.length > 0) {
-    const first = currentSector[0];
-    const last = currentSector[currentSector.length - 1];
-    const spanMinutes = currentSector.length * stepMinutes;
-    const spanHours = spanMinutes / 60;
-    sectors.push({
-      startAzimuthDeg: Math.min(first.azimuthDeg, last.azimuthDeg),
-      endAzimuthDeg: Math.max(first.azimuthDeg, last.azimuthDeg),
-      spanDeg: Math.abs(last.azimuthDeg - first.azimuthDeg),
-      isDirectSunlight: true,
-      startTimeStr: first.timeStr,
-      endTimeStr: last.timeStr,
-      hours: spanHours,
-    });
-  }
-
-  const totalHours = totalMinutesSunlight / 60;
+  const totalMinutes = Math.round(totalHours * 60);
   const reqHours = segment.isCityCentre ? 1.5 : 3.0;
   const isCompliant = totalHours >= reqHours;
 
@@ -835,7 +919,7 @@ export function analyzeSunlightAtPointSegments(
     point,
     segmentId: segment.id,
     offsetRatio,
-    totalMinutes: totalMinutesSunlight,
+    totalMinutes,
     totalHours,
     isCompliant,
     timeSlots,
