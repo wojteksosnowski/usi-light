@@ -124,3 +124,18 @@ export interface ProjectSettings {
   samplingInterval: number; // in meters, e.g. 0.5m
   equinoxDate: 'spring' | 'autumn'; // March 21 vs Sept 23
 }
+
+export type DimensionType = 'linear' | 'angular';
+
+export interface DimensionReference {
+  buildingId: string;
+  segmentId: string;
+}
+
+export interface DimensionItem {
+  id: string;
+  type: DimensionType;
+  ref1: DimensionReference;
+  ref2: DimensionReference;
+}
+

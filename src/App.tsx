@@ -1,7 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
-import { BuildingLoop, AnalysisPointResult, ProjectSettings, Point2D } from './types/geometry';
+import {
+  BuildingLoop,
+  AnalysisPointResult,
+  ProjectSettings,
+  Point2D,
+  DimensionItem,
+  DimensionReference,
+  DimensionType,
+} from './types/geometry';
 import {
   createSampleBuildings,
   createBuildingFromVertices,
@@ -17,7 +25,12 @@ import {
   AnalysisAccuracyOptions,
 } from './engine/analysisEngine';
 import { parseGoogleMapsCoordinates } from './utils/geoParser';
-import { offsetPolygonEdge, updateBuildingWithNewVertices } from './utils/math2d';
+import {
+  offsetPolygonEdge,
+  updateBuildingWithNewVertices,
+  computeLinearDimension,
+  computeAngularDimension,
+} from './utils/math2d';
 
 import {
   Sun,
@@ -49,6 +62,7 @@ import {
   Square,
   PenTool,
   Edit3,
+  Ruler,
   X,
 } from 'lucide-react';
 
@@ -76,6 +90,12 @@ export const App: React.FC = () => {
 
   // Edge Parallel Editing Mode State
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+
+  // Dimension Tool State (Linear / Angular)
+  const [dimensions, setDimensions] = useState<DimensionItem[]>([]);
+  const [isDimensionToolActive, setIsDimensionToolActive] = useState<boolean>(false);
+  const [dimensionType, setDimensionType] = useState<DimensionType>('linear');
+  const [dimensionPendingRef, setDimensionPendingRef] = useState<DimensionReference | null>(null);
 
   // Dynamic Variable Accuracy State (Live vs Stillness Progressive Refinement)
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
@@ -430,6 +450,52 @@ export const App: React.FC = () => {
     );
   };
 
+  // Handle clicking edge in Dimension Tool mode
+  const handleDimensionClickEdge = (buildingId: string, segmentId: string) => {
+    if (!dimensionPendingRef) {
+      setDimensionPendingRef({ buildingId, segmentId });
+    } else {
+      if (dimensionPendingRef.buildingId === buildingId && dimensionPendingRef.segmentId === segmentId) {
+        return; // Ignore clicking the exact same edge
+      }
+      const newDim: DimensionItem = {
+        id: `dim-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        type: dimensionType,
+        ref1: dimensionPendingRef,
+        ref2: { buildingId, segmentId },
+      };
+      setDimensions((prev) => [...prev, newDim]);
+      setDimensionPendingRef(null);
+      setIsDimensionToolActive(false); // exit tool after creation
+    }
+  };
+
+  // Cancel dimension tool
+  const handleCancelDimension = () => {
+    setDimensionPendingRef(null);
+    setIsDimensionToolActive(false);
+  };
+
+  // Delete specific dimension
+  const handleDeleteDimension = (id: string) => {
+    setDimensions((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  // Toggle type of existing dimension
+  const handleToggleDimensionType = (id: string) => {
+    setDimensions((prev) =>
+      prev.map((d) =>
+        d.id === id ? { ...d, type: d.type === 'linear' ? 'angular' : 'linear' } : d
+      )
+    );
+  };
+
+  // Clear all dimensions
+  const handleClearAllDimensions = () => {
+    setDimensions([]);
+    setDimensionPendingRef(null);
+  };
+
   // Update selected building property
   const updateSelectedBuilding = (fields: Partial<BuildingLoop>) => {
     if (!selectedBuildingId) return;
@@ -501,6 +567,23 @@ export const App: React.FC = () => {
       }
     }
   };
+
+  // Global Escape key handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isDimensionToolActive) handleCancelDimension();
+        if (drawingMode !== 'none') handleCancelDrawing();
+        if (isLinkingMode) {
+          setIsLinkingMode(false);
+          setLinkingSourceId(null);
+        }
+        if (isEditMode) setIsEditMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDimensionToolActive, drawingMode, isLinkingMode, isEditMode]);
 
   return (
     <div className="app-container">
@@ -1046,20 +1129,22 @@ export const App: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {/* 1. Object Creation Tools */}
+                    {/* 1. Object Creation & Measurement Tools */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
-                        Tworzenie nowych obiektów:
+                        Tworzenie i pomiary:
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
                         <button
                           type="button"
                           onClick={() => {
                             setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
                             setDrawingVerticesCount(0);
+                            setIsDimensionToolActive(false);
+                            setDimensionPendingRef(null);
                           }}
                           className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '6px', padding: '9px 8px' }}
+                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
                           title="Rysuj nowy prostokąt: 1. kliknięcie = start, 2. kliknięcie = koniec"
                         >
                           <Square size={13} />
@@ -1071,15 +1156,116 @@ export const App: React.FC = () => {
                           onClick={() => {
                             setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
                             setDrawingVerticesCount(0);
+                            setIsDimensionToolActive(false);
+                            setDimensionPendingRef(null);
                           }}
                           className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '6px', padding: '9px 8px' }}
+                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
                           title="Rysuj nową zamkniętą polilinię wieloboczną"
                         >
                           <PenTool size={13} />
                           <span style={{ fontWeight: 600 }}>Polilinia</span>
                         </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDimensionToolActive(!isDimensionToolActive);
+                            setDimensionPendingRef(null);
+                            setDrawingMode('none');
+                            setDrawingVerticesCount(0);
+                          }}
+                          className={`btn-tile ${isDimensionToolActive ? 'active-indigo' : 'inactive'}`}
+                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                          title="Dodaj wymiar: kliknij 1. krawędź (początek) i 2. krawędź (koniec)"
+                        >
+                          <Ruler size={13} />
+                          <span style={{ fontWeight: 600 }}>Wymiar</span>
+                        </button>
                       </div>
+
+                      {/* Active Dimension Tool Panel */}
+                      {isDimensionToolActive && (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                            fontSize: '11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <Ruler size={13} />
+                              <span>Narzędzie Wymiar</span>
+                            </span>
+
+                            {/* Dimension Type Selector (Liniowy vs Kątowy) */}
+                            <div style={{ display: 'flex', gap: '3px', backgroundColor: 'var(--bg-input)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-light)' }}>
+                              <button
+                                type="button"
+                                onClick={() => setDimensionType('linear')}
+                                style={{
+                                  padding: '2px 6px',
+                                  fontSize: '10px',
+                                  fontWeight: dimensionType === 'linear' ? 700 : 500,
+                                  borderRadius: '4px',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  backgroundColor: dimensionType === 'linear' ? '#38bdf8' : 'transparent',
+                                  color: dimensionType === 'linear' ? '#0f172a' : '#94a3b8',
+                                }}
+                              >
+                                Liniowy
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDimensionType('angular')}
+                                style={{
+                                  padding: '2px 6px',
+                                  fontSize: '10px',
+                                  fontWeight: dimensionType === 'angular' ? 700 : 500,
+                                  borderRadius: '4px',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  backgroundColor: dimensionType === 'angular' ? '#c084fc' : 'transparent',
+                                  color: dimensionType === 'angular' ? '#0f172a' : '#94a3b8',
+                                }}
+                              >
+                                Kątowy
+                              </button>
+                            </div>
+                          </div>
+
+                          <div style={{ color: '#cbd5e1', fontSize: '10.5px' }}>
+                            {!dimensionPendingRef
+                              ? '1. Kliknij w 1. krawędź obiektu na rzucie CAD (początek wymiaru).'
+                              : '2. Kliknij w 2. krawędź obiektu (koniec wymiaru).'}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleCancelDimension}
+                            style={{
+                              marginTop: '2px',
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: '1px solid rgba(244, 63, 94, 0.4)',
+                              backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                              color: '#fca5a5',
+                              fontSize: '10.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Anuluj wymiarowanie (Esc)
+                          </button>
+                        </div>
+                      )}
 
                       {/* Active Drawing Guide Prompt */}
                       {drawingMode === 'rectangle' && (
@@ -1158,6 +1344,107 @@ export const App: React.FC = () => {
                           >
                             Anuluj rysowanie (Esc)
                           </button>
+                        </div>
+                      )}
+
+                      {/* Active Dimensions List on Canvas */}
+                      {dimensions.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '4px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', color: '#94a3b8', fontWeight: 600 }}>
+                            <span>Wymiary na rzucie ({dimensions.length}):</span>
+                            <button
+                              type="button"
+                              onClick={handleClearAllDimensions}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#f43f5e',
+                                fontSize: '10px',
+                                cursor: 'pointer',
+                                padding: '2px 4px',
+                              }}
+                              title="Wyczyść wszystkie wymiary"
+                            >
+                              Wyczyść
+                            </button>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {dimensions.map((dim, idx) => {
+                              const b1 = buildings.find((b) => b.id === dim.ref1.buildingId);
+                              const s1 = b1?.segments.find((s) => s.id === dim.ref1.segmentId);
+                              const b2 = buildings.find((b) => b.id === dim.ref2.buildingId);
+                              const s2 = b2?.segments.find((s) => s.id === dim.ref2.segmentId);
+                              let valStr = '...';
+                              if (s1 && s2) {
+                                if (dim.type === 'linear') {
+                                  const r = computeLinearDimension(s1.p1, s1.p2, s2.p1, s2.p2);
+                                  valStr = `${r.distance.toFixed(2)} m`;
+                                } else {
+                                  const r = computeAngularDimension(s1.p1, s1.p2, s2.p1, s2.p2);
+                                  valStr = `${r.angleDeg.toFixed(1)}°`;
+                                }
+                              }
+
+                              return (
+                                <div
+                                  key={dim.id}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+                                    border: '1px solid var(--border-light)',
+                                    fontSize: '11px',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ color: dim.type === 'linear' ? '#38bdf8' : '#c084fc', fontWeight: 700, fontFamily: 'monospace' }}>
+                                      #{idx + 1} {valStr}
+                                    </span>
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleDimensionType(dim.id)}
+                                      style={{
+                                        padding: '2px 5px',
+                                        fontSize: '9.5px',
+                                        borderRadius: '4px',
+                                        border: '1px solid #475569',
+                                        backgroundColor: 'transparent',
+                                        color: '#94a3b8',
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Przełącz typ wymiaru (Liniowy / Kątowy)"
+                                    >
+                                      {dim.type === 'linear' ? 'm' : '°'}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteDimension(dim.id)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: '#f43f5e',
+                                        cursor: 'pointer',
+                                        padding: '2px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                      }}
+                                      title="Usuń ten wymiar"
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1714,6 +2001,12 @@ export const App: React.FC = () => {
             onDrawingVerticesCountChange={setDrawingVerticesCount}
             isEditMode={isEditMode}
             onBuildingEdgeMove={handleBuildingEdgeMove}
+            dimensions={dimensions}
+            isDimensionMode={isDimensionToolActive}
+            dimensionType={dimensionType}
+            dimensionPendingRef={dimensionPendingRef}
+            onDimensionClickEdge={handleDimensionClickEdge}
+            onDeleteDimension={handleDeleteDimension}
           />
         </div>
 
