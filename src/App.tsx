@@ -9,6 +9,7 @@ import {
   DimensionItem,
   DimensionReference,
   DimensionType,
+  CadLayerSettings,
 } from './types/geometry';
 import {
   createSampleBuildings,
@@ -63,6 +64,11 @@ import {
   PenTool,
   Edit3,
   Ruler,
+  Lock,
+  Unlock,
+  Ghost,
+  Lightbulb,
+  LightbulbOff,
   X,
 } from 'lucide-react';
 
@@ -79,6 +85,10 @@ export const App: React.FC = () => {
   // Collapsible Sidebar Groups State
   const [isProjectGroupOpen, setIsProjectGroupOpen] = useState<boolean>(true);
   const [isModelingGroupOpen, setIsModelingGroupOpen] = useState<boolean>(true);
+
+  // CAD Layers Settings & Selection State
+  const [layerSettings, setLayerSettings] = useState<Record<string, CadLayerSettings>>({});
+  const [selectedLayerName, setSelectedLayerName] = useState<string | null>(null);
 
   // Grouping / Linking mode state
   const [isLinkingMode, setIsLinkingMode] = useState<boolean>(false);
@@ -494,6 +504,84 @@ export const App: React.FC = () => {
   const handleClearAllDimensions = () => {
     setDimensions([]);
     setDimensionPendingRef(null);
+  };
+
+  // Active CAD layers from current buildings
+  const activeCadLayers = useMemo(() => {
+    const map = new Map<string, number>();
+    buildings.forEach((b) => {
+      const lyr = b.layer || 'Domyślna (0)';
+      map.set(lyr, (map.get(lyr) || 0) + 1);
+    });
+    return Array.from(map.entries()).map(([name, count]) => ({ name, count }));
+  }, [buildings]);
+
+  // Ensure selectedLayerName is valid
+  useEffect(() => {
+    if (activeCadLayers.length > 0) {
+      if (!selectedLayerName || !activeCadLayers.some((l) => l.name === selectedLayerName)) {
+        setSelectedLayerName(activeCadLayers[0].name);
+      }
+    } else {
+      setSelectedLayerName(null);
+    }
+  }, [activeCadLayers, selectedLayerName]);
+
+  // Toggle layer lock (Kłódka)
+  const handleToggleLayerLock = (layerName: string) => {
+    setLayerSettings((prev) => ({
+      ...prev,
+      [layerName]: {
+        ...prev[layerName],
+        isLocked: !prev[layerName]?.isLocked,
+      },
+    }));
+  };
+
+  // Toggle layer ghost mode (Duch)
+  const handleToggleLayerGhost = (layerName: string) => {
+    setLayerSettings((prev) => ({
+      ...prev,
+      [layerName]: {
+        ...prev[layerName],
+        isGhosted: !prev[layerName]?.isGhosted,
+      },
+    }));
+  };
+
+  // Toggle layer visibility (Żarówka)
+  const handleToggleLayerVisibility = (layerName: string) => {
+    setLayerSettings((prev) => ({
+      ...prev,
+      [layerName]: {
+        ...prev[layerName],
+        isVisible: prev[layerName]?.isVisible === false ? true : false,
+      },
+    }));
+  };
+
+  // Batch update all buildings on a layer
+  const handleUpdateLayerBuildings = (layerName: string, fields: Partial<BuildingLoop>) => {
+    setBuildings((prev) =>
+      prev.map((bldg) => {
+        const bldgLayer = bldg.layer || 'Domyślna (0)';
+        if (bldgLayer !== layerName) return bldg;
+        const updated = { ...bldg, ...fields };
+        if (
+          fields.defaultHeight !== undefined ||
+          fields.hWindowBottom !== undefined ||
+          fields.isCityCentre !== undefined
+        ) {
+          updated.segments = updated.segments.map((seg) => ({
+            ...seg,
+            hTop: fields.defaultHeight !== undefined ? fields.defaultHeight : seg.hTop,
+            hWindowBottom: fields.hWindowBottom !== undefined ? fields.hWindowBottom : seg.hWindowBottom,
+            isCityCentre: fields.isCityCentre !== undefined ? fields.isCityCentre : seg.isCityCentre,
+          }));
+        }
+        return updated;
+      })
+    );
   };
 
   // Update selected building property
@@ -996,6 +1084,239 @@ export const App: React.FC = () => {
 
             {isModelingGroupOpen && (
               <div className="sidebar-group-content">
+                {/* 2.0 Warstwy CAD */}
+                <div className="ui-card">
+                  <div className="ui-title">
+                    <span>Warstwy CAD ({activeCadLayers.length})</span>
+                    <Layers size={14} color="#818cf8" />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* Layer selection list */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {activeCadLayers.map((lyr) => {
+                        const isSelected = selectedLayerName === lyr.name;
+                        const setting = layerSettings[lyr.name] || {};
+                        const isLocked = setting.isLocked === true;
+                        const isGhosted = setting.isGhosted === true;
+                        const isVisible = setting.isVisible !== false;
+
+                        return (
+                          <div
+                            key={lyr.name}
+                            onClick={() => setSelectedLayerName(lyr.name)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 8px',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              backgroundColor: isSelected
+                                ? 'rgba(99, 102, 241, 0.16)'
+                                : 'rgba(15, 23, 42, 0.6)',
+                              border: isSelected
+                                ? '1px solid rgba(99, 102, 241, 0.45)'
+                                : '1px solid var(--border-light)',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: isSelected ? 700 : 500,
+                                  color: isSelected ? '#e0e7ff' : '#cbd5e1',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                                title={lyr.name}
+                              >
+                                {lyr.name}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '9.5px',
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                                  color: '#94a3b8',
+                                }}
+                              >
+                                {lyr.count} {lyr.count === 1 ? 'obiekt' : 'obiekty'}
+                              </span>
+                            </div>
+
+                            {/* 3 Action Controls: Kłódka, Duch, Żarówka */}
+                            <div
+                              style={{ display: 'flex', alignItems: 'center', gap: '3px' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {/* Kłódka (Lock) */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLayerLock(lyr.name)}
+                                title={isLocked ? 'Odblokuj przesuwanie i edycję (Kłódka aktywna)' : 'Zablokuj przesuwanie i edycję obiektów'}
+                                style={{
+                                  padding: '4px',
+                                  borderRadius: '5px',
+                                  border: 'none',
+                                  backgroundColor: isLocked ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
+                                  color: isLocked ? '#fbbf24' : '#64748b',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                {isLocked ? <Lock size={13} /> : <Unlock size={13} />}
+                              </button>
+
+                              {/* Duch (Ghost) */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLayerGhost(lyr.name)}
+                                title={isGhosted ? 'Wyłącz tryb Ducha (Duch aktywny - obiekty niewybieralne)' : 'Włącz tryb Ducha (blokuje wybieranie obiektów, kliknięcia przechodzą pod spód)'}
+                                style={{
+                                  padding: '4px',
+                                  borderRadius: '5px',
+                                  border: 'none',
+                                  backgroundColor: isGhosted ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+                                  color: isGhosted ? '#c084fc' : '#64748b',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <Ghost size={13} />
+                              </button>
+
+                              {/* Żarówka (Visibility) */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLayerVisibility(lyr.name)}
+                                title={isVisible ? 'Wyłącz warstwę z widoku' : 'Włącz warstwę w widoku'}
+                                style={{
+                                  padding: '4px',
+                                  borderRadius: '5px',
+                                  border: 'none',
+                                  backgroundColor: isVisible ? 'rgba(250, 204, 21, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                                  color: isVisible ? '#fde047' : '#94a3b8',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                {isVisible ? <Lightbulb size={13} /> : <LightbulbOff size={13} />}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Selected Layer Properties & Mass Edit */}
+                    {selectedLayerName && (() => {
+                      const layerBuildings = buildings.filter((b) => (b.layer || 'Domyślna (0)') === selectedLayerName);
+                      if (layerBuildings.length === 0) return null;
+
+                      const allIncluded = layerBuildings.every((b) => b.isIncluded !== false);
+                      const someIncluded = layerBuildings.some((b) => b.isIncluded !== false);
+                      const allTested = layerBuildings.every((b) => b.isTested);
+                      const someTested = layerBuildings.some((b) => b.isTested);
+                      const allCityCentre = layerBuildings.every((b) => b.isCityCentre);
+                      const someCityCentre = layerBuildings.some((b) => b.isCityCentre);
+                      const commonHeight = layerBuildings[0]?.defaultHeight ?? 15;
+
+                      return (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                            paddingTop: '8px',
+                            marginTop: '2px',
+                            borderTop: '1px dashed var(--border-light)',
+                          }}
+                        >
+                          <div style={{ fontSize: '10.5px', color: '#818cf8', fontWeight: 600 }}>
+                            Właściwości warstwy: <span style={{ color: '#fff' }}>{selectedLayerName}</span>
+                          </div>
+
+                          {/* Height H for all buildings on layer */}
+                          <div>
+                            <label style={{ display: 'block', fontSize: '10.5px', color: '#94a3b8', marginBottom: '3px' }}>
+                              Wysokość H dla całej warstwy (m)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.5"
+                              value={commonHeight}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                handleUpdateLayerBuildings(selectedLayerName, { defaultHeight: val });
+                              }}
+                              style={{
+                                width: '100%',
+                                backgroundColor: 'var(--bg-input)',
+                                border: '1px solid var(--border-light)',
+                                borderRadius: '6px',
+                                padding: '5px 8px',
+                                color: '#38bdf8',
+                                fontWeight: 'bold',
+                                fontFamily: 'monospace',
+                                fontSize: '12px',
+                              }}
+                            />
+                          </div>
+
+                          {/* 3 Batch Action Buttons */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateLayerBuildings(selectedLayerName, { isIncluded: !allIncluded })}
+                              className={`btn-tile ${allIncluded ? 'active-emerald' : someIncluded ? 'active-amber' : 'inactive'}`}
+                              style={{ padding: '6px 8px' }}
+                            >
+                              <span>Uwzględnij w kalkulacji</span>
+                              <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                                {allIncluded ? 'TAK (Wszystkie)' : someIncluded ? 'CZĘŚCIOWO' : 'NIE'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateLayerBuildings(selectedLayerName, { isTested: !allTested })}
+                              className={`btn-tile ${allTested ? 'active-indigo' : someTested ? 'active-amber' : 'inactive'}`}
+                              style={{ padding: '6px 8px' }}
+                            >
+                              <span>Obiekt badany (Projektowany)</span>
+                              <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                                {allTested ? 'TAK (Wszystkie)' : someTested ? 'CZĘŚCIOWO' : 'NIE'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateLayerBuildings(selectedLayerName, { isCityCentre: !allCityCentre })}
+                              className={`btn-tile ${allCityCentre ? 'active-amber' : someCityCentre ? 'active-indigo' : 'inactive'}`}
+                              style={{ padding: '6px 8px' }}
+                            >
+                              <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
+                              <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                                {allCityCentre ? 'TAK (Wszystkie)' : someCityCentre ? 'CZĘŚCIOWO' : 'NIE'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
                 {/* 2.1 Edycja Obiektu 2.5D */}
                 {selectedBuilding ? (
                   <div className="ui-card">
@@ -2007,6 +2328,7 @@ export const App: React.FC = () => {
             dimensionPendingRef={dimensionPendingRef}
             onDimensionClickEdge={handleDimensionClickEdge}
             onDeleteDimension={handleDeleteDimension}
+            layerSettings={layerSettings}
           />
         </div>
 

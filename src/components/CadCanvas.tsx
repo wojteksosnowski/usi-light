@@ -6,6 +6,7 @@ import {
   DimensionItem,
   DimensionReference,
   DimensionType,
+  CadLayerSettings,
 } from '../types/geometry';
 import {
   computeBuildingShadowEnvelope,
@@ -45,6 +46,7 @@ interface CadCanvasProps {
   dimensionPendingRef?: DimensionReference | null;
   onDimensionClickEdge?: (buildingId: string, segmentId: string) => void;
   onDeleteDimension?: (id: string) => void;
+  layerSettings?: Record<string, CadLayerSettings>;
 }
 
 export const CadCanvas: React.FC<CadCanvasProps> = ({
@@ -78,6 +80,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   dimensionPendingRef = null,
   onDimensionClickEdge,
   onDeleteDimension,
+  layerSettings = {},
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -577,6 +580,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     const selectedBldgObj = buildings.find((b) => b.id === selectedBuildingId);
 
     for (const bldg of buildings) {
+      const lyr = bldg.layer || 'Domyślna (0)';
+      const lyrSetting = layerSettings[lyr] || {};
+      if (lyrSetting.isVisible === false) continue; // Layer turned off (Żarówka)
+
+      const isGhosted = lyrSetting.isGhosted === true;
+      const isLocked = lyrSetting.isLocked === true;
       const isSelected = bldg.id === selectedBuildingId;
       const isLinkingSource = isLinkingMode && bldg.id === linkingSourceId;
       const isGroupSelected =
@@ -585,6 +594,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         bldg.groupId === selectedBldgObj.groupId;
       const isTested = bldg.isTested;
       const isIncluded = bldg.isIncluded !== false;
+
+      ctx.save();
+      if (isGhosted) {
+        ctx.globalAlpha = 0.35;
+      }
 
       ctx.beginPath();
       bldg.vertices.forEach((v, idx) => {
@@ -646,7 +660,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         ctx.font = 'bold 11px Inter, sans-serif';
         ctx.textAlign = 'center';
         const groupTag = bldg.groupId ? ' 🔗' : '';
-        ctx.fillText(`${bldg.name}${groupTag}`, sx, sy - 2);
+        const lockTag = isLocked ? ' 🔒' : '';
+        const ghostTag = isGhosted ? ' 👻' : '';
+        ctx.fillText(`${bldg.name}${groupTag}${lockTag}${ghostTag}`, sx, sy - 2);
 
         if (!isIncluded) {
           ctx.fillStyle = '#f87171';
@@ -658,6 +674,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           ctx.fillText(`H = ${bldg.defaultHeight}m ${bldg.isTested ? '• BADANY' : ''}`, sx, sy + 11);
         }
       }
+
+      ctx.restore();
 
       // Draw Normals
       if (showNormals) {
@@ -1743,6 +1761,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     dimensionType,
     dimensionPendingRef,
     dimHoveredEdge,
+    layerSettings,
     worldToScreen,
     screenToWorld,
   ]);
@@ -1850,6 +1869,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     let minDist = 1.0;
 
     for (const res of analysisResults) {
+      const bldg = buildings.find((b) => b.id === res.buildingId);
+      const lyr = bldg?.layer || 'Domyślna (0)';
+      const lyrSetting = layerSettings[lyr] || {};
+      if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
+
       const d = Math.hypot(res.point.x - world.wx, res.point.y - world.wy);
       if (d < minDist) {
         minDist = d;
@@ -1867,6 +1891,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     let minSegDist = 0.8; // meters
 
     for (const bldg of buildings) {
+      const lyr = bldg.layer || 'Domyślna (0)';
+      const lyrSetting = layerSettings[lyr] || {};
+      if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
+
       for (const seg of bldg.segments) {
         const dx = seg.p2.x - seg.p1.x;
         const dy = seg.p2.y - seg.p1.y;
@@ -1919,6 +1947,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     // Check if clicked inside a building
     let clickedBuildingId: string | null = null;
     for (const bldg of buildings) {
+      const lyr = bldg.layer || 'Domyślna (0)';
+      const lyrSetting = layerSettings[lyr] || {};
+      if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
+
       const minX = Math.min(...bldg.vertices.map((v) => v.x));
       const maxX = Math.max(...bldg.vertices.map((v) => v.x));
       const minY = Math.min(...bldg.vertices.map((v) => v.y));
@@ -1932,9 +1964,15 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
     if (e.button === 0 && clickedBuildingId) {
       onSelectBuilding(clickedBuildingId);
-      setIsDraggingBuilding(true);
-      setDragStart({ x: world.wx, y: world.wy });
-      onInteractionChange?.(true);
+      const clickedBldg = buildings.find((b) => b.id === clickedBuildingId);
+      const lyr = clickedBldg?.layer || 'Domyślna (0)';
+      const isLocked = layerSettings[lyr]?.isLocked === true;
+
+      if (!isLocked) {
+        setIsDraggingBuilding(true);
+        setDragStart({ x: world.wx, y: world.wy });
+        onInteractionChange?.(true);
+      }
     } else {
       setIsPanning(true);
       setDragStart({ x: sx, y: sy });
@@ -1958,6 +1996,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       let closestSeg: { buildingId: string; segmentId: string } | null = null;
       let minSegDist = 1.2; // 1.2m tolerance
       for (const bldg of buildings) {
+        const lyr = bldg.layer || 'Domyślna (0)';
+        const lyrSetting = layerSettings[lyr] || {};
+        if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
+
         for (const seg of bldg.segments) {
           const dx = seg.p2.x - seg.p1.x;
           const dy = seg.p2.y - seg.p1.y;
@@ -1981,7 +2023,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     // Check edge hover in edit mode
     if (isEditMode && selectedBuildingId) {
       const bldg = buildings.find((b) => b.id === selectedBuildingId);
-      if (bldg && bldg.vertices.length >= 3) {
+      const lyr = bldg?.layer || 'Domyślna (0)';
+      const isLocked = layerSettings[lyr]?.isLocked === true;
+
+      if (bldg && bldg.vertices.length >= 3 && !isLocked) {
         let closestEdgeIdx: number | null = null;
         let minEdgeDist = 1.0; // 1 meter hover tolerance
         for (let i = 0; i < bldg.vertices.length; i++) {
@@ -2005,6 +2050,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         } else {
           setHoveredEdge(null);
         }
+      } else {
+        if (hoveredEdge) setHoveredEdge(null);
       }
     } else {
       if (hoveredEdge) setHoveredEdge(null);

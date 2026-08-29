@@ -139,3 +139,10 @@ export interface DimensionItem {
   ref2: DimensionReference;
 }
 
+export interface CadLayerSettings {
+  isLocked?: boolean; // Kłódka: blocks moving and editing
+  isGhosted?: boolean; // Duch: blocks selection, passes clicks through
+  isVisible?: boolean; // Żarówka: CAD visibility
+}
+
+
