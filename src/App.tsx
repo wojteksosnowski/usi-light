@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
-import { BuildingLoop, AnalysisPointResult, ProjectSettings } from './types/geometry';
+import { BuildingLoop, AnalysisPointResult, ProjectSettings, Point2D } from './types/geometry';
 import {
   createSampleBuildings,
+  createBuildingFromVertices,
   parseDxfWithMetadata,
   DxfUnitOption,
   DxfUnitInfo,
@@ -12,8 +13,12 @@ import {
   runFullAnalysis,
   analyzeShadowingAtPoint,
   analyzeSunlightAtPoint,
+  analyzeSunlightAtPointSegments,
   AnalysisAccuracyOptions,
 } from './engine/analysisEngine';
+import { parseGoogleMapsCoordinates } from './utils/geoParser';
+import { offsetPolygonEdge, updateBuildingWithNewVertices } from './utils/math2d';
+
 import {
   Sun,
   Shield,
@@ -24,15 +29,27 @@ import {
   Building,
   CheckCircle2,
   AlertTriangle,
-  Move,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  FolderKanban,
+  Box,
   Maximize2,
   Sliders,
   Activity,
   MapPin,
   Timer,
   Zap,
+  Link,
+  Link2,
+  Unlink,
+  Wrench,
+  Copy,
+  Trash2,
+  Square,
+  PenTool,
+  Edit3,
+  X,
 } from 'lucide-react';
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
@@ -44,6 +61,21 @@ export const App: React.FC = () => {
   const [activePointMode, setActivePointMode] = useState<'shadowing' | 'sunlight'>('shadowing');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [fitKey, setFitKey] = useState<number>(0);
+
+  // Collapsible Sidebar Groups State
+  const [isProjectGroupOpen, setIsProjectGroupOpen] = useState<boolean>(true);
+  const [isModelingGroupOpen, setIsModelingGroupOpen] = useState<boolean>(true);
+
+  // Grouping / Linking mode state
+  const [isLinkingMode, setIsLinkingMode] = useState<boolean>(false);
+  const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
+
+  // Drawing Tools State (Rectangle & Polyline)
+  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline'>('none');
+  const [drawingVerticesCount, setDrawingVerticesCount] = useState<number>(0);
+
+  // Edge Parallel Editing Mode State
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
 
   // Dynamic Variable Accuracy State (Live vs Stillness Progressive Refinement)
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
@@ -64,6 +96,32 @@ export const App: React.FC = () => {
   ];
 
   const [selectedCity, setSelectedCity] = useState<string>('Warszawa');
+  const [mapsInput, setMapsInput] = useState<string>('');
+  const [mapsParseError, setMapsParseError] = useState<boolean>(false);
+
+  const handleMapsInputChange = (val: string) => {
+    setMapsInput(val);
+    if (!val.trim()) {
+      setMapsParseError(false);
+      return;
+    }
+    const parsed = parseGoogleMapsCoordinates(val);
+    if (parsed) {
+      setMapsParseError(false);
+      const matchingCity = POLISH_CITIES.find(
+        (c) => Math.abs(c.lat - parsed.latitude) < 0.05 && Math.abs(c.lon - parsed.longitude) < 0.05
+      );
+      const cityName = parsed.label || matchingCity?.name || `Lokalizacja (${parsed.latitude.toFixed(2)}°N)`;
+      setSelectedCity(cityName);
+      setSettings((prev) => ({
+        ...prev,
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+      }));
+    } else {
+      setMapsParseError(true);
+    }
+  };
 
   // Settings
   const [settings, setSettings] = useState<ProjectSettings>({
@@ -78,6 +136,10 @@ export const App: React.FC = () => {
   const [showNormals, setShowNormals] = useState<boolean>(false);
   const [showShadowingLines, setShowShadowingLines] = useState<boolean>(true);
   const [showSunlightLines, setShowSunlightLines] = useState<boolean>(true);
+  const [showShadowRange, setShowShadowRange] = useState<boolean>(true);
+
+  // Metoda obliczania nasłonecznienia § 56
+  const [sunlightMethod, setSunlightMethod] = useState<'raycasting' | 'segments'>('raycasting');
 
   // Progressive Accuracy Refinement Effect
   // When interacting/moving: use fast low-resolution mesh (1.5m).
@@ -125,12 +187,13 @@ export const App: React.FC = () => {
 
   // Run Calculation with Variable Precision
   const analysisOutput = useMemo(() => {
-    return runFullAnalysis(buildings, settings, currentAccuracyOptions);
-  }, [buildings, settings, currentAccuracyOptions]);
+    return runFullAnalysis(buildings, settings, currentAccuracyOptions, sunlightMethod);
+  }, [buildings, settings, currentAccuracyOptions, sunlightMethod]);
 
   const analysisResults = analysisOutput.results;
   const avgShadowingMs = analysisOutput.avgShadowingMs;
   const avgSunlightMs = analysisOutput.avgSunlightMs;
+  const avgSunlightSegMs = analysisOutput.avgSunlightSegMs;
 
   const [selectedPointKey, setSelectedPointKey] = useState<{
     buildingId: string;
@@ -154,23 +217,20 @@ export const App: React.FC = () => {
     };
 
     const shadowRes = analyzeShadowingAtPoint(
-      exactPoint,
-      seg,
-      r,
-      buildings,
-      bldg.id,
+      exactPoint, seg, r, buildings, bldg.id,
       currentAccuracyOptions.angleStepDeg
     );
 
-    const sunRes = analyzeSunlightAtPoint(
-      exactPoint,
-      seg,
-      r,
-      buildings,
-      bldg.id,
-      settings,
-      currentAccuracyOptions.sunlightStepMinutes
-    );
+    const sunRes =
+      sunlightMethod === 'segments'
+        ? analyzeSunlightAtPointSegments(
+            exactPoint, seg, r, buildings, bldg.id, settings,
+            currentAccuracyOptions.sunlightStepMinutes
+          )
+        : analyzeSunlightAtPoint(
+            exactPoint, seg, r, buildings, bldg.id, settings,
+            currentAccuracyOptions.sunlightStepMinutes
+          );
 
     return {
       id: `pinned-${bldg.id}-${seg.id}-${r.toFixed(4)}`,
@@ -181,34 +241,88 @@ export const App: React.FC = () => {
       shadowing: shadowRes,
       sunlight: sunRes,
     };
-  }, [selectedPointKey, buildings, settings, currentAccuracyOptions]);
+  }, [selectedPointKey, buildings, settings, currentAccuracyOptions, sunlightMethod]);
 
-  // Overall Statistics
-  const stats = useMemo(() => {
-    const total = analysisResults.length;
-    if (total === 0) return { total: 0, compliant12: 0, compliant56: 0, pct12: 100, pct56: 100 };
-
-    const c12 = analysisResults.filter((r) => r.shadowing.isCompliant).length;
-    const c56 = analysisResults.filter((r) => r.sunlight.isCompliant).length;
-
-    return {
-      total,
-      compliant12: c12,
-      compliant56: c56,
-      pct12: Math.round((c12 / total) * 100),
-      pct56: Math.round((c56 / total) * 100),
-    };
-  }, [analysisResults]);
 
   // Selected building object
   const selectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
 
-  // Move building handler
+  // Link two buildings together into a shared movement group
+  const performLinkBuildings = (id1: string, id2: string) => {
+    if (id1 === id2) return;
+    setBuildings((prev) => {
+      const b1 = prev.find((b) => b.id === id1);
+      const b2 = prev.find((b) => b.id === id2);
+      if (!b1 || !b2) return prev;
+
+      const newGroupId = b1.groupId || b2.groupId || `group-${Date.now()}`;
+      const oldGroupId1 = b1.groupId;
+      const oldGroupId2 = b2.groupId;
+
+      return prev.map((b) => {
+        if (
+          b.id === id1 ||
+          b.id === id2 ||
+          (oldGroupId1 && b.groupId === oldGroupId1) ||
+          (oldGroupId2 && b.groupId === oldGroupId2)
+        ) {
+          return { ...b, groupId: newGroupId };
+        }
+        return b;
+      });
+    });
+  };
+
+  // Remove a building from its linked group
+  const performUnlinkBuilding = (id: string) => {
+    setBuildings((prev) => {
+      const target = prev.find((b) => b.id === id);
+      if (!target || !target.groupId) return prev;
+
+      const remainingInGroup = prev.filter((b) => b.groupId === target.groupId && b.id !== id);
+      return prev.map((b) => {
+        if (b.id === id) {
+          return { ...b, groupId: undefined };
+        }
+        // If only 1 building remains, dissolve the group
+        if (remainingInGroup.length <= 1 && b.groupId === target.groupId) {
+          return { ...b, groupId: undefined };
+        }
+        return b;
+      });
+    });
+  };
+
+  // Dissolve an entire linked group
+  const performUnlinkAllInGroup = (groupId: string) => {
+    setBuildings((prev) =>
+      prev.map((b) => (b.groupId === groupId ? { ...b, groupId: undefined } : b))
+    );
+  };
+
+  // Select building or perform linking if linking mode is active
+  const handleSelectBuilding = (id: string | null) => {
+    if (isLinkingMode && linkingSourceId && id && id !== linkingSourceId) {
+      performLinkBuildings(linkingSourceId, id);
+      setIsLinkingMode(false);
+      setLinkingSourceId(null);
+      setSelectedBuildingId(id);
+      return;
+    }
+    setSelectedBuildingId(id);
+  };
+
+  // Move building handler (moves target building and all linked buildings in the same group)
   const handleBuildingMove = (id: string, dx: number, dy: number) => {
     if (!isInteracting) setIsInteracting(true);
-    setBuildings((prev) =>
-      prev.map((bldg) => {
-        if (bldg.id !== id) return bldg;
+    setBuildings((prev) => {
+      const targetBldg = prev.find((b) => b.id === id);
+      const targetGroupId = targetBldg?.groupId;
+
+      return prev.map((bldg) => {
+        const shouldMove = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
+        if (!shouldMove) return bldg;
+
         const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
         const newSegments = bldg.segments.map((s) => ({
           ...s,
@@ -220,6 +334,98 @@ export const App: React.FC = () => {
           vertices: newVertices,
           segments: newSegments,
         };
+      });
+    });
+  };
+
+  // Duplicate building handler
+  const handleDuplicateBuilding = (id: string) => {
+    const source = buildings.find((b) => b.id === id);
+    if (!source) return;
+
+    const offset = 5.0; // 5 meters offset so duplicate is clearly distinct and draggable
+    const newId = `bldg-${Date.now()}`;
+    const newName = `${source.name} (Kopia)`;
+
+    const newVertices = source.vertices.map((v) => ({
+      x: v.x + offset,
+      y: v.y - offset,
+    }));
+
+    const newSegments = source.segments.map((s, idx) => ({
+      ...s,
+      id: `${newId}-seg-${idx + 1}`,
+      p1: { x: s.p1.x + offset, y: s.p1.y - offset },
+      p2: { x: s.p2.x + offset, y: s.p2.y - offset },
+    }));
+
+    const duplicate: BuildingLoop = {
+      ...source,
+      id: newId,
+      name: newName,
+      vertices: newVertices,
+      segments: newSegments,
+      groupId: undefined, // New independent copy
+    };
+
+    setBuildings((prev) => [...prev, duplicate]);
+    setSelectedBuildingId(newId);
+    setSelectedPointKey(null);
+  };
+
+  // Delete building handler
+  const handleDeleteBuilding = (id: string) => {
+    setBuildings((prev) => {
+      const target = prev.find((b) => b.id === id);
+      const remaining = prev.filter((b) => b.id !== id);
+
+      // Clean up group if only 1 building remains
+      if (target?.groupId) {
+        const remainingInGroup = remaining.filter((b) => b.groupId === target.groupId);
+        if (remainingInGroup.length <= 1) {
+          return remaining.map((b) =>
+            b.groupId === target.groupId ? { ...b, groupId: undefined } : b
+          );
+        }
+      }
+      return remaining;
+    });
+
+    if (selectedBuildingId === id) {
+      setSelectedBuildingId(null);
+      setSelectedPointKey(null);
+    }
+  };
+
+  // Finish drawing new building from canvas (Rectangle / Polyline)
+  const handleFinishDrawing = (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => {
+    if (vertices.length < 3) return;
+    const defaultHeight = 15.0;
+    const count = buildings.length + 1;
+    const namePrefix = shapeType === 'rectangle' ? `Budynek (Prostokąt ${count})` : `Budynek (Polilinia ${count})`;
+    const newBldg = createBuildingFromVertices(vertices, namePrefix, defaultHeight, false);
+
+    setBuildings((prev) => [...prev, newBldg]);
+    setSelectedBuildingId(newBldg.id);
+    setSelectedPointKey(null);
+    setDrawingMode('none');
+    setDrawingVerticesCount(0);
+  };
+
+  // Cancel active drawing mode
+  const handleCancelDrawing = () => {
+    setDrawingMode('none');
+    setDrawingVerticesCount(0);
+  };
+
+  // Handle edge parallel offset move
+  const handleBuildingEdgeMove = (buildingId: string, edgeIndex: number, dx: number, dy: number) => {
+    if (!isInteracting) setIsInteracting(true);
+    setBuildings((prev) =>
+      prev.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const newVerts = offsetPolygonEdge(bldg.vertices, edgeIndex, { x: dx, y: dy });
+        return updateBuildingWithNewVertices(bldg, newVerts);
       })
     );
   };
@@ -335,467 +541,862 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        {/* Scrollable Body */}
+        {/* Scrollable Body with Collapsible Groups */}
         <div className="sidebar-body custom-scrollbar">
-          {/* Section: Zbiorczy Bilans Zgodności */}
-          <div className="ui-card">
-            <div className="ui-title">
-              <span>Bilans Zgodności</span>
-              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 'normal' }}>
-                {stats.total} pkt pomiarowych
-              </span>
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              {/* § 12 Card */}
-              <div
-                style={{
-                  padding: '12px',
-                  borderRadius: '10px',
-                  backgroundColor: stats.pct12 === 100 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(244, 63, 94, 0.1)',
-                  border: `1px solid ${stats.pct12 === 100 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#e2e8f0' }}>
-                    <Shield size={14} color="#34d399" />
-                    <span>§ 12 Przesłan.</span>
+          {/* ========================================================================= */}
+          {/* GRUPA 1: PROJEKT, RZUT I WARSTWY                                          */}
+          {/* (Lokalizacja, Jednostki DXF, Wgraj plik DXF & Załaduj scenę, Warstwy)     */}
+          {/* ========================================================================= */}
+          <div className="sidebar-group">
+            <button
+              type="button"
+              className="sidebar-group-header"
+              onClick={() => setIsProjectGroupOpen(!isProjectGroupOpen)}
+              title="Zwiń / rozwiń grupę: Projekt, Rzut i Warstwy"
+            >
+              <div className="sidebar-group-title">
+                <FolderKanban size={15} color="#f59e0b" />
+                <span>Projekt, Rzut i Warstwy</span>
+              </div>
+              {isProjectGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
+            </button>
+
+            {isProjectGroupOpen && (
+              <div className="sidebar-group-content">
+                {/* 1.1 Lokalizacja (Kąt słońca § 56) */}
+                <div className="ui-card">
+                  <div className="ui-title">
+                    <span>Lokalizacja (Kąt słońca § 56)</span>
+                    <MapPin size={14} color="#f59e0b" />
                   </div>
-                  {stats.pct12 === 100 ? (
-                    <CheckCircle2 size={14} color="#34d399" />
-                  ) : (
-                    <AlertTriangle size={14} color="#fb7185" />
-                  )}
-                </div>
-                <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
-                  {stats.pct12}%
-                </div>
-                <div style={{ width: '100%', height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', overflow: 'hidden' }}>
-                  <div style={{ width: `${stats.pct12}%`, height: '100%', backgroundColor: '#10b981', transition: 'width 0.3s' }} />
-                </div>
-                <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '6px' }}>
-                  Zgodne: <b>{stats.compliant12}</b> / {stats.total}
-                </div>
-              </div>
 
-              {/* § 56 Card */}
-              <div
-                style={{
-                  padding: '12px',
-                  borderRadius: '10px',
-                  backgroundColor: stats.pct56 >= 80 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(244, 63, 94, 0.1)',
-                  border: `1px solid ${stats.pct56 >= 80 ? 'rgba(245, 158, 11, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#e2e8f0' }}>
-                    <Sun size={14} color="#fbbf24" />
-                    <span>§ 56 Nasłon.</span>
-                  </div>
-                  {stats.pct56 >= 80 ? (
-                    <CheckCircle2 size={14} color="#fbbf24" />
-                  ) : (
-                    <AlertTriangle size={14} color="#fb7185" />
-                  )}
-                </div>
-                <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
-                  {stats.pct56}%
-                </div>
-                <div style={{ width: '100%', height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', overflow: 'hidden' }}>
-                  <div style={{ width: `${stats.pct56}%`, height: '100%', backgroundColor: '#f59e0b', transition: 'width 0.3s' }} />
-                </div>
-                <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '6px' }}>
-                  Zgodne: <b>{stats.compliant56}</b> / {stats.total}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section: Lokalizacja / Miasto (Słońce § 56) */}
-          <div className="ui-card">
-            <div className="ui-title">
-              <span>Lokalizacja (Kąt słońca § 56)</span>
-              <MapPin size={14} color="#f59e0b" />
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(5, 1fr)',
-                  gap: '4px',
-                  backgroundColor: 'var(--bg-input)',
-                  padding: '4px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-light)',
-                }}
-              >
-                {POLISH_CITIES.map((city) => {
-                  const isActive = selectedCity === city.name;
-                  return (
-                    <button
-                      key={city.name}
-                      type="button"
-                      onClick={() => {
-                        setSelectedCity(city.name);
-                        setSettings((prev) => ({
-                          ...prev,
-                          latitude: city.lat,
-                          longitude: city.lon,
-                        }));
-                      }}
-                      style={{
-                        padding: '6px 2px',
-                        fontSize: '11px',
-                        fontWeight: isActive ? 700 : 500,
-                        borderRadius: '6px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        backgroundColor: isActive ? '#f59e0b' : 'transparent',
-                        color: isActive ? '#000000' : 'var(--text-secondary)',
-                      }}
-                      title={`${city.name} (${city.lat}° N, ${city.lon}° E)`}
-                    >
-                      {city.name}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Coordinates info pill */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '11px',
-                  color: '#94a3b8',
-                  padding: '6px 10px',
-                  borderRadius: '8px',
-                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                  border: '1px solid rgba(245, 158, 11, 0.2)',
-                }}
-              >
-                <span>Współrzędne:</span>
-                <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
-                  {settings.latitude.toFixed(2)}° N, {settings.longitude.toFixed(2)}° E
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section: Przełączniki warstw */}
-          <div className="ui-card">
-            <div className="ui-title">
-              <span>Warstwy analityczne</span>
-              <Layers size={14} color="#818cf8" />
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => setShowShadowingLines(!showShadowingLines)}
-                className={`btn-tile ${showShadowingLines ? 'active-emerald' : 'inactive'}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showShadowingLines ? '#34d399' : '#64748b' }} />
-                  <span>Przesłanianie § 12 (Wewnętrzny obrys)</span>
-                </div>
-                <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowingLines ? 'WŁ' : 'WYŁ'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowSunlightLines(!showSunlightLines)}
-                className={`btn-tile ${showSunlightLines ? 'active-amber' : 'inactive'}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showSunlightLines ? '#fbbf24' : '#64748b' }} />
-                  <span>Nasłonecznienie § 56 (Zewnętrzny pas)</span>
-                </div>
-                <span style={{ fontSize: '10px', fontWeight: 700 }}>{showSunlightLines ? 'WŁ' : 'WYŁ'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowNormals(!showNormals)}
-                className={`btn-tile ${showNormals ? 'active-indigo' : 'inactive'}`}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showNormals ? '#818cf8' : '#64748b' }} />
-                  <span>Wektory normalne fasad (Zwrot ścian)</span>
-                </div>
-                <span style={{ fontSize: '10px', fontWeight: 700 }}>{showNormals ? 'WŁ' : 'WYŁ'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Section: Parametry zaznaczonego obiektu */}
-          {selectedBuilding ? (
-            <div className="ui-card">
-              <div className="ui-title">
-                <span>Edycja Obiektu 2.5D</span>
-                <Building size={14} color="#818cf8" />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa bryły</label>
-                  <input
-                    type="text"
-                    value={selectedBuilding.name}
-                    onChange={(e) => updateSelectedBuilding({ name: e.target.value })}
-                    style={{
-                      width: '100%',
-                      backgroundColor: 'var(--bg-input)',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: '8px',
-                      padding: '7px 10px',
-                      color: '#fff',
-                      fontSize: '12px',
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '10px' }}>
-                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Wysokość przesłaniania H (m)</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={selectedBuilding.defaultHeight}
-                    onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
-                    style={{
-                      width: '100%',
-                      backgroundColor: 'var(--bg-input)',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: '8px',
-                      padding: '7px 10px',
-                      color: '#fff',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                    }}
-                  />
-                </div>
-
-                {/* Real-world metric dimensions display */}
-                {(() => {
-                  const xs = selectedBuilding.vertices.map((v) => v.x);
-                  const ys = selectedBuilding.vertices.map((v) => v.y);
-                  const w = Math.max(...xs) - Math.min(...xs);
-                  const h = Math.max(...ys) - Math.min(...ys);
-                  const perimeter = selectedBuilding.segments.reduce((sum, s) => sum + s.length, 0);
-                  const isHuge = w > 200 || h > 200;
-
-                  return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* Google Maps link / Coordinates input */}
                     <div
                       style={{
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        backgroundColor: isHuge ? 'rgba(244, 63, 94, 0.15)' : 'rgba(15, 23, 42, 0.7)',
-                        border: `1px solid ${isHuge ? 'rgba(244, 63, 94, 0.35)' : 'var(--border-light)'}`,
-                        fontSize: '11px',
                         display: 'flex',
-                        flexDirection: 'column',
-                        gap: '3px',
+                        alignItems: 'center',
+                        gap: '6px',
+                        backgroundColor: 'var(--bg-input)',
+                        padding: '6px 8px',
+                        borderRadius: '8px',
+                        border: `1px solid ${mapsParseError ? 'rgba(244, 63, 94, 0.5)' : 'var(--border-light)'}`,
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: '#94a3b8' }}>Rzut (Szer × Głęb):</span>
-                        <b style={{ color: isHuge ? '#fca5a5' : '#38bdf8', fontFamily: 'monospace' }}>
-                          {w.toFixed(2)} m × {h.toFixed(2)} m
-                        </b>
+                      <Link size={13} color={mapsParseError ? '#f43f5e' : '#f59e0b'} style={{ flexShrink: 0 }} />
+                      <input
+                        type="text"
+                        value={mapsInput}
+                        onChange={(e) => handleMapsInputChange(e.target.value)}
+                        placeholder="Wklej link Google Maps / współrzędne..."
+                        style={{
+                          flex: 1,
+                          background: 'transparent',
+                          border: 'none',
+                          outline: 'none',
+                          fontSize: '11px',
+                          color: '#f8fafc',
+                          minWidth: 0,
+                        }}
+                        title="Wklej link z Google Maps lub współrzędne (np. 52.23, 21.01)"
+                      />
+                      {mapsInput && (
+                        <button
+                          type="button"
+                          onClick={() => handleMapsInputChange('')}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#94a3b8',
+                            cursor: 'pointer',
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                          title="Wyczyść"
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+                    {mapsParseError && (
+                      <div style={{ fontSize: '10px', color: '#f43f5e', paddingLeft: '4px' }}>
+                        Nie rozpoznano współrzędnych. Wklej link lub np. 52.23, 21.01
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: '#94a3b8' }}>Obwód fasad:</span>
-                        <span style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>{perimeter.toFixed(2)} m</span>
+                    )}
+
+                    {/* Quick City Presets */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(5, 1fr)',
+                        gap: '4px',
+                        backgroundColor: 'var(--bg-input)',
+                        padding: '4px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-light)',
+                      }}
+                    >
+                      {POLISH_CITIES.map((city) => {
+                        const isActive = selectedCity === city.name;
+                        return (
+                          <button
+                            key={city.name}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCity(city.name);
+                              setMapsInput('');
+                              setMapsParseError(false);
+                              setSettings((prev) => ({
+                                ...prev,
+                                latitude: city.lat,
+                                longitude: city.lon,
+                              }));
+                            }}
+                            style={{
+                              padding: '6px 2px',
+                              fontSize: '11px',
+                              fontWeight: isActive ? 700 : 500,
+                              borderRadius: '6px',
+                              border: 'none',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              backgroundColor: isActive ? '#f59e0b' : 'transparent',
+                              color: isActive ? '#000000' : 'var(--text-secondary)',
+                            }}
+                            title={`${city.name} (${city.lat}° N, ${city.lon}° E)`}
+                          >
+                            {city.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Coordinates info pill */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: '11px',
+                        color: '#94a3b8',
+                        padding: '6px 10px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                        border: '1px solid rgba(245, 158, 11, 0.2)',
+                      }}
+                    >
+                      <span>Współrzędne:</span>
+                      <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
+                        {settings.latitude.toFixed(4)}° N, {settings.longitude.toFixed(4)}° E
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1.2 Jednostki DXF / Skala */}
+                <div className="ui-card">
+                  <div className="ui-title">
+                    <span>Jednostki DXF / Skala</span>
+                    <Sliders size={14} color="#818cf8" />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                      Jednostka rysunku DXF:
+                    </div>
+
+                    {/* Unit Selector Segmented Buttons */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(5, 1fr)',
+                        gap: '4px',
+                        backgroundColor: 'var(--bg-input)',
+                        padding: '4px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-light)',
+                      }}
+                    >
+                      {(
+                        [
+                          { id: 'auto', label: 'Auto' },
+                          { id: 'm', label: 'm' },
+                          { id: 'dm', label: 'dm' },
+                          { id: 'cm', label: 'cm' },
+                          { id: 'mm', label: 'mm' },
+                        ] as const
+                      ).map((tab) => {
+                        const isActive = dxfUnit === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => handleDxfUnitChange(tab.id)}
+                            style={{
+                              padding: '6px 2px',
+                              fontSize: '11px',
+                              fontWeight: isActive ? 700 : 500,
+                              borderRadius: '6px',
+                              border: 'none',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              backgroundColor: isActive ? 'var(--accent-indigo)' : 'transparent',
+                              color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                            }}
+                            title={
+                              tab.id === 'auto'
+                                ? 'Automatyczne wykrywanie jednostki z nagłówka $INSUNITS lub skali geometrii'
+                                : `Wymuś skalę: 1 jednostka DXF = 1 ${tab.id}`
+                            }
+                          >
+                            {tab.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Status / Active Info Banner */}
+                    {dxfImportInfo ? (
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                          border: '1px solid rgba(99, 102, 241, 0.3)',
+                          fontSize: '11px',
+                          color: '#cbd5e1',
+                          lineHeight: '1.4',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontWeight: 600,
+                            color: '#e0e7ff',
+                            marginBottom: '2px',
+                          }}
+                        >
+                          <span>Skala importu:</span>
+                          <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                            {dxfImportInfo.unitName}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          {dxfImportInfo.source}
+                        </div>
                       </div>
-                      {isHuge && (
-                        <div style={{ fontSize: '10px', color: '#fda4af', marginTop: '2px' }}>
-                          ⚠️ Bardzo duży rzut ({w.toFixed(0)}m)! Jeśli budynek miał mieć np. 10m, zmień jednostkę DXF na <b>cm</b> lub <b>mm</b>.
+                    ) : (
+                      <div style={{ fontSize: '10px', color: '#64748b', lineHeight: '1.3' }}>
+                        {dxfUnit === 'auto'
+                          ? 'Automatycznie odczytuje $INSUNITS z pliku DXF lub dopasowuje skalę (mm/cm/m).'
+                          : `Wymuszenie: 1 jednostka = ${
+                              dxfUnit === 'm'
+                                ? '1 metr (1.0)'
+                                : dxfUnit === 'cm'
+                                ? '1 centymetr (0.01 m)'
+                                : '1 milimetr (0.001 m)'
+                            }.`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 1.3 Przyciski Wgraj plik DXF i Załaduj Scenę */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label className="btn-primary" style={{ margin: 0 }}>
+                    <Upload size={16} />
+                    <span>Wgraj plik DXF</span>
+                    <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuildings(createSampleBuildings());
+                      setSelectedBuildingId('bldg-1');
+                      setSelectedPointKey(null);
+                      setLastDxfText(null);
+                      setDxfImportInfo(null);
+                      setFitKey((prev) => prev + 1);
+                    }}
+                    className="btn-secondary"
+                  >
+                    <RotateCcw size={15} />
+                    <span>Załaduj scenę wzorcową</span>
+                  </button>
+                </div>
+
+                {/* 1.4 Warstwy analityczne */}
+                <div className="ui-card">
+                  <div className="ui-title">
+                    <span>Warstwy analityczne</span>
+                    <Layers size={14} color="#818cf8" />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowShadowingLines(!showShadowingLines)}
+                      className={`btn-tile ${showShadowingLines ? 'active-emerald' : 'inactive'}`}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showShadowingLines ? '#34d399' : '#64748b' }} />
+                        <span>Przesłanianie § 12 (Wewnętrzny obrys)</span>
+                      </div>
+                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowingLines ? 'WŁ' : 'WYŁ'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowSunlightLines(!showSunlightLines)}
+                      className={`btn-tile ${showSunlightLines ? 'active-amber' : 'inactive'}`}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showSunlightLines ? '#fbbf24' : '#64748b' }} />
+                        <span>Nasłonecznienie § 56 (Zewnętrzny pas)</span>
+                      </div>
+                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showSunlightLines ? 'WŁ' : 'WYŁ'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowNormals(!showNormals)}
+                      className={`btn-tile ${showNormals ? 'active-indigo' : 'inactive'}`}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showNormals ? '#818cf8' : '#64748b' }} />
+                        <span>Wektory normalne fasad (Zwrot ścian)</span>
+                      </div>
+                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showNormals ? 'WŁ' : 'WYŁ'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowShadowRange(!showShadowRange)}
+                      className={`btn-tile ${showShadowRange ? 'active-indigo' : 'inactive'}`}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showShadowRange ? '#a5b4fc' : '#64748b' }} />
+                        <span>Zakres cienia (Obwiednia obiektów badanych)</span>
+                      </div>
+                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowRange ? 'WŁ' : 'WYŁ'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+
+          {/* ========================================================================= */}
+          {/* GRUPA 2: OBIEKTY I NARZĘDZIA                                              */}
+          {/* (Edycja Obiektu 2.5D, Narzędzia)                                          */}
+          {/* ========================================================================= */}
+          <div className="sidebar-group">
+            <button
+              type="button"
+              className="sidebar-group-header"
+              onClick={() => setIsModelingGroupOpen(!isModelingGroupOpen)}
+              title="Zwiń / rozwiń grupę: Obiekty i Narzędzia"
+            >
+              <div className="sidebar-group-title">
+                <Box size={15} color="#818cf8" />
+                <span>Obiekty i Narzędzia</span>
+              </div>
+              {isModelingGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
+            </button>
+
+            {isModelingGroupOpen && (
+              <div className="sidebar-group-content">
+                {/* 2.1 Edycja Obiektu 2.5D */}
+                {selectedBuilding ? (
+                  <div className="ui-card">
+                    <div className="ui-title">
+                      <span>Edycja Obiektu 2.5D</span>
+                      <Building size={14} color="#818cf8" />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa bryły</label>
+                        <input
+                          type="text"
+                          value={selectedBuilding.name}
+                          onChange={(e) => updateSelectedBuilding({ name: e.target.value })}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-light)',
+                            borderRadius: '8px',
+                            padding: '7px 10px',
+                            color: '#fff',
+                            fontSize: '12px',
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ marginBottom: '10px' }}>
+                        <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Wysokość przesłaniania H (m)</label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          value={selectedBuilding.defaultHeight}
+                          onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-light)',
+                            borderRadius: '8px',
+                            padding: '7px 10px',
+                            color: '#fff',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                          }}
+                        />
+                      </div>
+
+                      {/* Real-world metric dimensions display */}
+                      {(() => {
+                        const xs = selectedBuilding.vertices.map((v) => v.x);
+                        const ys = selectedBuilding.vertices.map((v) => v.y);
+                        const w = Math.max(...xs) - Math.min(...xs);
+                        const h = Math.max(...ys) - Math.min(...ys);
+                        const perimeter = selectedBuilding.segments.reduce((sum, s) => sum + s.length, 0);
+                        const isHuge = w > 200 || h > 200;
+
+                        return (
+                          <div
+                            style={{
+                              padding: '8px 10px',
+                              borderRadius: '8px',
+                              backgroundColor: isHuge ? 'rgba(244, 63, 94, 0.15)' : 'rgba(15, 23, 42, 0.7)',
+                              border: `1px solid ${isHuge ? 'rgba(244, 63, 94, 0.35)' : 'var(--border-light)'}`,
+                              fontSize: '11px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '3px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ color: '#94a3b8' }}>Rzut (Szer × Głęb):</span>
+                              <b style={{ color: isHuge ? '#fca5a5' : '#38bdf8', fontFamily: 'monospace' }}>
+                                {w.toFixed(2)} m × {h.toFixed(2)} m
+                              </b>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ color: '#94a3b8' }}>Obwód fasad:</span>
+                              <span style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>{perimeter.toFixed(2)} m</span>
+                            </div>
+                            {isHuge && (
+                              <div style={{ fontSize: '10px', color: '#fda4af', marginTop: '2px' }}>
+                                ⚠️ Bardzo duży rzut ({w.toFixed(0)}m)! Jeśli budynek miał mieć np. 10m, zmień jednostkę DXF na <b>cm</b> lub <b>mm</b>.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Status Toggle Buttons */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
+                          className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
+                        >
+                          <span>Uwzględnij w kalkulacji</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
+                          className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
+                        >
+                          <span>Obiekt badany (Projektowany)</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
+                          className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
+                        >
+                          <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="ui-card" style={{ textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
+                    Kliknij dowolny budynek na rzucie CAD, aby edytować jego parametry.
+                  </div>
+                )}
+
+                {/* 2.2 Narzędzia */}
+                <div className="ui-card">
+                  <div className="ui-title">
+                    <span>Narzędzia</span>
+                    <Wrench size={14} color="#818cf8" />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {/* 1. Object Creation Tools */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
+                        Tworzenie nowych obiektów:
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
+                            setDrawingVerticesCount(0);
+                          }}
+                          className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
+                          style={{ justifyContent: 'center', gap: '6px', padding: '9px 8px' }}
+                          title="Rysuj nowy prostokąt: 1. kliknięcie = start, 2. kliknięcie = koniec"
+                        >
+                          <Square size={13} />
+                          <span style={{ fontWeight: 600 }}>Prostokąt</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
+                            setDrawingVerticesCount(0);
+                          }}
+                          className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
+                          style={{ justifyContent: 'center', gap: '6px', padding: '9px 8px' }}
+                          title="Rysuj nową zamkniętą polilinię wieloboczną"
+                        >
+                          <PenTool size={13} />
+                          <span style={{ fontWeight: 600 }}>Polilinia</span>
+                        </button>
+                      </div>
+
+                      {/* Active Drawing Guide Prompt */}
+                      {drawingMode === 'rectangle' && (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                            border: '1px solid rgba(99, 102, 241, 0.4)',
+                            fontSize: '11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                          }}
+                        >
+                          <div style={{ color: '#a5b4fc', fontWeight: 600 }}>
+                            {drawingVerticesCount === 0
+                              ? 'Kliknij w oknie CAD, aby wstawić 1. narożnik prostokąta.'
+                              : 'Kliknij 2. punkt, aby zakończyć tworzenie prostokąta.'}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleCancelDrawing}
+                            style={{
+                              marginTop: '2px',
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: '1px solid rgba(244, 63, 94, 0.4)',
+                              backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                              color: '#fca5a5',
+                              fontSize: '10.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Anuluj rysowanie (Esc)
+                          </button>
+                        </div>
+                      )}
+
+                      {drawingMode === 'polyline' && (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                            border: '1px solid rgba(99, 102, 241, 0.4)',
+                            fontSize: '11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                          }}
+                        >
+                          <div style={{ color: '#a5b4fc', fontWeight: 600 }}>
+                            {drawingVerticesCount === 0
+                              ? 'Kliknij w oknie CAD, aby wstawić 1. punkt polilinii.'
+                              : `Wstawiono wierzchołków: ${drawingVerticesCount}.`}
+                          </div>
+                          <div style={{ color: '#94a3b8', fontSize: '10px' }}>
+                            Klikaj kolejne wierzchołki. <b>Kliknij w 1. zielony punkt</b> na rzucie CAD, aby zamknąć polilinię.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleCancelDrawing}
+                            style={{
+                              marginTop: '2px',
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: '1px solid rgba(244, 63, 94, 0.4)',
+                              backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                              color: '#fca5a5',
+                              fontSize: '10.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Anuluj rysowanie (Esc)
+                          </button>
                         </div>
                       )}
                     </div>
-                  );
-                })()}
 
-                {/* Status Toggle Buttons */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                  <button
-                    type="button"
-                    onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
-                    className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
-                  >
-                    <span>Uwzględnij w kalkulacji</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
-                  </button>
+                    {/* 2. Operations on Selected Building */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px', borderTop: '1px solid var(--border-light)' }}>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
+                        Wybrany obiekt: {selectedBuilding ? selectedBuilding.name : '(brak wyboru)'}
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
-                    className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
-                  >
-                    <span>Obiekt badany (Projektowany)</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
-                  </button>
+                      {selectedBuilding ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {/* Action buttons: Edytuj, Duplikuj, Usuń */}
+                          <button
+                            type="button"
+                            onClick={() => setIsEditMode(!isEditMode)}
+                            className={`btn-tile ${isEditMode ? 'active-amber' : 'inactive'}`}
+                            style={{ justifyContent: 'center', gap: '6px', padding: '9px 12px' }}
+                            title="Włącz tryb równoległego przesuwania krawędzi obiektu"
+                          >
+                            <Edit3 size={14} />
+                            <span style={{ fontWeight: 600 }}>{isEditMode ? 'Zakończ edycję krawędzi' : 'Edytuj krawędzie (Offset)'}</span>
+                          </button>
 
-                  <button
-                    type="button"
-                    onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
-                    className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
-                  >
-                    <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="ui-card" style={{ textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
-              Kliknij dowolny budynek na rzucie CAD, aby edytować jego parametry.
-            </div>
-          )}
+                          {isEditMode && (
+                            <div
+                              style={{
+                                padding: '7px 10px',
+                                borderRadius: '7px',
+                                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                                border: '1px solid rgba(245, 158, 11, 0.35)',
+                                fontSize: '10.5px',
+                                color: '#fde68a',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                              }}
+                            >
+                              <span>Chwyć dowolną krawędź na rzucie CAD i przeciągaj. Krawędzie zachowują kierunki.</span>
+                            </div>
+                          )}
 
-          {/* Section: Jednostki DXF / Rysunku */}
-          <div className="ui-card">
-            <div className="ui-title">
-              <span>Jednostki DXF / Skala</span>
-              <Sliders size={14} color="#818cf8" />
-            </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateBuilding(selectedBuilding.id)}
+                              className="btn-tile active-indigo"
+                              style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                              title="Utwórz natychmiast kopię tego obiektu"
+                            >
+                              <Copy size={13} />
+                              <span style={{ fontWeight: 600 }}>Duplikuj</span>
+                            </button>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                Jednostka rysunku DXF:
-              </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteBuilding(selectedBuilding.id)}
+                              style={{
+                                padding: '8px 10px',
+                                borderRadius: '10px',
+                                border: '1px solid rgba(244, 63, 94, 0.4)',
+                                backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                                color: '#fca5a5',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px',
+                                transition: 'all 0.2s',
+                              }}
+                              title="Usuń ten obiekt ze sceny"
+                            >
+                              <Trash2 size={13} />
+                              <span>Usuń</span>
+                            </button>
+                          </div>
 
-              {/* Unit Selector Segmented Buttons */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(5, 1fr)',
-                  gap: '4px',
-                  backgroundColor: 'var(--bg-input)',
-                  padding: '4px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-light)',
-                }}
-              >
-                {(
-                  [
-                    { id: 'auto', label: 'Auto' },
-                    { id: 'm', label: 'm' },
-                    { id: 'dm', label: 'dm' },
-                    { id: 'cm', label: 'cm' },
-                    { id: 'mm', label: 'mm' },
-                  ] as const
-                ).map((tab) => {
-                  const isActive = dxfUnit === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => handleDxfUnitChange(tab.id)}
-                      style={{
-                        padding: '6px 2px',
-                        fontSize: '11px',
-                        fontWeight: isActive ? 700 : 500,
-                        borderRadius: '6px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        backgroundColor: isActive ? 'var(--accent-indigo)' : 'transparent',
-                        color: isActive ? '#ffffff' : 'var(--text-secondary)',
-                      }}
-                      title={
-                        tab.id === 'auto'
-                          ? 'Automatyczne wykrywanie jednostki z nagłówka $INSUNITS lub skali geometrii'
-                          : `Wymuś skalę: 1 jednostka DXF = 1 ${tab.id}`
-                      }
-                    >
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
+                          {/* Linking / Grouping Section */}
+                          {isLinkingMode ? (
+                            <div
+                              style={{
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                                border: '1px solid rgba(245, 158, 11, 0.4)',
+                                fontSize: '11px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px',
+                              }}
+                            >
+                              <div style={{ color: '#fbbf24', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <Link2 size={14} />
+                                <span>Tryb łączenia aktywny</span>
+                              </div>
+                              <div style={{ color: '#cbd5e1', fontSize: '10.5px' }}>
+                                Kliknij teraz <b>drugi obiekt</b> na rzucie CAD, aby go połączyć z <b>{selectedBuilding.name}</b>.
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsLinkingMode(false);
+                                  setLinkingSourceId(null);
+                                }}
+                                style={{
+                                  marginTop: '4px',
+                                  padding: '4px 8px',
+                                  borderRadius: '5px',
+                                  border: '1px solid rgba(244, 63, 94, 0.4)',
+                                  backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                                  color: '#fca5a5',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Anuluj łączenie
+                              </button>
+                            </div>
+                          ) : selectedBuilding.groupId ? (
+                            <div
+                              style={{
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                border: '1px solid rgba(56, 189, 248, 0.35)',
+                                fontSize: '11px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px',
+                              }}
+                            >
+                              <div style={{ color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <Link size={13} />
+                                <span>Połączony w grupie</span>
+                              </div>
+                              <div style={{ color: '#94a3b8', fontSize: '10px' }}>
+                                Obiekty w grupie przesuwają się wspólnie:
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                {buildings
+                                  .filter((b) => b.groupId === selectedBuilding.groupId)
+                                  .map((b) => (
+                                    <span
+                                      key={b.id}
+                                      style={{
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: b.id === selectedBuilding.id ? '#38bdf8' : 'rgba(15, 23, 42, 0.8)',
+                                        color: b.id === selectedBuilding.id ? '#0f172a' : '#cbd5e1',
+                                        fontWeight: b.id === selectedBuilding.id ? 700 : 500,
+                                        fontSize: '10px',
+                                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                                      }}
+                                    >
+                                      {b.name}
+                                    </span>
+                                  ))}
+                              </div>
 
-              {/* Status / Active Info Banner */}
-              {dxfImportInfo ? (
-                <div
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: '8px',
-                    backgroundColor: 'rgba(99, 102, 241, 0.12)',
-                    border: '1px solid rgba(99, 102, 241, 0.3)',
-                    fontSize: '11px',
-                    color: '#cbd5e1',
-                    lineHeight: '1.4',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontWeight: 600,
-                      color: '#e0e7ff',
-                      marginBottom: '2px',
-                    }}
-                  >
-                    <span>Skala importu:</span>
-                    <span style={{ color: '#38bdf8', fontWeight: 700 }}>
-                      {dxfImportInfo.unitName}
-                    </span>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginTop: '4px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsLinkingMode(true);
+                                    setLinkingSourceId(selectedBuilding.id);
+                                  }}
+                                  style={{
+                                    padding: '6px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #38bdf8',
+                                    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                                    color: '#e0f2fe',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '4px',
+                                  }}
+                                  title="Dołącz kolejny obiekt do tej grupy"
+                                >
+                                  <Link2 size={12} />
+                                  <span>Dołącz kolejny</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => performUnlinkBuilding(selectedBuilding.id)}
+                                  style={{
+                                    padding: '6px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid rgba(244, 63, 94, 0.4)',
+                                    backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                                    color: '#fca5a5',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '4px',
+                                  }}
+                                  title="Odłącz ten obiekt od grupy"
+                                >
+                                  <Unlink size={12} />
+                                  <span>Rozłącz obiekt</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsLinkingMode(true);
+                                setLinkingSourceId(selectedBuilding.id);
+                              }}
+                              className="btn-tile active-indigo"
+                              style={{ justifyContent: 'center', gap: '8px', padding: '9px 12px' }}
+                              title="Połącz ten obiekt z innym, aby przesuwać je razem"
+                            >
+                              <Link2 size={14} />
+                              <span style={{ fontWeight: 600 }}>Połącz z innym obiektem</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center', padding: '4px 0' }}>
+                          Wybierz obiekt na rzucie CAD, aby móc go zduplikować, usunąć lub połączyć.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '10px', color: '#94a3b8' }}>
-                    {dxfImportInfo.source}
-                  </div>
                 </div>
-              ) : (
-                <div style={{ fontSize: '10px', color: '#64748b', lineHeight: '1.3' }}>
-                  {dxfUnit === 'auto'
-                    ? 'Automatycznie odczytuje $INSUNITS z pliku DXF lub dopasowuje skalę (mm/cm/m).'
-                    : `Wymuszenie: 1 jednostka = ${
-                        dxfUnit === 'm'
-                          ? '1 metr (1.0)'
-                          : dxfUnit === 'cm'
-                          ? '1 centymetr (0.01 m)'
-                          : '1 milimetr (0.001 m)'
-                      }.`}
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
-
-          {/* Section: Akcje Główne */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <label className="btn-primary">
-              <Upload size={16} />
-              <span>Wgraj plik DXF</span>
-              <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
-            </label>
-
-            <button
-              type="button"
-              onClick={() => {
-                setBuildings(createSampleBuildings());
-                setSelectedBuildingId('bldg-1');
-                setSelectedPointKey(null);
-                setLastDxfText(null);
-                setDxfImportInfo(null);
-                setFitKey((prev) => prev + 1);
-              }}
-              className="btn-secondary"
-            >
-              <RotateCcw size={15} />
-              <span>Załaduj scenę wzorcową</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="sidebar-footer">
-          <Move size={16} color="#818cf8" style={{ flexShrink: 0 }} />
-          <span>Przeciągaj obiekty myszą. Analiza przelicza się na żywo.</span>
         </div>
       </aside>
 
@@ -825,16 +1426,26 @@ export const App: React.FC = () => {
             </button>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
-              <span style={{ color: '#94a3b8' }}>§ 12: <b style={{ color: '#fff' }}>{stats.pct12}%</b></span>
-            </div>
-            <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
-              <span style={{ color: '#94a3b8' }}>§ 56: <b style={{ color: '#fff' }}>{stats.pct56}%</b></span>
-            </div>
+          {/* Selected City Location Badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid #334155',
+              fontSize: '11px',
+              color: '#f8fafc',
+            }}
+            title={`Lokalizacja projektu: ${selectedCity} (${settings.latitude.toFixed(2)}°N, ${settings.longitude.toFixed(2)}°E)`}
+          >
+            <MapPin size={13} color="#f59e0b" />
+            <span style={{ fontWeight: 600, color: '#f8fafc' }}>{selectedCity}</span>
+            <span style={{ fontSize: '10px', color: '#94a3b8' }}>
+              ({settings.latitude.toFixed(2)}°N)
+            </span>
           </div>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
@@ -884,80 +1495,62 @@ export const App: React.FC = () => {
           >
             Wektory
           </button>
+          <button
+            onClick={() => setShowShadowRange(!showShadowRange)}
+            style={{
+              padding: '5px 9px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: showShadowRange ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+              color: showShadowRange ? '#c7d2fe' : '#94a3b8',
+            }}
+            title="Włącz / wyłącz widoczność obwiedni maksymalnego zasięgu cienia rzucanego przez obiekty badane w równonoc"
+          >
+            Zakres cienia
+          </button>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
-          {/* Dynamic Accuracy Refinement Badge */}
+          {/* § 56 Method Toggle */}
           <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              backgroundColor:
-                accuracyStage === 'final'
-                  ? 'rgba(16, 185, 129, 0.15)'
-                  : accuracyStage === 'live'
-                  ? 'rgba(245, 158, 11, 0.15)'
-                  : 'rgba(99, 102, 241, 0.15)',
-              border: `1px solid ${
-                accuracyStage === 'final'
-                  ? 'rgba(16, 185, 129, 0.3)'
-                  : accuracyStage === 'live'
-                  ? 'rgba(245, 158, 11, 0.3)'
-                  : 'rgba(99, 102, 241, 0.3)'
-              }`,
-              color:
-                accuracyStage === 'final'
-                  ? '#6ee7b7'
-                  : accuracyStage === 'live'
-                  ? '#fcd34d'
-                  : '#a5b4fc',
-              fontSize: '11px',
-              fontWeight: 600,
-            }}
-            title={
-              accuracyStage === 'final'
-                ? 'Osiągnięto docelową dokładność obliczeń (krok 0.25m)'
-                : 'Trwa adaptacyjne przeliczanie i zagęszczanie siatki (docelowo 0.25m)'
-            }
+            style={{ display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: 'rgba(15,23,42,0.6)', borderRadius: '8px', padding: '3px', border: '1px solid #1e293b' }}
+            title="Metoda obliczania nasłonecznienia § 56"
           >
-            <Activity size={13} />
-            <span>
-              {accuracyStage === 'live'
-                ? 'Live: 1.5m (60fps)'
-                : accuracyStage === 'stage1'
-                ? 'Dociąganie: 1.0m'
-                : accuracyStage === 'stage2'
-                ? 'Dociąganie: 0.5m'
-                : 'Dokładność: 0.25m'}
-            </span>
-          </div>
-
-          {/* Performance per point benchmark badge */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              backgroundColor: 'rgba(15, 23, 42, 0.85)',
-              border: '1px solid #334155',
-              fontSize: '11px',
-              fontFamily: 'monospace',
-            }}
-            title={`Średni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms`}
-          >
-            <Timer size={12} color="#94a3b8" />
-            <span style={{ color: '#34d399', fontWeight: 600 }}>
-              §12: {avgShadowingMs < 0.01 ? '<0.01' : avgShadowingMs.toFixed(2)}ms
-            </span>
-            <span style={{ color: '#475569' }}>|</span>
-            <span style={{ color: '#fbbf24', fontWeight: 600 }}>
-              §56: {avgSunlightMs < 0.01 ? '<0.01' : avgSunlightMs.toFixed(2)}ms
-            </span>
+            <button
+              onClick={() => setSunlightMethod('raycasting')}
+              style={{
+                padding: '3px 8px',
+                borderRadius: '5px',
+                fontSize: '10px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: 'none',
+                backgroundColor: sunlightMethod === 'raycasting' ? 'rgba(245,158,11,0.25)' : 'transparent',
+                color: sunlightMethod === 'raycasting' ? '#fcd34d' : '#64748b',
+                letterSpacing: '0.02em',
+              }}
+            >
+              Raycasting
+            </button>
+            <button
+              onClick={() => setSunlightMethod('segments')}
+              style={{
+                padding: '3px 8px',
+                borderRadius: '5px',
+                fontSize: '10px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: 'none',
+                backgroundColor: sunlightMethod === 'segments' ? 'rgba(99,102,241,0.25)' : 'transparent',
+                color: sunlightMethod === 'segments' ? '#a5b4fc' : '#64748b',
+                letterSpacing: '0.02em',
+              }}
+            >
+              Segmenty
+            </button>
           </div>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
@@ -984,8 +1577,8 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        {/* Legend Overlay at Bottom-Left */}
-        <div className="cad-legend-bottom" style={{ gap: '14px' }}>
+        {/* Legend & Stats Overlay at Bottom-Left */}
+        <div className="cad-legend-bottom" style={{ gap: '12px', alignItems: 'center' }}>
           <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '11px' }}>LEGENDA:</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '12px', height: '4px', backgroundColor: '#10b981', borderRadius: '2px' }} />
@@ -997,15 +1590,90 @@ export const App: React.FC = () => {
           </div>
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>§ 56 Nasłonecznienie:</span>
-            <div style={{ display: 'flex', height: '6px', width: '80px', borderRadius: '3px', overflow: 'hidden' }}>
-              <span style={{ flex: 1, backgroundColor: '#3b0764' }} title="0h (Fiolet)" />
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>§ 56:</span>
+            <div style={{ display: 'flex', height: '6px', width: '70px', borderRadius: '3px', overflow: 'hidden' }}>
+              <span style={{ flex: 1, backgroundColor: '#3b0764' }} title="0h" />
               <span style={{ flex: 1, backgroundColor: '#7e22ce' }} title="1.0h" />
               <span style={{ flex: 1, backgroundColor: '#c026d3' }} title="2.0h" />
               <span style={{ flex: 1, backgroundColor: '#ea580c' }} title="3.0h (Zgodne)" />
-              <span style={{ flex: 1, backgroundColor: '#fb923c' }} title="4.0h+ (Pomarańcz)" />
+              <span style={{ flex: 1, backgroundColor: '#fb923c' }} title="4.0h+" />
             </div>
-            <span style={{ fontSize: '10px', color: '#cbd5e1' }}>0h &rarr; 4h+ (krok 30m)</span>
+            <span style={{ fontSize: '10px', color: '#cbd5e1' }}>0h &rarr; 4h+</span>
+          </div>
+
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+          {/* Dynamic Accuracy Refinement Badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '2px 7px',
+              borderRadius: '5px',
+              backgroundColor:
+                accuracyStage === 'final'
+                  ? 'rgba(16, 185, 129, 0.15)'
+                  : accuracyStage === 'live'
+                  ? 'rgba(245, 158, 11, 0.15)'
+                  : 'rgba(99, 102, 241, 0.15)',
+              border: `1px solid ${
+                accuracyStage === 'final'
+                  ? 'rgba(16, 185, 129, 0.3)'
+                  : accuracyStage === 'live'
+                  ? 'rgba(245, 158, 11, 0.3)'
+                  : 'rgba(99, 102, 241, 0.3)'
+              }`,
+              color:
+                accuracyStage === 'final'
+                  ? '#6ee7b7'
+                  : accuracyStage === 'live'
+                  ? '#fcd34d'
+                  : '#a5b4fc',
+              fontSize: '10px',
+              fontWeight: 600,
+            }}
+            title={
+              accuracyStage === 'final'
+                ? 'Osiągnięto docelową dokładność obliczeń (krok 0.25m)'
+                : 'Trwa adaptacyjne przeliczanie i zagęszczanie siatki (docelowo 0.25m)'
+            }
+          >
+            <Activity size={12} />
+            <span>
+              {accuracyStage === 'live'
+                ? 'Live: 1.5m'
+                : accuracyStage === 'stage1'
+                ? 'Siatka: 1.0m'
+                : accuracyStage === 'stage2'
+                ? 'Siatka: 0.5m'
+                : 'Dokładność: 0.25m'}
+            </span>
+          </div>
+
+          {/* Performance per point benchmark badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '2px 7px',
+              borderRadius: '5px',
+              backgroundColor: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid #334155',
+              fontSize: '10px',
+              fontFamily: 'monospace',
+            }}
+            title={`Średni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms`}
+          >
+            <Timer size={11} color="#94a3b8" />
+            <span style={{ color: '#34d399', fontWeight: 600 }}>
+              §12: {avgShadowingMs < 0.01 ? '<0.01' : avgShadowingMs.toFixed(2)}ms
+            </span>
+            <span style={{ color: '#475569' }}>|</span>
+            <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+              §56: {avgSunlightMs < 0.01 ? '<0.01' : avgSunlightMs.toFixed(2)}ms
+            </span>
           </div>
         </div>
 
@@ -1014,7 +1682,7 @@ export const App: React.FC = () => {
           <CadCanvas
             buildings={buildings}
             selectedBuildingId={selectedBuildingId}
-            onSelectBuilding={setSelectedBuildingId}
+            onSelectBuilding={handleSelectBuilding}
             onBuildingMove={handleBuildingMove}
             analysisResults={analysisResults}
             selectedPointResult={selectedPointResult}
@@ -1033,8 +1701,19 @@ export const App: React.FC = () => {
             showNormals={showNormals}
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
+            showShadowRange={showShadowRange}
+            latitude={settings.latitude}
+            equinoxDate={settings.equinoxDate}
             fitTrigger={fitKey}
             onInteractionChange={setIsInteracting}
+            isLinkingMode={isLinkingMode}
+            linkingSourceId={linkingSourceId}
+            drawingMode={drawingMode}
+            onFinishDrawing={handleFinishDrawing}
+            onCancelDrawing={handleCancelDrawing}
+            onDrawingVerticesCountChange={setDrawingVerticesCount}
+            isEditMode={isEditMode}
+            onBuildingEdgeMove={handleBuildingEdgeMove}
           />
         </div>
 

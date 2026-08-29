@@ -14,8 +14,15 @@ import {
   raySegmentIntersection,
   sampleSegmentPoints,
   distancePointToSegment,
+  clipSegmentToCircle,
+  isDirectionInSegmentCone,
 } from '../utils/math2d';
-import { calculateSolarPosition } from '../utils/solar';
+
+import {
+  calculateSolarPosition,
+  getHourAtSolarAzimuth,
+  getSolarElevationAtAzimuth,
+} from '../utils/solar';
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -91,8 +98,8 @@ export function analyzeShadowingAtPoint(
       if (dp1 < 0 && dp2 < 0) continue;
 
       // ── Required clearance for this obstacle ──
-      // H of building/segment is directly the shadowing height (no window bottom subtraction)
-      const deltaH = Math.max(0, seg.hTop);
+      // H measured from tested window bottom level to top edge of obstacle (§ 12 ust. 3)
+      const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
       const dBase  = Math.min(deltaH, 35.0);
       const dReq   = segment.isCityCentre || bldg.isCityCentre
         ? 0.5 * dBase
@@ -161,170 +168,156 @@ export function analyzeShadowingAtPoint(
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // PHASE 2 & 3 – Exact geometric angular sector partition
+  // PHASE 2 & 3 – Exact geometric angular sector partition (metoda_przeciec_odcinkow.md)
   // ─────────────────────────────────────────────────────────────────────────
-
-  // 1. Gather all critical transition angles (exact obstacle vertices & clipping points)
-  const criticalAnglesSet = new Set<number>();
-  criticalAnglesSet.add(-78.0);
-  criticalAnglesSet.add(78.0);
 
   // Helper to get relative angle (-180 to 180) from point P to target point Q w.r.t normalAngleRad
   const getRelAngleDeg = (q: Point2D): number => {
     const worldAngle = Math.atan2(q.y - point.y, q.x - point.x);
     let diffRad = worldAngle - normalAngleRad;
-    // Normalize to [-PI, PI]
     while (diffRad > Math.PI) diffRad -= 2 * Math.PI;
     while (diffRad < -Math.PI) diffRad += 2 * Math.PI;
     return diffRad * RAD2DEG;
   };
 
+  // 1. Z każdego wycinka przeszkody wewnątrz okręgu dReq wyznaczamy analityczny sektor kątowy [start, end]
+  interface BlockedInterval {
+    start: number;
+    end: number;
+    reqDistance: number;
+  }
+
+  const rawBlocked: BlockedInterval[] = [];
+
   for (const cand of candidates) {
     const a1 = getRelAngleDeg(cand.clipP1);
     const a2 = getRelAngleDeg(cand.clipP2);
 
-    if (a1 >= -78.0 && a1 <= 78.0) criticalAnglesSet.add(a1);
-    if (a2 >= -78.0 && a2 <= 78.0) criticalAnglesSet.add(a2);
-  }
+    const minA = Math.min(a1, a2);
+    const maxA = Math.max(a1, a2);
 
-  // Also insert uniform subdivision steps so fine curves/sampling are smooth
-  for (let a = -78.0; a <= 78.0; a += 0.5) {
-    criticalAnglesSet.add(a);
-  }
+    // Przycięcie do kąta roboczego fasady [-78°, +78°] (§ 12 ust. 1 pkt 1)
+    const start = Math.max(-78.0, minA);
+    const end = Math.min(78.0, maxA);
 
-  const sortedAngles = Array.from(criticalAnglesSet).sort((a, b) => a - b);
-
-  // Filter out duplicate or near-identical angles (< 0.001 deg)
-  const distinctAngles: number[] = [sortedAngles[0]];
-  for (let i = 1; i < sortedAngles.length; i++) {
-    if (sortedAngles[i] - distinctAngles[distinctAngles.length - 1] > 1e-4) {
-      distinctAngles.push(sortedAngles[i]);
+    if (end > start + 1e-4) {
+      rawBlocked.push({
+        start,
+        end,
+        reqDistance: cand.dReq,
+      });
     }
   }
 
-  // 2. Evaluate each angular interval [distinctAngles[i], distinctAngles[i+1]]
-  interface IntervalResult {
-    startAngleDeg: number;
-    endAngleDeg: number;
-    spanDeg: number;
-    isFree: boolean;
-    reqDistance: number;
-    hitDist: number;
-  }
+  // 2. Sumowanie i scalanie przedziałów przesłoniętych: Ω_blocked = ⋃ [start_k, end_k]
+  rawBlocked.sort((a, b) => a.start - b.start);
 
-  const intervals: IntervalResult[] = [];
-
-  for (let i = 0; i < distinctAngles.length - 1; i++) {
-    const aStart = distinctAngles[i];
-    const aEnd = distinctAngles[i + 1];
-    const midAngleDeg = (aStart + aEnd) / 2;
-    const worldAngleRad = normalAngleRad + midAngleDeg * DEG2RAD;
-
-    const rayDir: Vector2D = {
-      x: Math.cos(worldAngleRad),
-      y: Math.sin(worldAngleRad),
-    };
-
-    let closestHitDist = Infinity;
-    let hitObstacleH = 0;
-    let hitObstacleReqDist = 0;
-
-    for (const cand of candidates) {
-      const seg = cand.seg;
-      const hit = raySegmentIntersection(point, rayDir, seg.p1, seg.p2);
-      if (!hit.hit) continue;
-
-      const t = hit.distance;
-      if (t < 0.001 || t > cand.dReq + 0.001) continue;
-
-      const dotWithNormal = rayDir.x * seg.normal.x + rayDir.y * seg.normal.y;
-      if (dotWithNormal >= -1e-4) continue;
-
-      if (t < closestHitDist) {
-        closestHitDist = t;
-        hitObstacleH = cand.dReq;
-        hitObstacleReqDist = cand.dReq;
+  const mergedBlocked: BlockedInterval[] = [];
+  for (const blk of rawBlocked) {
+    if (mergedBlocked.length === 0) {
+      mergedBlocked.push({ ...blk });
+    } else {
+      const last = mergedBlocked[mergedBlocked.length - 1];
+      if (blk.start <= last.end + 1e-4) {
+        last.end = Math.max(last.end, blk.end);
+        last.reqDistance = Math.max(last.reqDistance, blk.reqDistance);
+      } else {
+        mergedBlocked.push({ ...blk });
       }
     }
+  }
 
-    const isFree = closestHitDist === Infinity;
-    const hitDistance = isFree ? 35.0 : closestHitDist;
-    const reqDistance = isFree ? 0 : hitObstacleReqDist;
+  // 3. Budowa pełnych sektorów na przedziale [-78°, +78°] (dopełnienie Ω_free = [-78°, 78°] \ Ω_blocked)
+  const sectors: ShadowingSector[] = [];
+  let cursor = -78.0;
 
-    intervals.push({
-      startAngleDeg: aStart,
-      endAngleDeg: aEnd,
-      spanDeg: aEnd - aStart,
-      isFree,
-      reqDistance,
-      hitDist: hitDistance,
+  for (const blk of mergedBlocked) {
+    if (blk.start > cursor + 1e-4) {
+      sectors.push({
+        startAngleDeg: cursor,
+        endAngleDeg: blk.start,
+        spanDeg: blk.start - cursor,
+        isFree: true,
+        requiredDistance: 0,
+      });
+    }
+    const bStart = Math.max(cursor, blk.start);
+    const bEnd = Math.max(bStart, blk.end);
+    if (bEnd > bStart + 1e-4) {
+      sectors.push({
+        startAngleDeg: bStart,
+        endAngleDeg: bEnd,
+        spanDeg: bEnd - bStart,
+        isFree: false,
+        requiredDistance: blk.reqDistance,
+      });
+      cursor = bEnd;
+    }
+  }
+
+  if (cursor < 78.0 - 1e-4) {
+    sectors.push({
+      startAngleDeg: cursor,
+      endAngleDeg: 78.0,
+      spanDeg: 78.0 - cursor,
+      isFree: true,
+      requiredDistance: 0,
     });
   }
 
-  // Also build standard discrete rays (-78 to +78 with angleStepDeg)
+  if (sectors.length === 0) {
+    sectors.push({
+      startAngleDeg: -78.0,
+      endAngleDeg: 78.0,
+      spanDeg: 156.0,
+      isFree: true,
+      requiredDistance: 0,
+    });
+  }
+
+  // Próbkowanie promieni dla celów wizualizacji (bez raycastingu w analizie, z analitycznych sektorów)
   const rays: ShadowingResult['rays'] = [];
   for (let aDeg = -78.0; aDeg <= 78.0 + 1e-4; aDeg += angleStepDeg) {
+    const matchingSec = sectors.find(
+      (s) => aDeg >= s.startAngleDeg - 1e-4 && aDeg <= s.endAngleDeg + 1e-4
+    );
+    const isFree = matchingSec ? matchingSec.isFree : true;
+    const reqDistance = matchingSec?.requiredDistance ?? 0;
     const worldAngleRad = normalAngleRad + aDeg * DEG2RAD;
     const rayDir: Vector2D = {
       x: Math.cos(worldAngleRad),
       y: Math.sin(worldAngleRad),
     };
 
-    let closestHitDist = Infinity;
-    let hitObstacleReqDist = 0;
-
-    for (const cand of candidates) {
-      const seg = cand.seg;
-      const hit = raySegmentIntersection(point, rayDir, seg.p1, seg.p2);
-      if (!hit.hit) continue;
-
-      const t = hit.distance;
-      if (t < 0.001 || t > cand.dReq + 0.001) continue;
-
-      const dotWithNormal = rayDir.x * seg.normal.x + rayDir.y * seg.normal.y;
-      if (dotWithNormal >= -1e-4) continue;
-
-      if (t < closestHitDist) {
-        closestHitDist = t;
-        hitObstacleReqDist = cand.dReq;
+    let hitDistance = isFree ? 35.0 : reqDistance;
+    if (!isFree) {
+      let closestD = Infinity;
+      for (const cand of candidates) {
+        if (isDirectionInSegmentCone(point, rayDir, cand.clipP1, cand.clipP2)) {
+          const dx = cand.seg.p2.x - cand.seg.p1.x;
+          const dy = cand.seg.p2.y - cand.seg.p1.y;
+          const cross = rayDir.x * dy - rayDir.y * dx;
+          if (Math.abs(cross) > 1e-9) {
+            const ox = cand.seg.p1.x - point.x;
+            const oy = cand.seg.p1.y - point.y;
+            const t = (ox * dy - oy * dx) / cross;
+            if (t > 1e-4 && t < closestD) {
+              closestD = t;
+            }
+          }
+        }
       }
+      if (closestD < Infinity) hitDistance = closestD;
     }
 
-    const isFree = closestHitDist === Infinity;
     rays.push({
       angleDeg: aDeg,
       worldAngleDeg: (worldAngleRad * RAD2DEG + 360) % 360,
       isFree,
-      hitDistance: isFree ? 35.0 : closestHitDist,
-      reqDistance: isFree ? 0 : hitObstacleReqDist,
+      hitDistance,
+      reqDistance,
     });
   }
-
-  // 3. Merge contiguous intervals with identical isFree state into final exact sectors
-  const sectors: ShadowingSector[] = [];
-  let curSec: ShadowingSector | null = null;
-
-  for (const interval of intervals) {
-    if (!curSec || curSec.isFree !== interval.isFree) {
-      if (curSec) {
-        sectors.push(curSec);
-      }
-      curSec = {
-        startAngleDeg: interval.startAngleDeg,
-        endAngleDeg: interval.endAngleDeg,
-        spanDeg: interval.spanDeg,
-        isFree: interval.isFree,
-        requiredDistance: interval.reqDistance,
-      };
-    } else {
-      curSec.endAngleDeg = interval.endAngleDeg;
-      curSec.spanDeg = curSec.endAngleDeg - curSec.startAngleDeg;
-      if (interval.reqDistance > (curSec.requiredDistance ?? 0)) {
-        curSec.requiredDistance = interval.reqDistance;
-      }
-    }
-  }
-  if (curSec) sectors.push(curSec);
 
   // Guarantee exact seamless boundary alignment: start of sector[i] is EXACTLY end of sector[i-1]
   if (sectors.length > 0) {
@@ -640,6 +633,322 @@ export function analyzeSunlightAtPoint(
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * ALTERNATYWNA metoda § 56 — Segment-Intersection (analogiczna do § 12)
+ *
+ * Zamiast rzucać promień dla każdego slotu czasowego, buduje geometryczny podział
+ * zakresu azymutów słonecznych na sektory wolne / zablokowane przez przeszkody.
+ * Kryterium blokowania: kąt elewacji przeszkody (atan2(hTop, dist)) > kąt elewacji słońca
+ * w danym azymucie.
+ *
+ * Algorytm:
+ * 1. Pre-filtracja kandydatów (identyczna jak w § 12 — fasada widoczna z P, przed płaszczyzną ściany).
+ * 2. Zebranie krytycznych kątów (azymuty narożników kandydatów, wschodnie i zachodnie krańce
+ *    trajektorii słonecznej) → gęsty podział na interwały.
+ * 3. Dla środka każdego interwału: rzut promienia na kandydatów + porównanie elewacji słońca
+ *    z kątem przeszkody → wolny / zablokowany.
+ * 4. Scalenie interwałów w sektory. Mapowanie sektorów na czas przez interpolację trajektorii.
+ *
+ * @returns SunlightResult kompatybilny ze standardową metodą + pole `_segMethodMs` (czas obliczeń ms)
+ */
+/**
+ * Analityczna metoda § 56 (Nasłonecznienie) — Metoda Przecięć Odcinków (Segment-Intersection).
+ * Zgodna z metoda_przeciec_odcinkow.md.
+ *
+ * Czysto analityczna metoda bez dyskretyzacji czasowej i bez raycastingu.
+ * Wyznacza ciągły przedział azymutów słońca [azActiveMin, azActiveMax] na fasadzie,
+ * analitycznie oblicza zasięg cienia R(az) = deltaH / tan(elev(az)), przycina odcinki
+ * przeszkód do okręgów o promieniu R i scalamy przedziały cienia w ciągłe sektory.
+ * Granice sektorów kątowych są mapowane bezpośrednio na ciągły czas równonocy.
+ */
+export function analyzeSunlightAtPointSegments(
+  point: Point2D,
+  segment: FacadeSegment,
+  offsetRatio: number,
+  allBuildings: BuildingLoop[],
+  targetBuildingId: string,
+  settings: ProjectSettings,
+  stepMinutes: number = 5,
+  precomputedTrajectory?: SolarTrajectorySlot[]
+): SunlightResult & { _segMethodMs: number } {
+  const t0 = performance.now();
+  const normal = segment.normal;
+  const isChildcare = segment.buildingType === 'childcare';
+
+  const month = settings.equinoxDate === 'autumn' ? 9 : 3;
+  const day = settings.equinoxDate === 'autumn' ? 23 : 21;
+
+  // 1. Parametry astronomiczne równonocy
+  const noonPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, 12.0);
+  const noonHour = noonPos.solarNoonDecimal;
+  const hoursRadius = isChildcare ? 4 : 5;
+
+  const startHour = Math.max(5.0, noonHour - hoursRadius);
+  const endHour = Math.min(19.0, noonHour + hoursRadius);
+
+  const startPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, startHour);
+  const endPos = calculateSolarPosition(settings.latitude, settings.longitude, month, day, endHour);
+
+  // Azymuty słońca na początku i końcu okna analizy w dniu równonocy
+  const azSolarMin = Math.min(startPos.azimuthDeg, endPos.azimuthDeg);
+  const azSolarMax = Math.max(startPos.azimuthDeg, endPos.azimuthDeg);
+
+  // Normalna fasady w stopniach geograficznych
+  const normalAzimuth = ((Math.atan2(normal.x, normal.y) * RAD2DEG + 360) % 360);
+
+  // Zakres widzenia fasady: normalAzimuth ± 78° (kąt padania ≥ 12° do lica ściany)
+  const azActiveMin = Math.max(azSolarMin, normalAzimuth - 78.0);
+  const azActiveMax = Math.min(azSolarMax, normalAzimuth + 78.0);
+
+  if (azActiveMax <= azActiveMin + 0.1) {
+    const trajectory = precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
+    const emptySlots: SunlightTimeSlot[] = trajectory.map((slot) => ({
+      time: slot.timeStr,
+      azimuthDeg: slot.azimuthDeg,
+      elevationDeg: slot.elevationDeg,
+      isSunAboveHorizon: slot.isSunAboveHorizon,
+      isAngleAbove12Deg: false,
+      isDirectSunlight: false,
+    }));
+
+    return {
+      point,
+      segmentId: segment.id,
+      offsetRatio,
+      totalMinutes: 0,
+      totalHours: 0,
+      isCompliant: false,
+      timeSlots: emptySlots,
+      sectors: [],
+      _segMethodMs: performance.now() - t0,
+    };
+  }
+
+  // 2. Analityczne rzutowanie cienia przeszkód na płaszczyznę równika niebieskiego O(1)
+  const latRad = settings.latitude * DEG2RAD;
+  const tanLat = Math.tan(latRad);
+
+  interface BlockedInterval {
+    startAz: number;
+    endAz: number;
+  }
+
+  const rawBlocked: BlockedInterval[] = [];
+
+  for (const bldg of allBuildings) {
+    if (bldg.isIncluded === false) continue;
+    for (const seg of bldg.segments) {
+      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+
+      const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
+      if (deltaH <= 0) continue;
+
+      // Sprawdzenie strony zewnętrznej przeszkody
+      const dotExt =
+        (point.x - seg.p1.x) * seg.normal.x +
+        (point.y - seg.p1.y) * seg.normal.y;
+      if (dotExt <= 0) continue;
+
+      // Sprawdzenie czy przeszkoda nie leży całkowicie z tyłu fasady
+      const v1x = seg.p1.x - point.x;
+      const v1y = seg.p1.y - point.y;
+      const v2x = seg.p2.x - point.x;
+      const v2y = seg.p2.y - point.y;
+      const dot1 = v1x * normal.x + v1y * normal.y;
+      const dot2 = v2x * normal.x + v2y * normal.y;
+      if (dot1 < -0.01 && dot2 < -0.01) continue;
+
+      // Odległość południowa cienia dla danej wysokości: L_0 = deltaH / tan(lat)
+      const L0 = deltaH / tanLat;
+      const Y_min = point.y - L0;
+      const Y_max = point.y; // Przeszkoda musi leżeć na południe od punktu (pomiędzy punktem a Słońcem)
+
+      // Przycięcie odcinka przeszkody do strefy cienia (Y_min <= Y <= Y_max)
+      let p1x = seg.p1.x;
+      let p1y = seg.p1.y;
+      let p2x = seg.p2.x;
+      let p2y = seg.p2.y;
+
+      // Jeśli cały odcinek leży poza strefą cienia w osi Y -> brak zacienienia
+      if ((p1y < Y_min && p2y < Y_min) || (p1y > Y_max && p2y > Y_max)) continue;
+
+      // Przycięcie do Y_min (zasięg południowy cienia)
+      if (p1y < Y_min) {
+        const t = (Y_min - p1y) / (p2y - p1y);
+        p1x = p1x + t * (p2x - p1x);
+        p1y = Y_min;
+      } else if (p2y < Y_min) {
+        const t = (Y_min - p1y) / (p2y - p1y);
+        p2x = p1x + t * (p2x - p1x);
+        p2y = Y_min;
+      }
+
+      // Przycięcie do Y_max (linia punktu w osi Y)
+      if (p1y > Y_max) {
+        const t = (Y_max - p1y) / (p2y - p1y);
+        p1x = p1x + t * (p2x - p1x);
+        p1y = Y_max;
+      } else if (p2y > Y_max) {
+        const t = (Y_max - p1y) / (p2y - p1y);
+        p2x = p1x + t * (p2x - p1x);
+        p2y = Y_max;
+      }
+
+      // Azymuty punktów krawędzi zacieniającej z punktu P: O(1)
+      const az1 = ((Math.atan2(p1x - point.x, p1y - point.y) * RAD2DEG + 360) % 360);
+      const az2 = ((Math.atan2(p2x - point.x, p2y - point.y) * RAD2DEG + 360) % 360);
+
+      // Obsługa przedziałów przecinających południk północny (0° / 360°)
+      const intervals: [number, number][] = [];
+      if (Math.abs(az1 - az2) > 180) {
+        const minA = Math.min(az1, az2);
+        const maxA = Math.max(az1, az2);
+        intervals.push([maxA, 360]);
+        intervals.push([0, minA]);
+      } else {
+        intervals.push([Math.min(az1, az2), Math.max(az1, az2)]);
+      }
+
+      for (const [bStart, bEnd] of intervals) {
+        const candStart = Math.max(azActiveMin, bStart);
+        const candEnd   = Math.min(azActiveMax, bEnd);
+
+        if (candEnd > candStart + 0.05) {
+          rawBlocked.push({ startAz: candStart, endAz: candEnd });
+        }
+      }
+    }
+  }
+
+  // 3. Scalanie przedziałów zacienionych: Ω_blocked = ⋃ [startAz_k, endAz_k]
+  rawBlocked.sort((a, b) => a.startAz - b.startAz);
+  const mergedBlocked: BlockedInterval[] = [];
+  for (const b of rawBlocked) {
+    if (mergedBlocked.length === 0) {
+      mergedBlocked.push({ ...b });
+    } else {
+      const last = mergedBlocked[mergedBlocked.length - 1];
+      if (b.startAz <= last.endAz + 0.1) {
+        last.endAz = Math.max(last.endAz, b.endAz);
+      } else {
+        mergedBlocked.push({ ...b });
+      }
+    }
+  }
+
+  // Wyznaczanie ciągłych wolnych sektorów nasłonecznienia: Ω_free = [azActiveMin, azActiveMax] \ Ω_blocked
+  const sectors: import('../types/geometry').SunlightSector[] = [];
+  let cursor = azActiveMin;
+  let totalHours = 0;
+
+  for (const b of mergedBlocked) {
+    if (b.startAz > cursor + 0.05) {
+      const secStartAz = cursor;
+      const secEndAz = b.startAz;
+
+      // Analityczne przeliczenie kąta azymutu na dokładną godzinę dziesiętną
+      const rawH1 = getHourAtSolarAzimuth(secStartAz, settings.latitude, settings.longitude, month, day);
+      const rawH2 = getHourAtSolarAzimuth(secEndAz, settings.latitude, settings.longitude, month, day);
+      const hStart = Math.min(rawH1, rawH2);
+      const hEnd   = Math.max(rawH1, rawH2);
+      const secHours = hEnd - hStart;
+
+      const h1Int = Math.floor(hStart);
+      const m1Int = Math.round((hStart - h1Int) * 60);
+      const h2Int = Math.floor(hEnd);
+      const m2Int = Math.round((hEnd - h2Int) * 60);
+
+      sectors.push({
+        startAzimuthDeg: secStartAz,
+        endAzimuthDeg: secEndAz,
+        spanDeg: Math.abs(secEndAz - secStartAz),
+        isDirectSunlight: true,
+        startTimeStr: `${String(h1Int).padStart(2, '0')}:${String(m1Int).padStart(2, '0')}`,
+        endTimeStr: `${String(h2Int).padStart(2, '0')}:${String(m2Int).padStart(2, '0')}`,
+        hours: secHours,
+      });
+      totalHours += secHours;
+    }
+    cursor = Math.max(cursor, b.endAz);
+  }
+
+  if (cursor < azActiveMax - 0.05) {
+    const secStartAz = cursor;
+    const secEndAz = azActiveMax;
+
+    const rawH1 = getHourAtSolarAzimuth(secStartAz, settings.latitude, settings.longitude, month, day);
+    const rawH2 = getHourAtSolarAzimuth(secEndAz, settings.latitude, settings.longitude, month, day);
+    const hStart = Math.min(rawH1, rawH2);
+    const hEnd   = Math.max(rawH1, rawH2);
+    const secHours = hEnd - hStart;
+
+    const h1Int = Math.floor(hStart);
+    const m1Int = Math.round((hStart - h1Int) * 60);
+    const h2Int = Math.floor(hEnd);
+    const m2Int = Math.round((hEnd - h2Int) * 60);
+
+    sectors.push({
+      startAzimuthDeg: secStartAz,
+      endAzimuthDeg: secEndAz,
+      spanDeg: Math.abs(secEndAz - secStartAz),
+      isDirectSunlight: true,
+      startTimeStr: `${String(h1Int).padStart(2, '0')}:${String(m1Int).padStart(2, '0')}`,
+      endTimeStr: `${String(h2Int).padStart(2, '0')}:${String(m2Int).padStart(2, '0')}`,
+      hours: secHours,
+    });
+    totalHours += secHours;
+  }
+
+  // Generowanie timeSlots dla osi timeline w UI (reprezentacja z analitycznych sektorów)
+  const trajectory = precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare);
+  const timeSlots: SunlightTimeSlot[] = trajectory.map((slot) => {
+    const isAbove = slot.isSunAboveHorizon && slot.elevationDeg > 0;
+    const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
+    const isAngleAbove12Deg = isAbove && dot >= COS_78_DEG;
+
+    let isDirect = false;
+    if (isAngleAbove12Deg) {
+      for (const sec of sectors) {
+        if (slot.azimuthDeg >= sec.startAzimuthDeg - 0.1 && slot.azimuthDeg <= sec.endAzimuthDeg + 0.1) {
+          isDirect = true;
+          break;
+        }
+      }
+    }
+
+    return {
+      time: slot.timeStr,
+      azimuthDeg: slot.azimuthDeg,
+      elevationDeg: slot.elevationDeg,
+      isSunAboveHorizon: isAbove,
+      isAngleAbove12Deg,
+      isDirectSunlight: isDirect,
+    };
+  });
+
+  const totalMinutes = Math.round(totalHours * 60);
+  const reqHours = segment.isCityCentre ? 1.5 : 3.0;
+  const isCompliant = totalHours >= reqHours;
+
+  return {
+    point,
+    segmentId: segment.id,
+    offsetRatio,
+    totalMinutes,
+    totalHours,
+    isCompliant,
+    timeSlots,
+    sectors,
+    _segMethodMs: performance.now() - t0,
+  };
+}
+
+
+
+
+
+
 export interface AnalysisAccuracyOptions {
   samplingInterval?: number; // Distance between test points along facade (e.g. 1.5m live -> 0.25m final)
   angleStepDeg?: number; // Angular ray resolution (e.g. 2.0 deg live -> 0.5 deg final)
@@ -650,16 +959,19 @@ export interface AnalysisBatchOutput {
   results: AnalysisPointResult[];
   avgShadowingMs: number;
   avgSunlightMs: number;
+  avgSunlightSegMs: number; // Czas metody segment-intersection (porównanie)
   totalPoints: number;
 }
 
 /**
  * Runs full batch analysis on all facade segments of tested building(s).
+ * Runs BOTH sunlight methods in parallel for benchmarking.
  */
 export function runFullAnalysis(
   buildings: BuildingLoop[],
   settings: ProjectSettings,
-  options?: AnalysisAccuracyOptions
+  options?: AnalysisAccuracyOptions,
+  sunlightMethod: 'raycasting' | 'segments' = 'raycasting'
 ): AnalysisBatchOutput {
   const results: AnalysisPointResult[] = [];
 
@@ -674,7 +986,13 @@ export function runFullAnalysis(
 
   let totalShadowingTimeMs = 0;
   let totalSunlightTimeMs = 0;
+  let totalSunlightSegTimeMs = 0;
   let pointCount = 0;
+
+  // Akumulatory różnic do logowania zbiórczego
+  let diffCount = 0;
+  let maxHoursDiff = 0;
+  let totalHoursDiffAbs = 0;
 
   for (const bldg of testedBuildings) {
     for (const seg of bldg.segments) {
@@ -684,29 +1002,40 @@ export function runFullAnalysis(
       sampled.forEach((sample, idx) => {
         pointCount++;
 
+        // ── § 12 Shadowing ──
         const tShadow0 = performance.now();
         const shadowing = analyzeShadowingAtPoint(
-          sample.point,
-          seg,
-          sample.ratio,
-          buildings,
-          bldg.id,
-          angleStep
+          sample.point, seg, sample.ratio, buildings, bldg.id, angleStep
         );
         totalShadowingTimeMs += performance.now() - tShadow0;
 
+        // ── § 56 Nasłonecznienie — wybrana metoda ──
         const tSun0 = performance.now();
-        const sunlight = analyzeSunlightAtPoint(
-          sample.point,
-          seg,
-          sample.ratio,
-          buildings,
-          bldg.id,
-          settings,
-          sunlightStep,
-          trajectory
-        );
+        const sunlight =
+          sunlightMethod === 'segments'
+            ? analyzeSunlightAtPointSegments(
+                sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory
+              )
+            : analyzeSunlightAtPoint(
+                sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory
+              );
         totalSunlightTimeMs += performance.now() - tSun0;
+
+        // ── Benchmark porównawczy (tylko gdy metoda segment-intersection jest aktywna) ──
+        if (sunlightMethod === 'segments') {
+          const tSunSeg0 = performance.now();
+          const sunlightRay = analyzeSunlightAtPoint(
+            sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory
+          );
+          totalSunlightSegTimeMs += performance.now() - tSunSeg0;
+
+          const hoursDiff = Math.abs(sunlight.totalHours - sunlightRay.totalHours);
+          totalHoursDiffAbs += hoursDiff;
+          if (hoursDiff > 0.01) {
+            diffCount++;
+            if (hoursDiff > maxHoursDiff) maxHoursDiff = hoursDiff;
+          }
+        }
 
         results.push({
           id: `${bldg.id}-${seg.id}-p${idx}`,
@@ -721,13 +1050,28 @@ export function runFullAnalysis(
     }
   }
 
-  const avgShadowingMs = pointCount > 0 ? totalShadowingTimeMs / pointCount : 0;
-  const avgSunlightMs = pointCount > 0 ? totalSunlightTimeMs / pointCount : 0;
+  const avgShadowingMs   = pointCount > 0 ? totalShadowingTimeMs    / pointCount : 0;
+  const avgSunlightMs    = pointCount > 0 ? totalSunlightTimeMs      / pointCount : 0;
+  const avgSunlightSegMs = pointCount > 0 ? totalSunlightSegTimeMs   / pointCount : 0;
+
+  // ── Log benchmark do DevTools Console (tylko gdy segment-intersection aktywna) ──
+  if (sunlightMethod === 'segments' && pointCount > 0) {
+    console.groupCollapsed(
+      `%c§56 Benchmark [Segment-Intersection aktywna] — ${pointCount} pkt`,
+      'color:#f59e0b;font-weight:bold'
+    );
+    console.log(`Seg-Intersection (aktywna): avg ${avgSunlightMs.toFixed(3)} ms/pkt | total ${totalSunlightTimeMs.toFixed(1)} ms`);
+    console.log(`Raycasting (porównanie):    avg ${avgSunlightSegMs.toFixed(3)} ms/pkt | total ${totalSunlightSegTimeMs.toFixed(1)} ms`);
+    console.log(`Przyspieszenie seg/ray:     ${avgSunlightSegMs > 0 ? (avgSunlightMs / avgSunlightSegMs).toFixed(2) : '—'}×`);
+    console.log(`Różnice wyników:            ${diffCount}/${pointCount} pkt z |Δh| > 0.01h | max Δ = ${maxHoursDiff.toFixed(3)}h | śr. |Δ| = ${(totalHoursDiffAbs / pointCount).toFixed(4)}h`);
+    console.groupEnd();
+  }
 
   return {
     results,
     avgShadowingMs,
     avgSunlightMs,
+    avgSunlightSegMs,
     totalPoints: pointCount,
   };
 }

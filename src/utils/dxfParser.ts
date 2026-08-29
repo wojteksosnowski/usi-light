@@ -365,3 +365,57 @@ export function createSampleBuildings(): BuildingLoop[] {
     buildLoop('bldg-3', 'Budynek C (Istniejący Zachód, H=25m)', bldg3Vertices, false, 25.0),
   ];
 }
+
+/**
+ * Creates a valid BuildingLoop from user-drawn vertices (Rectangle or Polyline).
+ */
+export function createBuildingFromVertices(
+  vertices: Point2D[],
+  name?: string,
+  defaultHeight: number = 15.0,
+  isTested: boolean = false
+): BuildingLoop {
+  const isCCW = isPolygonCCW(vertices);
+  const newId = `bldg-${Date.now()}`;
+  const segments: FacadeSegment[] = [];
+
+  for (let i = 0; i < vertices.length; i++) {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % vertices.length];
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-4) continue;
+
+    const normal = calculateOutwardNormal(p1, p2, isCCW);
+
+    segments.push({
+      id: `${newId}-seg-${segments.length + 1}`,
+      p1,
+      p2,
+      normal,
+      length: len,
+      angleRad: Math.atan2(dy, dx),
+      hTop: defaultHeight,
+      hWindowBottom: 0.85,
+      isCityCentre: false,
+      buildingType: 'residential',
+    });
+  }
+
+  return {
+    id: newId,
+    name: name || `Budynek ${newId.slice(-4)}`,
+    layer: isTested ? 'BUD_PROJEKTOWANY' : 'BUD_NOWY',
+    isTested,
+    isIncluded: true,
+    isCityCentre: false,
+    buildingType: 'residential',
+    defaultHeight,
+    hWindowBottom: 0.85,
+    vertices: [...vertices],
+    segments,
+    isClockwise: !isCCW,
+    transform: { tx: 0, ty: 0, rotationDeg: 0 },
+  };
+}

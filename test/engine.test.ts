@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateSignedArea, isPolygonCCW, calculateOutwardNormal } from '../src/utils/math2d';
+import { calculateSignedArea, isPolygonCCW, calculateOutwardNormal, computeBuildingShadowEnvelope, computeCombinedShadowEnvelope } from '../src/utils/math2d';
 import { calculateSolarPosition } from '../src/utils/solar';
 import { analyzeShadowingAtPoint, runFullAnalysis } from '../src/engine/analysisEngine';
 import { createSampleBuildings, resolveDxfScale } from '../src/utils/dxfParser';
@@ -199,7 +199,47 @@ describe('Variable Accuracy & Multi-stage Refinement', () => {
     expect(directRayWithout?.isFree).toBe(true); // obstacle ignored, ray is completely free
     expect(resWithoutObstacle.isCompliant).toBe(true);
   });
+
+  it('verifies analytical segment intersection method (§ 56 Segmenty) vs raycasting consistency', async () => {
+    const { analyzeSunlightAtPoint, analyzeSunlightAtPointSegments } = await import('../src/engine/analysisEngine');
+    const buildings = createSampleBuildings();
+    const target = buildings[0];
+    const southSeg = target.segments[0];
+    const point = { x: 20, y: 10 };
+    const settings = {
+      latitude: 52.23,
+      longitude: 21.01,
+      isCityCentreDefault: false,
+      samplingInterval: 0.25,
+      equinoxDate: 'spring' as const,
+    };
+
+    const rayResult = analyzeSunlightAtPoint(point, southSeg, 0.5, buildings, target.id, settings, 5);
+    const segResult = analyzeSunlightAtPointSegments(point, southSeg, 0.5, buildings, target.id, settings, 5);
+
+    expect(Math.abs(segResult.totalMinutes - rayResult.totalMinutes)).toBeLessThanOrEqual(10);
+    expect(Math.abs(segResult.totalHours - rayResult.totalHours)).toBeLessThanOrEqual(0.15);
+    expect(segResult.isCompliant).toBe(rayResult.isCompliant);
+    expect(segResult.sectors).toBeDefined();
+    expect(segResult.sectors!.length).toBeGreaterThan(0);
+  });
+
+  it('computes combined boolean shadow envelope (Zakres cienia) for all tested buildings correctly', () => {
+    const buildings = createSampleBuildings();
+    const loops = computeCombinedShadowEnvelope(buildings, 52.23, 'spring');
+
+    expect(loops).toBeDefined();
+    expect(loops.length).toBeGreaterThanOrEqual(1);
+    expect(loops[0].length).toBeGreaterThanOrEqual(3);
+
+    // Verify combined envelope extends to the North
+    const testedBldgs = buildings.filter((b) => b.isTested && b.isIncluded !== false);
+    const maxBldgY = Math.max(...testedBldgs.flatMap((b) => b.vertices.map((v) => v.y)));
+    const maxCombinedY = Math.max(...loops.flatMap((l) => l.map((v) => v.y)));
+    expect(maxCombinedY).toBeGreaterThan(maxBldgY);
+  });
 });
+
 
 
 

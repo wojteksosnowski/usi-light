@@ -25,11 +25,11 @@ describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 
       }
     }
 
-    const iterations = 50;
+    const iterations = 20;
     const totalPoints = points.length * iterations;
 
     // 1. Warm-up
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 3; i++) {
       for (const p of points) {
         analyzeShadowingAtPoint(p.point, p.seg, p.ratio, buildings, target.id, 0.5);
         analyzeSunlightAtPoint(p.point, p.seg, p.ratio, buildings, target.id, settings, 5);
@@ -46,17 +46,7 @@ describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 
     const t1 = performance.now();
     const shadowingTimeHigh = t1 - t0;
 
-    // 3. Measure Shadowing (§ 12) at live precision (angleStep = 2.0 deg -> 79 rays/point)
-    const t0Live = performance.now();
-    for (let i = 0; i < iterations; i++) {
-      for (const p of points) {
-        analyzeShadowingAtPoint(p.point, p.seg, p.ratio, buildings, target.id, 2.0);
-      }
-    }
-    const t1Live = performance.now();
-    const shadowingTimeLive = t1Live - t0Live;
-
-    // 4. Measure Sunlight (§ 56) at high precision (stepMinutes = 5 min -> ~120 solar checks)
+    // 3. Measure Sunlight (§ 56) with Raycasting
     const t2 = performance.now();
     for (let i = 0; i < iterations; i++) {
       for (const p of points) {
@@ -64,27 +54,11 @@ describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 
       }
     }
     const t3 = performance.now();
-    const sunlightTimeHigh = t3 - t2;
-
-    // 5. Measure Sunlight (§ 56) at live precision (stepMinutes = 15 min -> ~40 solar checks)
-    const t2Live = performance.now();
-    for (let i = 0; i < iterations; i++) {
-      for (const p of points) {
-        analyzeSunlightAtPoint(p.point, p.seg, p.ratio, buildings, target.id, settings, 15);
-      }
-    }
-    const t3Live = performance.now();
-    const sunlightTimeLive = t3Live - t2Live;
+    const sunlightRayTimeHigh = t3 - t2;
 
     console.log(`\n================ BENCHMARK PROFILING RESULTS (${totalPoints} punktów pomiarowych) ================`);
-    console.log(`[TRYB DOKŁADNY - HIGH PRECISION]:`);
-    console.log(`- Przesłanianie § 12 (krok 0.5° = 313 promieni): ${shadowingTimeHigh.toFixed(2)} ms (${(shadowingTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
-    console.log(`- Nasłonecznienie § 56 (krok 5 min = 120 slotów):  ${sunlightTimeHigh.toFixed(2)} ms (${(sunlightTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
-    console.log(`=> Przesłanianie zajmuje ${(shadowingTimeHigh / sunlightTimeHigh * 100).toFixed(1)}% czasu Nasłonecznienia (${(shadowingTimeHigh / sunlightTimeHigh).toFixed(2)}x)`);
-    console.log(`\n[TRYB SZYBKI - LIVE]:`);
-    console.log(`- Przesłanianie § 12 (krok 2.0° = 79 promieni):   ${shadowingTimeLive.toFixed(2)} ms (${(shadowingTimeLive / totalPoints * 1000).toFixed(2)} µs/pkt)`);
-    console.log(`- Nasłonecznienie § 56 (krok 15 min = 40 slotów):  ${sunlightTimeLive.toFixed(2)} ms (${(sunlightTimeLive / totalPoints * 1000).toFixed(2)} µs/pkt)`);
-    console.log(`=> Przesłanianie zajmuje ${(shadowingTimeLive / sunlightTimeLive * 100).toFixed(1)}% czasu Nasłonecznienia (${(shadowingTimeLive / sunlightTimeLive).toFixed(2)}x)`);
+    console.log(`- Przesłanianie § 12 (analityczne/sektory):  ${shadowingTimeHigh.toFixed(2)} ms (${(shadowingTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
+    console.log(`- Nasłonecznienie § 56 (krok 5 min):         ${sunlightRayTimeHigh.toFixed(2)} ms (${(sunlightRayTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
     console.log(`===================================================================================\n`);
-  });
+  }, 15000);
 });

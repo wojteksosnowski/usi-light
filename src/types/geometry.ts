@@ -36,6 +36,7 @@ export interface BuildingLoop {
   vertices: Point2D[];
   segments: FacadeSegment[];
   isClockwise: boolean;
+  groupId?: string; // Group ID for linked / grouped buildings that move together
   transform: {
     tx: number;
     ty: number;
@@ -83,6 +84,17 @@ export interface SunlightTimeSlot {
   blockingAngleDeg?: number;
 }
 
+export interface SunlightSector {
+  startAzimuthDeg: number;
+  endAzimuthDeg: number;
+  spanDeg: number;
+  isDirectSunlight: boolean;
+  requiredDistance?: number;
+  startTimeStr?: string;
+  endTimeStr?: string;
+  hours: number;
+}
+
 export interface SunlightResult {
   point: Point2D;
   segmentId: string;
@@ -91,7 +103,9 @@ export interface SunlightResult {
   totalHours: number;
   isCompliant: boolean; // >= 3.0h (or 1.5h in city centre)
   timeSlots: SunlightTimeSlot[];
+  sectors?: SunlightSector[]; // Analityczne ciągłe sektory geometryczne
 }
+
 
 export interface AnalysisPointResult {
   id: string;

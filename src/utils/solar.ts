@@ -91,9 +91,9 @@ export function calculateSolarPosition(
     
     let az = Math.acos(Math.max(-1, Math.min(1, cosAzimuth))) * RAD2DEG;
     if (haDeg > 0) {
-      azimuthDeg = (360 - az + 180) % 360;
-    } else {
       azimuthDeg = (az + 180) % 360;
+    } else {
+      azimuthDeg = (540 - az) % 360;
     }
   }
 
@@ -111,3 +111,48 @@ export function calculateSolarPosition(
     solarNoonDecimal: solarNoonMinutes / 60
   };
 }
+
+/**
+ * Zwraca dokładną godzinę dziesiętną (hourFraction) dla zadanego azymutu słońca w dniu równonocy.
+ * Wykorzystuje monotoniczność azymutu w ciągu dnia i szybkie wyszukiwanie binarne.
+ */
+export function getHourAtSolarAzimuth(
+  azimuthDeg: number,
+  lat: number,
+  lon: number,
+  month: number = 3,
+  day: number = 21,
+  tzOffset: number = 1.0
+): number {
+  let low = 4.0;
+  let high = 20.0;
+
+  for (let i = 0; i < 24; i++) {
+    const mid = (low + high) / 2;
+    const pos = calculateSolarPosition(lat, lon, month, day, mid, tzOffset);
+    if (pos.azimuthDeg < azimuthDeg) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return (low + high) / 2;
+}
+
+/**
+ * Zwraca kąt elewacji słońca dla zadanego azymutu w dniu równonocy.
+ */
+export function getSolarElevationAtAzimuth(
+  azimuthDeg: number,
+  lat: number,
+  lon: number,
+  month: number = 3,
+  day: number = 21,
+  tzOffset: number = 1.0
+): number {
+  const hour = getHourAtSolarAzimuth(azimuthDeg, lat, lon, month, day, tzOffset);
+  const pos = calculateSolarPosition(lat, lon, month, day, hour, tzOffset);
+  return pos.elevationDeg;
+}
+
