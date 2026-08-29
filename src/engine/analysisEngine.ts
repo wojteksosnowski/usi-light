@@ -98,8 +98,7 @@ export function analyzeShadowingAtPoint(
       if (dp1 < 0 && dp2 < 0) continue;
 
       // ── Required clearance for this obstacle ──
-      // H measured from tested window bottom level to top edge of obstacle (§ 12 ust. 3)
-      const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
+      const deltaH = Math.max(0, seg.hTop);
       const dBase  = Math.min(deltaH, 35.0);
       const dReq   = segment.isCityCentre || bldg.isCityCentre
         ? 0.5 * dBase
@@ -565,7 +564,7 @@ export function analyzeSunlightAtPoint(
 
       const hit = raySegmentIntersection(point, sunDir, seg.p1, seg.p2);
       if (hit.hit && hit.distance > 0.05) {
-        const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
+        const deltaH = Math.max(0, seg.hTop);
         const betaDeg = Math.atan2(deltaH, hit.distance) * RAD2DEG;
 
         if (betaDeg > maxObstacleAngleDeg) {
@@ -752,8 +751,8 @@ export function analyzeSunlightAtPointSegments(
       const v2y = seg.p2.y - point.y;
       if (v1x * normal.x + v1y * normal.y < -0.01 && v2x * normal.x + v2y * normal.y < -0.01) continue;
 
-      // Wysokość przeszkody ponad parapet okna
-      const deltaH = Math.max(0, seg.hTop - segment.hWindowBottom);
+      // Wysokość przeszkody H bezpośrednio
+      const deltaH = Math.max(0, seg.hTop);
       if (deltaH <= 0) continue;
 
       // L = deltaH * tan(latitude) -> zasięg graniczny płaszczyzny cienia na południe
