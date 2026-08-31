@@ -145,4 +145,24 @@ export interface CadLayerSettings {
   isVisible?: boolean; // Żarówka: CAD visibility
 }
 
+export interface Edge2D {
+  p1: Point2D;
+  p2: Point2D;
+}
+
+export interface HourlyShadowLoop {
+  hourOffset: number; // np. -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5
+  hourDecimal: number; // godzina dziesiętna, np. 11.87
+  azimuthDeg: number;
+  elevationDeg: number;
+  polygons: Point2D[][]; // obrysy cienia dla danej godziny
+}
+
+export interface ShadowAnalysisResult {
+  envelopeLoops: Point2D[][]; // Łączna koperta zasięgu cienia (Union)
+  hourlyShadows: HourlyShadowLoop[]; // Obrysy cienia dla poszczególnych godzin
+  calculationTimeMs: number; // Czas kalkulacji samej geometrii cienia
+}
+
+
 

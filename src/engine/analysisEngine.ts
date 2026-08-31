@@ -9,6 +9,7 @@ import {
   SunlightTimeSlot,
   AnalysisPointResult,
   ProjectSettings,
+  ShadowAnalysisResult,
 } from '../types/geometry';
 import {
   raySegmentIntersection,
@@ -16,7 +17,9 @@ import {
   distancePointToSegment,
   clipSegmentToCircle,
   isDirectionInSegmentCone,
+  computeFullShadowAnalysis,
 } from '../utils/math2d';
+
 
 import {
   calculateSolarPosition,
@@ -983,9 +986,12 @@ export interface AnalysisBatchOutput {
   avgShadowingMs: number;
   avgSunlightMs: number;
   avgSunlightSegMs: number; // Czas metody segment-intersection (porównanie)
+  shadowEnvelopeMs: number; // Czas obliczenia obrysów i koperty cienia
+  shadowAnalysis?: ShadowAnalysisResult; // Wynik analizy obrysu cienia i godzinowych obrysów
   totalAnalysisMs: number; // Full wall-clock time for the active batch analysis
   totalPoints: number;
 }
+
 
 const analysisPointCache = new Map<string, AnalysisPointResult>();
 
@@ -1185,6 +1191,16 @@ export function runFullAnalysis(
   const avgShadowingMs   = pointCount > 0 ? totalShadowingTimeMs    / pointCount : 0;
   const avgSunlightMs    = pointCount > 0 ? totalSunlightTimeMs      / pointCount : 0;
   const avgSunlightSegMs = pointCount > 0 ? totalSunlightSegTimeMs   / pointCount : 0;
+
+  // ── Analiza obrysu cienia rzucanego (Silhouette Edges + Koperta + Godziny 0, +-1h..+-5h) ──
+  const shadowAnalysis = computeFullShadowAnalysis(
+    buildings,
+    settings.latitude,
+    settings.longitude,
+    settings.equinoxDate
+  );
+  const shadowEnvelopeMs = shadowAnalysis.calculationTimeMs;
+
   const totalAnalysisMs = performance.now() - analysisStart;
 
   // ── Log benchmark do DevTools Console (tylko gdy Metoda Linijki Słońca aktywna) ──
@@ -1196,6 +1212,7 @@ export function runFullAnalysis(
     console.log(`Linijka Słońca (aktywna):    avg ${avgSunlightMs.toFixed(3)} ms/pkt | total ${totalSunlightTimeMs.toFixed(1)} ms`);
     console.log(`Metoda Astronomiczna (ref):  avg ${avgSunlightSegMs.toFixed(3)} ms/pkt | total ${totalSunlightSegTimeMs.toFixed(1)} ms`);
     console.log(`Przyspieszenie Lin/Astro:    ${avgSunlightSegMs > 0 ? (avgSunlightMs / avgSunlightSegMs).toFixed(2) : '—'}×`);
+    console.log(`Obrys cienia (koperta/godz): ${shadowEnvelopeMs.toFixed(2)} ms`);
     console.log(`Różnice wyników:             ${diffCount}/${pointCount} pkt z |Δh| > 0.01h | max Δ = ${maxHoursDiff.toFixed(3)}h | śr. |Δ| = ${(totalHoursDiffAbs / pointCount).toFixed(4)}h`);
     console.groupEnd();
   }
@@ -1205,7 +1222,10 @@ export function runFullAnalysis(
     avgShadowingMs,
     avgSunlightMs,
     avgSunlightSegMs,
+    shadowEnvelopeMs,
+    shadowAnalysis,
     totalAnalysisMs,
     totalPoints: pointCount,
   };
 }
+

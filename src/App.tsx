@@ -280,7 +280,10 @@ export const App: React.FC = () => {
   const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
   const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
   const avgSunlightSegMs = analysisOutput?.avgSunlightSegMs || 0;
+  const shadowEnvelopeMs = analysisOutput?.shadowEnvelopeMs || 0;
+  const shadowAnalysis = analysisOutput?.shadowAnalysis;
   const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
+
 
   const [selectedPointKey, setSelectedPointKey] = useState<{
     buildingId: string;
@@ -2725,7 +2728,7 @@ export const App: React.FC = () => {
               fontSize: '10px',
               fontFamily: 'monospace',
             }}
-            title={`Czas pełnego przeliczenia aktywnych warstw analitycznych:\n• Łącznie: ${totalAnalysisMs.toFixed(3)} ms\n\nŚredni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms`}
+            title={`Czas pełnego przeliczenia aktywnych warstw analitycznych:\n• Łącznie: ${totalAnalysisMs.toFixed(3)} ms\n\nŚredni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms\n\nAnaliza obrysu cienia:\n• Obrys cienia (§ 56 koperta & godziny): ${shadowEnvelopeMs.toFixed(3)} ms`}
           >
             <Timer size={11} color="#94a3b8" />
             <span style={{ color: '#34d399', fontWeight: 600 }}>
@@ -2767,7 +2770,9 @@ export const App: React.FC = () => {
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
             showShadowRange={showShadowRange}
+            shadowAnalysis={shadowAnalysis}
             sunlightMethod={sunlightMethod}
+
             latitude={settings.latitude}
             longitude={settings.longitude}
             equinoxDate={settings.equinoxDate}

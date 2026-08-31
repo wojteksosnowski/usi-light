@@ -26,10 +26,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   showShadowingLines,
   showSunlightLines,
   showShadowRange = false,
+  shadowAnalysis,
   sunlightMethod = 'raycasting',
   latitude = 52.23,
   longitude = 21.01,
   equinoxDate = 'spring',
+
   fitTrigger,
   onInteractionChange,
   isLinkingMode = false,
@@ -155,8 +157,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
   const shadowRangeLoops = useMemo(() => {
     if (!showShadowRange) return [];
-    return computeCombinedShadowEnvelope(visibleBuildings, latitude, equinoxDate);
-  }, [visibleBuildings, showShadowRange, latitude, equinoxDate]);
+    if (shadowAnalysis?.envelopeLoops) {
+      return shadowAnalysis.envelopeLoops;
+    }
+    return computeCombinedShadowEnvelope(visibleBuildings, latitude, equinoxDate, longitude);
+  }, [visibleBuildings, showShadowRange, shadowAnalysis, latitude, equinoxDate, longitude]);
+
 
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
@@ -268,7 +274,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     );
 
     // 3. Shadow Range § 12 (only for visible tested buildings)
-    renderShadowRange(renderContext, shadowRangeLoops, showShadowRange);
+    renderShadowRange(renderContext, shadowRangeLoops, showShadowRange, shadowAnalysis?.hourlyShadows);
+
 
     // 4. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12)
     if (selectedPointResult) {

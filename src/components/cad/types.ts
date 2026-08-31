@@ -41,7 +41,9 @@ export interface CadCanvasProps {
   showShadowingLines: boolean;
   showSunlightLines: boolean;
   showShadowRange?: boolean;
+  shadowAnalysis?: import('../../types/geometry').ShadowAnalysisResult;
   sunlightMethod?: 'raycasting' | 'segments';
+
   latitude?: number;
   longitude?: number;
   equinoxDate?: 'spring' | 'autumn';

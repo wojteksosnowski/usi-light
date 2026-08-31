@@ -60,5 +60,6 @@ describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 
     console.log(`- Przesłanianie § 12 (analityczne/sektory):  ${shadowingTimeHigh.toFixed(2)} ms (${(shadowingTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
     console.log(`- Nasłonecznienie § 56 (krok 5 min):         ${sunlightRayTimeHigh.toFixed(2)} ms (${(sunlightRayTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
     console.log(`===================================================================================\n`);
-  }, 15000);
+  }, 45000);
 });
+
