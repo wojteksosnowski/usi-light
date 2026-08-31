@@ -1,4 +1,4 @@
-import { runFullAnalysis, AnalysisAccuracyOptions, AnalysisBatchOutput } from './analysisEngine';
+import { runFullAnalysis, AnalysisAccuracyOptions, AnalysisBatchOutput, EnabledAnalyses } from './analysisEngine';
 import { BuildingLoop, ProjectSettings } from '../types/geometry';
 
 export interface AnalysisWorkerRequest {
@@ -7,6 +7,7 @@ export interface AnalysisWorkerRequest {
   settings: ProjectSettings;
   options?: AnalysisAccuracyOptions;
   sunlightMethod?: 'raycasting' | 'segments';
+  enabledAnalyses?: EnabledAnalyses;
 }
 
 export interface AnalysisWorkerResponse {
@@ -17,9 +18,9 @@ export interface AnalysisWorkerResponse {
 }
 
 self.onmessage = (e: MessageEvent<AnalysisWorkerRequest>) => {
-  const { id, buildings, settings, options, sunlightMethod } = e.data;
+  const { id, buildings, settings, options, sunlightMethod, enabledAnalyses } = e.data;
   try {
-    const output = runFullAnalysis(buildings, settings, options, sunlightMethod);
+    const output = runFullAnalysis(buildings, settings, options, sunlightMethod, enabledAnalyses);
     self.postMessage({ id, success: true, output });
   } catch (err: any) {
     self.postMessage({ id, success: false, error: err?.message || String(err) });

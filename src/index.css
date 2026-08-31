@@ -104,6 +104,8 @@ html, body, #root {
 
 .sidebar-group-divider {
   height: 1px;
+  min-height: 1px;
+  flex-shrink: 0;
   background-color: var(--border-color);
   margin: 4px 0;
   border: none;

@@ -984,15 +984,39 @@ const makePointCacheKey = (
  * Runs full batch analysis on all facade segments of tested building(s).
  * Runs BOTH sunlight methods in parallel for benchmarking.
  */
+export interface EnabledAnalyses {
+  shadowing?: boolean;
+  sunlight?: boolean;
+  shadowRange?: boolean;
+}
+
 export function runFullAnalysis(
   buildings: BuildingLoop[],
   settings: ProjectSettings,
   options?: AnalysisAccuracyOptions,
-  sunlightMethod: 'raycasting' | 'segments' = 'raycasting'
+  sunlightMethod: 'raycasting' | 'segments' = 'raycasting',
+  enabledAnalyses?: EnabledAnalyses
 ): AnalysisBatchOutput {
   const analysisStart = performance.now();
-  const results: AnalysisPointResult[] = [];
+  const isShadowingEnabled = enabledAnalyses?.shadowing !== false;
+  const isSunlightEnabled = enabledAnalyses?.sunlight !== false;
+  const isShadowRangeEnabled = enabledAnalyses?.shadowRange !== false;
 
+  // If all analytical layers are disabled, return immediately with zero calculations
+  if (!isShadowingEnabled && !isSunlightEnabled && !isShadowRangeEnabled) {
+    return {
+      results: [],
+      avgShadowingMs: 0,
+      avgSunlightMs: 0,
+      avgSunlightSegMs: 0,
+      shadowEnvelopeMs: 0,
+      shadowAnalysis: { hourlyShadows: [], envelopeLoops: [], calculationTimeMs: 0 },
+      totalAnalysisMs: performance.now() - analysisStart,
+      totalPoints: 0,
+    };
+  }
+
+  const results: AnalysisPointResult[] = [];
   const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false);
   const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
   const angleStep = options?.angleStepDeg ?? 0.5;
@@ -1019,30 +1043,40 @@ export function runFullAnalysis(
       angleStep,
       sunlightStep,
       sunlightMethod,
+      isShadowingEnabled,
+      isSunlightEnabled,
     },
   });
 
   // Precompute solar trajectories and 10h window lines once for standard residential and childcare segments
-  const astroSystem = new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
-  const linijkaSystem = new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
-  const activeHourSystem = sunlightMethod === 'segments' ? linijkaSystem : astroSystem;
+  const astroSystem = isSunlightEnabled ? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
+  const linijkaSystem = isSunlightEnabled ? new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
+  const activeHourSystem = isSunlightEnabled ? (sunlightMethod === 'segments' ? linijkaSystem! : astroSystem!) : null;
 
-  const standardTrajectory = computeDailySolarTrajectory(settings, sunlightStep, false, activeHourSystem);
-  const childcareTrajectory = computeDailySolarTrajectory(settings, sunlightStep, true, activeHourSystem);
-  const standardWindow = precomputeSolarWindow(settings, false, activeHourSystem);
-  const childcareWindow = precomputeSolarWindow(settings, true, activeHourSystem);
+  const standardTrajectory = (isSunlightEnabled && activeHourSystem)
+    ? computeDailySolarTrajectory(settings, sunlightStep, false, activeHourSystem)
+    : [];
+  const childcareTrajectory = (isSunlightEnabled && activeHourSystem)
+    ? computeDailySolarTrajectory(settings, sunlightStep, true, activeHourSystem)
+    : [];
+  const standardWindow = (isSunlightEnabled && activeHourSystem)
+    ? precomputeSolarWindow(settings, false, activeHourSystem)
+    : null;
+  const childcareWindow = (isSunlightEnabled && activeHourSystem)
+    ? precomputeSolarWindow(settings, true, activeHourSystem)
+    : null;
 
   // Trajektorie referencyjne (Astro) dla benchmarku w trybie Linijki Słońca
-  const refStandardTrajectory = sunlightMethod === 'segments'
+  const refStandardTrajectory = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, false, astroSystem)
     : null;
-  const refChildcareTrajectory = sunlightMethod === 'segments'
+  const refChildcareTrajectory = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, true, astroSystem)
     : null;
-  const refStandardWindow = sunlightMethod === 'segments'
+  const refStandardWindow = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? precomputeSolarWindow(settings, false, astroSystem)
     : null;
-  const refChildcareWindow = sunlightMethod === 'segments'
+  const refChildcareWindow = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? precomputeSolarWindow(settings, true, astroSystem)
     : null;
 
@@ -1056,121 +1090,154 @@ export function runFullAnalysis(
   let maxHoursDiff = 0;
   let totalHoursDiffAbs = 0;
 
-  for (const bldg of testedBuildings) {
-    for (const seg of bldg.segments) {
-      const isChildcare = seg.buildingType === 'childcare';
-      const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
-      const trajectory = isChildcare ? childcareTrajectory : standardTrajectory;
-      const windowInfo = isChildcare ? childcareWindow : standardWindow;
-      const refTrajectory = isChildcare ? refChildcareTrajectory : refStandardTrajectory;
-      const refWindowInfo = isChildcare ? refChildcareWindow : refStandardWindow;
-      const sampleKeys = sampled.map((sample) =>
-        makePointCacheKey(cacheKey, bldg.id, seg.id, sample.ratio)
-      );
-      const sampleResults: Array<AnalysisPointResult | null> = new Array(sampled.length).fill(null);
-
-      for (let i = 0; i < sampled.length; i++) {
-        const cached = analysisPointCache.get(sampleKeys[i]);
-        if (cached) {
-          sampleResults[i] = cached;
-        }
-      }
-
-      for (let i = 0; i < sampled.length; i++) {
-        if (sampleResults[i]) continue;
-
-        const leftKnown = i > 0 ? sampleResults[i - 1] : null;
-        let rightKnownIndex = -1;
-        for (let k = i + 1; k < sampled.length; k++) {
-          if (sampleResults[k]) {
-            rightKnownIndex = k;
-            break;
-          }
-        }
-        const rightKnown = rightKnownIndex >= 0 ? sampleResults[rightKnownIndex] : null;
-
-        if (leftKnown && rightKnown && sameAnalysisResult(leftKnown, rightKnown)) {
-          for (let j = i; j < rightKnownIndex; j++) {
-            sampleResults[j] = leftKnown;
-            analysisPointCache.set(sampleKeys[j], leftKnown);
-          }
-          i = rightKnownIndex - 1;
-          continue;
-        }
-
-        const sample = sampled[i];
-        const prefilteredObstacles = prefilterObstacleSegments(sample.point, seg, buildings, bldg.id);
-
-        const tShadow0 = performance.now();
-        const shadowing = analyzeShadowingAtPoint(
-          sample.point, seg, sample.ratio, buildings, bldg.id, angleStep, prefilteredObstacles
+  if (isShadowingEnabled || isSunlightEnabled) {
+    for (const bldg of testedBuildings) {
+      for (const seg of bldg.segments) {
+        const isChildcare = seg.buildingType === 'childcare';
+        const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
+        const trajectory = isChildcare ? childcareTrajectory : standardTrajectory;
+        const windowInfo = isChildcare ? childcareWindow : standardWindow;
+        const refTrajectory = isChildcare ? refChildcareTrajectory : refStandardTrajectory;
+        const refWindowInfo = isChildcare ? refChildcareWindow : refStandardWindow;
+        const sampleKeys = sampled.map((sample) =>
+          makePointCacheKey(cacheKey, bldg.id, seg.id, sample.ratio)
         );
-        totalShadowingTimeMs += performance.now() - tShadow0;
+        const sampleResults: Array<AnalysisPointResult | null> = new Array(sampled.length).fill(null);
 
-        const tSun0 = performance.now();
-        const sunlight =
-          sunlightMethod === 'segments'
-            ? analyzeSunlightAtPointSegments(
-                sample.point, seg, sample.ratio, buildings, bldg.id, settings, prefilteredObstacles, windowInfo, linijkaSystem
-              )
-            : analyzeSunlightAtPoint(
-                sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory, prefilteredObstacles, windowInfo, astroSystem
-              );
-        totalSunlightTimeMs += performance.now() - tSun0;
-
-        let sunlightRay = sunlight;
-        if (sunlightMethod === 'segments' && refTrajectory && refWindowInfo) {
-          const tSunSeg0 = performance.now();
-          sunlightRay = analyzeSunlightAtPoint(
-            sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, refTrajectory, prefilteredObstacles, refWindowInfo, astroSystem
-          );
-          totalSunlightSegTimeMs += performance.now() - tSunSeg0;
-
-          const hoursDiff = Math.abs(sunlight.totalHours - sunlightRay.totalHours);
-          totalHoursDiffAbs += hoursDiff;
-          if (hoursDiff > 0.01) {
-            diffCount++;
-            if (hoursDiff > maxHoursDiff) maxHoursDiff = hoursDiff;
+        for (let i = 0; i < sampled.length; i++) {
+          const cached = analysisPointCache.get(sampleKeys[i]);
+          if (cached) {
+            sampleResults[i] = cached;
           }
         }
 
-        const result: AnalysisPointResult = {
-          id: `${bldg.id}-${seg.id}-p${i}`,
-          point: sample.point,
-          normal: seg.normal,
-          segmentId: seg.id,
-          buildingId: bldg.id,
-          shadowing,
-          sunlight,
-        };
-        sampleResults[i] = result;
-        analysisPointCache.set(sampleKeys[i], result);
-      }
-      for (const res of sampleResults) {
-        if (!res) continue;
-        pointCount++;
-        results.push(res);
+        for (let i = 0; i < sampled.length; i++) {
+          if (sampleResults[i]) continue;
+
+          const leftKnown = i > 0 ? sampleResults[i - 1] : null;
+          let rightKnownIndex = -1;
+          for (let k = i + 1; k < sampled.length; k++) {
+            if (sampleResults[k]) {
+              rightKnownIndex = k;
+              break;
+            }
+          }
+          const rightKnown = rightKnownIndex >= 0 ? sampleResults[rightKnownIndex] : null;
+
+          if (leftKnown && rightKnown && sameAnalysisResult(leftKnown, rightKnown)) {
+            for (let j = i; j < rightKnownIndex; j++) {
+              sampleResults[j] = leftKnown;
+              analysisPointCache.set(sampleKeys[j], leftKnown);
+            }
+            i = rightKnownIndex - 1;
+            continue;
+          }
+
+          const sample = sampled[i];
+          const prefilteredObstacles = prefilterObstacleSegments(sample.point, seg, buildings, bldg.id);
+
+          let shadowing: ShadowingResult;
+          if (isShadowingEnabled) {
+            const tShadow0 = performance.now();
+            shadowing = analyzeShadowingAtPoint(
+              sample.point, seg, sample.ratio, buildings, bldg.id, angleStep, prefilteredObstacles
+            );
+            totalShadowingTimeMs += performance.now() - tShadow0;
+          } else {
+            shadowing = {
+              point: sample.point,
+              segmentId: seg.id,
+              offsetRatio: sample.ratio,
+              isCompliant: true,
+              maxContinuousFreeSpanDeg: 156,
+              totalFreeSpanDeg: 156,
+              sectors: [],
+              rays: [],
+            };
+          }
+
+          let sunlight: SunlightResult;
+          if (isSunlightEnabled) {
+            const tSun0 = performance.now();
+            sunlight =
+              sunlightMethod === 'segments'
+                ? analyzeSunlightAtPointSegments(
+                    sample.point, seg, sample.ratio, buildings, bldg.id, settings, prefilteredObstacles, windowInfo || undefined, linijkaSystem!
+                  )
+                : analyzeSunlightAtPoint(
+                    sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory, prefilteredObstacles, windowInfo || undefined, astroSystem!
+                  );
+            totalSunlightTimeMs += performance.now() - tSun0;
+
+            let sunlightRay = sunlight;
+            if (sunlightMethod === 'segments' && refTrajectory && refWindowInfo && astroSystem) {
+              const tSunSeg0 = performance.now();
+              sunlightRay = analyzeSunlightAtPoint(
+                sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, refTrajectory, prefilteredObstacles, refWindowInfo || undefined, astroSystem
+              );
+              totalSunlightSegTimeMs += performance.now() - tSunSeg0;
+
+              const hoursDiff = Math.abs(sunlight.totalHours - sunlightRay.totalHours);
+              totalHoursDiffAbs += hoursDiff;
+              if (hoursDiff > 0.01) {
+                diffCount++;
+                if (hoursDiff > maxHoursDiff) maxHoursDiff = hoursDiff;
+              }
+            }
+          } else {
+            sunlight = {
+              point: sample.point,
+              segmentId: seg.id,
+              offsetRatio: sample.ratio,
+              totalMinutes: 0,
+              totalHours: 0,
+              isCompliant: true,
+              timeSlots: [],
+              sectors: [],
+            };
+          }
+
+          const result: AnalysisPointResult = {
+            id: `${bldg.id}-${seg.id}-p${i}`,
+            point: sample.point,
+            normal: seg.normal,
+            segmentId: seg.id,
+            buildingId: bldg.id,
+            shadowing,
+            sunlight,
+          };
+          sampleResults[i] = result;
+          analysisPointCache.set(sampleKeys[i], result);
+        }
+        for (const res of sampleResults) {
+          if (!res) continue;
+          pointCount++;
+          results.push(res);
+        }
       }
     }
   }
 
-  const avgShadowingMs   = pointCount > 0 ? totalShadowingTimeMs    / pointCount : 0;
-  const avgSunlightMs    = pointCount > 0 ? totalSunlightTimeMs      / pointCount : 0;
-  const avgSunlightSegMs = pointCount > 0 ? totalSunlightSegTimeMs   / pointCount : 0;
+  const avgShadowingMs   = pointCount > 0 && isShadowingEnabled ? totalShadowingTimeMs  / pointCount : 0;
+  const avgSunlightMs    = pointCount > 0 && isSunlightEnabled  ? totalSunlightTimeMs   / pointCount : 0;
+  const avgSunlightSegMs = pointCount > 0 && isSunlightEnabled  ? totalSunlightSegTimeMs/ pointCount : 0;
 
   // ── Analiza obrysu cienia rzucanego (Silhouette Edges + Koperta + Godziny 0, +-1h..+-5h) ──
-  const shadowAnalysis = computeFullShadowAnalysis(
-    buildings,
-    settings.latitude,
-    settings.longitude,
-    settings.equinoxDate
-  );
+  let shadowAnalysis = { hourlyShadows: [] as any[], envelopeLoops: [] as any[], calculationTimeMs: 0 };
+  if (isShadowRangeEnabled) {
+    shadowAnalysis = computeFullShadowAnalysis(
+      buildings,
+      settings.latitude,
+      settings.longitude,
+      settings.equinoxDate
+    );
+  }
   const shadowEnvelopeMs = shadowAnalysis.calculationTimeMs;
 
   const totalAnalysisMs = performance.now() - analysisStart;
 
   // ── Log benchmark do DevTools Console (tylko gdy Metoda Linijki Słońca aktywna) ──
-  if (sunlightMethod === 'segments' && pointCount > 0) {
+  if (isSunlightEnabled && sunlightMethod === 'segments' && pointCount > 0) {
     console.groupCollapsed(
       `%c§56 Benchmark [Metoda Linijki Słońca aktywna] — ${pointCount} pkt`,
       'color:#f59e0b;font-weight:bold'

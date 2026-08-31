@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { BuildingLoop, ProjectSettings } from '../types/geometry';
-import { runFullAnalysis, AnalysisAccuracyOptions, AnalysisBatchOutput } from '../engine/analysisEngine';
+import { runFullAnalysis, AnalysisAccuracyOptions, AnalysisBatchOutput, EnabledAnalyses } from '../engine/analysisEngine';
 import { AnalysisWorkerRequest, AnalysisWorkerResponse } from '../engine/analysis.worker';
 
 export function useAnalysisWorker(
@@ -8,11 +8,12 @@ export function useAnalysisWorker(
   settings: ProjectSettings,
   options: AnalysisAccuracyOptions,
   sunlightMethod: 'raycasting' | 'segments' = 'raycasting',
-  isLiveInteraction: boolean = false
+  isLiveInteraction: boolean = false,
+  enabledAnalyses?: EnabledAnalyses
 ) {
   // Initial immediate synchronous calculation for immediate initial mount
   const [analysisOutput, setAnalysisOutput] = useState<AnalysisBatchOutput>(() => {
-    return runFullAnalysis(buildings, settings, options, sunlightMethod);
+    return runFullAnalysis(buildings, settings, options, sunlightMethod, enabledAnalyses);
   });
 
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
@@ -77,7 +78,13 @@ export function useAnalysisWorker(
 
   // Dispatch calculation to Web Worker (with Terminate-on-Supersede guarantee)
   const dispatchCalculation = useCallback(
-    (bldgs: BuildingLoop[], st: ProjectSettings, opt: AnalysisAccuracyOptions, method: 'raycasting' | 'segments') => {
+    (
+      bldgs: BuildingLoop[],
+      st: ProjectSettings,
+      opt: AnalysisAccuracyOptions,
+      method: 'raycasting' | 'segments',
+      analyses?: EnabledAnalyses
+    ) => {
       const reqId = ++nextReqId.current;
 
       if (!workerRef.current) {
@@ -102,12 +109,13 @@ export function useAnalysisWorker(
             settings: st,
             options: opt,
             sunlightMethod: method,
+            enabledAnalyses: analyses,
           };
           workerRef.current.postMessage(req);
         }
       } else {
         // Fallback to sync if worker is unavailable
-        const output = runFullAnalysis(bldgs, st, opt, method);
+        const output = runFullAnalysis(bldgs, st, opt, method, analyses);
         if (isMountedRef.current) {
           setAnalysisOutput(output);
           setIsCalculating(false);
@@ -128,13 +136,13 @@ export function useAnalysisWorker(
     if (isLiveInteraction) {
       // During active dragging / live interaction, throttle requests by 80ms to avoid flooding
       debounceTimerRef.current = setTimeout(() => {
-        dispatchCalculation(buildings, settings, options, sunlightMethod);
+        dispatchCalculation(buildings, settings, options, sunlightMethod, enabledAnalyses);
       }, 80);
     } else {
       // Immediate dispatch when not dragging (e.g. idle refinement or settings change)
-      dispatchCalculation(buildings, settings, options, sunlightMethod);
+      dispatchCalculation(buildings, settings, options, sunlightMethod, enabledAnalyses);
     }
-  }, [buildings, settings, options, sunlightMethod, isLiveInteraction, dispatchCalculation]);
+  }, [buildings, settings, options, sunlightMethod, isLiveInteraction, enabledAnalyses, dispatchCalculation]);
 
   return {
     analysisOutput,

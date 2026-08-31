@@ -268,13 +268,21 @@ export const App: React.FC = () => {
     });
   }, [buildings, layerSettings]);
 
+  // Dynamic analytical layers filter (omits calculations when layers are toggled off)
+  const enabledAnalyses = useMemo(() => ({
+    shadowing: showShadowingLines,
+    sunlight: showSunlightLines,
+    shadowRange: showShadowRange,
+  }), [showShadowingLines, showSunlightLines, showShadowRange]);
+
   // Run Calculation with Variable Precision using Web Worker in background thread
   const { analysisOutput, isCalculating } = useAnalysisWorker(
     effectiveBuildings,
     settings,
     currentAccuracyOptions,
     sunlightMethod,
-    isInteracting
+    isInteracting,
+    enabledAnalyses
   );
 
   const analysisResults = analysisOutput?.results || [];
@@ -1094,22 +1102,22 @@ export const App: React.FC = () => {
       <aside className={`app-sidebar ${!isSidebarOpen ? 'collapsed' : ''}`}>
         {/* Header */}
         <div className="sidebar-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div
               style={{
-                padding: '8px',
-                borderRadius: '10px',
-                background: 'linear-gradient(135deg, #f59e0b, #6366f1)',
+                padding: '7px',
+                borderRadius: '9px',
+                background: 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Sparkles size={20} color="#fff" />
+              <Sun size={20} color="#38bdf8" />
             </div>
             <div>
-              <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#fff' }}>USI Light 2.5D</div>
-              <div style={{ fontSize: '11px', color: '#94a3b8' }}>Analiza § 12 & § 56 WT</div>
+              <div style={{ fontWeight: 'bold', fontSize: '16px', color: '#fff', letterSpacing: '0.3px' }}>Światło</div>
             </div>
           </div>
           <button
@@ -1867,114 +1875,134 @@ export const App: React.FC = () => {
                     <Wrench size={14} color="#818cf8" />
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {/* 1. Object Creation & Measurement Tools */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
-                        Tworzenie i pomiary:
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
-                            setDrawingVerticesCount(0);
-                            setIsDimensionToolActive(false);
-                            setDimensionPendingRef(null);
-                            setFacadePointMode(false);
-                          }}
-                          className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Rysuj nowy prostokąt: 1. kliknięcie = start, 2. kliknięcie = koniec"
-                        >
-                          <Square size={13} />
-                          <span style={{ fontWeight: 600 }}>Prostokąt</span>
-                        </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    {/* Rząd 1: Prostokąt, Polilinia */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
+                          setDrawingVerticesCount(0);
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                          setFacadePointMode(false);
+                        }}
+                        className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+                        title="Rysuj nowy prostokąt: 1. kliknięcie = start, 2. kliknięcie = koniec"
+                      >
+                        <Square size={13} />
+                        <span style={{ fontWeight: 600 }}>Prostokąt</span>
+                      </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
-                            setDrawingVerticesCount(0);
-                            setIsDimensionToolActive(false);
-                            setDimensionPendingRef(null);
-                            setFacadePointMode(false);
-                          }}
-                          className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Rysuj nową zamkniętą polilinię wieloboczną"
-                        >
-                          <PenTool size={13} />
-                          <span style={{ fontWeight: 600 }}>Polilinia</span>
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
+                          setDrawingVerticesCount(0);
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                          setFacadePointMode(false);
+                        }}
+                        className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+                        title="Rysuj nową zamkniętą polilinię wieloboczną"
+                      >
+                        <PenTool size={13} />
+                        <span style={{ fontWeight: 600 }}>Polilinia</span>
+                      </button>
+                    </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDrawingMode(drawingMode === 'rotate' ? 'none' : 'rotate');
-                            setDrawingVerticesCount(0);
-                            setIsDimensionToolActive(false);
-                            setDimensionPendingRef(null);
-                            setFacadePointMode(false);
-                          }}
-                          className={`btn-tile ${drawingMode === 'rotate' ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Obrót obiektów: przeciągaj wokół przesuwalnego punktu obrotu (obiekty połączone obracają się wspólnie)"
-                        >
-                          <RotateCw size={13} />
-                          <span style={{ fontWeight: 600 }}>Obrót</span>
-                        </button>
+                    {/* Rząd 2: Obrót, Wierzchołki, Krawędzie */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawingMode(drawingMode === 'rotate' ? 'none' : 'rotate');
+                          setDrawingVerticesCount(0);
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                          setFacadePointMode(false);
+                        }}
+                        className={`btn-tile ${drawingMode === 'rotate' ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                        title="Obrót obiektów: przeciągaj wokół przesuwalnego punktu obrotu (obiekty połączone obracają się wspólnie)"
+                      >
+                        <RotateCw size={13} />
+                        <span style={{ fontWeight: 600 }}>Obrót</span>
+                      </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDrawingMode(drawingMode === 'vertexEdit' ? 'none' : 'vertexEdit');
-                            setDrawingVerticesCount(0);
-                            setIsDimensionToolActive(false);
-                            setDimensionPendingRef(null);
-                            setFacadePointMode(false);
-                          }}
-                          className={`btn-tile ${drawingMode === 'vertexEdit' ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Edycja wierzchołków brył: przeciągaj punkty, klikaj [+] by dodać wierzchołek, klawisz Del by usunąć"
-                        >
-                          <Edit3 size={13} />
-                          <span style={{ fontWeight: 600 }}>Wierzchołki</span>
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawingMode(drawingMode === 'vertexEdit' ? 'none' : 'vertexEdit');
+                          setDrawingVerticesCount(0);
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                          setFacadePointMode(false);
+                        }}
+                        className={`btn-tile ${drawingMode === 'vertexEdit' ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                        title="Edycja wierzchołków brył: przeciągaj punkty, klikaj [+] by dodać wierzchołek, klawisz Del by usunąć"
+                      >
+                        <Edit3 size={13} />
+                        <span style={{ fontWeight: 600 }}>Wierzchołki</span>
+                      </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsDimensionToolActive(!isDimensionToolActive);
-                            setDimensionPendingRef(null);
-                            setDrawingMode('none');
-                            setDrawingVerticesCount(0);
-                            setFacadePointMode(false);
-                          }}
-                          className={`btn-tile ${isDimensionToolActive ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Dodaj wymiar: kliknij 1. krawędź (początek) i 2. krawędź (koniec)"
-                        >
-                          <Ruler size={13} />
-                          <span style={{ fontWeight: 600 }}>Wymiar</span>
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditMode(!isEditMode);
+                          setDrawingMode('none');
+                          setDrawingVerticesCount(0);
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                          setFacadePointMode(false);
+                        }}
+                        className={`btn-tile ${isEditMode ? 'active-amber' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                        title="Równoległe przesuwanie krawędzi (offset) z zachowaniem kierunków ścian"
+                      >
+                        <Maximize2 size={13} />
+                        <span style={{ fontWeight: 600 }}>Krawędzie</span>
+                      </button>
+                    </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFacadePointMode((prev) => !prev);
-                            setDrawingMode('none');
-                            setIsDimensionToolActive(false);
-                            setDimensionPendingRef(null);
-                          }}
-                          className={`btn-tile ${facadePointMode ? 'active-indigo' : 'inactive'}`}
-                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Kliknij lub przeciągnij punkt wzdłuż krawędzi fasady"
-                        >
-                          <MapPin size={13} />
-                          <span style={{ fontWeight: 600 }}>Punkt fasady</span>
-                        </button>
-                      </div>
+                    {/* Rząd 3: Wymiar, Punkt fasady */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDimensionToolActive(!isDimensionToolActive);
+                          setDimensionPendingRef(null);
+                          setDrawingMode('none');
+                          setDrawingVerticesCount(0);
+                          setFacadePointMode(false);
+                        }}
+                        className={`btn-tile ${isDimensionToolActive ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+                        title="Dodaj wymiar: kliknij 1. krawędź (początek) i 2. krawędź (koniec)"
+                      >
+                        <Ruler size={13} />
+                        <span style={{ fontWeight: 600 }}>Wymiar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFacadePointMode((prev) => !prev);
+                          setDrawingMode('none');
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                        }}
+                        className={`btn-tile ${facadePointMode ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+                        title="Kliknij lub przeciągnij punkt wzdłuż krawędzi fasady"
+                      >
+                        <MapPin size={13} />
+                        <span style={{ fontWeight: 600 }}>Punkt fasady</span>
+                      </button>
+                    </div>
 
                       {/* Active Dimension Tool Panel */}
                       {isDimensionToolActive && (
@@ -2350,24 +2378,11 @@ export const App: React.FC = () => {
                           </div>
                         </div>
                       )}
-                    </div>
 
                     {/* 2. Operations on Selected Building */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px', borderTop: '1px solid var(--border-light)' }}>
                       {selectedBuilding ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {/* Action buttons: Edytuj, Duplikuj, Usuń */}
-                          <button
-                            type="button"
-                            onClick={() => setIsEditMode(!isEditMode)}
-                            className={`btn-tile ${isEditMode ? 'active-amber' : 'inactive'}`}
-                            style={{ justifyContent: 'center', gap: '6px', padding: '9px 12px' }}
-                            title="Włącz tryb równoległego przesuwania krawędzi obiektu"
-                          >
-                            <Edit3 size={14} />
-                            <span style={{ fontWeight: 600 }}>{isEditMode ? 'Zakończ edycję krawędzi' : 'Edytuj krawędzie (Offset)'}</span>
-                          </button>
-
                           {isEditMode && (
                             <div
                               style={{
@@ -2593,22 +2608,20 @@ export const App: React.FC = () => {
           {!isSidebarOpen && (
             <button
               onClick={() => setIsSidebarOpen(true)}
+              title="Pokaż panel boczny"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '10px',
+                justifyContent: 'center',
+                padding: '6px 8px',
+                borderRadius: '8px',
                 background: 'var(--accent-indigo)',
                 color: '#fff',
                 border: 'none',
                 cursor: 'pointer',
-                fontSize: '11px',
-                fontWeight: 'bold',
               }}
             >
-              <ChevronRight size={14} />
-              <span>Pokaż panel</span>
+              <ChevronRight size={16} />
             </button>
           )}
 
@@ -2921,6 +2934,31 @@ export const App: React.FC = () => {
               Razem: {totalAnalysisMs < 0.01 ? '<0.01' : totalAnalysisMs.toFixed(2)}ms
             </span>
           </div>
+
+          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+          {/* Warstadt Website Link */}
+          <a
+            href="https://www.warstadt.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: '10.5px',
+              fontWeight: 600,
+              color: '#94a3b8',
+              textDecoration: 'none',
+              padding: '2px 4px',
+              borderRadius: '4px',
+              transition: 'color 0.15s ease',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#38bdf8')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+            title="www.warstadt.com"
+          >
+            <span>www.warstadt.com</span>
+          </a>
         </div>
 
         {/* The CAD Canvas Element */}
