@@ -43,6 +43,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   onUpdateBuildingVertices,
   onBuildingRotate,
   pinnedPoints = [],
+  pinnedPointResults: propPinnedPointResults,
   activePinnedPointId = null,
   onSelectPinnedPoint,
   onAddPinnedPoint,
@@ -259,11 +260,17 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     if (drawingMode !== 'vertexEdit') {
       setSelectedVertexIndex(null);
     }
+    setEditingEdgeLength(null);
   }, [drawingMode]);
 
   useEffect(() => {
     setCustomPivot(null);
+    setEditingEdgeLength(null);
   }, [selectedBuildingId]);
+
+  useEffect(() => {
+    setEditingEdgeLength(null);
+  }, [isDimensionMode, facadePointMode, isLinkingMode]);
 
   useEffect(() => {
     if (!viewRotationMode) setRotationHover(null);
@@ -366,18 +373,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   }, []);
 
   const pinnedPointResults = useMemo(() => {
+    if (propPinnedPointResults && propPinnedPointResults.length > 0) {
+      return propPinnedPointResults;
+    }
     if (!pinnedPoints || pinnedPoints.length === 0) {
       return selectedPointResult ? [selectedPointResult] : [];
     }
     return pinnedPoints.map((pt, idx) => {
-      const found = analysisResults.find(
-        (r) => r.buildingId === pt.buildingId && r.segmentId === pt.segmentId && Math.abs((r.shadowing?.offsetRatio ?? 0) - pt.offsetRatio) < 0.05
-      );
-      if (found) {
-        return { ...found, id: pt.id, label: pt.label || `P${idx + 1}` };
-      }
       const bldg = buildings.find((b) => b.id === pt.buildingId);
-      const seg = bldg?.segments.find((s) => s.id === pt.segmentId);
+      if (!bldg) return null;
+      const lyr = bldg.layer || 'Domyślna (0)';
+      if (layerSettings[lyr]?.isVisible === false) return null;
+      const seg = bldg.segments.find((s) => s.id === pt.segmentId);
       if (seg) {
         const px = seg.p1.x + pt.offsetRatio * (seg.p2.x - seg.p1.x);
         const py = seg.p1.y + pt.offsetRatio * (seg.p2.y - seg.p1.y);
@@ -394,7 +401,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
       return null;
     }).filter(Boolean) as AnalysisPointResult[];
-  }, [pinnedPoints, analysisResults, buildings, selectedPointResult]);
+  }, [propPinnedPointResults, pinnedPoints, buildings, selectedPointResult]);
 
   // Main Render Loop
   useEffect(() => {
@@ -465,12 +472,27 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     renderShadowRange(renderContext, shadowRangeLoops, showShadowRange, shadowAnalysis?.hourlyShadows);
 
 
-    // 4. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12)
-    if (selectedPointResult) {
-      if (activePointMode === 'sunlight') {
-        renderSunlightVisualization(renderContext, selectedPointResult, visibleBuildings);
-      } else {
-        renderShadowingVisualization(renderContext, selectedPointResult, visibleBuildings);
+    // 4. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
+    const pointsToVisualize = (pinnedPointResults && pinnedPointResults.length > 0)
+      ? pinnedPointResults
+      : (selectedPointResult ? [selectedPointResult] : []);
+
+    if (pointsToVisualize.length > 0) {
+      // Sort so active pinned point is rendered last (on top)
+      const sortedVisualizations = [...pointsToVisualize].sort((a, b) => {
+        const aActive = a.id === activePinnedPointId || a.id === selectedPointResult?.id;
+        const bActive = b.id === activePinnedPointId || b.id === selectedPointResult?.id;
+        if (aActive && !bActive) return 1;
+        if (!aActive && bActive) return -1;
+        return 0;
+      });
+
+      for (const ptRes of sortedVisualizations) {
+        if (activePointMode === 'sunlight') {
+          renderSunlightVisualization(renderContext, ptRes, visibleBuildings);
+        } else {
+          renderShadowingVisualization(renderContext, ptRes, visibleBuildings);
+        }
       }
     }
 
@@ -631,9 +653,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         }
       }
 
-      // If active edge editing is in progress, block building dragging / deselection
+      // If active edge editing is in progress and we clicked outside an edge badge, cancel edge length editing
       if (editingEdgeLength) {
-        return;
+        setEditingEdgeLength(null);
       }
 
       // Check click on Pinned Facade Points

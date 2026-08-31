@@ -58,18 +58,19 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
       </div>
 
       {/* Multiple Pinned Points Tabs */}
-      {allPoints.length > 1 && (
+      {allPoints.length > 0 && (
         <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
           {allPoints.map((pt, idx) => {
             const isActive = activePointId ? pt.id === activePointId : pt.id === pointResult.id;
             const label = pt.label || `P${idx + 1}`;
+            const ptCompliant = (pt.shadowing?.isCompliant ?? true) && (pt.sunlight?.isCompliant ?? true);
             return (
               <div
                 key={pt.id}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '5px',
+                  gap: '6px',
                   padding: '4px 8px',
                   borderRadius: '6px',
                   backgroundColor: isActive ? 'rgba(56, 189, 248, 0.2)' : 'rgba(30, 41, 59, 0.8)',
@@ -82,6 +83,16 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
                 }}
                 onClick={() => onSelectPointId?.(pt.id)}
               >
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: ptCompliant ? '#34d399' : '#fb7185',
+                    display: 'inline-block',
+                  }}
+                  title={ptCompliant ? 'Zgodne z przepisami' : 'Wymaga uwagi'}
+                />
                 <span>{label}</span>
                 <button
                   type="button"

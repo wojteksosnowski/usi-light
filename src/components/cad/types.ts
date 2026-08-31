@@ -58,6 +58,7 @@ export interface CadCanvasProps {
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
   onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
   pinnedPoints?: import('../../types/geometry').PinnedFacadePoint[];
+  pinnedPointResults?: AnalysisPointResult[];
   activePinnedPointId?: string | null;
   onSelectPinnedPoint?: (id: string | null) => void;
   onAddPinnedPoint?: (point: { buildingId: string; segmentId: string; offsetRatio: number }) => void;

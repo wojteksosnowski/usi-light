@@ -300,9 +300,10 @@ export function renderSunlightVisualization(
   // 4. Badge tytułowy metody
   const badgeY = py - 24;
   const solidCol = getSunlightColor(sunlight.totalHours, 1.0);
+  const labelPrefix = selectedPointResult.label ? `${selectedPointResult.label}: ` : '';
   const titleText = isLinijkaMethod
-    ? `Metoda Linijki Słońca (H=${heightH.toFixed(0)}m, Czas: ${sunlight.totalHours.toFixed(2)}h)`
-    : `Metoda Astronomiczna (H=${heightH.toFixed(0)}m, Czas: ${sunlight.totalHours.toFixed(2)}h)`;
+    ? `${labelPrefix}Linijka Słońca (H=${heightH.toFixed(0)}m, ${sunlight.totalHours.toFixed(2)}h)`
+    : `${labelPrefix}Metoda Astro (H=${heightH.toFixed(0)}m, ${sunlight.totalHours.toFixed(2)}h)`;
   ctx.font = 'bold 11px sans-serif';
   const tw = ctx.measureText(titleText).width;
   ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';

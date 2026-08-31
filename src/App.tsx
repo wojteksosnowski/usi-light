@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { CompassRose } from './components/cad/CompassRose';
@@ -1167,10 +1168,8 @@ export const App: React.FC = () => {
 
         if (handledTool) return;
 
-        // Poziom 2: Gdy żadne narzędzie nie jest aktywne -> odznaczenie obiektów i punktów
+        // Poziom 2: Gdy żadne narzędzie nie jest aktywne -> odznaczenie obiektów
         setSelectedBuildingId(null);
-        setPinnedPoints([]);
-        setActivePinnedPointId(null);
         setSelectedLayerName(null);
         return;
       }
@@ -1205,6 +1204,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
+      <Analytics />
       {/* Collapsible Left Sidebar */}
       <aside className={`app-sidebar ${!isSidebarOpen ? 'collapsed' : ''}`}>
         {/* Header */}
@@ -3081,7 +3081,9 @@ export const App: React.FC = () => {
             onBuildingMove={handleBuildingMove}
             analysisResults={analysisResults}
             pinnedPoints={pinnedPoints}
+            pinnedPointResults={pinnedPointResults}
             activePinnedPointId={activePinnedPointId}
+            activePointMode={activePointMode}
             onSelectPinnedPoint={(id) => setActivePinnedPointId(id)}
             onAddPinnedPoint={handleAddPinnedPoint}
             onDeletePinnedPoint={handleDeletePinnedPoint}
