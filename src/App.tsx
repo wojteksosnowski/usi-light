@@ -34,6 +34,7 @@ import {
   computeLinearDimension,
   computeAngularDimension,
 } from './utils/math2d';
+import { useAnalysisWorker } from './hooks/useAnalysisWorker';
 
 import {
   Sun,
@@ -280,16 +281,19 @@ export const App: React.FC = () => {
     });
   }, [buildings, layerSettings]);
 
-  // Run Calculation with Variable Precision using effective buildings
-  const analysisOutput = useMemo(() => {
-    return runFullAnalysis(effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod);
-  }, [effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
+  // Run Calculation with Variable Precision using Web Worker in background thread
+  const { analysisOutput, isCalculating } = useAnalysisWorker(
+    effectiveBuildings,
+    settings,
+    currentAccuracyOptions,
+    sunlightMethod
+  );
 
-  const analysisResults = analysisOutput.results;
-  const avgShadowingMs = analysisOutput.avgShadowingMs;
-  const avgSunlightMs = analysisOutput.avgSunlightMs;
-  const avgSunlightSegMs = analysisOutput.avgSunlightSegMs;
-  const totalAnalysisMs = analysisOutput.totalAnalysisMs;
+  const analysisResults = analysisOutput?.results || [];
+  const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
+  const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
+  const avgSunlightSegMs = analysisOutput?.avgSunlightSegMs || 0;
+  const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
 
   const [selectedPointKey, setSelectedPointKey] = useState<{
     buildingId: string;

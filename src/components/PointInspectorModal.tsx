@@ -10,7 +10,7 @@ interface PointInspectorModalProps {
   onClose: () => void;
 }
 
-export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
+export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.memo(({
   pointResult,
   activeMode = 'shadowing',
   sunlightMethod = 'raycasting',
@@ -185,4 +185,4 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
       </div>
     </div>
   );
-};
+});

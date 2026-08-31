@@ -42,9 +42,10 @@ export function renderAnalysisBands(
     if (lyrSetting.isVisible === false) return;
 
     const seg = bldg?.segments.find((s) => s.id === points[0].segmentId);
-    if (!seg) return;
+    if (!seg || !seg.p1 || !seg.p2 || !Number.isFinite(seg.p1.x) || !Number.isFinite(seg.p1.y) || !Number.isFinite(seg.p2.x) || !Number.isFinite(seg.p2.y)) return;
 
     const norm = seg.normal;
+    if (!norm || !Number.isFinite(norm.x) || !Number.isFinite(norm.y)) return;
     const dx = seg.p2.x - seg.p1.x;
     const dy = seg.p2.y - seg.p1.y;
 

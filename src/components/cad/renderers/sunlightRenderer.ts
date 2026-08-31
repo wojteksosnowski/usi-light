@@ -21,25 +21,30 @@ export function renderSunlightVisualization(
   buildings: any[]
 ) {
   const { ctx, worldToScreen, latitude, longitude, equinoxDate } = rc;
+  if (!selectedPointResult || !selectedPointResult.point || !selectedPointResult.normal) return;
   const { point, shadowing, sunlight } = selectedPointResult;
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
   const { sx: px, sy: py } = worldToScreen(point.x, point.y);
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return;
 
   const bldgOfPoint = buildings.find((b) => b.id === selectedPointResult.buildingId);
   const heightH = Math.max(5, bldgOfPoint?.defaultHeight ?? 15);
   const isCityCentre = bldgOfPoint?.isCityCentre ?? false;
   const maxAllowedReq = isCityCentre ? 17.5 : 35.0;
 
-  const slots = sunlight.timeSlots;
+  const slots = sunlight?.timeSlots || [];
   let noonElevationDeg = 38.0;
   for (const s of slots) {
     if (s.elevationDeg > noonElevationDeg) noonElevationDeg = s.elevationDeg;
   }
   const noonElevRad = (noonElevationDeg * Math.PI) / 180;
-  const shadowLengthH = Math.min(heightH / Math.tan(noonElevRad), maxAllowedReq);
+  const tanElev = Math.max(1e-4, Math.tan(noonElevRad));
+  const shadowLengthH = Math.min(heightH / tanElev, maxAllowedReq);
 
   // Normalna fasady w stopniach (matematycznych, CCW od wschodu)
   const normalWorldDeg = (Math.atan2(selectedPointResult.normal.y, selectedPointResult.normal.x) * 180) / Math.PI;
-  const sectors = shadowing.sectors ?? [];
+  if (!Number.isFinite(normalWorldDeg)) return;
+  const sectors = shadowing?.sectors ?? [];
 
   const getRayDist = (azimuthDeg: number): number => {
     const mathDeg = ((90 - azimuthDeg) % 360 + 360) % 360;

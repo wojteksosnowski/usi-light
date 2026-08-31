@@ -5,7 +5,7 @@ interface CompassRoseProps {
   onResetRotation?: () => void;
 }
 
-export const CompassRose: React.FC<CompassRoseProps> = ({ rotationDeg, onResetRotation }) => {
+export const CompassRose: React.FC<CompassRoseProps> = React.memo(({ rotationDeg, onResetRotation }) => {
   return (
     <div
       onClick={onResetRotation}
@@ -74,4 +74,4 @@ export const CompassRose: React.FC<CompassRoseProps> = ({ rotationDeg, onResetRo
       </svg>
     </div>
   );
-};
+});

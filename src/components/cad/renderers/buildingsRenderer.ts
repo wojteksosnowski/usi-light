@@ -19,6 +19,7 @@ export function renderBuildings(
 
   // 1. Render Building Fills
   for (const bldg of buildings) {
+    if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
     const lyr = bldg.layer || 'Domyślna (0)';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
@@ -35,12 +36,18 @@ export function renderBuildings(
     }
 
     ctx.beginPath();
-    bldg.vertices.forEach((v: any, idx: number) => {
+    let validCount = 0;
+    bldg.vertices.forEach((v: any) => {
+      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) return;
       const { sx, sy } = worldToScreen(v.x, v.y);
-      if (idx === 0) ctx.moveTo(sx, sy);
+      if (!Number.isFinite(sx) || !Number.isFinite(sy)) return;
+      if (validCount === 0) ctx.moveTo(sx, sy);
       else ctx.lineTo(sx, sy);
+      validCount++;
     });
-    ctx.closePath();
+    if (validCount >= 3) {
+      ctx.closePath();
+    }
 
     if (!isIncluded) {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
@@ -72,6 +79,7 @@ export function renderBuildings(
 
   // 2. Render Building Segments (Outlines & Edges)
   for (const bldg of buildings) {
+    if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
     const lyr = bldg.layer || 'Domyślna (0)';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
@@ -87,97 +95,110 @@ export function renderBuildings(
       ctx.globalAlpha = 0.35;
     }
 
-    for (let eIdx = 0; eIdx < bldg.segments.length; eIdx++) {
-      const seg = bldg.segments[eIdx];
-      const isEdgeHovered = isEditMode && hoveredEdge?.buildingId === bldg.id && hoveredEdge?.edgeIndex === eIdx;
-      const { sx: x1, sy: y1 } = worldToScreen(seg.p1.x, seg.p1.y);
-      const { sx: x2, sy: y2 } = worldToScreen(seg.p2.x, seg.p2.y);
-
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-
-      if (isEdgeHovered) {
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 4;
-      } else if (!isIncluded) {
-        ctx.strokeStyle = 'rgba(71, 85, 105, 0.4)';
-        ctx.lineWidth = 1;
-      } else if (isTested) {
-        ctx.strokeStyle = isSelected ? '#3b82f6' : '#60a5fa';
-        ctx.lineWidth = isSelected ? 3 : 2;
-      } else {
-        ctx.strokeStyle = isSelected ? '#cbd5e1' : '#64748b';
-        ctx.lineWidth = isSelected ? 2.5 : 1.5;
-      }
-      ctx.stroke();
-
-      if (showNormals) {
-        const midX = (seg.p1.x + seg.p2.x) / 2;
-        const midY = (seg.p1.y + seg.p2.y) / 2;
-        const normLen = 1.2;
-        const nx = midX + seg.normal.x * normLen;
-        const ny = midY + seg.normal.y * normLen;
-        const { sx: msx, sy: msy } = worldToScreen(midX, midY);
-        const { sx: nsx, sy: nsy } = worldToScreen(nx, ny);
+    if (Array.isArray(bldg.segments)) {
+      for (let eIdx = 0; eIdx < bldg.segments.length; eIdx++) {
+        const seg = bldg.segments[eIdx];
+        if (!seg || !seg.p1 || !seg.p2 || !Number.isFinite(seg.p1.x) || !Number.isFinite(seg.p1.y) || !Number.isFinite(seg.p2.x) || !Number.isFinite(seg.p2.y)) continue;
+        const isEdgeHovered = isEditMode && hoveredEdge?.buildingId === bldg.id && hoveredEdge?.edgeIndex === eIdx;
+        const { sx: x1, sy: y1 } = worldToScreen(seg.p1.x, seg.p1.y);
+        const { sx: x2, sy: y2 } = worldToScreen(seg.p2.x, seg.p2.y);
+        if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
 
         ctx.beginPath();
-        ctx.moveTo(msx, msy);
-        ctx.lineTo(nsx, nsy);
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 1;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+
+        if (isEdgeHovered) {
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 4;
+        } else if (!isIncluded) {
+          ctx.strokeStyle = 'rgba(71, 85, 105, 0.4)';
+          ctx.lineWidth = 1;
+        } else if (isTested) {
+          ctx.strokeStyle = isSelected ? '#3b82f6' : '#60a5fa';
+          ctx.lineWidth = isSelected ? 3 : 2;
+        } else {
+          ctx.strokeStyle = isSelected ? '#cbd5e1' : '#64748b';
+          ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        }
         ctx.stroke();
 
-        const angle = Math.atan2(nsy - msy, nsx - msx);
-        const headLen = 4;
-        ctx.beginPath();
-        ctx.moveTo(nsx, nsy);
-        ctx.lineTo(nsx - headLen * Math.cos(angle - Math.PI / 6), nsy - headLen * Math.sin(angle - Math.PI / 6));
-        ctx.lineTo(nsx - headLen * Math.cos(angle + Math.PI / 6), nsy - headLen * Math.sin(angle + Math.PI / 6));
-        ctx.fillStyle = '#f59e0b';
-        ctx.fill();
+        if (showNormals && seg.normal && Number.isFinite(seg.normal.x) && Number.isFinite(seg.normal.y)) {
+          const midX = (seg.p1.x + seg.p2.x) / 2;
+          const midY = (seg.p1.y + seg.p2.y) / 2;
+          const normLen = 1.2;
+          const nx = midX + seg.normal.x * normLen;
+          const ny = midY + seg.normal.y * normLen;
+          const { sx: msx, sy: msy } = worldToScreen(midX, midY);
+          const { sx: nsx, sy: nsy } = worldToScreen(nx, ny);
+          if (Number.isFinite(msx) && Number.isFinite(msy) && Number.isFinite(nsx) && Number.isFinite(nsy)) {
+            ctx.beginPath();
+            ctx.moveTo(msx, msy);
+            ctx.lineTo(nsx, nsy);
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            const angle = Math.atan2(nsy - msy, nsx - msx);
+            const headLen = 4;
+            ctx.beginPath();
+            ctx.moveTo(nsx, nsy);
+            ctx.lineTo(nsx - headLen * Math.cos(angle - Math.PI / 6), nsy - headLen * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(nsx - headLen * Math.cos(angle + Math.PI / 6), nsy - headLen * Math.sin(angle + Math.PI / 6));
+            ctx.fillStyle = '#f59e0b';
+            ctx.fill();
+          }
+        }
       }
     }
 
     // Centroid Label for Building
-    if (bldg.vertices.length >= 3) {
+    if (bldg.vertices && bldg.vertices.length >= 3) {
       let cx = 0;
       let cy = 0;
+      let count = 0;
       for (const v of bldg.vertices) {
-        cx += v.x;
-        cy += v.y;
+        if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
+          cx += v.x;
+          cy += v.y;
+          count++;
+        }
       }
-      cx /= bldg.vertices.length;
-      cy /= bldg.vertices.length;
-      const { sx: csx, sy: csy } = worldToScreen(cx, cy);
+      if (count >= 3) {
+        cx /= count;
+        cy /= count;
+        const { sx: csx, sy: csy } = worldToScreen(cx, cy);
 
-      const lockTag = isLocked ? ' 🔒' : '';
-      const ghostTag = isGhosted ? ' 👻' : '';
-      const title = `${bldg.name || (isTested ? 'Budynek Badany' : 'Budynek Sąsiedni')}${lockTag}${ghostTag}`;
-      const sub = `H = ${bldg.defaultHeight}m • ${isTested ? 'BADANY' : 'PRZESZKODA'}`;
-      ctx.font = 'bold 11px sans-serif';
-      const w1 = ctx.measureText(title).width;
-      ctx.font = '9px monospace';
-      const w2 = ctx.measureText(sub).width;
-      const maxW = Math.max(w1, w2);
+        if (Number.isFinite(csx) && Number.isFinite(csy)) {
+          const lockTag = isLocked ? ' 🔒' : '';
+          const ghostTag = isGhosted ? ' 👻' : '';
+          const title = `${bldg.name || (isTested ? 'Budynek Badany' : 'Budynek Sąsiedni')}${lockTag}${ghostTag}`;
+          const sub = `H = ${bldg.defaultHeight}m • ${isTested ? 'BADANY' : 'PRZESZKODA'}`;
+          ctx.font = 'bold 11px sans-serif';
+          const w1 = ctx.measureText(title).width;
+          ctx.font = '9px monospace';
+          const w2 = ctx.measureText(sub).width;
+          const maxW = Math.max(w1, w2);
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-      ctx.strokeStyle = isTested ? 'rgba(59, 130, 246, 0.5)' : 'rgba(100, 116, 139, 0.4)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(csx - maxW / 2 - 8, csy - 18, maxW + 16, 36, 6);
-      ctx.fill();
-      ctx.stroke();
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.strokeStyle = isTested ? 'rgba(59, 130, 246, 0.5)' : 'rgba(100, 116, 139, 0.4)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(csx - maxW / 2 - 8, csy - 18, maxW + 16, 36, 6);
+          ctx.fill();
+          ctx.stroke();
 
-      ctx.fillStyle = isTested ? '#93c5fd' : '#e2e8f0';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(title, csx, csy - 5);
+          ctx.fillStyle = isTested ? '#93c5fd' : '#e2e8f0';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(title, csx, csy - 5);
 
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '9px monospace';
-      ctx.fillText(sub, csx, csy + 9);
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '9px monospace';
+          ctx.fillText(sub, csx, csy + 9);
+        }
+      }
     }
     ctx.restore();
   }

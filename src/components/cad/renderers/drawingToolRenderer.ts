@@ -12,6 +12,7 @@ export function renderDrawingToolPreview(
   if (drawingMode === 'rectangle' && drawingVertices.length === 1 && currentMouseWorld) {
     const p1 = drawingVertices[0];
     const p2 = currentMouseWorld;
+    if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) return;
     const minX = Math.min(p1.x, p2.x);
     const maxX = Math.max(p1.x, p2.x);
     const minY = Math.min(p1.y, p2.y);
@@ -19,6 +20,7 @@ export function renderDrawingToolPreview(
 
     const s1 = worldToScreen(minX, minY);
     const s2 = worldToScreen(maxX, maxY);
+    if (!Number.isFinite(s1.sx) || !Number.isFinite(s1.sy) || !Number.isFinite(s2.sx) || !Number.isFinite(s2.sy)) return;
     const rx = Math.min(s1.sx, s2.sx);
     const ry = Math.min(s1.sy, s2.sy);
     const rw = Math.abs(s2.sx - s1.sx);

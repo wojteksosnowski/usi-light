@@ -8,17 +8,22 @@ import polygonClipping from 'polygon-clipping';
  * Negative => Clockwise (CW)
  */
 export function calculateSignedArea(points: Point2D[]): number {
+  if (!points || points.length < 3) return 0;
   let area = 0;
   const n = points.length;
   for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    area += points[i].x * points[j].y;
-    area -= points[j].x * points[i].y;
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) {
+      continue;
+    }
+    area += p1.x * p2.y - p2.x * p1.y;
   }
   return area / 2;
 }
 
 export function isPolygonCCW(points: Point2D[]): boolean {
+  if (!points || points.length < 3) return true;
   return calculateSignedArea(points) > 0;
 }
 
@@ -32,11 +37,14 @@ export function calculateOutwardNormal(
   p2: Point2D,
   polygonIsCCW: boolean = true
 ): Vector2D {
+  if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) {
+    return { x: 0, y: 1 };
+  }
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
   const length = Math.hypot(dx, dy);
 
-  if (length === 0) {
+  if (length < 1e-9) {
     return { x: 0, y: 1 };
   }
 
@@ -56,18 +64,31 @@ export function calculateOutwardNormal(
  * Checks if a point is inside a polygon using ray casting algorithm.
  */
 export function isPointInPolygon(point: Point2D, vertices: Point2D[]): boolean {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !vertices || vertices.length < 3) {
+    return false;
+  }
   let inside = false;
   const { x, y } = point;
   const n = vertices.length;
 
   for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = vertices[i].x,
-      yi = vertices[i].y;
-    const xj = vertices[j].x,
-      yj = vertices[j].y;
+    const vi = vertices[i];
+    const vj = vertices[j];
+    if (!vi || !vj || !Number.isFinite(vi.x) || !Number.isFinite(vi.y) || !Number.isFinite(vj.x) || !Number.isFinite(vj.y)) {
+      continue;
+    }
+    const xi = vi.x,
+      yi = vi.y;
+    const xj = vj.x,
+      yj = vj.y;
+
+    const denom = yj - yi;
+    if (Math.abs(denom) < 1e-9) {
+      continue;
+    }
 
     const intersect =
-      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-10) + xi;
+      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / denom + xi;
     if (intersect) inside = !inside;
   }
 
@@ -121,8 +142,11 @@ export function distancePointToSegment(
   a: Point2D,
   b: Point2D
 ): number {
+  if (!p || !a || !b || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(a.x) || !Number.isFinite(a.y) || !Number.isFinite(b.x) || !Number.isFinite(b.y)) {
+    return Infinity;
+  }
   const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
-  if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  if (l2 < 1e-9) return Math.hypot(p.x - a.x, p.y - a.y);
   let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
@@ -136,10 +160,14 @@ export function sampleSegmentPoints(
   p2: Point2D,
   interval: number = 0.5
 ): { point: Point2D; ratio: number }[] {
+  if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) {
+    return [{ point: p1 || { x: 0, y: 0 }, ratio: 0.5 }];
+  }
   const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-  if (len === 0) return [{ point: p1, ratio: 0.5 }];
+  if (len < 1e-6) return [{ point: p1, ratio: 0.5 }];
 
-  const count = Math.max(1, Math.round(len / interval));
+  const safeInterval = Math.max(0.01, interval);
+  const count = Math.max(1, Math.round(len / safeInterval));
   const points: { point: Point2D; ratio: number }[] = [];
 
   // Sample interior points along the segment (avoiding degenerate 0.0 and 1.0 exact corner vertices)

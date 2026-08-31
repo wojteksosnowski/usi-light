@@ -6,13 +6,17 @@ export function renderShadowingVisualization(
   buildings: any[]
 ) {
   const { ctx, worldToScreen, viewRotationDeg, viewState } = rc;
+  if (!selectedPointResult || !selectedPointResult.point || !selectedPointResult.normal) return;
   const { point, shadowing } = selectedPointResult;
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
   const { sx: px, sy: py } = worldToScreen(point.x, point.y);
-  const sectors = shadowing.sectors;
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+  const sectors = shadowing?.sectors;
 
   if (!sectors || sectors.length === 0) return;
 
   const normalWorldDeg = (Math.atan2(selectedPointResult.normal.y, selectedPointResult.normal.x) * 180) / Math.PI;
+  if (!Number.isFinite(normalWorldDeg)) return;
 
   ctx.save();
   ctx.translate(px, py);
@@ -70,6 +74,7 @@ export function renderShadowingVisualization(
     const startRad = ((normalWorldDeg + startRelDeg) * Math.PI) / 180;
     const endRad = ((normalWorldDeg + endRelDeg) * Math.PI) / 180;
     const radius = dist;
+    if (!Number.isFinite(radius) || radius <= 0 || !Number.isFinite(startRad) || !Number.isFinite(endRad)) continue;
 
     // 1. Filled sector wedge
     ctx.beginPath();

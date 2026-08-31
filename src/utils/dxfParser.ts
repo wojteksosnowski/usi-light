@@ -167,16 +167,31 @@ export function parseDxfWithMetadata(
   dxfText: string,
   unitOption: DxfUnitOption = 'auto'
 ): DxfParseResult {
+  if (!dxfText || typeof dxfText !== 'string' || dxfText.trim().length === 0) {
+    return {
+      buildings: [],
+      unitInfo: resolveDxfScale({}, 0, unitOption),
+    };
+  }
+
   const parser = new DxfParser();
   let parsed: any;
   try {
     parsed = parser.parseSync(dxfText);
-  } catch (err) {
+  } catch (err: any) {
     console.error('Failed to parse DXF:', err);
-    throw new Error('Nieprawidłowy format pliku DXF');
+    return {
+      buildings: [],
+      unitInfo: {
+        unit: unitOption,
+        scale: 1.0,
+        unitName: 'Błąd pliku DXF',
+        source: err?.message || 'Nieprawidłowy format pliku DXF',
+      },
+    };
   }
 
-  if (!parsed || !parsed.entities) {
+  if (!parsed || !Array.isArray(parsed.entities)) {
     return {
       buildings: [],
       unitInfo: resolveDxfScale(parsed?.header, 0, unitOption),
@@ -186,25 +201,33 @@ export function parseDxfWithMetadata(
   // Find max coordinate in entities to assist heuristic auto-detection
   let maxCoord = 0;
   for (const entity of parsed.entities) {
-    if (entity.vertices) {
+    if (entity && Array.isArray(entity.vertices)) {
       for (const v of entity.vertices) {
-        if (Math.abs(v.x) > maxCoord) maxCoord = Math.abs(v.x);
-        if (Math.abs(v.y) > maxCoord) maxCoord = Math.abs(v.y);
+        if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
+          if (Math.abs(v.x) > maxCoord) maxCoord = Math.abs(v.x);
+          if (Math.abs(v.y) > maxCoord) maxCoord = Math.abs(v.y);
+        }
       }
     }
   }
 
   const unitInfo = resolveDxfScale(parsed.header, maxCoord, unitOption);
-  const scaleUnit = unitInfo.scale;
+  const scaleUnit = unitInfo.scale || 1.0;
 
   const loops: BuildingLoop[] = [];
   let buildingCount = 1;
 
   for (const entity of parsed.entities) {
+    if (!entity) continue;
     // Process LWPOLYLINE and POLYLINE
     if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
-      if (entity.vertices && entity.vertices.length >= 3) {
-        const rawPoints: Point2D[] = entity.vertices.map((v: any) => ({
+      if (Array.isArray(entity.vertices) && entity.vertices.length >= 3) {
+        const validVertices = entity.vertices.filter(
+          (v: any) => v && Number.isFinite(v.x) && Number.isFinite(v.y)
+        );
+        if (validVertices.length < 3) continue;
+
+        const rawPoints: Point2D[] = validVertices.map((v: any) => ({
           x: v.x * scaleUnit,
           y: v.y * scaleUnit,
         }));
@@ -218,6 +241,8 @@ export function parseDxfWithMetadata(
         ) {
           rawPoints.pop();
         }
+
+        if (rawPoints.length < 3) continue;
 
         const isCCW = isPolygonCCW(rawPoints);
         const segments: FacadeSegment[] = [];

@@ -27,6 +27,7 @@ export function renderDimensions(
         const res = computeLinearDimension(seg1.p1, seg1.p2, seg2.p1, seg2.p2);
         const s1 = worldToScreen(res.p1.x, res.p1.y);
         const s2 = worldToScreen(res.p2.x, res.p2.y);
+        if (!Number.isFinite(s1.sx) || !Number.isFinite(s1.sy) || !Number.isFinite(s2.sx) || !Number.isFinite(s2.sy)) continue;
 
         ctx.beginPath();
         ctx.moveTo(s1.sx, s1.sy);
