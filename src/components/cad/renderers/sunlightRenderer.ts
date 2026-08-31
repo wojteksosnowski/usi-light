@@ -1,18 +1,10 @@
 import { CadRenderContext } from '../types';
 import { calculateSolarPosition, AstroSolarSystem, LinijkaSolarSystem } from '../../../utils/solar';
+import { APP_CONFIG } from '../../../config/appConfig';
 
-// Purple-to-Orange sunlight color scale in 30-minute steps
-export const getSunlightColor = (hours: number, alpha: number = 0.85) => {
-  const steppedHours = Math.floor(hours * 2) / 2;
-  if (steppedHours < 0.5) return `rgba(59, 7, 100, ${alpha})`;
-  if (steppedHours < 1.0) return `rgba(88, 28, 135, ${alpha})`;
-  if (steppedHours < 1.5) return `rgba(126, 34, 206, ${alpha})`;
-  if (steppedHours < 2.0) return `rgba(168, 85, 247, ${alpha})`;
-  if (steppedHours < 2.5) return `rgba(192, 38, 211, ${alpha})`;
-  if (steppedHours < 3.0) return `rgba(225, 29, 72, ${alpha})`;
-  if (steppedHours < 3.5) return `rgba(234, 88, 12, ${alpha})`;
-  if (steppedHours < 4.0) return `rgba(249, 115, 22, ${alpha})`;
-  return `rgba(251, 191, 36, ${alpha})`;
+// Purple-to-Orange sunlight color scale in 30-minute steps from APP_CONFIG
+export const getSunlightColor = (hours: number, alpha: number = APP_CONFIG.analysisBands.defaultAlpha) => {
+  return APP_CONFIG.analysisBands.sunlight.getColor(hours, alpha);
 };
 
 export function renderSunlightVisualization(

@@ -350,7 +350,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       setDragStart({ x: sx, y: sy });
-      onInteractionChange?.(true);
       return;
     }
 
@@ -467,7 +466,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         onSelectBuilding(null);
         setIsPanning(true);
         setDragStart({ x: sx, y: sy });
-        onInteractionChange?.(true);
       }
     }
   };
@@ -641,7 +639,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   }, [getHoverCandidates, screenToWorld]);
 
   const handleMouseUp = () => {
-    if (isPanning || isDraggingBuilding || draggingEdge || draggingFacadePoint) {
+    if (isDraggingBuilding || draggingEdge || draggingFacadePoint) {
       onInteractionChange?.(false);
     }
     setIsPanning(false);
