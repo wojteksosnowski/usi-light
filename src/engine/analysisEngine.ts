@@ -888,10 +888,18 @@ export function analyzeSunlightAtPointSegments(
     const hEnd   = Math.max(rawH1, rawH2);
     const secHours = hEnd - hStart;
 
-    const h1Int = Math.floor(hStart);
-    const m1Int = Math.round((hStart - h1Int) * 60);
-    const h2Int = Math.floor(hEnd);
-    const m2Int = Math.round((hEnd - h2Int) * 60);
+    let h1Int = Math.floor(hStart);
+    let m1Int = Math.round((hStart - h1Int) * 60);
+    if (m1Int >= 60) {
+      h1Int += 1;
+      m1Int = 0;
+    }
+    let h2Int = Math.floor(hEnd);
+    let m2Int = Math.round((hEnd - h2Int) * 60);
+    if (m2Int >= 60) {
+      h2Int += 1;
+      m2Int = 0;
+    }
 
     sectors.push({
       startAzimuthDeg: startAz,

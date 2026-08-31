@@ -391,9 +391,9 @@ export class LinijkaSolarSystem implements ISolarHourSystem {
   readonly equinoxDate: 'spring' | 'autumn';
   readonly solarNoonDecimal: number;
   readonly solarNoonTime: string;
-  private readonly latRad: number;
-  private readonly sinLat: number;
-  private readonly tanLat: number;
+  readonly latRad: number;
+  readonly sinLat: number;
+  readonly tanLat: number;
 
   private cachedHourLines: HourLine2D[] | null = null;
   private cachedKey: string = '';
@@ -413,6 +413,15 @@ export class LinijkaSolarSystem implements ISolarHourSystem {
     this.latRad = latitude * DEG2RAD;
     this.sinLat = Math.sin(this.latRad);
     this.tanLat = Math.tan(this.latRad);
+  }
+
+  /**
+   * Zwraca czas trwania (w godzinach dziesiętnych) między dwoma azymutami na równonoc.
+   */
+  getSpanHours(startAzimuthDeg: number, endAzimuthDeg: number): number {
+    const h1 = this.getHourForAzimuth(startAzimuthDeg);
+    const h2 = this.getHourForAzimuth(endAzimuthDeg);
+    return Math.abs(h2 - h1);
   }
 
   /**
