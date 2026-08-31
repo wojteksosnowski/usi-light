@@ -101,5 +101,20 @@ describe('Dimension Tools (Wymiar)', () => {
       expect(res.angleDeg).toBeCloseTo(0.0);
       expect(res.isParallel).toBe(true);
     });
+
+    it('computes touchRadiusWorld reaching the closest segment endpoints', () => {
+      const s1_a = { x: 5, y: 0 };
+      const s1_b = { x: 15, y: 0 };
+      const s2_a = { x: 0, y: 8 };
+      const s2_b = { x: 0, y: 18 };
+
+      // Intersection is at (0, 0)
+      const res = computeAngularDimension(s1_a, s1_b, s2_a, s2_b);
+      expect(res.angleDeg).toBeCloseTo(90.0);
+      expect(res.intersection.x).toBeCloseTo(0);
+      expect(res.intersection.y).toBeCloseTo(0);
+      // touchRadiusWorld must be >= 8 to reach s2_a
+      expect(res.touchRadiusWorld).toBeGreaterThanOrEqual(8.0);
+    });
   });
 });

@@ -11,7 +11,7 @@ export function useCadHotkeys({
   setCurrentMouseWorld,
   setHoveredBuildingIndex,
 }: {
-  drawingMode: 'none' | 'rectangle' | 'polyline';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit';
   drawingVertices: Point2D[];
   hoveredBuildings: string[];
   onCancelDrawing?: () => void;

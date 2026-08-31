@@ -75,28 +75,36 @@ export function renderDimensions(
       } else {
         const res = computeAngularDimension(seg1.p1, seg1.p2, seg2.p1, seg2.p2);
         const sI = worldToScreen(res.intersection.x, res.intersection.y);
-        const sm1 = worldToScreen(res.mid1.x, res.mid1.y);
-        const sm2 = worldToScreen(res.mid2.x, res.mid2.y);
 
+        // Screen angles (y is down, so screenAngle = -worldAngle)
+        const theta1 = -res.ang1;
+        const theta2 = -res.ang2;
+        const delta = Math.atan2(Math.sin(theta2 - theta1), Math.cos(theta2 - theta1));
+
+        // Radius scaled to touch at least one segment, min 28px
+        const r = Math.max(res.touchRadiusWorld * rc.viewState.scale, 28);
+
+        // Extension guide rays from intersection along both segment vectors
         ctx.beginPath();
         ctx.moveTo(sI.sx, sI.sy);
-        ctx.lineTo(sm1.sx, sm1.sy);
+        ctx.lineTo(sI.sx + Math.cos(theta1) * (r + 10), sI.sy + Math.sin(theta1) * (r + 10));
         ctx.moveTo(sI.sx, sI.sy);
-        ctx.lineTo(sm2.sx, sm2.sy);
-        ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)';
+        ctx.lineTo(sI.sx + Math.cos(theta2) * (r + 10), sI.sy + Math.sin(theta2) * (r + 10));
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.4)';
         ctx.lineWidth = 1.2;
         ctx.setLineDash([3, 3]);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        const r = 26;
+        // Continuous interior arc connecting the two rays and touching segments
         ctx.beginPath();
-        ctx.arc(sI.sx, sI.sy, r, -res.ang1, -res.ang2, res.ang1 > res.ang2);
+        ctx.arc(sI.sx, sI.sy, r, theta1, theta1 + delta, delta < 0);
         ctx.strokeStyle = '#c084fc';
         ctx.lineWidth = 2.0;
         ctx.stroke();
 
-        const labelAngle = (-res.ang1 + -res.ang2) / 2;
+        // Label positioned on the interior bisector
+        const labelAngle = theta1 + delta / 2;
         const labelX = sI.sx + Math.cos(labelAngle) * (r + 14);
         const labelY = sI.sy + Math.sin(labelAngle) * (r + 14);
         const labelText = `${res.angleDeg.toFixed(1)}°`;

@@ -4,6 +4,7 @@ import {
   calculateOutwardNormal,
   isPolygonCCW,
 } from '../utils/math2d';
+import { computeLineEquation } from './segmentStatistics';
 
 interface DxfEntity {
   type: string;
@@ -264,6 +265,7 @@ export function parseDxfWithMetadata(
             hWindowBottom: 0.85, // Default 0.85m
             isCityCentre: false,
             buildingType: 'residential',
+            lineEquation: computeLineEquation(p1, p2, normal),
           });
         }
 
@@ -365,6 +367,7 @@ export function createSampleBuildings(): BuildingLoop[] {
         hWindowBottom: 0.85,
         isCityCentre: false,
         buildingType: 'residential',
+        lineEquation: computeLineEquation(p1, p2, normal),
       });
     }
 
@@ -425,6 +428,7 @@ export function createBuildingFromVertices(
       hWindowBottom: 0.85,
       isCityCentre: false,
       buildingType: 'residential',
+      lineEquation: computeLineEquation(p1, p2, normal),
     });
   }
 

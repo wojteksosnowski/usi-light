@@ -34,6 +34,7 @@ import {
   computeLinearDimension,
   computeAngularDimension,
 } from './utils/math2d';
+import { rebuildBuildingSegments, analyzeSegmentsStatistics } from './utils/segmentStatistics';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
 
 import {
@@ -91,7 +92,7 @@ type SavedScene = {
   selectedLayerName: string | null;
   isLinkingMode: boolean;
   linkingSourceId: string | null;
-  drawingMode: 'none' | 'rectangle' | 'polyline';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit';
   dimensions: DimensionItem[];
   isEditMode: boolean;
   isDimensionToolActive: boolean;
@@ -135,8 +136,8 @@ export const App: React.FC = () => {
   const [isLinkingMode, setIsLinkingMode] = useState<boolean>(false);
   const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
 
-  // Drawing Tools State (Rectangle & Polyline)
-  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline'>('none');
+  // Drawing Tools State (Rectangle, Polyline & Vertex Edit)
+  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline' | 'vertexEdit'>('none');
   const [facadePointMode, setFacadePointMode] = useState<boolean>(false);
   const [drawingVerticesCount, setDrawingVerticesCount] = useState<number>(0);
 
@@ -283,6 +284,9 @@ export const App: React.FC = () => {
   const shadowEnvelopeMs = analysisOutput?.shadowEnvelopeMs || 0;
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
   const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
+
+  // Statistical analysis of facade segments directions & linear equations
+  const segmentStats = useMemo(() => analyzeSegmentsStatistics(buildings), [buildings]);
 
 
   const [selectedPointKey, setSelectedPointKey] = useState<{
@@ -634,6 +638,17 @@ export const App: React.FC = () => {
   const handleCancelDrawing = () => {
     setDrawingMode('none');
     setDrawingVerticesCount(0);
+  };
+
+  // Update vertices for active building from vertex edit mode
+  const handleUpdateBuildingVertices = (buildingId: string, newVertices: Point2D[]) => {
+    if (!isInteracting) setIsInteracting(true);
+    setBuildings((prev) =>
+      prev.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        return rebuildBuildingSegments(bldg, newVertices);
+      })
+    );
   };
 
   // Handle edge parallel offset move
@@ -1868,6 +1883,23 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => {
+                            setDrawingMode(drawingMode === 'vertexEdit' ? 'none' : 'vertexEdit');
+                            setDrawingVerticesCount(0);
+                            setIsDimensionToolActive(false);
+                            setDimensionPendingRef(null);
+                            setFacadePointMode(false);
+                          }}
+                          className={`btn-tile ${drawingMode === 'vertexEdit' ? 'active-indigo' : 'inactive'}`}
+                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                          title="Edycja wierzchołków brył: przeciągaj punkty, klikaj [+] by dodać nowy wierzchołek"
+                        >
+                          <Edit3 size={13} />
+                          <span style={{ fontWeight: 600 }}>Wierzchołki</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
                             setIsDimensionToolActive(!isDimensionToolActive);
                             setDimensionPendingRef(null);
                             setDrawingMode('none');
@@ -2061,6 +2093,76 @@ export const App: React.FC = () => {
                           </button>
                         </div>
                       )}
+
+                      {drawingMode === 'vertexEdit' && (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                            fontSize: '11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                          }}
+                        >
+                          <div style={{ color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <Edit3 size={13} />
+                            <span>Tryb edycji wierzchołków</span>
+                          </div>
+                          <div style={{ color: '#cbd5e1', fontSize: '10px', lineHeight: '1.4' }}>
+                            • Przeciągnij niebieski wierzchołek, aby zmienić kształt.<br />
+                            • Kliknij zielony punkt <b style={{ color: '#10b981' }}>[+]</b> na krawędzi, aby wstawić nowy wierzchołek.<br />
+                            • Kliknij <b>PPM</b> na wierzchołku, aby go usunąć.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setDrawingMode('none')}
+                            style={{
+                              marginTop: '4px',
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: '1px solid rgba(56, 189, 248, 0.4)',
+                              backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                              color: '#38bdf8',
+                              fontSize: '10.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Zakończ edycję wierzchołków
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Analiza Statystyczna Kierunków Odcinków */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px', paddingTop: '6px', borderTop: '1px solid var(--border-light)' }}>
+                        <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>Analiza kierunków fasad</span>
+                          <span style={{ color: '#818cf8', fontSize: '10.5px' }}>{segmentStats.totalSegments} odc. ({segmentStats.totalLength.toFixed(1)}m)</span>
+                        </div>
+
+                        {segmentStats.dominantDirections.length > 0 && (
+                          <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(129, 140, 248, 0.1)', border: '1px solid rgba(129, 140, 248, 0.25)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <div style={{ color: '#a5b4fc', fontWeight: 600 }}>Główna siatka ortogonalna:</div>
+                            <div style={{ color: '#f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Osie: <b>{segmentStats.dominantDirections[0].angleDeg.toFixed(1)}°</b> / <b>{segmentStats.dominantDirections[0].orthogonalDeg.toFixed(1)}°</b></span>
+                              <span style={{ color: '#38bdf8', fontWeight: 600 }}>{segmentStats.dominantDirections[0].percentage.toFixed(0)}% długości</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Mini rozkład kątów */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginTop: '2px' }}>
+                          {segmentStats.angleBins.filter(b => b.count > 0).slice(0, 8).map((b) => (
+                            <div key={b.label} style={{ padding: '3px 4px', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-light)', fontSize: '9.5px', textAlign: 'center' }}>
+                              <div style={{ color: '#94a3b8' }}>{b.binStartDeg}°-{b.binEndDeg}°</div>
+                              <div style={{ color: '#e2e8f0', fontWeight: 600 }}>{b.totalLength.toFixed(0)}m ({b.percentage.toFixed(0)}%)</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
 
                       {/* Active Dimensions List on Canvas */}
                       {dimensions.length > 0 && (
@@ -2774,6 +2876,7 @@ export const App: React.FC = () => {
             onFinishDrawing={handleFinishDrawing}
             onCancelDrawing={handleCancelDrawing}
             onDrawingVerticesCountChange={setDrawingVerticesCount}
+            onUpdateBuildingVertices={handleUpdateBuildingVertices}
             facadePointMode={facadePointMode}
             onFacadePointMove={handleFacadePointMove}
             isEditMode={isEditMode}

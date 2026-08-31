@@ -10,6 +10,17 @@ export interface Vector2D {
 
 export type BuildingType = 'residential' | 'childcare' | 'other';
 
+export interface LineEquation2D {
+  A: number; // A*x + B*y + C = 0 (normalized: A^2 + B^2 = 1)
+  B: number;
+  C: number;
+  slope?: number; // a in y = ax + b (undefined if vertical)
+  intercept?: number; // b in y = ax + b (undefined if vertical)
+  isVertical: boolean;
+  angleDeg: number; // [0, 180) degrees line orientation
+  azimuthDeg: number; // [0, 360) outward normal azimuth
+}
+
 export interface FacadeSegment {
   id: string;
   p1: Point2D;
@@ -21,6 +32,7 @@ export interface FacadeSegment {
   hWindowBottom: number; // Bottom edge of window elevation (default parapet e.g. 0.85m)
   isCityCentre: boolean;
   buildingType: BuildingType;
+  lineEquation?: LineEquation2D;
 }
 
 export interface BuildingLoop {

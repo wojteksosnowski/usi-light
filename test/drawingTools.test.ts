@@ -57,4 +57,38 @@ describe('Drawing Tools: Rectangle and Polyline Creation', () => {
     expect(building.segments[1].length).toBeCloseTo(10.0, 2);
     expect(building.segments[2].length).toBeCloseTo(10.0, 2);
   });
+
+  it('should create an oriented rectangle aligned with rotated view angle (e.g. 45 deg)', () => {
+    const p1 = { x: 0, y: 0 };
+    const p2 = { x: 10 * Math.SQRT2, y: 0 }; // Vector (14.14, 0)
+    const viewRotationDeg = 45;
+
+    const theta = (viewRotationDeg * Math.PI) / 180;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    const ux = cosT;
+    const uy = -sinT;
+    const vx = sinT;
+    const vy = cosT;
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const w = dx * ux + dy * uy;
+    const h = dx * vx + dy * vy;
+
+    const rectVertices: Point2D[] = [
+      { x: p1.x, y: p1.y },
+      { x: p1.x + w * ux, y: p1.y + w * uy },
+      { x: p1.x + w * ux + h * vx, y: p1.y + w * uy + h * vy },
+      { x: p1.x + h * vx, y: p1.y + h * vy },
+    ];
+
+    const building = createBuildingFromVertices(rectVertices, 'Rotated Rect', 15.0);
+    expect(building.vertices.length).toBe(4);
+    // Width and height in view space should each be 10m
+    expect(Math.abs(w)).toBeCloseTo(10.0);
+    expect(Math.abs(h)).toBeCloseTo(10.0);
+    expect(building.segments[0].length).toBeCloseTo(10.0);
+    expect(building.segments[1].length).toBeCloseTo(10.0);
+  });
 });

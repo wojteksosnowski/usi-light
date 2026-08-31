@@ -40,6 +40,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   onFinishDrawing,
   onCancelDrawing,
   onDrawingVerticesCountChange,
+  onUpdateBuildingVertices,
   facadePointMode = false,
   onFacadePointMove,
   isEditMode = false,
@@ -62,6 +63,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   // Drawing state
   const [drawingVertices, setDrawingVertices] = useState<Point2D[]>([]);
   const [currentMouseWorld, setCurrentMouseWorld] = useState<Point2D | null>(null);
+
+  // Vertex edit state
+  const [hoveredVertexIndex, setHoveredVertexIndex] = useState<number | null>(null);
+  const [hoveredMidpointIndex, setHoveredMidpointIndex] = useState<number | null>(null);
+  const [draggedVertexIndex, setDraggedVertexIndex] = useState<number | null>(null);
 
   // Edge editing state (parallel offset)
   const [hoveredEdge, setHoveredEdge] = useState<{ buildingId: string; edgeIndex: number } | null>(null);
@@ -298,8 +304,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       selectedBuildingId
     );
 
-    // 6. Drawing Tool Live Previews
-    renderDrawingToolPreview(renderContext, drawingMode, drawingVertices, currentMouseWorld);
+    // 6. Drawing Tool Live Previews & Vertex Edit Handles
+    const activeSelectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
+    renderDrawingToolPreview(
+      renderContext,
+      drawingMode,
+      drawingVertices,
+      currentMouseWorld,
+      activeSelectedBuilding,
+      hoveredVertexIndex,
+      hoveredMidpointIndex,
+      draggedVertexIndex
+    );
   }, [
     buildings,
     selectedBuildingId,
@@ -325,6 +341,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     drawingMode,
     drawingVertices,
     currentMouseWorld,
+    hoveredVertexIndex,
+    hoveredMidpointIndex,
+    draggedVertexIndex,
     isLinkingMode,
     linkingSourceId,
     isEditMode,
@@ -383,23 +402,63 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
+      if (drawingMode === 'vertexEdit' && selectedBuildingId) {
+        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg && selBldg.vertices.length >= 3) {
+          // Check existing vertices
+          for (let i = 0; i < selBldg.vertices.length; i++) {
+            const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
+            if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+              setDraggedVertexIndex(i);
+              onInteractionChange?.(true);
+              return;
+            }
+          }
+          // Check edge midpoint [+] to insert new vertex
+          for (let i = 0; i < selBldg.vertices.length; i++) {
+            const v1 = selBldg.vertices[i];
+            const v2 = selBldg.vertices[(i + 1) % selBldg.vertices.length];
+            const sm = worldToScreen((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
+            if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 10) {
+              const newVerts = [...selBldg.vertices];
+              const newPt = { x: (v1.x + v2.x) / 2, y: (v1.y + v2.y) / 2 };
+              newVerts.splice(i + 1, 0, newPt);
+              onUpdateBuildingVertices?.(selBldg.id, newVerts);
+              setDraggedVertexIndex(i + 1);
+              onInteractionChange?.(true);
+              return;
+            }
+          }
+        }
+      }
+
       if (drawingMode === 'rectangle') {
         if (drawingVertices.length === 0) {
           setDrawingVertices([{ x: world.wx, y: world.wy }]);
         } else {
           const p1 = drawingVertices[0];
           const p2 = { x: world.wx, y: world.wy };
-          const minX = Math.min(p1.x, p2.x);
-          const maxX = Math.max(p1.x, p2.x);
-          const minY = Math.min(p1.y, p2.y);
-          const maxY = Math.max(p1.y, p2.y);
 
-          if (Math.abs(maxX - minX) >= 0.5 && Math.abs(maxY - minY) >= 0.5) {
+          const theta = ((viewRotationDeg || 0) * Math.PI) / 180;
+          const cosT = Math.cos(theta);
+          const sinT = Math.sin(theta);
+          const ux = cosT;
+          const uy = -sinT;
+          const vx = sinT;
+          const vy = cosT;
+
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+
+          const w = dx * ux + dy * uy;
+          const h = dx * vx + dy * vy;
+
+          if (Math.abs(w) >= 0.5 && Math.abs(h) >= 0.5) {
             const rectVertices: Point2D[] = [
-              { x: minX, y: minY },
-              { x: maxX, y: minY },
-              { x: maxX, y: maxY },
-              { x: minX, y: maxY },
+              { x: p1.x, y: p1.y },
+              { x: p1.x + w * ux, y: p1.y + w * uy },
+              { x: p1.x + w * ux + h * vx, y: p1.y + w * uy + h * vy },
+              { x: p1.x + h * vx, y: p1.y + h * vy },
             ];
             onFinishDrawing?.(rectVertices, 'rectangle');
           }
@@ -526,7 +585,50 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       setRotationHover(closest);
     }
 
-    if (drawingMode !== 'none') {
+    if (drawingMode === 'vertexEdit' && selectedBuildingId) {
+      const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+      if (selBldg && selBldg.vertices.length >= 3) {
+        if (draggedVertexIndex !== null) {
+          const updatedVerts = selBldg.vertices.map((v, idx) =>
+            idx === draggedVertexIndex ? { x: world.wx, y: world.wy } : v
+          );
+          onUpdateBuildingVertices?.(selBldg.id, updatedVerts);
+          return;
+        }
+
+        // Check hover
+        let foundV: number | null = null;
+        let foundM: number | null = null;
+
+        for (let i = 0; i < selBldg.vertices.length; i++) {
+          const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
+          if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+            foundV = i;
+            break;
+          }
+        }
+
+        if (foundV === null) {
+          for (let i = 0; i < selBldg.vertices.length; i++) {
+            const v1 = selBldg.vertices[i];
+            const v2 = selBldg.vertices[(i + 1) % selBldg.vertices.length];
+            const sm = worldToScreen((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
+            if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 10) {
+              foundM = i;
+              break;
+            }
+          }
+        }
+
+        setHoveredVertexIndex(foundV);
+        setHoveredMidpointIndex(foundM);
+      }
+    } else {
+      if (hoveredVertexIndex !== null) setHoveredVertexIndex(null);
+      if (hoveredMidpointIndex !== null) setHoveredMidpointIndex(null);
+    }
+
+    if (drawingMode !== 'none' && drawingMode !== 'vertexEdit') {
       setCurrentMouseWorld({ x: world.wx, y: world.wy });
     }
 
@@ -660,14 +762,38 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   }, [getHoverCandidates, screenToWorld]);
 
   const handleMouseUp = () => {
-    if (isDraggingBuilding || draggingEdge || draggingFacadePoint) {
+    if (isDraggingBuilding || draggingEdge || draggingFacadePoint || draggedVertexIndex !== null) {
       onInteractionChange?.(false);
     }
     setIsPanning(false);
     setIsDraggingBuilding(false);
     setDraggingEdge(null);
     setDraggingFacadePoint(null);
+    setDraggedVertexIndex(null);
     setDragStart(null);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (drawingMode === 'vertexEdit' && selectedBuildingId) {
+      e.preventDefault();
+      const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+      if (selBldg && selBldg.vertices.length > 3) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        for (let i = 0; i < selBldg.vertices.length; i++) {
+          const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
+          if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+            const filtered = selBldg.vertices.filter((_, idx) => idx !== i);
+            onUpdateBuildingVertices?.(selBldg.id, filtered);
+            setHoveredVertexIndex(null);
+            setHoveredMidpointIndex(null);
+            return;
+          }
+        }
+      }
+    }
   };
 
   return (
@@ -690,6 +816,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onContextMenu={handleContextMenu}
         style={{
           position: 'absolute',
           top: 0,
@@ -700,6 +827,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           cursor:
             isDimensionMode
               ? 'crosshair'
+              : drawingMode === 'vertexEdit'
+              ? hoveredVertexIndex !== null || draggedVertexIndex !== null
+                ? 'move'
+                : hoveredMidpointIndex !== null
+                ? 'copy'
+                : 'default'
               : drawingMode !== 'none'
               ? 'crosshair'
               : draggingEdge

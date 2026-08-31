@@ -1,42 +1,72 @@
 import { CadRenderContext } from '../types';
+import { BuildingLoop } from '../../../types/geometry';
 
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
-  drawingMode: 'none' | 'rectangle' | 'polyline',
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit',
   drawingVertices: any[],
-  currentMouseWorld: any
+  currentMouseWorld: any,
+  selectedBuilding?: BuildingLoop | null,
+  hoveredVertexIndex?: number | null,
+  hoveredMidpointIndex?: number | null,
+  draggedVertexIndex?: number | null
 ) {
   const { ctx, worldToScreen } = rc;
 
-  // Rectangle Preview
+  // Rectangle Preview (aligned with rotated view)
   if (drawingMode === 'rectangle' && drawingVertices.length === 1 && currentMouseWorld) {
     const p1 = drawingVertices[0];
     const p2 = currentMouseWorld;
     if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) return;
-    const minX = Math.min(p1.x, p2.x);
-    const maxX = Math.max(p1.x, p2.x);
-    const minY = Math.min(p1.y, p2.y);
-    const maxY = Math.max(p1.y, p2.y);
 
-    const s1 = worldToScreen(minX, minY);
-    const s2 = worldToScreen(maxX, maxY);
-    if (!Number.isFinite(s1.sx) || !Number.isFinite(s1.sy) || !Number.isFinite(s2.sx) || !Number.isFinite(s2.sy)) return;
-    const rx = Math.min(s1.sx, s2.sx);
-    const ry = Math.min(s1.sy, s2.sy);
-    const rw = Math.abs(s2.sx - s1.sx);
-    const rh = Math.abs(s2.sy - s1.sy);
+    const theta = ((rc.viewRotationDeg || 0) * Math.PI) / 180;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+
+    const ux = cosT;
+    const uy = -sinT;
+    const vx = sinT;
+    const vy = cosT;
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+
+    const w = dx * ux + dy * uy;
+    const h = dx * vx + dy * vy;
+
+    const v0 = p1;
+    const v1 = { x: p1.x + w * ux, y: p1.y + w * uy };
+    const v2 = { x: p1.x + w * ux + h * vx, y: p1.y + w * uy + h * vy };
+    const v3 = { x: p1.x + h * vx, y: p1.y + h * vy };
+
+    const s0 = worldToScreen(v0.x, v0.y);
+    const s1 = worldToScreen(v1.x, v1.y);
+    const s2 = worldToScreen(v2.x, v2.y);
+    const s3 = worldToScreen(v3.x, v3.y);
+
+    if (!Number.isFinite(s0.sx) || !Number.isFinite(s2.sx)) return;
 
     ctx.save();
     ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
     ctx.strokeStyle = '#38bdf8';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
-    ctx.fillRect(rx, ry, rw, rh);
-    ctx.strokeRect(rx, ry, rw, rh);
 
-    const wMeters = maxX - minX;
-    const hMeters = maxY - minY;
+    ctx.beginPath();
+    ctx.moveTo(s0.sx, s0.sy);
+    ctx.lineTo(s1.sx, s1.sy);
+    ctx.lineTo(s2.sx, s2.sy);
+    ctx.lineTo(s3.sx, s3.sy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    const wMeters = Math.abs(w);
+    const hMeters = Math.abs(h);
     const dimText = `${wMeters.toFixed(1)}m × ${hMeters.toFixed(1)}m`;
+    const midSx = (s0.sx + s2.sx) / 2;
+    const midSy = (s0.sy + s2.sy) / 2;
+
     ctx.font = 'bold 12px Inter, sans-serif';
     const textWidth = ctx.measureText(dimText).width;
 
@@ -45,14 +75,14 @@ export function renderDrawingToolPreview(
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.roundRect(rx + rw / 2 - textWidth / 2 - 8, ry + rh / 2 - 12, textWidth + 16, 24, 6);
+    ctx.roundRect(midSx - textWidth / 2 - 8, midSy - 12, textWidth + 16, 24, 6);
     ctx.fill();
     ctx.stroke();
 
     ctx.fillStyle = '#38bdf8';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(dimText, rx + rw / 2, ry + rh / 2);
+    ctx.fillText(dimText, midSx, midSy);
     ctx.restore();
   }
 
@@ -120,5 +150,79 @@ export function renderDrawingToolPreview(
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  // Vertex Edit Mode handles and midpoint [+] insertions
+  if (drawingMode === 'vertexEdit' && selectedBuilding && selectedBuilding.vertices) {
+    const verts = selectedBuilding.vertices;
+    if (verts.length >= 3) {
+      ctx.save();
+
+      // 1. Edge midpoints [+] handles
+      for (let i = 0; i < verts.length; i++) {
+        const v1 = verts[i];
+        const v2 = verts[(i + 1) % verts.length];
+        const mx = (v1.x + v2.x) / 2;
+        const my = (v1.y + v2.y) / 2;
+        const { sx, sy } = worldToScreen(mx, my);
+        if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
+
+        const isHovered = hoveredMidpointIndex === i;
+        const r = isHovered ? 6 : 4.5;
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fillStyle = isHovered ? '#10b981' : 'rgba(15, 23, 42, 0.9)';
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 1.5;
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw small '+'
+        ctx.beginPath();
+        ctx.moveTo(sx - 2.5, sy);
+        ctx.lineTo(sx + 2.5, sy);
+        ctx.moveTo(sx, sy - 2.5);
+        ctx.lineTo(sx, sy + 2.5);
+        ctx.strokeStyle = isHovered ? '#ffffff' : '#10b981';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+
+      // 2. Vertex handles (draggable)
+      for (let i = 0; i < verts.length; i++) {
+        const v = verts[i];
+        const { sx, sy } = worldToScreen(v.x, v.y);
+        if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
+
+        const isHovered = hoveredVertexIndex === i || draggedVertexIndex === i;
+        const r = isHovered ? 7.5 : 5.5;
+
+        if (isHovered) {
+          ctx.beginPath();
+          ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fillStyle = isHovered ? '#38bdf8' : '#0f172a';
+        ctx.strokeStyle = isHovered ? '#ffffff' : '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+
+        // Vertex index number
+        ctx.font = 'bold 8.5px monospace';
+        ctx.fillStyle = isHovered ? '#020617' : '#94a3b8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${i + 1}`, sx, sy);
+      }
+
+      ctx.restore();
+    }
   }
 }
