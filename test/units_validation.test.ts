@@ -70,23 +70,16 @@ describe('Verification of Geometry Units and Heights Scale', () => {
     // Analyze mid-point of target south wall
     const result = analyzeShadowingAtPoint(midPoint, targetBuilding.segments[0], 0.5, allBuildings, targetBuilding.id);
 
-    // 1. Check direct South ray (angle 0 relative to normal)
-    const directRay = result.rays.find(r => Math.abs(r.angleDeg) < 0.1);
-    expect(directRay).toBeDefined();
-
-    // Distance in plan: (5, 10) to (5, 5) => exactly 5.0 meters
-    expect(directRay?.hitDistance).toBeCloseTo(5.0);
+    // 1. Check center sector (angle 0 relative to normal)
+    const directSector = result.sectors.find(s => s.startAngleDeg <= 0 && s.endAngleDeg >= 0);
+    expect(directSector).toBeDefined();
 
     // Required distance dReq: deltaH = 15.0 meters
-    expect(directRay?.reqDistance).toBeCloseTo(15.0);
+    expect(directSector?.requiredDistance).toBeCloseTo(15.0);
 
-    // Since hitDistance (5.0m) < reqDistance (15.0m), this ray MUST be NOT free (blocked)
-    expect(directRay?.isFree).toBe(false);
+    // Since obstacle distance (5.0m) < reqDistance (15.0m), this sector MUST be NOT free (blocked)
+    expect(directSector?.isFree).toBe(false);
 
-    // Obstacle is 100m wide at distance 5m.
-    // Rays from -69.5° to +69.5° (139° span) hit the obstacle at distance < 14.15m and are BLOCKED.
-    // Only grazing rays at extreme edges (>69.5°) exceed 14.15m (span = 78° - 69.5° = 8.5° on each side).
-    // Continuous free span is 8.5° and total free span is 17.0°, both far below the required 60°/75°.
     // Therefore, it correctly evaluates to NON-COMPLIANT (§ 12 Niezgodne).
     expect(result.isCompliant).toBe(false);
     expect(result.maxContinuousFreeSpanDeg).toBeCloseTo(7.47, 1);

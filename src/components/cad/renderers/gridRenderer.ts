@@ -138,7 +138,7 @@ export function renderCadGrid(
   const niceMeters = Math.max(1, Math.pow(10, Math.floor(Math.log10(metersForTarget))) * Math.round(metersForTarget / Math.pow(10, Math.floor(Math.log10(metersForTarget)))));
   const barPixels = niceMeters * viewState.scale;
 
-  const barX = width - barPixels - 24;
+  const barX = width - barPixels - 74;
   const barY = height - 20;
 
   if (barX > 50 && barPixels > 5) {

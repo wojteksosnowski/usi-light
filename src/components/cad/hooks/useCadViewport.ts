@@ -6,7 +6,9 @@ export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
   buildings: BuildingLoop[],
   viewRotationDeg: number,
-  fitTrigger?: number
+  fitTrigger?: number,
+  selectedBuildingId?: string | null,
+  layerSettings?: Record<string, any>
 ) {
   const [viewState, setViewState] = useState<ViewportState>({
     panX: 500,
@@ -48,6 +50,29 @@ export function useCadViewport(
     const container = containerRef.current;
     if (!container || buildings.length === 0) return;
 
+    // 1. Ustalenie obiektów docelowych do wycentrowania
+    let targetBuildings: BuildingLoop[] = [];
+
+    if (selectedBuildingId) {
+      targetBuildings = buildings.filter((b) => b.id === selectedBuildingId);
+    }
+
+    // Jeśli brak zaznaczenia lub obiekt nie istnieje, bierzemy obiekty z włączonych (widocznych) warstw
+    if (targetBuildings.length === 0) {
+      targetBuildings = buildings.filter((b) => {
+        const lyr = b.layer || 'Domyślna (0)';
+        const s = layerSettings?.[lyr] || {};
+        return s.isVisible !== false && b.isIncluded !== false;
+      });
+    }
+
+    if (targetBuildings.length === 0) {
+      targetBuildings = buildings.filter((b) => b.isIncluded !== false);
+    }
+    if (targetBuildings.length === 0) {
+      targetBuildings = buildings;
+    }
+
     const rect = container.getBoundingClientRect();
     const width = rect.width > 50 ? rect.width : window.innerWidth - 380;
     const height = rect.height > 50 ? rect.height : window.innerHeight;
@@ -57,7 +82,7 @@ export function useCadViewport(
     let minY = Infinity;
     let maxY = -Infinity;
 
-    for (const bldg of buildings) {
+    for (const bldg of targetBuildings) {
       for (const v of bldg.vertices) {
         if (Number.isFinite(v.x) && v.x < minX) minX = v.x;
         if (Number.isFinite(v.x) && v.x > maxX) maxX = v.x;
@@ -73,7 +98,7 @@ export function useCadViewport(
     const rot = (viewRotationDeg * Math.PI) / 180;
     const cos = Math.cos(rot);
     const sin = Math.sin(rot);
-    const rotated = buildings.flatMap((bldg) =>
+    const rotated = targetBuildings.flatMap((bldg) =>
       bldg.vertices.map((v) => ({
         x: v.x * cos - v.y * sin,
         y: v.x * sin + v.y * cos,
@@ -92,8 +117,9 @@ export function useCadViewport(
     const rotatedCenterX = (rMinX + rMaxX) / 2;
     const rotatedCenterY = (rMinY + rMaxY) / 2;
 
-    const scaleX = (width * 0.80) / bboxWidth;
-    const scaleY = (height * 0.80) / bboxHeight;
+    const scaleFactor = selectedBuildingId ? 0.70 : 0.80;
+    const scaleX = (width * scaleFactor) / bboxWidth;
+    const scaleY = (height * scaleFactor) / bboxHeight;
     const newScale = Math.max(0.001, Math.min(100, Math.min(scaleX, scaleY)));
 
     const panX = width / 2 - rotatedCenterX * newScale;
@@ -104,7 +130,7 @@ export function useCadViewport(
       panY,
       scale: newScale,
     });
-  }, [buildings, viewRotationDeg, containerRef]);
+  }, [buildings, viewRotationDeg, containerRef, selectedBuildingId, layerSettings]);
 
   useEffect(() => {
     fitToExtents();

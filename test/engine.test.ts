@@ -48,7 +48,7 @@ describe('Shadowing Engine (§ 12)', () => {
     const res = analyzeShadowingAtPoint(midPoint, southSegment, 0.5, buildings, target.id);
 
     expect(res).toBeDefined();
-    expect(res.rays.length).toBeGreaterThan(0);
+    expect(res.sectors.length).toBeGreaterThan(0);
   });
 });
 
@@ -187,17 +187,16 @@ describe('Variable Accuracy & Multi-stage Refinement', () => {
 
     // With building B included (default):
     const resWithObstacle = analyzeShadowingAtPoint(point, southSeg, 0.5, buildings, target.id, 0.5);
-    const directRayWith = resWithObstacle.rays.find(r => Math.abs(r.angleDeg) < 0.1);
-    expect(directRayWith?.isFree).toBe(false); // blocked by Building B
+    const blockedSector = resWithObstacle.sectors.find(s => !s.isFree && s.startAngleDeg <= 0 && s.endAngleDeg >= 0);
+    expect(blockedSector).toBeDefined();
 
     // Mark building B as excluded (isIncluded = false)
     buildings[1].isIncluded = false;
     buildings[2].isIncluded = false; // Exclude building C as well
 
     const resWithoutObstacle = analyzeShadowingAtPoint(point, southSeg, 0.5, buildings, target.id, 0.5);
-    const directRayWithout = resWithoutObstacle.rays.find(r => Math.abs(r.angleDeg) < 0.1);
-    expect(directRayWithout?.isFree).toBe(true); // obstacle ignored, ray is completely free
     expect(resWithoutObstacle.isCompliant).toBe(true);
+    expect(resWithoutObstacle.sectors.every(s => s.isFree)).toBe(true);
   });
 
   it('verifies analytical segment intersection method (§ 56 Segmenty) vs raycasting consistency', async () => {

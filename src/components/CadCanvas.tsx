@@ -84,7 +84,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     containerRef,
     buildings,
     viewRotationDeg,
-    fitTrigger
+    fitTrigger,
+    selectedBuildingId,
+    layerSettings
   );
 
   // Hotkeys hook
@@ -236,6 +238,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       layerSettings
     );
 
+    const visibleBuildings = buildings.filter((b) => {
+      const lyr = b.layer || 'Domyślna (0)';
+      return layerSettings[lyr]?.isVisible !== false;
+    });
+
     // 3. Buildings Base & Outlines
     renderBuildings(
       renderContext,
@@ -253,22 +260,22 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       layerSettings
     );
 
-    // 3. Shadow Range § 12
-    renderShadowRange(renderContext, buildings, showShadowRange);
+    // 3. Shadow Range § 12 (only for visible tested buildings)
+    renderShadowRange(renderContext, visibleBuildings, showShadowRange);
 
     // 4. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12)
     if (selectedPointResult) {
       if (activePointMode === 'sunlight') {
-        renderSunlightVisualization(renderContext, selectedPointResult, buildings);
+        renderSunlightVisualization(renderContext, selectedPointResult, visibleBuildings);
       } else {
-        renderShadowingVisualization(renderContext, selectedPointResult, buildings);
+        renderShadowingVisualization(renderContext, selectedPointResult, visibleBuildings);
       }
     }
 
     // 5. Dimensions & Annotations
     renderDimensions(
       renderContext,
-      buildings,
+      visibleBuildings,
       dimensions,
       isDimensionMode,
       dimensionPendingRef,
@@ -408,7 +415,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
       if (facadePointMode && selectedBuildingId) {
         const bldg = buildings.find((b) => b.id === selectedBuildingId);
-        if (bldg) {
+        const lyr = bldg?.layer || 'Domyślna (0)';
+        if (bldg && layerSettings[lyr]?.isVisible !== false) {
           let closestSeg: { segId: string; ratio: number } | null = null;
           let minDist = 1.2;
           for (const seg of bldg.segments) {

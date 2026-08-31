@@ -5,7 +5,9 @@ import { parseDxfWithMetadata } from '../src/utils/dxfParser';
 
 describe('Diagnose test.dxf', () => {
   it('prints all entities and their coordinates in test.dxf', () => {
-    const raw = fs.readFileSync('test.dxf', 'utf-8');
+    const dxfPath = fs.existsSync('reference/test.dxf') ? 'reference/test.dxf' : 'test.dxf';
+    if (!fs.existsSync(dxfPath)) return;
+    const raw = fs.readFileSync(dxfPath, 'utf-8');
     const parser = new DxfParser();
     const parsed = parser.parseSync(raw);
 

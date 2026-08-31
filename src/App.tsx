@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
+import { CompassRose } from './components/cad/CompassRose';
 import {
   BuildingLoop,
   AnalysisPointResult,
@@ -259,10 +260,30 @@ export const App: React.FC = () => {
     }
   }, [accuracyStage]);
 
-  // Run Calculation with Variable Precision
+  // Buildings filtered through layer visibility (Lightbulb override)
+  // When a layer's lightbulb is off (isVisible === false), all buildings on it
+  // are completely excluded from calculation as tested buildings and as obstacle buildings,
+  // without modifying their persistent isIncluded/isTested flags.
+  const effectiveBuildings = useMemo(() => {
+    return buildings.map((b) => {
+      const lyr = b.layer || 'Domyślna (0)';
+      const setting = layerSettings[lyr] || {};
+      const isVisible = setting.isVisible !== false;
+      if (!isVisible) {
+        return {
+          ...b,
+          isIncluded: false,
+          isTested: false,
+        };
+      }
+      return b;
+    });
+  }, [buildings, layerSettings]);
+
+  // Run Calculation with Variable Precision using effective buildings
   const analysisOutput = useMemo(() => {
-    return runFullAnalysis(buildings, settings, currentAccuracyOptions, sunlightMethod);
-  }, [buildings, settings, currentAccuracyOptions, sunlightMethod]);
+    return runFullAnalysis(effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod);
+  }, [effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
 
   const analysisResults = analysisOutput.results;
   const avgShadowingMs = analysisOutput.avgShadowingMs;
@@ -282,6 +303,8 @@ export const App: React.FC = () => {
     if (!selectedPointKey) return null;
     const bldg = buildings.find((b) => b.id === selectedPointKey.buildingId);
     if (!bldg) return null;
+    const lyr = bldg.layer || 'Domyślna (0)';
+    if (layerSettings[lyr]?.isVisible === false) return null;
     const seg = bldg.segments.find((s) => s.id === selectedPointKey.segmentId);
     if (!seg) return null;
 
@@ -291,10 +314,10 @@ export const App: React.FC = () => {
       y: seg.p1.y + r * (seg.p2.y - seg.p1.y),
     };
 
-    const prefilteredObstacles = prefilterObstacleSegments(exactPoint, seg, buildings, bldg.id);
+    const prefilteredObstacles = prefilterObstacleSegments(exactPoint, seg, effectiveBuildings, bldg.id);
 
     const shadowRes = analyzeShadowingAtPoint(
-      exactPoint, seg, r, buildings, bldg.id,
+      exactPoint, seg, r, effectiveBuildings, bldg.id,
       currentAccuracyOptions.angleStepDeg,
       prefilteredObstacles
     );
@@ -302,13 +325,13 @@ export const App: React.FC = () => {
     const sunRes =
       sunlightMethod === 'segments'
         ? analyzeSunlightAtPointSegments(
-            exactPoint, seg, r, buildings, bldg.id, settings,
+            exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
             currentAccuracyOptions.sunlightStepMinutes,
             undefined,
             prefilteredObstacles
           )
         : analyzeSunlightAtPoint(
-            exactPoint, seg, r, buildings, bldg.id, settings,
+            exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
             currentAccuracyOptions.sunlightStepMinutes,
             undefined,
             prefilteredObstacles
@@ -323,11 +346,18 @@ export const App: React.FC = () => {
       shadowing: shadowRes,
       sunlight: sunRes,
     };
-  }, [selectedPointKey, buildings, settings, currentAccuracyOptions, sunlightMethod]);
+  }, [selectedPointKey, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
 
 
-  // Selected building object
-  const selectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
+  // Selected building object (respects layer visibility)
+  const selectedBuilding = useMemo(() => {
+    if (!selectedBuildingId) return null;
+    const b = buildings.find((item) => item.id === selectedBuildingId);
+    if (!b) return null;
+    const lyr = b.layer || 'Domyślna (0)';
+    if (layerSettings[lyr]?.isVisible === false) return null;
+    return b;
+  }, [buildings, selectedBuildingId, layerSettings]);
 
   useEffect(() => {
     try {
@@ -717,13 +747,26 @@ export const App: React.FC = () => {
 
   // Toggle layer visibility (Żarówka)
   const handleToggleLayerVisibility = (layerName: string) => {
-    setLayerSettings((prev) => ({
-      ...prev,
-      [layerName]: {
-        ...prev[layerName],
-        isVisible: prev[layerName]?.isVisible === false ? true : false,
-      },
-    }));
+    setLayerSettings((prev) => {
+      const willBeVisible = prev[layerName]?.isVisible === false ? true : false;
+      if (!willBeVisible) {
+        if (selectedBuildingId) {
+          const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+          const bldgLayer = selBldg?.layer || 'Domyślna (0)';
+          if (bldgLayer === layerName) {
+            setSelectedBuildingId(null);
+            setSelectedPointKey(null);
+          }
+        }
+      }
+      return {
+        ...prev,
+        [layerName]: {
+          ...prev[layerName],
+          isVisible: willBeVisible,
+        },
+      };
+    });
   };
 
   // Batch update all buildings on a layer
@@ -945,13 +988,40 @@ export const App: React.FC = () => {
           target.isContentEditable);
 
       if (e.key === 'Escape') {
-        if (isDimensionToolActive) handleCancelDimension();
-        if (drawingMode !== 'none') handleCancelDrawing();
+        // Poziom 1: Anulowanie / wyłączenie aktywnego narzędzia
+        let handledTool = false;
+        if (isDimensionToolActive) {
+          handleCancelDimension();
+          handledTool = true;
+        }
+        if (drawingMode !== 'none') {
+          handleCancelDrawing();
+          handledTool = true;
+        }
         if (isLinkingMode) {
           setIsLinkingMode(false);
           setLinkingSourceId(null);
+          handledTool = true;
         }
-        if (isEditMode) setIsEditMode(false);
+        if (isEditMode) {
+          setIsEditMode(false);
+          handledTool = true;
+        }
+        if (viewRotationMode) {
+          setViewRotationMode(false);
+          handledTool = true;
+        }
+        if (facadePointMode) {
+          setFacadePointMode(false);
+          handledTool = true;
+        }
+
+        if (handledTool) return;
+
+        // Poziom 2: Gdy żadne narzędzie nie jest aktywne -> odznaczenie obiektów i punktów
+        setSelectedBuildingId(null);
+        setSelectedPointKey(null);
+        setSelectedLayerName(null);
         return;
       }
 
@@ -978,6 +1048,8 @@ export const App: React.FC = () => {
     drawingMode,
     isLinkingMode,
     isEditMode,
+    viewRotationMode,
+    facadePointMode,
     selectedBuildingId,
   ]);
 
@@ -2110,10 +2182,6 @@ export const App: React.FC = () => {
 
                     {/* 2. Operations on Selected Building */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px', borderTop: '1px solid var(--border-light)' }}>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
-                        Wybrany obiekt: {selectedBuilding ? selectedBuilding.name : '(brak wyboru)'}
-                      </div>
-
                       {selectedBuilding ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {/* Action buttons: Edytuj, Duplikuj, Usuń */}
@@ -2748,6 +2816,14 @@ export const App: React.FC = () => {
           sunlightMethod={sunlightMethod}
           onModeChange={setActivePointMode}
           onClose={() => setSelectedPointKey(null)}
+        />
+
+        {/* Rotatable Compass Rose (Bottom-Right) */}
+        <CompassRose
+          rotationDeg={viewRotationDeg}
+          onResetRotation={() => {
+            setViewRotationDeg(0);
+          }}
         />
       </main>
     </div>

@@ -7,10 +7,13 @@ node_modules/
 dist/
 build/
 
-# CAD temp files
+# CAD temp & reference files
 *.bak
 *.dwl
 *.dwl2
+*.dwg
+*.dxf
+reference/
 
 # Logs & Environment
 npm-debug.log*
