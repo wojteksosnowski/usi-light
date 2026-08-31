@@ -5,6 +5,8 @@ node_modules/
 
 # Production build
 dist/
+dist-web/
+dist-web.zip
 build/
 
 # CAD temp & reference files
