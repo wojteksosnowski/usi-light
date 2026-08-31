@@ -997,16 +997,10 @@ export function computeAngularDimension(
   const ang1 = Math.atan2(mid1.y - intersection.y, mid1.x - intersection.x);
   const ang2 = Math.atan2(mid2.y - intersection.y, mid2.x - intersection.x);
 
-  // Calculate distance from intersection to closest points on segments to ensure touching
-  const distToSeg = (p: Point2D, s1: Point2D, s2: Point2D) => {
-    const d1 = Math.hypot(s1.x - p.x, s1.y - p.y);
-    const d2 = Math.hypot(s2.x - p.x, s2.y - p.y);
-    return Math.min(d1, d2);
-  };
-
-  const d1 = distToSeg(intersection, a1, b1);
-  const d2 = distToSeg(intersection, a2, b2);
-  const touchRadiusWorld = Math.max(d1, d2, 1.5);
+  // Distance from intersection to midpoints of both segments to keep the arc close to midpoints
+  const dMid1 = Math.hypot(mid1.x - intersection.x, mid1.y - intersection.y);
+  const dMid2 = Math.hypot(mid2.x - intersection.x, mid2.y - intersection.y);
+  const touchRadiusWorld = Math.max((dMid1 + dMid2) / 2, 1.5);
 
   const touchPoint1 = {
     x: intersection.x + Math.cos(ang1) * touchRadiusWorld,
