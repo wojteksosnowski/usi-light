@@ -1,5 +1,14 @@
 import { CadRenderContext } from '../types';
 
+export interface EditingEdgeLengthState {
+  buildingId: string;
+  edgeIndex: number;
+  currentLength: number;
+  targetLength: number;
+  inputStr: string;
+  previewVertices?: any[];
+}
+
 export function renderBuildings(
   rc: CadRenderContext,
   buildings: any[],
@@ -13,9 +22,35 @@ export function renderBuildings(
   activePointMode: 'shadowing' | 'sunlight',
   isLinkingMode: boolean,
   linkingSourceId: string | null,
-  layerSettings: Record<string, any> = {}
+  layerSettings: Record<string, any> = {},
+  editingEdgeLength?: EditingEdgeLengthState | null,
+  hoveredEdgeLengthBadge?: { buildingId: string; edgeIndex: number } | null,
+  pinnedPointResults: any[] = [],
+  activePinnedPointId?: string | null,
+  liveFacadeSnap?: { point: { x: number; y: number }; buildingId: string; segmentId: string; ratio: number } | null,
+  facadePointMode?: boolean
 ) {
   const { ctx, worldToScreen } = rc;
+
+  // 0. Render Dashed Ghost Preview for Edge Length Editing
+  if (editingEdgeLength?.previewVertices && editingEdgeLength.previewVertices.length >= 3) {
+    ctx.save();
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 4]);
+    ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
+    ctx.beginPath();
+    const first = worldToScreen(editingEdgeLength.previewVertices[0].x, editingEdgeLength.previewVertices[0].y);
+    ctx.moveTo(first.sx, first.sy);
+    for (let i = 1; i < editingEdgeLength.previewVertices.length; i++) {
+      const pt = worldToScreen(editingEdgeLength.previewVertices[i].x, editingEdgeLength.previewVertices[i].y);
+      ctx.lineTo(pt.sx, pt.sy);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // 1. Render Building Fills
   for (const bldg of buildings) {
@@ -149,6 +184,47 @@ export function renderBuildings(
             ctx.fill();
           }
         }
+
+        // Edge Length Badge on Selected Building (Interactive for editing)
+        if (isSelected && seg.p1 && seg.p2) {
+          const midX = (seg.p1.x + seg.p2.x) / 2;
+          const midY = (seg.p1.y + seg.p2.y) / 2;
+          const len = Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+          const { sx: msx, sy: msy } = worldToScreen(midX, midY);
+
+          if (Number.isFinite(msx) && Number.isFinite(msy)) {
+            const isEditingThisEdge =
+              editingEdgeLength?.buildingId === bldg.id && editingEdgeLength?.edgeIndex === eIdx;
+            const isHoveredBadge =
+              hoveredEdgeLengthBadge?.buildingId === bldg.id && hoveredEdgeLengthBadge?.edgeIndex === eIdx;
+
+            const labelText = isEditingThisEdge
+              ? `[ ${editingEdgeLength.inputStr || editingEdgeLength.targetLength.toFixed(2)}m ]`
+              : `${len.toFixed(2)}m`;
+
+            ctx.font = 'bold 10px Inter, monospace';
+            const tw = ctx.measureText(labelText).width;
+            const pw = tw + 10;
+            const ph = 18;
+
+            ctx.fillStyle = isEditingThisEdge
+              ? '#f59e0b'
+              : isHoveredBadge
+              ? 'rgba(56, 189, 248, 0.95)'
+              : 'rgba(15, 23, 42, 0.88)';
+            ctx.strokeStyle = isEditingThisEdge ? '#fbbf24' : isHoveredBadge ? '#38bdf8' : 'rgba(56, 189, 248, 0.4)';
+            ctx.lineWidth = isEditingThisEdge || isHoveredBadge ? 1.5 : 1;
+            ctx.beginPath();
+            ctx.roundRect(msx - pw / 2, msy - ph / 2, pw, ph, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = isEditingThisEdge ? '#0f172a' : '#f8fafc';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, msx, msy);
+          }
+        }
       }
     }
 
@@ -220,8 +296,8 @@ export function renderBuildings(
             const d = dots[dIdx];
             const dx = startDotX + dIdx * dotSpacing;
             ctx.beginPath();
-            ctx.arc(dx, dotY, dotRadius, 0, Math.PI * 2);
-            ctx.fillStyle = d.active ? d.color : '#334155';
+            ctx.arc(dx, dotY, dotRadius, 0, 2 * Math.PI);
+            ctx.fillStyle = d.active ? d.color : 'rgba(71, 85, 105, 0.4)';
             ctx.fill();
           }
         }
@@ -230,38 +306,40 @@ export function renderBuildings(
     ctx.restore();
   }
 
-  // 3. Group Links
-  const groupCentroids = new Map<string, { x: number; y: number }[]>();
-  for (const bldg of buildings) {
-    if (bldg.groupId && bldg.vertices.length > 0) {
-      const centroid = bldg.vertices.reduce(
-        (acc: any, v: any) => ({ x: acc.x + v.x / bldg.vertices.length, y: acc.y + v.y / bldg.vertices.length }),
-        { x: 0, y: 0 }
-      );
-      if (!groupCentroids.has(bldg.groupId)) {
-        groupCentroids.set(bldg.groupId, []);
-      }
-      groupCentroids.get(bldg.groupId)!.push(centroid);
+  // 3. Render Group Links / Link Handles
+  const groupBuildings = new Map<string, any[]>();
+  buildings.forEach((b) => {
+    if (b.groupId) {
+      if (!groupBuildings.has(b.groupId)) groupBuildings.set(b.groupId, []);
+      groupBuildings.get(b.groupId)!.push(b);
     }
-  }
+  });
 
-  groupCentroids.forEach((centroids) => {
-    if (centroids.length >= 2) {
+  groupBuildings.forEach((bldgs) => {
+    if (bldgs.length < 2) return;
+    for (let i = 0; i < bldgs.length - 1; i++) {
+      const b1 = bldgs[i];
+      const b2 = bldgs[i + 1];
+      if (!b1.vertices?.length || !b2.vertices?.length) continue;
+
+      const c1 = b1.vertices.reduce((acc: any, v: any) => ({ x: acc.x + v.x / b1.vertices.length, y: acc.y + v.y / b1.vertices.length }), { x: 0, y: 0 });
+      const c2 = b2.vertices.reduce((acc: any, v: any) => ({ x: acc.x + v.x / b2.vertices.length, y: acc.y + v.y / b2.vertices.length }), { x: 0, y: 0 });
+
+      const s1 = worldToScreen(c1.x, c1.y);
+      const s2 = worldToScreen(c2.x, c2.y);
+
       ctx.save();
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+      ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(s1.sx, s1.sy);
+      ctx.lineTo(s2.sx, s2.sy);
+      ctx.stroke();
 
-      for (let i = 0; i < centroids.length - 1; i++) {
-        const c1 = worldToScreen(centroids[i].x, centroids[i].y);
-        const c2 = worldToScreen(centroids[i + 1].x, centroids[i + 1].y);
-        ctx.beginPath();
-        ctx.moveTo(c1.sx, c1.sy);
-        ctx.lineTo(c2.sx, c2.sy);
-        ctx.stroke();
-
-        const midX = (c1.sx + c2.sx) / 2;
-        const midY = (c1.sy + c2.sy) / 2;
+      const midX = (s1.sx + s2.sx) / 2;
+      const midY = (s1.sy + s2.sy) / 2;
+      if (Number.isFinite(midX) && Number.isFinite(midY)) {
         ctx.fillStyle = '#0f172a';
         ctx.strokeStyle = '#38bdf8';
         ctx.lineWidth = 1;
@@ -279,8 +357,55 @@ export function renderBuildings(
     }
   });
 
-  // 4. Highlight Selected Analysis Point
-  if (selectedPointResult) {
+  // 4. Render All Pinned Analysis Points (P1, P2, P3)
+  if (pinnedPointResults && pinnedPointResults.length > 0) {
+    pinnedPointResults.forEach((ptRes, pIdx) => {
+      if (!ptRes || !ptRes.point) return;
+      const { point } = ptRes;
+      const { sx, sy } = worldToScreen(point.x, point.y);
+      if (!Number.isFinite(sx) || !Number.isFinite(sy)) return;
+
+      const isActive = activePinnedPointId ? ptRes.id === activePinnedPointId : (selectedPointResult?.id === ptRes.id);
+      const label = ptRes.label || `P${pIdx + 1}`;
+
+      ctx.save();
+      if (isActive) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, 12, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 2]);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(sx, sy, 7, 0, 2 * Math.PI);
+      ctx.fillStyle = isActive ? '#38bdf8' : '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = isActive ? '#ffffff' : '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      const badgeW = 20;
+      const badgeH = 14;
+      const badgeY = sy - 16;
+      ctx.fillStyle = isActive ? '#0284c7' : 'rgba(15, 23, 42, 0.9)';
+      ctx.strokeStyle = isActive ? '#38bdf8' : '#475569';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(sx - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, sx, badgeY);
+
+      ctx.restore();
+    });
+  } else if (selectedPointResult) {
     const { point } = selectedPointResult;
     const { sx, sy } = worldToScreen(point.x, point.y);
 
@@ -302,7 +427,48 @@ export function renderBuildings(
     ctx.restore();
   }
 
-  // 5. Linking Mode Interactive Link Preview
+  // 5. Render Live Snapping Marker in facadePointMode
+  if (facadePointMode && liveFacadeSnap) {
+    const { sx, sy } = worldToScreen(liveFacadeSnap.point.x, liveFacadeSnap.point.y);
+    if (Number.isFinite(sx) && Number.isFinite(sy)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sy, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = '#10b981';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(sx, sy, 11, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 2]);
+      ctx.stroke();
+
+      const snapLabel = `+ Punkt (${(liveFacadeSnap.ratio * 100).toFixed(0)}%)`;
+      ctx.font = 'bold 10px Inter, sans-serif';
+      const tw = ctx.measureText(snapLabel).width;
+      const pw = tw + 10;
+      const ph = 18;
+      const py = sy - 18;
+
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.95)';
+      ctx.beginPath();
+      ctx.roundRect(sx - pw / 2, py - ph / 2, pw, ph, 4);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(snapLabel, sx, py);
+
+      ctx.restore();
+    }
+  }
+
+  // 6. Linking Mode Interactive Link Preview
   if (isLinkingMode && linkingSourceId) {
     const srcBldg = buildings.find((b) => b.id === linkingSourceId);
     if (srcBldg && srcBldg.vertices.length > 0) {

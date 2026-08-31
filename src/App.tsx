@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { CompassRose } from './components/cad/CompassRose';
@@ -11,6 +11,7 @@ import {
   DimensionReference,
   DimensionType,
   CadLayerSettings,
+  PinnedFacadePoint,
 } from './types/geometry';
 import {
   createSampleBuildings,
@@ -33,49 +34,50 @@ import {
   updateBuildingWithNewVertices,
   computeLinearDimension,
   computeAngularDimension,
+  computePolygonArea,
 } from './utils/math2d';
 import { rebuildBuildingSegments, analyzeSegmentsStatistics } from './utils/segmentStatistics';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
+import { APP_CONFIG } from './config/appConfig';
 
 import {
   Sun,
-  Shield,
+  MapPin,
+  FileSpreadsheet,
+  ChevronDown,
+  ChevronRight,
   Layers,
+  Building,
   Upload,
   Download,
-  RotateCw,
   RotateCcw,
+  RotateCw,
+  Sliders,
   Sparkles,
-  Building,
-  CheckCircle2,
-  AlertTriangle,
   ChevronLeft,
-  ChevronRight,
-  ChevronDown,
+  Lock,
+  Unlock,
+  Ghost,
+  Eye,
+  EyeOff,
   FolderKanban,
   Box,
-  Maximize2,
-  Sliders,
-  Activity,
-  MapPin,
+  Trash2,
+  Edit3,
   Timer,
-  Zap,
+  Square,
+  Activity,
+  Lightbulb,
+  LightbulbOff,
+  X,
   Link,
   Link2,
   Unlink,
   Wrench,
-  Copy,
-  Trash2,
-  Square,
   PenTool,
-  Edit3,
+  Maximize2,
   Ruler,
-  Lock,
-  Unlock,
-  Ghost,
-  Lightbulb,
-  LightbulbOff,
-  X,
+  Copy,
 } from 'lucide-react';
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
@@ -86,7 +88,9 @@ type SavedScene = {
   version: 1;
   buildings: BuildingLoop[];
   selectedBuildingId: string | null;
-  selectedPointKey: { buildingId: string; segmentId: string; offsetRatio: number } | null;
+  pinnedPoints?: PinnedFacadePoint[];
+  activePinnedPointId?: string | null;
+  selectedPointKey?: { buildingId: string; segmentId: string; offsetRatio: number } | null;
   settings: ProjectSettings;
   layerSettings: Record<string, CadLayerSettings>;
   selectedLayerName: string | null;
@@ -121,10 +125,11 @@ export const App: React.FC = () => {
   const [fitKey, setFitKey] = useState<number>(0);
 
   // Collapsible Sidebar Groups State (Accordion: expanding one closes the other)
-  const [openSidebarGroup, setOpenSidebarGroup] = useState<'project' | 'modeling' | null>('project');
+  const [openSidebarGroup, setOpenSidebarGroup] = useState<'project' | 'layers' | 'modeling' | null>('project');
   const isProjectGroupOpen = openSidebarGroup === 'project';
+  const isLayersGroupOpen = openSidebarGroup === 'layers';
   const isModelingGroupOpen = openSidebarGroup === 'modeling';
-  const toggleSidebarGroup = (group: 'project' | 'modeling') => {
+  const toggleSidebarGroup = (group: 'project' | 'layers' | 'modeling') => {
     setOpenSidebarGroup((prev) => (prev === group ? null : group));
   };
 
@@ -297,61 +302,107 @@ export const App: React.FC = () => {
   const segmentStats = useMemo(() => analyzeSegmentsStatistics(buildings), [buildings]);
 
 
-  const [selectedPointKey, setSelectedPointKey] = useState<{
-    buildingId: string;
-    segmentId: string;
-    offsetRatio: number;
-  } | null>(null);
+  // Multi-point facade analysis (limit max 3 points)
+  const [pinnedPoints, setPinnedPoints] = useState<PinnedFacadePoint[]>([]);
+  const [activePinnedPointId, setActivePinnedPointId] = useState<string | null>(null);
 
-  // Directly evaluate selected point at its EXACT pinned offsetRatio on the segment
-  // (so its position on the wall is 100% fixed and never moves when background mesh precision changes)
-  const selectedPointResult = useMemo<AnalysisPointResult | null>(() => {
-    if (!selectedPointKey) return null;
-    const bldg = buildings.find((b) => b.id === selectedPointKey.buildingId);
-    if (!bldg) return null;
-    const lyr = bldg.layer || 'Domyślna (0)';
-    if (layerSettings[lyr]?.isVisible === false) return null;
-    const seg = bldg.segments.find((s) => s.id === selectedPointKey.segmentId);
-    if (!seg) return null;
+  const handleAddPinnedPoint = useCallback((pt: { buildingId: string; segmentId: string; offsetRatio: number }) => {
+    setPinnedPoints((prev) => {
+      const maxPts = APP_CONFIG.facadePoints?.maxPinnedPoints ?? 3;
+      const newPtId = `pinned-${pt.buildingId}-${pt.segmentId}-${Date.now()}`;
+      if (prev.length >= maxPts) {
+        // Replace active point or oldest point if at limit
+        const activeIdx = prev.findIndex((p) => p.id === activePinnedPointId);
+        const replaceIdx = activeIdx >= 0 ? activeIdx : 0;
+        const copy = [...prev];
+        copy[replaceIdx] = { ...pt, id: newPtId, label: `P${replaceIdx + 1}` };
+        setActivePinnedPointId(newPtId);
+        return copy;
+      }
+      const newPoint: PinnedFacadePoint = {
+        ...pt,
+        id: newPtId,
+        label: `P${prev.length + 1}`,
+      };
+      setActivePinnedPointId(newPtId);
+      return [...prev, newPoint];
+    });
+  }, [activePinnedPointId]);
 
-    const r = selectedPointKey.offsetRatio;
-    const exactPoint = {
-      x: seg.p1.x + r * (seg.p2.x - seg.p1.x),
-      y: seg.p1.y + r * (seg.p2.y - seg.p1.y),
-    };
+  const handleDeletePinnedPoint = useCallback((id: string) => {
+    setPinnedPoints((prev) => {
+      const filtered = prev.filter((p) => p.id !== id);
+      const reindexed = filtered.map((p, idx) => ({ ...p, label: `P${idx + 1}` }));
+      if (activePinnedPointId === id) {
+        setActivePinnedPointId(reindexed.length > 0 ? reindexed[0].id : null);
+      }
+      return reindexed;
+    });
+  }, [activePinnedPointId]);
 
-    const prefilteredObstacles = prefilterObstacleSegments(exactPoint, seg, effectiveBuildings, bldg.id);
-
-    const shadowRes = analyzeShadowingAtPoint(
-      exactPoint, seg, r, effectiveBuildings, bldg.id,
-      currentAccuracyOptions.angleStepDeg,
-      prefilteredObstacles
+  const handleUpdatePinnedPoint = useCallback((id: string, buildingId: string, segmentId: string, offsetRatio: number) => {
+    setPinnedPoints((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, buildingId, segmentId, offsetRatio } : p))
     );
+  }, []);
 
-    const sunRes =
-      sunlightMethod === 'segments'
-        ? analyzeSunlightAtPointSegments(
-            exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
-            prefilteredObstacles
-          )
-        : analyzeSunlightAtPoint(
-            exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
-            currentAccuracyOptions.sunlightStepMinutes,
-            undefined,
-            prefilteredObstacles
-          );
+  // Directly evaluate pinned points at their EXACT pinned offsetRatio on the segments
+  const pinnedPointResults = useMemo<AnalysisPointResult[]>(() => {
+    return pinnedPoints.map((pt, pIdx) => {
+      const bldg = buildings.find((b) => b.id === pt.buildingId);
+      if (!bldg) return null;
+      const lyr = bldg.layer || 'Domyślna (0)';
+      if (layerSettings[lyr]?.isVisible === false) return null;
+      const seg = bldg.segments.find((s) => s.id === pt.segmentId);
+      if (!seg) return null;
 
-    return {
-      id: `pinned-${bldg.id}-${seg.id}-${r.toFixed(4)}`,
-      point: exactPoint,
-      normal: seg.normal,
-      buildingId: bldg.id,
-      segmentId: seg.id,
-      shadowing: shadowRes,
-      sunlight: sunRes,
-    };
-  }, [selectedPointKey, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
+      const r = pt.offsetRatio;
+      const exactPoint = {
+        x: seg.p1.x + r * (seg.p2.x - seg.p1.x),
+        y: seg.p1.y + r * (seg.p2.y - seg.p1.y),
+      };
 
+      const prefilteredObstacles = prefilterObstacleSegments(exactPoint, seg, effectiveBuildings, bldg.id);
+
+      const shadowRes = analyzeShadowingAtPoint(
+        exactPoint, seg, r, effectiveBuildings, bldg.id,
+        currentAccuracyOptions.angleStepDeg,
+        prefilteredObstacles
+      );
+
+      const sunRes =
+        sunlightMethod === 'segments'
+          ? analyzeSunlightAtPointSegments(
+              exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
+              prefilteredObstacles
+            )
+          : analyzeSunlightAtPoint(
+              exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
+              currentAccuracyOptions.sunlightStepMinutes,
+              undefined,
+              prefilteredObstacles
+            );
+
+      return {
+        id: pt.id,
+        point: exactPoint,
+        normal: seg.normal,
+        buildingId: bldg.id,
+        segmentId: seg.id,
+        label: pt.label || `P${pIdx + 1}`,
+        shadowing: shadowRes,
+        sunlight: sunRes,
+      };
+    }).filter(Boolean) as AnalysisPointResult[];
+  }, [pinnedPoints, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
+
+  const activePointResult = useMemo<AnalysisPointResult | null>(() => {
+    if (pinnedPointResults.length === 0) return null;
+    if (activePinnedPointId) {
+      return pinnedPointResults.find((p) => p.id === activePinnedPointId) || pinnedPointResults[0];
+    }
+    return pinnedPointResults[0];
+  }, [pinnedPointResults, activePinnedPointId]);
 
   // Selected building object (respects layer visibility)
   const selectedBuilding = useMemo(() => {
@@ -363,6 +414,20 @@ export const App: React.FC = () => {
     return b;
   }, [buildings, selectedBuildingId, layerSettings]);
 
+  // Area of selected building in m²
+  const selectedBuildingArea = useMemo(() => {
+    if (!selectedBuilding || !selectedBuilding.vertices || selectedBuilding.vertices.length < 3) return 0;
+    return computePolygonArea(selectedBuilding.vertices);
+  }, [selectedBuilding]);
+
+  // Dimensions connected to selected building only
+  const selectedBuildingDimensions = useMemo(() => {
+    if (!selectedBuildingId) return [];
+    return dimensions.filter(
+      (d) => d.ref1.buildingId === selectedBuildingId || d.ref2?.buildingId === selectedBuildingId
+    );
+  }, [dimensions, selectedBuildingId]);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SCENE_STORAGE_KEY);
@@ -372,7 +437,23 @@ export const App: React.FC = () => {
 
       setBuildings(scene.buildings ?? createSampleBuildings());
       setSelectedBuildingId(scene.selectedBuildingId ?? null);
-      setSelectedPointKey(scene.selectedPointKey ?? null);
+      if (scene.pinnedPoints) {
+        setPinnedPoints(scene.pinnedPoints);
+        setActivePinnedPointId(scene.activePinnedPointId ?? (scene.pinnedPoints.length > 0 ? scene.pinnedPoints[0].id : null));
+      } else if (scene.selectedPointKey) {
+        const legacyPt: PinnedFacadePoint = {
+          id: 'pinned-legacy',
+          buildingId: scene.selectedPointKey.buildingId,
+          segmentId: scene.selectedPointKey.segmentId,
+          offsetRatio: scene.selectedPointKey.offsetRatio,
+          label: 'P1',
+        };
+        setPinnedPoints([legacyPt]);
+        setActivePinnedPointId('pinned-legacy');
+      } else {
+        setPinnedPoints([]);
+        setActivePinnedPointId(null);
+      }
       setSettings(scene.settings ?? {
         latitude: 52.2297,
         longitude: 21.0122,
@@ -414,7 +495,8 @@ export const App: React.FC = () => {
       version: 1,
       buildings,
       selectedBuildingId,
-      selectedPointKey,
+      pinnedPoints,
+      activePinnedPointId,
       settings,
       layerSettings,
       selectedLayerName,
@@ -447,7 +529,8 @@ export const App: React.FC = () => {
   }, [
     buildings,
     selectedBuildingId,
-    selectedPointKey,
+    pinnedPoints,
+    activePinnedPointId,
     settings,
     layerSettings,
     selectedLayerName,
@@ -624,7 +707,8 @@ export const App: React.FC = () => {
 
     setBuildings((prev) => [...prev, duplicate]);
     setSelectedBuildingId(newId);
-    setSelectedPointKey(null);
+    setPinnedPoints([]);
+    setActivePinnedPointId(null);
   };
 
   // Delete building handler
@@ -647,7 +731,8 @@ export const App: React.FC = () => {
 
     if (selectedBuildingId === id) {
       setSelectedBuildingId(null);
-      setSelectedPointKey(null);
+      setPinnedPoints([]);
+      setActivePinnedPointId(null);
     }
   };
 
@@ -661,13 +746,14 @@ export const App: React.FC = () => {
 
     setBuildings((prev) => [...prev, newBldg]);
     setSelectedBuildingId(newBldg.id);
-    setSelectedPointKey(null);
+    setPinnedPoints([]);
+    setActivePinnedPointId(null);
     setDrawingMode('none');
     setDrawingVerticesCount(0);
   };
 
   const handleFacadePointMove = (buildingId: string, segmentId: string, offsetRatio: number) => {
-    setSelectedPointKey({ buildingId, segmentId, offsetRatio });
+    handleAddPinnedPoint({ buildingId, segmentId, offsetRatio });
   };
 
   // Cancel active drawing mode
@@ -798,7 +884,8 @@ export const App: React.FC = () => {
           const bldgLayer = selBldg?.layer || 'Domyślna (0)';
           if (bldgLayer === layerName) {
             setSelectedBuildingId(null);
-            setSelectedPointKey(null);
+            setPinnedPoints([]);
+            setActivePinnedPointId(null);
           }
         }
       }
@@ -892,7 +979,8 @@ export const App: React.FC = () => {
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
           setSelectedBuildingId(result.buildings[0].id);
-          setSelectedPointKey(null);
+          setPinnedPoints([]);
+          setActivePinnedPointId(null);
           setDxfImportInfo(result.unitInfo);
           setFitKey((prev) => prev + 1);
         } else {
@@ -916,7 +1004,8 @@ export const App: React.FC = () => {
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
           setSelectedBuildingId(result.buildings[0].id);
-          setSelectedPointKey(null);
+          setPinnedPoints([]);
+          setActivePinnedPointId(null);
           setDxfImportInfo(result.unitInfo);
           setFitKey((prev) => prev + 1);
         }
@@ -934,7 +1023,23 @@ export const App: React.FC = () => {
 
     setBuildings(scene.buildings ?? createSampleBuildings());
     setSelectedBuildingId(scene.selectedBuildingId ?? null);
-    setSelectedPointKey(scene.selectedPointKey ?? null);
+    if (scene.pinnedPoints) {
+      setPinnedPoints(scene.pinnedPoints);
+      setActivePinnedPointId(scene.activePinnedPointId ?? (scene.pinnedPoints.length > 0 ? scene.pinnedPoints[0].id : null));
+    } else if (scene.selectedPointKey) {
+      const legacyPt: PinnedFacadePoint = {
+        id: 'pinned-legacy',
+        buildingId: scene.selectedPointKey.buildingId,
+        segmentId: scene.selectedPointKey.segmentId,
+        offsetRatio: scene.selectedPointKey.offsetRatio,
+        label: 'P1',
+      };
+      setPinnedPoints([legacyPt]);
+      setActivePinnedPointId('pinned-legacy');
+    } else {
+      setPinnedPoints([]);
+      setActivePinnedPointId(null);
+    }
     setSettings(scene.settings ?? settings);
     setLayerSettings(scene.layerSettings ?? {});
     setSelectedLayerName(scene.selectedLayerName ?? null);
@@ -985,7 +1090,8 @@ export const App: React.FC = () => {
       version: 1,
       buildings,
       selectedBuildingId,
-      selectedPointKey,
+      pinnedPoints,
+      activePinnedPointId,
       settings,
       layerSettings,
       selectedLayerName,
@@ -1063,7 +1169,8 @@ export const App: React.FC = () => {
 
         // Poziom 2: Gdy żadne narzędzie nie jest aktywne -> odznaczenie obiektów i punktów
         setSelectedBuildingId(null);
-        setSelectedPointKey(null);
+        setPinnedPoints([]);
+        setActivePinnedPointId(null);
         setSelectedLayerName(null);
         return;
       }
@@ -1139,19 +1246,19 @@ export const App: React.FC = () => {
         <div className="sidebar-body custom-scrollbar">
 
           {/* ========================================================================= */}
-          {/* GRUPA 1: PROJEKT, RZUT I WARSTWY                                          */}
-          {/* (Lokalizacja, Jednostki DXF, Wgraj plik DXF & Załaduj scenę, Warstwy)     */}
+          {/* GRUPA 1: PROJEKT                                                          */}
+          {/* (Lokalizacja, Jednostki DXF, Wgraj plik DXF & Załaduj scenę, Analizy)      */}
           {/* ========================================================================= */}
           <div className="sidebar-group">
             <button
               type="button"
               className="sidebar-group-header"
               onClick={() => toggleSidebarGroup('project')}
-              title="Zwiń / rozwiń grupę: Projekt, Rzut i Warstwy"
+              title="Zwiń / rozwiń grupę: Projekt"
             >
               <div className="sidebar-group-title">
                 <FolderKanban size={15} color="#f59e0b" />
-                <span>Projekt, Rzut i Warstwy</span>
+                <span>Projekt</span>
               </div>
               {isProjectGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
             </button>
@@ -1423,7 +1530,8 @@ export const App: React.FC = () => {
                     onClick={() => {
                       setBuildings(createSampleBuildings());
                       setSelectedBuildingId('bldg-1');
-                      setSelectedPointKey(null);
+                      setPinnedPoints([]);
+                      setActivePinnedPointId(null);
                       setLastDxfText(null);
                       setDxfImportInfo(null);
                       setFitKey((prev) => prev + 1);
@@ -1435,11 +1543,11 @@ export const App: React.FC = () => {
                   </button>
                 </div>
 
-                {/* 1.4 Warstwy analityczne */}
+                {/* 1.3 Analizy */}
                 <div className="ui-card">
                   <div className="ui-title">
-                    <span>Warstwy analityczne</span>
-                    <Layers size={14} color="#818cf8" />
+                    <span>Analizy</span>
+                    <Sliders size={14} color="#f59e0b" />
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1497,25 +1605,25 @@ export const App: React.FC = () => {
           </div>
 
           {/* ========================================================================= */}
-          {/* GRUPA 2: OBIEKTY I NARZĘDZIA                                              */}
-          {/* (Edycja Obiektu 2.5D, Narzędzia)                                          */}
+          {/* GRUPA 2: WARSTWY CAD                                                      */}
+          {/* (Kafel: Warstwy CAD)                                                      */}
           {/* ========================================================================= */}
           <div className="sidebar-group-divider" />
           <div className="sidebar-group">
             <button
               type="button"
               className="sidebar-group-header"
-              onClick={() => toggleSidebarGroup('modeling')}
-              title="Zwiń / rozwiń grupę: Obiekty i Narzędzia"
+              onClick={() => toggleSidebarGroup('layers')}
+              title="Zwiń / rozwiń grupę: Warstwy CAD"
             >
               <div className="sidebar-group-title">
-                <Box size={15} color="#818cf8" />
-                <span>Obiekty i Narzędzia</span>
+                <Layers size={15} color="#38bdf8" />
+                <span>Warstwy CAD</span>
               </div>
-              {isModelingGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
+              {isLayersGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
             </button>
 
-            {isModelingGroupOpen && (
+            {isLayersGroupOpen && (
               <div className="sidebar-group-content">
                 {/* 2.0 Warstwy CAD */}
                 <div className="ui-card">
@@ -1570,14 +1678,16 @@ export const App: React.FC = () => {
                               </span>
                               <span
                                 style={{
-                                  fontSize: '9.5px',
+                                  fontSize: '10px',
+                                  color: '#64748b',
+                                  backgroundColor: 'rgba(30, 41, 59, 0.6)',
                                   padding: '1px 5px',
                                   borderRadius: '4px',
-                                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                                  color: '#94a3b8',
+                                  fontWeight: 600,
+                                  flexShrink: 0,
                                 }}
                               >
-                                {lyr.count} {lyr.count === 1 ? 'obiekt' : 'obiekty'}
+                                {lyr.count}
                               </span>
                             </div>
 
@@ -1812,6 +1922,10 @@ export const App: React.FC = () => {
                               gap: '3px',
                             }}
                           >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ color: '#94a3b8' }}>Powierzchnia:</span>
+                              <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{selectedBuildingArea.toFixed(1)} m²</b>
+                            </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ color: '#94a3b8' }}>Rzut (Szer × Głęb):</span>
                               <b style={{ color: isHuge ? '#fca5a5' : '#38bdf8', fontFamily: 'monospace' }}>
@@ -2278,11 +2392,11 @@ export const App: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Active Dimensions List on Canvas */}
-                      {dimensions.length > 0 && (
+                      {/* Active Dimensions List for Selected Building */}
+                      {selectedBuildingDimensions.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '4px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', color: '#94a3b8', fontWeight: 600 }}>
-                            <span>Wymiary na rzucie ({dimensions.length}):</span>
+                            <span>Wymiary obiektu ({selectedBuildingDimensions.length}):</span>
                             <button
                               type="button"
                               onClick={handleClearAllDimensions}
@@ -2301,7 +2415,7 @@ export const App: React.FC = () => {
                           </div>
 
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {dimensions.map((dim, idx) => {
+                            {selectedBuildingDimensions.map((dim, idx) => {
                               const b1 = buildings.find((b) => b.id === dim.ref1.buildingId);
                               const s1 = b1?.segments.find((s) => s.id === dim.ref1.segmentId);
                               const b2 = buildings.find((b) => b.id === dim.ref2.buildingId);
@@ -2836,12 +2950,9 @@ export const App: React.FC = () => {
         <div className="cad-legend-bottom" style={{ gap: '12px', alignItems: 'center' }}>
           <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '11px' }}>LEGENDA:</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ width: '12px', height: '4px', backgroundColor: '#10b981', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px' }}>§ 12 Zgodne</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ width: '12px', height: '4px', backgroundColor: '#f43f5e', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px' }}>§ 12 Niezgodne</span>
+            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>§ 12:</span>
+            <span style={{ color: '#10b981', fontWeight: 800, fontSize: '12px' }} title="§ 12 Zgodne">✓</span>
+            <span style={{ color: '#f43f5e', fontWeight: 800, fontSize: '12px' }} title="§ 12 Niezgodne">✗</span>
           </div>
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -2969,17 +3080,18 @@ export const App: React.FC = () => {
             onSelectBuilding={handleSelectBuilding}
             onBuildingMove={handleBuildingMove}
             analysisResults={analysisResults}
-            selectedPointResult={selectedPointResult}
-            activePointMode={activePointMode}
+            pinnedPoints={pinnedPoints}
+            activePinnedPointId={activePinnedPointId}
+            onSelectPinnedPoint={(id) => setActivePinnedPointId(id)}
+            onAddPinnedPoint={handleAddPinnedPoint}
+            onDeletePinnedPoint={handleDeletePinnedPoint}
+            onUpdatePinnedPoint={handleUpdatePinnedPoint}
+            selectedPointResult={activePointResult}
             onSelectPointResult={(res) => {
               if (!res) {
-                setSelectedPointKey(null);
+                setActivePinnedPointId(null);
               } else {
-                setSelectedPointKey({
-                  buildingId: res.buildingId,
-                  segmentId: res.segmentId,
-                  offsetRatio: res.shadowing.offsetRatio,
-                });
+                setActivePinnedPointId(res.id);
               }
             }}
             showNormals={showNormals}
@@ -3025,11 +3137,18 @@ export const App: React.FC = () => {
 
         {/* Floating Point Inspector Modal */}
         <PointInspectorModal
-          pointResult={selectedPointResult}
+          pointResult={activePointResult}
+          allPoints={pinnedPointResults}
+          activePointId={activePinnedPointId}
+          onSelectPointId={setActivePinnedPointId}
+          onDeletePointId={handleDeletePinnedPoint}
           activeMode={activePointMode}
           sunlightMethod={sunlightMethod}
           onModeChange={setActivePointMode}
-          onClose={() => setSelectedPointKey(null)}
+          onClose={() => {
+            setPinnedPoints([]);
+            setActivePinnedPointId(null);
+          }}
         />
 
         {/* Rotatable Compass Rose (Bottom-Right) */}

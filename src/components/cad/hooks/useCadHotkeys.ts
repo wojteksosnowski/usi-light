@@ -12,6 +12,12 @@ export function useCadHotkeys({
   setDrawingVertices,
   setCurrentMouseWorld,
   setHoveredBuildingIndex,
+  isEditingEdgeLength = false,
+  onAdjustEdgeLengthStep,
+  onEdgeLengthInputChar,
+  onEdgeLengthBackspace,
+  onCommitEdgeLength,
+  onCancelEdgeLength,
 }: {
   drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate';
   drawingVertices: Point2D[];
@@ -23,9 +29,52 @@ export function useCadHotkeys({
   setDrawingVertices: React.Dispatch<React.SetStateAction<Point2D[]>>;
   setCurrentMouseWorld: React.Dispatch<React.SetStateAction<Point2D | null>>;
   setHoveredBuildingIndex: React.Dispatch<React.SetStateAction<number>>;
+  isEditingEdgeLength?: boolean;
+  onAdjustEdgeLengthStep?: (delta: number) => void;
+  onEdgeLengthInputChar?: (char: string) => void;
+  onEdgeLengthBackspace?: () => void;
+  onCommitEdgeLength?: () => void;
+  onCancelEdgeLength?: () => void;
 }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If actively typing into an HTML input, don't intercept
+      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+      if (activeTag === 'input' || activeTag === 'textarea') return;
+
+      if (isEditingEdgeLength) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancelEdgeLength?.();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onCommitEdgeLength?.();
+          return;
+        }
+        if (e.key === '[' || e.key === '{') {
+          e.preventDefault();
+          onAdjustEdgeLengthStep?.(e.shiftKey ? -0.1 : -0.5);
+          return;
+        }
+        if (e.key === ']' || e.key === '}') {
+          e.preventDefault();
+          onAdjustEdgeLengthStep?.(e.shiftKey ? 0.1 : 0.5);
+          return;
+        }
+        if (e.key === 'Backspace') {
+          e.preventDefault();
+          onEdgeLengthBackspace?.();
+          return;
+        }
+        if (/^[0-9.,]$/.test(e.key)) {
+          e.preventDefault();
+          onEdgeLengthInputChar?.(e.key === ',' ? '.' : e.key);
+          return;
+        }
+      }
+
       if (e.key === 'Escape') {
         if (drawingMode !== 'none' || drawingVertices.length > 0) {
           setDrawingVertices([]);
@@ -61,5 +110,11 @@ export function useCadHotkeys({
     setDrawingVertices,
     setCurrentMouseWorld,
     setHoveredBuildingIndex,
+    isEditingEdgeLength,
+    onAdjustEdgeLengthStep,
+    onEdgeLengthInputChar,
+    onEdgeLengthBackspace,
+    onCommitEdgeLength,
+    onCancelEdgeLength,
   ]);
 }

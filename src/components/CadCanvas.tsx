@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { Point2D } from '../types/geometry';
-import { isPointInPolygon, computeCombinedShadowEnvelope } from '../utils/math2d';
+import { Point2D, PinnedFacadePoint, AnalysisPointResult } from '../types/geometry';
+import { isPointInPolygon, computeCombinedShadowEnvelope, adjustEdgeLength } from '../utils/math2d';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { renderCadGrid } from './cad/renderers/gridRenderer';
 import { renderAnalysisBands } from './cad/renderers/analysisBandsRenderer';
-import { renderBuildings } from './cad/renderers/buildingsRenderer';
+import { renderBuildings, EditingEdgeLengthState } from './cad/renderers/buildingsRenderer';
 import { renderShadowRange } from './cad/renderers/shadowRangeRenderer';
 import { renderSunlightVisualization } from './cad/renderers/sunlightRenderer';
 import { renderShadowingVisualization } from './cad/renderers/shadowingRenderer';
@@ -42,6 +42,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   onDrawingVerticesCountChange,
   onUpdateBuildingVertices,
   onBuildingRotate,
+  pinnedPoints = [],
+  activePinnedPointId = null,
+  onSelectPinnedPoint,
+  onAddPinnedPoint,
+  onDeletePinnedPoint,
+  onUpdatePinnedPoint,
   facadePointMode = false,
   onFacadePointMove,
   isEditMode = false,
@@ -80,10 +86,22 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   const [rotStartAngleScreen, setRotStartAngleScreen] = useState<number>(0);
   const [rotAngleDeg, setRotAngleDeg] = useState<number>(0);
 
+  // Edge length editing state
+  const [editingEdgeLength, setEditingEdgeLength] = useState<EditingEdgeLengthState | null>(null);
+  const [hoveredEdgeLengthBadge, setHoveredEdgeLengthBadge] = useState<{ buildingId: string; edgeIndex: number } | null>(null);
+
   // Edge editing state (parallel offset)
   const [hoveredEdge, setHoveredEdge] = useState<{ buildingId: string; edgeIndex: number } | null>(null);
   const [draggingEdge, setDraggingEdge] = useState<{ buildingId: string; edgeIndex: number } | null>(null);
   const [draggingFacadePoint, setDraggingFacadePoint] = useState<{ buildingId: string; segmentId: string } | null>(null);
+  const [draggingPinnedPointId, setDraggingPinnedPointId] = useState<string | null>(null);
+  const [liveFacadeSnap, setLiveFacadeSnap] = useState<{
+    point: Point2D;
+    buildingId: string;
+    segmentId: string;
+    ratio: number;
+  } | null>(null);
+
   const [hoveredBuildings, setHoveredBuildings] = useState<string[]>([]);
   const [hoveredBuildingIndex, setHoveredBuildingIndex] = useState(0);
   const [rotationHover, setRotationHover] = useState<{
@@ -140,6 +158,65 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     }
   }, [selectedVertexIndex, selectedBuildingId, buildings, onUpdateBuildingVertices]);
 
+  // Edge length editing callbacks
+  const handleAdjustEdgeLengthStep = useCallback((delta: number) => {
+    if (!editingEdgeLength) return;
+    const selBldg = buildings.find((b) => b.id === editingEdgeLength.buildingId);
+    if (!selBldg || !selBldg.vertices) return;
+    const nextLen = Math.max(0.2, Number((editingEdgeLength.targetLength + delta).toFixed(2)));
+    const preview = adjustEdgeLength(selBldg.vertices, editingEdgeLength.edgeIndex, nextLen);
+    setEditingEdgeLength({
+      ...editingEdgeLength,
+      targetLength: nextLen,
+      inputStr: nextLen.toFixed(2),
+      previewVertices: preview,
+    });
+  }, [editingEdgeLength, buildings]);
+
+  const handleEdgeLengthInputChar = useCallback((char: string) => {
+    if (!editingEdgeLength) return;
+    const selBldg = buildings.find((b) => b.id === editingEdgeLength.buildingId);
+    if (!selBldg || !selBldg.vertices) return;
+    const isFirstType = editingEdgeLength.inputStr === editingEdgeLength.currentLength.toFixed(2);
+    const nextStr = (isFirstType ? '' : editingEdgeLength.inputStr) + char;
+    const parsed = parseFloat(nextStr);
+    const validLen = !isNaN(parsed) && parsed > 0.01 ? parsed : editingEdgeLength.targetLength;
+    const preview = adjustEdgeLength(selBldg.vertices, editingEdgeLength.edgeIndex, validLen);
+    setEditingEdgeLength({
+      ...editingEdgeLength,
+      inputStr: nextStr,
+      targetLength: validLen,
+      previewVertices: preview,
+    });
+  }, [editingEdgeLength, buildings]);
+
+  const handleEdgeLengthBackspace = useCallback(() => {
+    if (!editingEdgeLength) return;
+    const selBldg = buildings.find((b) => b.id === editingEdgeLength.buildingId);
+    if (!selBldg || !selBldg.vertices) return;
+    const nextStr = editingEdgeLength.inputStr.slice(0, -1);
+    const parsed = parseFloat(nextStr);
+    const validLen = !isNaN(parsed) && parsed > 0.01 ? parsed : editingEdgeLength.targetLength;
+    const preview = adjustEdgeLength(selBldg.vertices, editingEdgeLength.edgeIndex, validLen);
+    setEditingEdgeLength({
+      ...editingEdgeLength,
+      inputStr: nextStr,
+      targetLength: validLen,
+      previewVertices: preview,
+    });
+  }, [editingEdgeLength, buildings]);
+
+  const handleCommitEdgeLength = useCallback(() => {
+    if (editingEdgeLength && editingEdgeLength.previewVertices) {
+      onUpdateBuildingVertices?.(editingEdgeLength.buildingId, editingEdgeLength.previewVertices);
+      setEditingEdgeLength(null);
+    }
+  }, [editingEdgeLength, onUpdateBuildingVertices]);
+
+  const handleCancelEdgeLength = useCallback(() => {
+    setEditingEdgeLength(null);
+  }, []);
+
   // Hotkeys hook
   useCadHotkeys({
     drawingMode,
@@ -152,6 +229,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     setDrawingVertices,
     setCurrentMouseWorld,
     setHoveredBuildingIndex,
+    isEditingEdgeLength: Boolean(editingEdgeLength),
+    onAdjustEdgeLengthStep: handleAdjustEdgeLengthStep,
+    onEdgeLengthInputChar: handleEdgeLengthInputChar,
+    onEdgeLengthBackspace: handleEdgeLengthBackspace,
+    onCommitEdgeLength: handleCommitEdgeLength,
+    onCancelEdgeLength: handleCancelEdgeLength,
   });
 
   useEffect(() => {
@@ -277,6 +360,37 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     };
   }, []);
 
+  const pinnedPointResults = useMemo(() => {
+    if (!pinnedPoints || pinnedPoints.length === 0) {
+      return selectedPointResult ? [selectedPointResult] : [];
+    }
+    return pinnedPoints.map((pt, idx) => {
+      const found = analysisResults.find(
+        (r) => r.buildingId === pt.buildingId && r.segmentId === pt.segmentId && Math.abs((r.shadowing?.offsetRatio ?? 0) - pt.offsetRatio) < 0.05
+      );
+      if (found) {
+        return { ...found, id: pt.id, label: pt.label || `P${idx + 1}` };
+      }
+      const bldg = buildings.find((b) => b.id === pt.buildingId);
+      const seg = bldg?.segments.find((s) => s.id === pt.segmentId);
+      if (seg) {
+        const px = seg.p1.x + pt.offsetRatio * (seg.p2.x - seg.p1.x);
+        const py = seg.p1.y + pt.offsetRatio * (seg.p2.y - seg.p1.y);
+        return {
+          id: pt.id,
+          point: { x: px, y: py },
+          normal: seg.normal || { x: 0, y: 1 },
+          buildingId: pt.buildingId,
+          segmentId: pt.segmentId,
+          label: pt.label || `P${idx + 1}`,
+          shadowing: { point: { x: px, y: py }, segmentId: pt.segmentId, offsetRatio: pt.offsetRatio, isCompliant: true, maxContinuousFreeSpanDeg: 156, totalFreeSpanDeg: 156, sectors: [], rays: [] },
+          sunlight: { point: { x: px, y: py }, segmentId: pt.segmentId, offsetRatio: pt.offsetRatio, totalMinutes: 0, totalHours: 0, isCompliant: true, timeSlots: [], sectors: [] },
+        };
+      }
+      return null;
+    }).filter(Boolean) as AnalysisPointResult[];
+  }, [pinnedPoints, analysisResults, buildings, selectedPointResult]);
+
   // Main Render Loop
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -333,7 +447,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       activePointMode,
       isLinkingMode,
       linkingSourceId,
-      layerSettings
+      layerSettings,
+      editingEdgeLength,
+      hoveredEdgeLengthBadge,
+      pinnedPointResults,
+      activePinnedPointId,
+      liveFacadeSnap,
+      facadePointMode
     );
 
     // 3. Shadow Range § 12 (only for visible tested buildings)
@@ -470,6 +590,47 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
+      // Check click on Edge Length Badges of Selected Building
+      if (selectedBuildingId) {
+        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg && selBldg.segments) {
+          for (let eIdx = 0; eIdx < selBldg.segments.length; eIdx++) {
+            const seg = selBldg.segments[eIdx];
+            const midX = (seg.p1.x + seg.p2.x) / 2;
+            const midY = (seg.p1.y + seg.p2.y) / 2;
+            const sm = worldToScreen(midX, midY);
+            const len = Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+            if (Math.abs(sx - sm.sx) <= 25 && Math.abs(sy - sm.sy) <= 12) {
+              setEditingEdgeLength({
+                buildingId: selBldg.id,
+                edgeIndex: eIdx,
+                currentLength: len,
+                targetLength: len,
+                inputStr: len.toFixed(2),
+                previewVertices: selBldg.vertices,
+              });
+              return;
+            }
+          }
+        }
+      }
+
+      // Check click on Pinned Facade Points
+      if (pinnedPointResults && pinnedPointResults.length > 0) {
+        for (const ptRes of pinnedPointResults) {
+          const sm = worldToScreen(ptRes.point.x, ptRes.point.y);
+          if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 15) {
+            onSelectPinnedPoint?.(ptRes.id);
+            onSelectPointResult(ptRes);
+            if (facadePointMode) {
+              setDraggingPinnedPointId(ptRes.id);
+              onInteractionChange?.(true);
+            }
+            return;
+          }
+        }
+      }
+
       if (isDimensionMode) {
         if (dimHoveredEdge) {
           onDimensionClickEdge?.(dimHoveredEdge.buildingId, dimHoveredEdge.segmentId);
@@ -599,32 +760,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
-      if (facadePointMode && selectedBuildingId) {
-        const bldg = buildings.find((b) => b.id === selectedBuildingId);
-        const lyr = bldg?.layer || 'Domyślna (0)';
-        if (bldg && layerSettings[lyr]?.isVisible !== false) {
-          let closestSeg: { segId: string; ratio: number } | null = null;
-          let minDist = 1.2;
-          for (const seg of bldg.segments) {
-            const dx = seg.p2.x - seg.p1.x;
-            const dy = seg.p2.y - seg.p1.y;
-            const lenSq = dx * dx + dy * dy;
-            if (lenSq < 1e-4) continue;
-            const u = Math.max(0, Math.min(1, ((world.wx - seg.p1.x) * dx + (world.wy - seg.p1.y) * dy) / lenSq));
-            const px = seg.p1.x + u * dx;
-            const py = seg.p1.y + u * dy;
-            const dist = Math.hypot(world.wx - px, world.wy - py);
-            if (dist < minDist) {
-              minDist = dist;
-              closestSeg = { segId: seg.id, ratio: u };
-            }
-          }
-          if (closestSeg) {
-            onFacadePointMove?.(bldg.id, closestSeg.segId, closestSeg.ratio);
-            setDraggingFacadePoint({ buildingId: bldg.id, segmentId: closestSeg.segId });
-            onInteractionChange?.(true);
-            return;
-          }
+      if (facadePointMode) {
+        if (liveFacadeSnap) {
+          onAddPinnedPoint?.({
+            buildingId: liveFacadeSnap.buildingId,
+            segmentId: liveFacadeSnap.segmentId,
+            offsetRatio: liveFacadeSnap.ratio,
+          });
+          return;
         }
       }
 
@@ -763,8 +906,84 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
+    // Check Hover on Edge Length Badges of Selected Building
+    if (selectedBuildingId) {
+      const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+      let foundEdgeBadge: { buildingId: string; edgeIndex: number } | null = null;
+      if (selBldg && selBldg.segments) {
+        for (let eIdx = 0; eIdx < selBldg.segments.length; eIdx++) {
+          const seg = selBldg.segments[eIdx];
+          const midX = (seg.p1.x + seg.p2.x) / 2;
+          const midY = (seg.p1.y + seg.p2.y) / 2;
+          const sm = worldToScreen(midX, midY);
+          if (Math.abs(sx - sm.sx) <= 25 && Math.abs(sy - sm.sy) <= 12) {
+            foundEdgeBadge = { buildingId: selBldg.id, edgeIndex: eIdx };
+            break;
+          }
+        }
+      }
+      setHoveredEdgeLengthBadge(foundEdgeBadge);
+    } else {
+      if (hoveredEdgeLengthBadge) setHoveredEdgeLengthBadge(null);
+    }
+
     if (drawingMode !== 'none' && drawingMode !== 'vertexEdit' && drawingMode !== 'rotate') {
       setCurrentMouseWorld({ x: world.wx, y: world.wy });
+    }
+
+    if (facadePointMode) {
+      if (draggingPinnedPointId) {
+        const activePt = pinnedPoints.find((p) => p.id === draggingPinnedPointId);
+        if (activePt) {
+          const bldg = buildings.find((b) => b.id === activePt.buildingId);
+          const seg = bldg?.segments.find((s) => s.id === activePt.segmentId);
+          if (seg) {
+            const dx = seg.p2.x - seg.p1.x;
+            const dy = seg.p2.y - seg.p1.y;
+            const lenSq = dx * dx + dy * dy;
+            const ratio = Math.max(0, Math.min(1, ((world.wx - seg.p1.x) * dx + (world.wy - seg.p1.y) * dy) / lenSq));
+            onUpdatePinnedPoint?.(activePt.id, activePt.buildingId, seg.id, ratio);
+          }
+        }
+        return;
+      }
+
+      // Snapping candidate calculation (prioritize hovered building)
+      let searchBuildings = hoveredBuildingId ? [buildings.find((b) => b.id === hoveredBuildingId)].filter(Boolean) : [];
+      if (searchBuildings.length === 0 || !searchBuildings[0]) {
+        searchBuildings = buildings.filter((b) => {
+          const lyr = b.layer || 'Domyślna (0)';
+          return layerSettings[lyr]?.isVisible !== false && layerSettings[lyr]?.isGhosted !== true;
+        });
+      }
+      let bestSnap: { point: Point2D; buildingId: string; segmentId: string; ratio: number } | null = null;
+      let minSnapDist = 999999;
+      for (const bldg of searchBuildings) {
+        if (!bldg || !Array.isArray(bldg.segments)) continue;
+
+        for (const seg of bldg.segments) {
+          const dx = seg.p2.x - seg.p1.x;
+          const dy = seg.p2.y - seg.p1.y;
+          const lenSq = dx * dx + dy * dy;
+          if (lenSq < 1e-4) continue;
+          const u = Math.max(0, Math.min(1, ((world.wx - seg.p1.x) * dx + (world.wy - seg.p1.y) * dy) / lenSq));
+          const px = seg.p1.x + u * dx;
+          const py = seg.p1.y + u * dy;
+          const dist = Math.hypot(world.wx - px, world.wy - py);
+          if (dist < minSnapDist) {
+            minSnapDist = dist;
+            bestSnap = {
+              point: { x: px, y: py },
+              buildingId: bldg.id,
+              segmentId: seg.id,
+              ratio: u,
+            };
+          }
+        }
+      }
+      setLiveFacadeSnap(bestSnap);
+    } else {
+      if (liveFacadeSnap) setLiveFacadeSnap(null);
     }
 
     if (draggingFacadePoint) {
@@ -901,6 +1120,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       isDraggingBuilding ||
       draggingEdge ||
       draggingFacadePoint ||
+      draggingPinnedPointId ||
       draggedVertexIndex !== null ||
       isDraggingPivot ||
       isRotating
@@ -911,6 +1131,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     setIsDraggingBuilding(false);
     setDraggingEdge(null);
     setDraggingFacadePoint(null);
+    setDraggingPinnedPointId(null);
     setDraggedVertexIndex(null);
     setIsDraggingPivot(false);
     setIsRotating(false);

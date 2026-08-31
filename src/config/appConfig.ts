@@ -49,6 +49,11 @@ export const APP_CONFIG = {
     facadeWorkingAngleDeg: 78.0, // ±78° (12° od lica fasady)
   },
 
+  // Punkty badania fasady
+  facadePoints: {
+    maxPinnedPoints: 3, // Maksymalna liczba badanych punktów fasady
+  },
+
   // Kolory i style widoku CAD
   cad: {
     gridColor: '#1e293b',

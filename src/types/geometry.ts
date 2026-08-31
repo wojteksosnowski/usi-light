@@ -119,6 +119,14 @@ export interface SunlightResult {
 }
 
 
+export interface PinnedFacadePoint {
+  id: string;
+  buildingId: string;
+  segmentId: string;
+  offsetRatio: number;
+  label?: string; // e.g. "P1", "P2", "P3"
+}
+
 export interface AnalysisPointResult {
   id: string;
   point: Point2D;
@@ -127,6 +135,7 @@ export interface AnalysisPointResult {
   buildingId: string;
   shadowing: ShadowingResult;
   sunlight: SunlightResult;
+  label?: string;
 }
 
 export interface ProjectSettings {

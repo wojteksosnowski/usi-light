@@ -1025,4 +1025,70 @@ export function computeAngularDimension(
   };
 }
 
+/**
+ * Oblicza pole powierzchni wielokąta 2D (wzór Gaussa / Shoelace formula).
+ */
+export function computePolygonArea(vertices: Point2D[]): number {
+  if (!vertices || vertices.length < 3) return 0;
+  let area = 0;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += vertices[i].x * vertices[j].y - vertices[j].x * vertices[i].y;
+  }
+  return Math.abs(area) / 2;
+}
+
+/**
+ * Zmienia długość wybranej krawędzi wielokąta z zachowaniem stałego początku (V_i)
+ * i równoległym przesunięciem (offsetem) kolejnego doczepionego odcinka (V_{i+1} -> V_{i+2}).
+ */
+export function adjustEdgeLength(
+  vertices: Point2D[],
+  edgeIndex: number,
+  newLength: number
+): Point2D[] {
+  const n = vertices.length;
+  if (n < 3 || edgeIndex < 0 || edgeIndex >= n || newLength <= 0.01) {
+    return vertices;
+  }
+
+  const p1 = vertices[edgeIndex]; // Fixed start
+  const nextIdx = (edgeIndex + 1) % n;
+  const p2 = vertices[nextIdx];   // Old end
+
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const currentLen = Math.hypot(dx, dy);
+  if (currentLen < 1e-4) return vertices;
+
+  const ux = dx / currentLen;
+  const uy = dy / currentLen;
+
+  // New end point of edgeIndex
+  const newP2 = {
+    x: p1.x + ux * newLength,
+    y: p1.y + uy * newLength,
+  };
+
+  // Translation delta for the following attached segment(s)
+  const shiftX = newP2.x - p2.x;
+  const shiftY = newP2.y - p2.y;
+
+  // Clone vertices
+  const result = vertices.map((v) => ({ ...v }));
+
+  // Set the new end point for edgeIndex
+  result[nextIdx] = newP2;
+
+  // Shift subsequent vertex (edgeIndex + 2) to translate the attached edge parallel
+  const afterNextIdx = (edgeIndex + 2) % n;
+  result[afterNextIdx] = {
+    x: vertices[afterNextIdx].x + shiftX,
+    y: vertices[afterNextIdx].y + shiftY,
+  };
+
+  return result;
+}
+
 

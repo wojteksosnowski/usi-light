@@ -4,6 +4,10 @@ import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
 
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
+  allPoints?: AnalysisPointResult[];
+  activePointId?: string | null;
+  onSelectPointId?: (id: string) => void;
+  onDeletePointId?: (id: string) => void;
   activeMode?: 'shadowing' | 'sunlight';
   sunlightMethod?: 'raycasting' | 'segments';
   onModeChange?: (mode: 'shadowing' | 'sunlight') => void;
@@ -12,6 +16,10 @@ interface PointInspectorModalProps {
 
 export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.memo(({
   pointResult,
+  allPoints = [],
+  activePointId,
+  onSelectPointId,
+  onDeletePointId,
   activeMode = 'shadowing',
   sunlightMethod = 'raycasting',
   onModeChange,
@@ -27,13 +35,15 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
   return (
     <div className="inspector-card">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b', paddingBottom: '10px', marginBottom: '14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b', paddingBottom: '10px', marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ padding: '8px', borderRadius: '10px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
             <Compass size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#f8fafc' }}>Punkt fasady</div>
+            <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#f8fafc' }}>
+              {pointResult.label ? `Punkt fasady (${pointResult.label})` : 'Punkt fasady'}
+            </div>
             <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>
               X={point.x.toFixed(2)}m, Y={point.y.toFixed(2)}m
             </div>
@@ -46,6 +56,57 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
           <X size={18} />
         </button>
       </div>
+
+      {/* Multiple Pinned Points Tabs */}
+      {allPoints.length > 1 && (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+          {allPoints.map((pt, idx) => {
+            const isActive = activePointId ? pt.id === activePointId : pt.id === pointResult.id;
+            const label = pt.label || `P${idx + 1}`;
+            return (
+              <div
+                key={pt.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.2)' : 'rgba(30, 41, 59, 0.8)',
+                  border: `1px solid ${isActive ? '#38bdf8' : '#334155'}`,
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onClick={() => onSelectPointId?.(pt.id)}
+              >
+                <span>{label}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeletePointId?.(pt.id);
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'rgba(255, 255, 255, 0.6)',
+                    cursor: 'pointer',
+                    padding: '0 2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                  title="Usuń ten punkt"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* § 12 Przesłanianie Box (Clickable to activate shadowing visualization) */}
       <div
