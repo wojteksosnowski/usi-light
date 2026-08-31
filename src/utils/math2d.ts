@@ -526,9 +526,7 @@ export function computeBuildingShadowEnvelope(
 
   const noonPos = calculateSolarPosition(latitude, longitude, month, day, 12.0);
   const noonHour = noonPos.solarNoonDecimal;
-  const hourOffsets = isChildcare
-    ? [-4, -3, -2, -1, 0, 1, 2, 3, 4]
-    : [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+  const hourOffsets = isChildcare ? [-4, 4] : [-5, 5];
 
   const isConvex = isPolygonConvex(vertices);
 
@@ -685,8 +683,9 @@ export function computeFullShadowAnalysis(
   }
   const envelopeLoops = unionPolygonLoops(buildingEnvelopes);
 
-  // 2. Obrysy godzinowe dla kroków: -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5 h
-  const allOffsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+  // 2. Obrysy godzinowe krańcowe dla kroków: -5h oraz +5h
+  const anyChildcare = testedBuildings.some((b) => b.segments.some((s) => s.buildingType === 'childcare'));
+  const allOffsets = anyChildcare ? [-4, 4] : [-5, 5];
   const hourlyShadows: HourlyShadowLoop[] = [];
 
   for (const offset of allOffsets) {

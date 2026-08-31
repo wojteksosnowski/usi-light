@@ -18,8 +18,7 @@ export function renderShadowRange(
     ctx.setLineDash([3, 4]);
 
     for (const hourly of hourlyShadows) {
-      const isNoon = hourly.hourOffset === 0;
-      ctx.strokeStyle = isNoon ? 'rgba(251, 191, 36, 0.4)' : 'rgba(129, 140, 248, 0.22)';
+      ctx.strokeStyle = 'rgba(129, 140, 248, 0.35)';
 
       for (const poly of hourly.polygons) {
         if (poly.length < 3) continue;

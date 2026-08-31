@@ -159,23 +159,15 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       transform: { tx: 0, ty: 0, rotationDeg: 0 },
     };
 
-    it('computes building shadow envelope and hourly shadow contours for full hours from noon', () => {
+    it('computes building shadow envelope and hourly shadow contours for +-5h boundary hours', () => {
       const result = computeFullShadowAnalysis([testBuilding], 52.23, 21.01, 'spring');
 
       expect(result.envelopeLoops.length).toBeGreaterThan(0);
-      expect(result.hourlyShadows.length).toBeGreaterThan(0);
+      expect(result.hourlyShadows.length).toBe(2);
       expect(result.calculationTimeMs).toBeGreaterThanOrEqual(0);
 
-      // Verify that solar noon offset 0 is present
-      const noonShadow = result.hourlyShadows.find((h) => h.hourOffset === 0);
-      expect(noonShadow).toBeDefined();
-      expect(noonShadow!.polygons.length).toBeGreaterThan(0);
-
-      // Verify that hourly offsets encompass range up to +-5h
       const offsets = result.hourlyShadows.map((h) => h.hourOffset);
-      expect(offsets).toContain(0);
-      expect(offsets).toContain(-1);
-      expect(offsets).toContain(1);
+      expect(offsets).toEqual([-5, 5]);
     });
 
     it('integrates shadow analysis in runFullAnalysis and measures shadowEnvelopeMs', () => {
