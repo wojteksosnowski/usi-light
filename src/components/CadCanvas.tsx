@@ -380,13 +380,15 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           const minY = Math.min(p1.y, p2.y);
           const maxY = Math.max(p1.y, p2.y);
 
-          const rectVertices: Point2D[] = [
-            { x: minX, y: minY },
-            { x: maxX, y: minY },
-            { x: maxX, y: maxY },
-            { x: minX, y: maxY },
-          ];
-          onFinishDrawing?.(rectVertices, 'rectangle');
+          if (Math.abs(maxX - minX) >= 0.5 && Math.abs(maxY - minY) >= 0.5) {
+            const rectVertices: Point2D[] = [
+              { x: minX, y: minY },
+              { x: maxX, y: minY },
+              { x: maxX, y: maxY },
+              { x: minX, y: maxY },
+            ];
+            onFinishDrawing?.(rectVertices, 'rectangle');
+          }
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
         }
@@ -630,7 +632,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       const sy = e.clientY - rect.top;
       const world = screenToWorld(sx, sy);
       const hits = getHoverCandidates({ x: world.wx, y: world.wy });
-      setHoveredBuildings(hits);
+      setHoveredBuildings((prev) => {
+        if (prev.length === hits.length && prev.every((id, idx) => id === hits[idx])) {
+          return prev;
+        }
+        return hits;
+      });
       setHoveredBuildingIndex((prev) => (hits.length === 0 ? 0 : Math.min(prev, hits.length - 1)));
     };
 

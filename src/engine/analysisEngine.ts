@@ -75,6 +75,31 @@ export function prefilterObstacleSegments(
   for (const bldg of allBuildings) {
     if (bldg.isIncluded === false) continue;
 
+    // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż 35m od punktu P
+    if (bldg.vertices && bldg.vertices.length >= 3) {
+      let minX = bldg.vertices[0].x;
+      let maxX = minX;
+      let minY = bldg.vertices[0].y;
+      let maxY = minY;
+      for (let vi = 1; vi < bldg.vertices.length; vi++) {
+        const vx = bldg.vertices[vi].x;
+        const vy = bldg.vertices[vi].y;
+        if (vx < minX) minX = vx;
+        if (vx > maxX) maxX = vx;
+        if (vy < minY) minY = vy;
+        if (vy > maxY) maxY = vy;
+      }
+      const maxReach = bldg.isCityCentre ? 17.5 : 35.0;
+      if (
+        point.x < minX - maxReach ||
+        point.x > maxX + maxReach ||
+        point.y < minY - maxReach ||
+        point.y > maxY + maxReach
+      ) {
+        continue;
+      }
+    }
+
     for (const seg of bldg.segments) {
       // 0. Pomiń sam badany odcinek
       if (bldg.id === targetBuildingId && seg.id === segment.id) continue;

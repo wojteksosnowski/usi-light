@@ -17,6 +17,7 @@ export function useAnalysisWorker(
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const workerRef = useRef<Worker | null>(null);
   const nextReqId = useRef<number>(0);
+  const lastAppliedReqId = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
 
   // Initialize Web Worker instance
@@ -31,8 +32,13 @@ export function useAnalysisWorker(
       workerRef.current.onmessage = (e: MessageEvent<AnalysisWorkerResponse>) => {
         if (!isMountedRef.current) return;
         const { id, success, output } = e.data;
-        if (id === nextReqId.current && success && output) {
+        if (success && output && id >= lastAppliedReqId.current) {
+          lastAppliedReqId.current = id;
           setAnalysisOutput(output);
+          if (id >= nextReqId.current) {
+            setIsCalculating(false);
+          }
+        } else if (!success) {
           setIsCalculating(false);
         }
       };
