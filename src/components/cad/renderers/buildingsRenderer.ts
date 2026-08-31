@@ -172,31 +172,58 @@ export function renderBuildings(
         if (Number.isFinite(csx) && Number.isFinite(csy)) {
           const lockTag = isLocked ? ' 🔒' : '';
           const ghostTag = isGhosted ? ' 👻' : '';
-          const title = `${bldg.name || (isTested ? 'Budynek Badany' : 'Budynek Sąsiedni')}${lockTag}${ghostTag}`;
-          const sub = `H = ${bldg.defaultHeight}m • ${isTested ? 'BADANY' : 'PRZESZKODA'}`;
-          ctx.font = 'bold 11px sans-serif';
-          const w1 = ctx.measureText(title).width;
-          ctx.font = '9px monospace';
-          const w2 = ctx.measureText(sub).width;
-          const maxW = Math.max(w1, w2);
+          const heightText = `${bldg.defaultHeight}m${lockTag}${ghostTag}`;
 
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.strokeStyle = isTested ? 'rgba(59, 130, 246, 0.5)' : 'rgba(100, 116, 139, 0.4)';
+          ctx.font = 'bold 13px Inter, sans-serif';
+          const textW = ctx.measureText(heightText).width;
+
+          // Status dots configuration: [included, tested, cityCentre, childcare]
+          const isIncluded = bldg.isIncluded !== false;
+          const isChildcare = bldg.buildingType === 'childcare' || bldg.segments.some((s: any) => s.buildingType === 'childcare');
+          const isCityCentre = bldg.isCityCentre || bldg.segments.some((s: any) => s.isCityCentre);
+
+          const dots: { color: string; active: boolean }[] = [
+            { color: '#10b981', active: isIncluded },
+            { color: '#6366f1', active: isTested },
+            { color: '#f59e0b', active: isCityCentre },
+          ];
+          if (isChildcare) {
+            dots.push({ color: '#c084fc', active: true });
+          }
+
+          const dotRadius = 2.5;
+          const dotSpacing = 7;
+          const totalDotsW = (dots.length - 1) * dotSpacing;
+          const cardW = Math.max(textW + 16, totalDotsW + 18, 38);
+          const cardH = 30;
+
+          ctx.fillStyle = 'rgba(11, 19, 41, 0.9)';
+          ctx.strokeStyle = isTested ? 'rgba(99, 102, 241, 0.6)' : 'rgba(100, 116, 139, 0.4)';
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.roundRect(csx - maxW / 2 - 8, csy - 18, maxW + 16, 36, 6);
+          ctx.roundRect(csx - cardW / 2, csy - cardH / 2, cardW, cardH, 6);
           ctx.fill();
           ctx.stroke();
 
-          ctx.fillStyle = isTested ? '#93c5fd' : '#e2e8f0';
-          ctx.font = 'bold 11px sans-serif';
+          // Height text (larger, bold)
+          ctx.fillStyle = isTested ? '#93c5fd' : '#f8fafc';
+          ctx.font = 'bold 13px Inter, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(title, csx, csy - 5);
+          ctx.fillText(heightText, csx, csy - 5);
 
-          ctx.fillStyle = '#94a3b8';
-          ctx.font = '9px monospace';
-          ctx.fillText(sub, csx, csy + 9);
+          // Row of status dots under height
+          const startDotX = csx - totalDotsW / 2;
+          const dotY = csy + 7;
+
+          for (let dIdx = 0; dIdx < dots.length; dIdx++) {
+            const d = dots[dIdx];
+            const dx = startDotX + dIdx * dotSpacing;
+            ctx.beginPath();
+            ctx.arc(dx, dotY, dotRadius, 0, Math.PI * 2);
+            ctx.fillStyle = d.active ? d.color : '#334155';
+            ctx.fill();
+          }
         }
       }
     }

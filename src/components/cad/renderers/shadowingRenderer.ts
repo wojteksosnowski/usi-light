@@ -24,6 +24,22 @@ export function renderShadowingVisualization(
   ctx.scale(viewState.scale, -viewState.scale);
   ctx.lineWidth = 1 / viewState.scale;
 
+  // 0. Light dotted concentric arcs at R = n * 3m (e.g. 3m, 6m, 9m, ..., 36m)
+  {
+    const fanStartRad = ((normalWorldDeg - 78) * Math.PI) / 180;
+    const fanEndRad   = ((normalWorldDeg + 78) * Math.PI) / 180;
+    ctx.save();
+    ctx.setLineDash([2, 4]);
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.2)';
+    ctx.lineWidth = 1 / viewState.scale;
+    for (let r = 3; r <= 36; r += 3) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r, fanStartRad, fanEndRad, false);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   for (let sIdx = 0; sIdx < sectors.length; sIdx++) {
     const sector = sectors[sIdx];
     const isFree = sector.isFree;
@@ -103,60 +119,46 @@ export function renderShadowingVisualization(
     ctx.arc(0, 0, radius, startRad, endRad, false);
     ctx.stroke();
 
-    // 4. Sector Angle Label inside the sector (e.g. "58.0°" or "34.5°") + distance label
+    // 4. Sector Angle Label placed above the arc edge and rotated 90 deg left around center
     {
       let midRad = (startRad + endRad) / 2;
       if (Math.abs(endRad - startRad) > Math.PI) {
         midRad += Math.PI;
       }
 
-      const labelDist = Math.max(2.5, dist * 0.65);
       const viewRotRad = (viewRotationDeg * Math.PI) / 180;
       const screenMidRad = midRad + viewRotRad;
+      // Position label slightly above the arc edge on screen (radius + 12px)
       const labelScreen = {
-        sx: px + Math.cos(screenMidRad) * labelDist * viewState.scale,
-        sy: py - Math.sin(screenMidRad) * labelDist * viewState.scale,
-      };
-      const tickScreen = {
-        sx: px + Math.cos(screenMidRad) * radius * viewState.scale,
-        sy: py - Math.sin(screenMidRad) * radius * viewState.scale,
+        sx: px + Math.cos(screenMidRad) * (radius * viewState.scale + 12),
+        sy: py - Math.sin(screenMidRad) * (radius * viewState.scale + 12),
       };
 
-      const labelAngle = Math.atan2(-Math.sin(screenMidRad), Math.cos(screenMidRad));
+      // Rotate 90 degrees to the left around its center (tangent to the arc)
+      const radialAngle = Math.atan2(-Math.sin(screenMidRad), Math.cos(screenMidRad));
+      const labelAngle = radialAngle - Math.PI / 2;
 
       ctx.save();
       ctx.resetTransform();
       ctx.translate(labelScreen.sx, labelScreen.sy);
       ctx.rotate(labelAngle);
-      ctx.font = 'bold 10px monospace';
+      ctx.font = 'bold 9.5px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const angleText = `${spanDeg.toFixed(1)}°`;
       const textWidth = ctx.measureText(angleText).width;
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.roundRect(-textWidth / 2 - 5, -9, textWidth + 10, 18, 4);
+      ctx.roundRect(-textWidth / 2 - 4, -8, textWidth + 8, 16, 3.5);
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = textColor;
       ctx.fillText(angleText, 0, 0);
-
-      if (isFree || dist >= 10) {
-        ctx.fillStyle = strokeColor;
-        ctx.font = 'bold 9px monospace';
-        const tickOffset = Math.max(12, viewState.scale * 0.25);
-        const tickDx = tickScreen.sx - labelScreen.sx;
-        const tickDy = tickScreen.sy - labelScreen.sy;
-        const tickLength = Math.hypot(tickDx, tickDy) || 1;
-        const tickX = (tickDx / tickLength) * tickOffset;
-        const tickY = (tickDy / tickLength) * tickOffset;
-        ctx.fillText(`${dist.toFixed(0)}m`, tickX, tickY);
-      }
       ctx.restore();
     }
   }

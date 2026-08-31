@@ -1451,6 +1451,7 @@ export const App: React.FC = () => {
           {/* GRUPA 2: OBIEKTY I NARZĘDZIA                                              */}
           {/* (Edycja Obiektu 2.5D, Narzędzia)                                          */}
           {/* ========================================================================= */}
+          <div className="sidebar-group-divider" />
           <div className="sidebar-group">
             <button
               type="button"
@@ -1625,10 +1626,6 @@ export const App: React.FC = () => {
                             borderTop: '1px dashed var(--border-light)',
                           }}
                         >
-                          <div style={{ fontSize: '10.5px', color: '#818cf8', fontWeight: 600 }}>
-                            Właściwości warstwy: <span style={{ color: '#fff' }}>{selectedLayerName}</span>
-                          </div>
-
                           {/* Height H for all buildings on layer */}
                           <div>
                             <label style={{ display: 'block', fontSize: '10.5px', color: '#94a3b8', marginBottom: '3px' }}>
@@ -1662,7 +1659,6 @@ export const App: React.FC = () => {
                               type="button"
                               onClick={() => handleUpdateLayerBuildings(selectedLayerName, { isIncluded: !allIncluded })}
                               className={`btn-tile ${allIncluded ? 'active-emerald' : someIncluded ? 'active-amber' : 'inactive'}`}
-                              style={{ padding: '6px 8px' }}
                             >
                               <span>Uwzględnij w kalkulacji</span>
                               <span style={{ fontSize: '10px', fontWeight: 700 }}>
@@ -1674,7 +1670,6 @@ export const App: React.FC = () => {
                               type="button"
                               onClick={() => handleUpdateLayerBuildings(selectedLayerName, { isTested: !allTested })}
                               className={`btn-tile ${allTested ? 'active-indigo' : someTested ? 'active-amber' : 'inactive'}`}
-                              style={{ padding: '6px 8px' }}
                             >
                               <span>Obiekt badany (Projektowany)</span>
                               <span style={{ fontSize: '10px', fontWeight: 700 }}>
@@ -1686,9 +1681,8 @@ export const App: React.FC = () => {
                               type="button"
                               onClick={() => handleUpdateLayerBuildings(selectedLayerName, { isCityCentre: !allCityCentre })}
                               className={`btn-tile ${allCityCentre ? 'active-amber' : someCityCentre ? 'active-indigo' : 'inactive'}`}
-                              style={{ padding: '6px 8px' }}
                             >
-                              <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
+                              <span>Zabudowa śródmiejska</span>
                               <span style={{ fontSize: '10px', fontWeight: 700 }}>
                                 {allCityCentre ? 'TAK (Wszystkie)' : someCityCentre ? 'CZĘŚCIOWO' : 'NIE'}
                               </span>
@@ -1813,7 +1807,7 @@ export const App: React.FC = () => {
                           onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
                           className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
                         >
-                          <span>Zabudowa śródmiejska (§ 12 ust. 5)</span>
+                          <span>Zabudowa śródmiejska</span>
                           <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
                         </button>
                       </div>
