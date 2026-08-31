@@ -1,5 +1,7 @@
 import { CadRenderContext } from '../types';
 import { BuildingLoop } from '../../../types/geometry';
+import { DirectionSnapResult } from '../../../utils/directionSnapping';
+import { APP_CONFIG } from '../../../config/appConfig';
 
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
@@ -9,9 +11,71 @@ export function renderDrawingToolPreview(
   selectedBuilding?: BuildingLoop | null,
   hoveredVertexIndex?: number | null,
   hoveredMidpointIndex?: number | null,
-  draggedVertexIndex?: number | null
+  draggedVertexIndex?: number | null,
+  directionSnapResult?: DirectionSnapResult | null
 ) {
   const { ctx, worldToScreen } = rc;
+
+  // Render Direction Snapping Guide Line and Badge
+  if (directionSnapResult && currentMouseWorld) {
+    const p1 = worldToScreen(directionSnapResult.guideLine.p1.x, directionSnapResult.guideLine.p1.y);
+    const p2 = worldToScreen(directionSnapResult.guideLine.p2.x, directionSnapResult.guideLine.p2.y);
+    const pSnap = worldToScreen(directionSnapResult.snappedPoint.x, directionSnapResult.snappedPoint.y);
+
+    if (Number.isFinite(p1.sx) && Number.isFinite(p2.sx) && Number.isFinite(pSnap.sx)) {
+      ctx.save();
+      // Infinite guide line
+      ctx.beginPath();
+      ctx.strokeStyle = APP_CONFIG.directionSnapping.guideLineColor;
+      ctx.lineWidth = APP_CONFIG.directionSnapping.guideLineWidth;
+      ctx.setLineDash([...APP_CONFIG.directionSnapping.guideLineDash]);
+      ctx.moveTo(p1.sx, p1.sy);
+      ctx.lineTo(p2.sx, p2.sy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Snap point cross / dot
+      ctx.beginPath();
+      ctx.arc(pSnap.sx, pSnap.sy, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Info badge near mouse
+      const relationLabel = directionSnapResult.relationType === 'perpendicular'
+        ? '⟂ 90° (Prostopadły)'
+        : directionSnapResult.relationType === 'parallel'
+        ? '∥ (Równoległy)'
+        : '⊞ (Siatka główna)';
+
+      const distLabel = `${directionSnapResult.distanceFromOrigin.toFixed(2)} m`;
+      const angleLabel = `${directionSnapResult.guideAngleDeg.toFixed(1)}°`;
+      const badgeText = `${relationLabel} | ${angleLabel} | ${distLabel}`;
+
+      ctx.font = 'bold 10px Inter, sans-serif';
+      const tw = ctx.measureText(badgeText).width;
+      const bx = pSnap.sx + 12;
+      const by = pSnap.sy - 16;
+
+      ctx.fillStyle = APP_CONFIG.directionSnapping.badgeBgColor;
+      ctx.strokeStyle = APP_CONFIG.directionSnapping.badgeBorderColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by - 10, tw + 12, 20, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#e0f2fe';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(badgeText, bx + 6, by);
+
+      ctx.restore();
+    }
+  }
+
 
   // Rectangle Preview (aligned with rotated view)
   if (drawingMode === 'rectangle' && drawingVertices.length === 1 && currentMouseWorld) {

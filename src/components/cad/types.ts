@@ -7,6 +7,8 @@ import {
   DimensionType,
   CadLayerSettings,
 } from '../../types/geometry';
+import { DominantDirection } from '../../utils/segmentStatistics';
+
 
 export interface ViewportState {
   panX: number;
@@ -79,4 +81,7 @@ export interface CadCanvasProps {
   viewRotationDeg?: number;
   onViewRotationChange?: (deg: number) => void;
   onEndViewRotationMode?: () => void;
+  isDirectionSnappingActive?: boolean;
+  dominantDirections?: DominantDirection[];
 }
+

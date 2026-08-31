@@ -12,6 +12,8 @@ import { renderSunlightVisualization } from './cad/renderers/sunlightRenderer';
 import { renderShadowingVisualization } from './cad/renderers/shadowingRenderer';
 import { renderDimensions } from './cad/renderers/dimensionsRenderer';
 import { renderDrawingToolPreview } from './cad/renderers/drawingToolRenderer';
+import { calculateDirectionSnap } from '../utils/directionSnapping';
+
 
 export const CadCanvas: React.FC<CadCanvasProps> = ({
   buildings,
@@ -64,6 +66,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   viewRotationDeg = 0,
   onViewRotationChange,
   onEndViewRotationMode,
+  isDirectionSnappingActive = true,
+  dominantDirections = [],
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -71,6 +75,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   // Drawing state
   const [drawingVertices, setDrawingVertices] = useState<Point2D[]>([]);
   const [currentMouseWorld, setCurrentMouseWorld] = useState<Point2D | null>(null);
+  const [activeDirectionSnap, setActiveDirectionSnap] = useState<import('../utils/directionSnapping').DirectionSnapResult | null>(null);
 
   // Vertex edit state
   const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
@@ -530,7 +535,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       buildingForPreview,
       hoveredVertexIndex,
       hoveredMidpointIndex,
-      draggedVertexIndex
+      draggedVertexIndex,
+      activeDirectionSnap
     );
   }, [
     buildings,
@@ -578,6 +584,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     pinnedPointResults,
     activePinnedPointId,
     liveFacadeSnap,
+    activeDirectionSnap,
     facadePointMode,
     layerSettings,
     shadowRangeLoops,
@@ -749,11 +756,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
 
       if (drawingMode === 'rectangle') {
+        const effectiveWorldPt = activeDirectionSnap?.snappedPoint || { x: world.wx, y: world.wy };
         if (drawingVertices.length === 0) {
-          setDrawingVertices([{ x: world.wx, y: world.wy }]);
+          setDrawingVertices([effectiveWorldPt]);
         } else {
           const p1 = drawingVertices[0];
-          const p2 = { x: world.wx, y: world.wy };
+          const p2 = effectiveWorldPt;
 
           const theta = ((viewRotationDeg || 0) * Math.PI) / 180;
           const cosT = Math.cos(theta);
@@ -780,6 +788,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           }
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
+          setActiveDirectionSnap(null);
         }
         return;
       }
@@ -796,12 +805,15 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
             onFinishDrawing?.(drawingVertices, 'polyline');
             setDrawingVertices([]);
             setCurrentMouseWorld(null);
+            setActiveDirectionSnap(null);
             return;
           }
         }
-        setDrawingVertices((prev) => [...prev, { x: world.wx, y: world.wy }]);
+        const effectiveWorldPt = activeDirectionSnap?.snappedPoint || { x: world.wx, y: world.wy };
+        setDrawingVertices((prev) => [...prev, effectiveWorldPt]);
         return;
       }
+
 
       if (facadePointMode) {
         if (liveFacadeSnap) {
@@ -971,8 +983,43 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     }
 
     if (drawingMode !== 'none' && drawingMode !== 'vertexEdit' && drawingMode !== 'rotate') {
-      setCurrentMouseWorld({ x: world.wx, y: world.wy });
+      let mousePos: Point2D = { x: world.wx, y: world.wy };
+
+      if (isDirectionSnappingActive) {
+        let origin: Point2D | null = null;
+        if (drawingMode === 'rectangle' && drawingVertices.length === 1) {
+          origin = drawingVertices[0];
+        } else if (drawingMode === 'polyline' && drawingVertices.length > 0) {
+          origin = drawingVertices[drawingVertices.length - 1];
+        }
+
+        if (origin) {
+          const snap = calculateDirectionSnap({
+            currentMouseWorld: mousePos,
+            originPoint: origin,
+            buildings,
+            dominantDirections,
+            polylineVertices: drawingMode === 'polyline' ? drawingVertices : [],
+            worldToScreen,
+          });
+          if (snap) {
+            mousePos = snap.snappedPoint;
+            setActiveDirectionSnap(snap);
+          } else {
+            setActiveDirectionSnap(null);
+          }
+        } else {
+          setActiveDirectionSnap(null);
+        }
+      } else {
+        setActiveDirectionSnap(null);
+      }
+
+      setCurrentMouseWorld(mousePos);
+    } else {
+      if (activeDirectionSnap) setActiveDirectionSnap(null);
     }
+
 
     if (facadePointMode) {
       if (draggingPinnedPointId) {

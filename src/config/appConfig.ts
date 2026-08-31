@@ -64,4 +64,26 @@ export const APP_CONFIG = {
     obstacleBuildingFill: 'rgba(71, 85, 105, 0.18)',
     obstacleBuildingSelectedFill: 'rgba(148, 163, 184, 0.28)',
   },
+
+  // System śledzenia kierunków i snapowania (Polar / Ortho Tracking & Snapping)
+  directionSnapping: {
+    enabledDefault: true,
+    // Tolerancja kątowa przyciągania do osi w stopniach (siła / okno przyciągania)
+    angleToleranceDeg: 4.0,
+    // Maksymalna odległość prostopadła kursora do osi w pikselach ekranowych (elastyczność)
+    screenSnapThresholdPx: 20,
+    // Minimalna odległość od punktu bazowego w metrach do aktywacji snapowania
+    minDistanceMeters: 0.2,
+    // Maksymalna liczba rozważanych najbliższych obiektów / ścian
+    maxNearbySegments: 16,
+    // Długość rysowanej linii naprowadzającej w metrach świata CAD
+    guideLineLengthMeters: 60.0,
+    // Kolorystyka i styl linii naprowadzających
+    guideLineColor: '#38bdf8',
+    guideLineDash: [6, 4],
+    guideLineWidth: 1.5,
+    badgeBgColor: 'rgba(15, 23, 42, 0.92)',
+    badgeBorderColor: '#38bdf8',
+  },
 } as const;
+

@@ -79,6 +79,8 @@ import {
   Maximize2,
   Ruler,
   Copy,
+  Compass,
+  Magnet,
 } from 'lucide-react';
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
@@ -126,13 +128,19 @@ export const App: React.FC = () => {
   const [fitKey, setFitKey] = useState<number>(0);
 
   // Collapsible Sidebar Groups State (Accordion: expanding one closes the other)
-  const [openSidebarGroup, setOpenSidebarGroup] = useState<'project' | 'layers' | 'modeling' | null>('project');
+  const [openSidebarGroup, setOpenSidebarGroup] = useState<'project' | 'layers' | 'tools' | null>('project');
   const isProjectGroupOpen = openSidebarGroup === 'project';
   const isLayersGroupOpen = openSidebarGroup === 'layers';
-  const isModelingGroupOpen = openSidebarGroup === 'modeling';
-  const toggleSidebarGroup = (group: 'project' | 'layers' | 'modeling') => {
+  const isToolsGroupOpen = openSidebarGroup === 'tools';
+  const toggleSidebarGroup = (group: 'project' | 'layers' | 'tools') => {
     setOpenSidebarGroup((prev) => (prev === group ? null : group));
   };
+
+  // Direction Snapping State (Polar / Ortho Tracking & Snapping)
+  const [isDirectionSnappingActive, setIsDirectionSnappingActive] = useState<boolean>(
+    APP_CONFIG.directionSnapping.enabledDefault
+  );
+
 
   // CAD Layers Settings & Selection State
   const [layerSettings, setLayerSettings] = useState<Record<string, CadLayerSettings>>({});
@@ -1605,8 +1613,8 @@ export const App: React.FC = () => {
           </div>
 
           {/* ========================================================================= */}
-          {/* GRUPA 2: WARSTWY CAD                                                      */}
-          {/* (Kafel: Warstwy CAD)                                                      */}
+          {/* GRUPA 2: WARSTWY I OBIEKTY                                                */}
+          {/* (Kafle: Warstwy CAD & Edycja Obiektu 2.5D)                                */}
           {/* ========================================================================= */}
           <div className="sidebar-group-divider" />
           <div className="sidebar-group">
@@ -1614,11 +1622,11 @@ export const App: React.FC = () => {
               type="button"
               className="sidebar-group-header"
               onClick={() => toggleSidebarGroup('layers')}
-              title="Zwiń / rozwiń grupę: Warstwy CAD"
+              title="Zwiń / rozwiń grupę: Warstwy i obiekty"
             >
               <div className="sidebar-group-title">
                 <Layers size={15} color="#38bdf8" />
-                <span>Warstwy CAD</span>
+                <span>Warstwy i obiekty</span>
               </div>
               {isLayersGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
             </button>
@@ -1981,8 +1989,32 @@ export const App: React.FC = () => {
                     Kliknij dowolny budynek na rzucie CAD, aby edytować jego parametry.
                   </div>
                 )}
+              </div>
+            )}
+          </div>
 
-                {/* 2.2 Narzędzia */}
+          {/* ========================================================================= */}
+          {/* GRUPA 3: NARZĘDZIA                                                        */}
+          {/* (Kafle: Narzędzia Rysowania / Edycji & Modelowanie Obiektu 2.5D)          */}
+          {/* ========================================================================= */}
+          <div className="sidebar-group-divider" />
+          <div className="sidebar-group">
+            <button
+              type="button"
+              className="sidebar-group-header"
+              onClick={() => toggleSidebarGroup('tools')}
+              title="Zwiń / rozwiń grupę: Narzędzia"
+            >
+              <div className="sidebar-group-title">
+                <Wrench size={15} color="#818cf8" />
+                <span>Narzędzia</span>
+              </div>
+              {isToolsGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
+            </button>
+
+            {isToolsGroupOpen && (
+              <div className="sidebar-group-content">
+                {/* 3.1 Narzędzia Rysowania i Edycji */}
                 <div className="ui-card">
                   <div className="ui-title">
                     <span>Narzędzia</span>
@@ -1990,6 +2022,23 @@ export const App: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    {/* Przełącznik Śledzenia Kierunków i Snapowania */}
+                    <button
+                      type="button"
+                      onClick={() => setIsDirectionSnappingActive(!isDirectionSnappingActive)}
+                      className={`btn-tile ${isDirectionSnappingActive ? 'active-indigo' : 'inactive'}`}
+                      style={{ padding: '7px 10px', justifyContent: 'space-between', marginBottom: '4px' }}
+                      title="Włącz / wyłącz inteligentne śledzenie kierunków (równoległe, prostopadłe 90° i osie dominujące)"
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Compass size={14} color={isDirectionSnappingActive ? '#818cf8' : '#64748b'} />
+                        <span style={{ fontWeight: 600 }}>Śledzenie kierunków</span>
+                      </div>
+                      <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                        {isDirectionSnappingActive ? 'WŁ' : 'WYŁ'}
+                      </span>
+                    </button>
+
                     {/* Rząd 1: Prostokąt, Polilinia */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
                       <button
@@ -2895,6 +2944,29 @@ export const App: React.FC = () => {
 
           <button
             onClick={() => {
+              setIsDirectionSnappingActive((prev) => !prev);
+            }}
+            title="Włącz / wyłącz przyciąganie i śledzenie kierunków (równoległe i prostopadłe)"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: '1px solid #334155',
+              backgroundColor: isDirectionSnappingActive ? 'rgba(99, 102, 241, 0.25)' : 'rgba(30, 41, 59, 0.8)',
+              color: isDirectionSnappingActive ? '#a5b4fc' : '#94a3b8',
+            }}
+          >
+            <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#94a3b8'} />
+            <span>Śledzenie kierunków</span>
+          </button>
+
+          <button
+            onClick={() => {
               setViewRotationMode((prev) => !prev);
             }}
             title="Ustaw obrót widoku względem odcinka"
@@ -3134,6 +3206,8 @@ export const App: React.FC = () => {
               if (Math.abs(deg) > 0.001) setSavedViewRotationDeg(deg);
             }}
             onEndViewRotationMode={() => setViewRotationMode(false)}
+            isDirectionSnappingActive={isDirectionSnappingActive}
+            dominantDirections={segmentStats.dominantDirections}
           />
         </div>
 
