@@ -320,8 +320,6 @@ export const App: React.FC = () => {
       sunlightMethod === 'segments'
         ? analyzeSunlightAtPointSegments(
             exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
-            currentAccuracyOptions.sunlightStepMinutes,
-            undefined,
             prefilteredObstacles
           )
         : analyzeSunlightAtPoint(

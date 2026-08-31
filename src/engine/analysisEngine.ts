@@ -711,8 +711,6 @@ export function analyzeSunlightAtPointSegments(
   allBuildings: BuildingLoop[],
   targetBuildingId: string,
   settings: ProjectSettings,
-  stepMinutes: number = 5,
-  precomputedTrajectory?: SolarTrajectorySlot[],
   prefilteredObstacles?: PrefilteredObstacle[],
   precomputedWindow?: SolarWindowInfo,
   hourSystem?: ISolarHourSystem
@@ -737,17 +735,6 @@ export function analyzeSunlightAtPointSegments(
   const azActiveMax = Math.min(azSolarMax, normalAzimuth + 78.0);
 
   if (azActiveMax <= azActiveMin + 0.1) {
-    const trajectory =
-      precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare, sys);
-    const emptySlots: SunlightTimeSlot[] = trajectory.map((slot) => ({
-      time: slot.timeStr,
-      azimuthDeg: slot.azimuthDeg,
-      elevationDeg: slot.elevationDeg,
-      isSunAboveHorizon: slot.isSunAboveHorizon,
-      isAngleAbove12Deg: false,
-      isDirectSunlight: false,
-    }));
-
     return {
       point,
       segmentId: segment.id,
@@ -755,7 +742,7 @@ export function analyzeSunlightAtPointSegments(
       totalMinutes: 0,
       totalHours: 0,
       isCompliant: false,
-      timeSlots: emptySlots,
+      timeSlots: [],
       sectors: [],
       _segMethodMs: performance.now() - t0,
     };
@@ -926,35 +913,6 @@ export function analyzeSunlightAtPointSegments(
     addFreeSector(cursor, azActiveMax);
   }
 
-  // Generowanie timeSlots dla osi timeline w UI (z sektorów geometrycznych)
-  const trajectory =
-    precomputedTrajectory ?? computeDailySolarTrajectory(settings, stepMinutes, isChildcare, sys);
-
-  const timeSlots: SunlightTimeSlot[] = trajectory.map((slot) => {
-    const isAbove = slot.isSunAboveHorizon && slot.elevationDeg > 0;
-    const dot = normal.x * slot.sunDir.x + normal.y * slot.sunDir.y;
-    const isAngleAbove12Deg = isAbove && dot >= COS_78_DEG;
-
-    let isDirect = false;
-    if (isAngleAbove12Deg) {
-      for (const sec of sectors) {
-        if (slot.azimuthDeg >= sec.startAzimuthDeg - 0.05 && slot.azimuthDeg <= sec.endAzimuthDeg + 0.05) {
-          isDirect = true;
-          break;
-        }
-      }
-    }
-
-    return {
-      time: slot.timeStr,
-      azimuthDeg: slot.azimuthDeg,
-      elevationDeg: slot.elevationDeg,
-      isSunAboveHorizon: isAbove,
-      isAngleAbove12Deg,
-      isDirectSunlight: isDirect,
-    };
-  });
-
   // Dokładne zaokrąglenie do pełnych minut, z uwzględnieniem tolerancji numerycznej O(1) dla pełnego okna
   let totalMinutes = Math.round(totalHours * 60);
   const maxAllowedHours = isChildcare ? 8.0 : 10.0;
@@ -972,7 +930,7 @@ export function analyzeSunlightAtPointSegments(
     totalMinutes,
     totalHours,
     isCompliant,
-    timeSlots,
+    timeSlots: [],
     sectors,
     _segMethodMs: performance.now() - t0,
   };
@@ -1153,7 +1111,7 @@ export function runFullAnalysis(
         const sunlight =
           sunlightMethod === 'segments'
             ? analyzeSunlightAtPointSegments(
-                sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory, prefilteredObstacles, windowInfo, linijkaSystem
+                sample.point, seg, sample.ratio, buildings, bldg.id, settings, prefilteredObstacles, windowInfo, linijkaSystem
               )
             : analyzeSunlightAtPoint(
                 sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory, prefilteredObstacles, windowInfo, astroSystem

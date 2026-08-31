@@ -31,7 +31,7 @@ describe('§ 56 Sunlight Methods Agreement (Raycasting vs Segments)', () => {
           };
 
           const rayRes = analyzeSunlightAtPoint(pt, seg, ratio, buildings, bldg.id, settings, 5, trajectory);
-          const segRes = analyzeSunlightAtPointSegments(pt, seg, ratio, buildings, bldg.id, settings, 5, trajectory);
+          const segRes = analyzeSunlightAtPointSegments(pt, seg, ratio, buildings, bldg.id, settings);
 
           expect(Math.abs(segRes.totalHours - rayRes.totalHours)).toBeLessThan(0.15);
           expect(Math.abs(segRes.totalMinutes - rayRes.totalMinutes)).toBeLessThanOrEqual(10);
@@ -66,7 +66,7 @@ describe('§ 56 Sunlight Methods Agreement (Raycasting vs Segments)', () => {
           };
 
           const rayRes = analyzeSunlightAtPoint(pt, seg, ratio, buildings, bldg.id, settings, 5, trajectory);
-          const segRes = analyzeSunlightAtPointSegments(pt, seg, ratio, buildings, bldg.id, settings, 5, trajectory);
+          const segRes = analyzeSunlightAtPointSegments(pt, seg, ratio, buildings, bldg.id, settings);
 
           expect(Math.abs(segRes.totalHours - rayRes.totalHours)).toBeLessThan(0.15);
           expect(Math.abs(segRes.totalMinutes - rayRes.totalMinutes)).toBeLessThanOrEqual(10);

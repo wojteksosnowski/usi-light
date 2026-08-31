@@ -1,7 +1,7 @@
 import { describe, it } from 'vitest';
 import { createSampleBuildings } from '../src/utils/dxfParser';
 import { sampleSegmentPoints } from '../src/utils/math2d';
-import { analyzeShadowingAtPoint, analyzeSunlightAtPoint } from '../src/engine/analysisEngine';
+import { analyzeShadowingAtPoint, analyzeSunlightAtPoint, analyzeSunlightAtPointSegments } from '../src/engine/analysisEngine';
 import { ProjectSettings } from '../src/types/geometry';
 
 describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 56)', () => {
@@ -25,18 +25,19 @@ describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 
       }
     }
 
-    const iterations = 20;
+    const iterations = 5;
     const totalPoints = points.length * iterations;
 
     // 1. Warm-up
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       for (const p of points) {
         analyzeShadowingAtPoint(p.point, p.seg, p.ratio, buildings, target.id, 0.5);
         analyzeSunlightAtPoint(p.point, p.seg, p.ratio, buildings, target.id, settings, 5);
+        analyzeSunlightAtPointSegments(p.point, p.seg, p.ratio, buildings, target.id, settings);
       }
     }
 
-    // 2. Measure Shadowing (§ 12) at high precision (angleStep = 0.5 deg -> 313 rays/point)
+    // 2. Measure Shadowing (§ 12) at high precision
     const t0 = performance.now();
     for (let i = 0; i < iterations; i++) {
       for (const p of points) {
@@ -44,22 +45,22 @@ describe('Performance Benchmark: Przesłanianie (§ 12) vs Nasłonecznienie (§ 
       }
     }
     const t1 = performance.now();
-    const shadowingTimeHigh = t1 - t0;
+    const shadowingTime = t1 - t0;
 
-    // 3. Measure Sunlight (§ 56) with Raycasting
+    // 3. Measure Linijka Słońca (§ 56 Segmenty - czysto analityczna)
     const t2 = performance.now();
     for (let i = 0; i < iterations; i++) {
       for (const p of points) {
-        analyzeSunlightAtPoint(p.point, p.seg, p.ratio, buildings, target.id, settings, 5);
+        analyzeSunlightAtPointSegments(p.point, p.seg, p.ratio, buildings, target.id, settings);
       }
     }
     const t3 = performance.now();
-    const sunlightRayTimeHigh = t3 - t2;
+    const sunlightSegTime = t3 - t2;
 
     console.log(`\n================ BENCHMARK PROFILING RESULTS (${totalPoints} punktów pomiarowych) ================`);
-    console.log(`- Przesłanianie § 12 (analityczne/sektory):  ${shadowingTimeHigh.toFixed(2)} ms (${(shadowingTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
-    console.log(`- Nasłonecznienie § 56 (krok 5 min):         ${sunlightRayTimeHigh.toFixed(2)} ms (${(sunlightRayTimeHigh / totalPoints * 1000).toFixed(2)} µs/pkt)`);
+    console.log(`- Przesłanianie § 12 (analityczne/sektory):       ${shadowingTime.toFixed(2)} ms (${(shadowingTime / totalPoints * 1000).toFixed(2)} µs/pkt)`);
+    console.log(`- Linijka Słońca § 56 (czysto analityczna 1D):    ${sunlightSegTime.toFixed(2)} ms (${(sunlightSegTime / totalPoints * 1000).toFixed(2)} µs/pkt)`);
     console.log(`===================================================================================\n`);
-  }, 45000);
+  }, 10000);
 });
 

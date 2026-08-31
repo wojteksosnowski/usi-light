@@ -76,8 +76,6 @@ describe('Linijka Słońca Pure Analytical Engine (§ 56 WT)', () => {
       [targetBldg],
       targetBldg.id,
       settings,
-      5,
-      undefined,
       undefined,
       undefined,
       linijkaSys
@@ -164,8 +162,8 @@ describe('Linijka Słońca Pure Analytical Engine (§ 56 WT)', () => {
 
     // Test with Obstacle 1 alone, Obstacle 2 alone, and BOTH together
     const point = { x: 10, y: 0 };
-    const res1 = analyzeSunlightAtPointSegments(point, southSegment, 0.5, [targetBldg, obsBldg1], targetBldg.id, settings, 5, undefined, undefined, undefined, linijkaSys);
-    const resBoth = analyzeSunlightAtPointSegments(point, southSegment, 0.5, [targetBldg, obsBldg1, obsBldg2], targetBldg.id, settings, 5, undefined, undefined, undefined, linijkaSys);
+    const res1 = analyzeSunlightAtPointSegments(point, southSegment, 0.5, [targetBldg, obsBldg1], targetBldg.id, settings, undefined, undefined, linijkaSys);
+    const resBoth = analyzeSunlightAtPointSegments(point, southSegment, 0.5, [targetBldg, obsBldg1, obsBldg2], targetBldg.id, settings, undefined, undefined, linijkaSys);
 
     // Both together should have less or equal sunlight than 1 alone, and continuous sectors without overlap
     expect(resBoth.totalHours).toBeLessThan(res1.totalHours);

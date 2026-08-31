@@ -214,7 +214,7 @@ describe('Variable Accuracy & Multi-stage Refinement', () => {
     };
 
     const rayResult = analyzeSunlightAtPoint(point, southSeg, 0.5, buildings, target.id, settings, 5);
-    const segResult = analyzeSunlightAtPointSegments(point, southSeg, 0.5, buildings, target.id, settings, 5);
+    const segResult = analyzeSunlightAtPointSegments(point, southSeg, 0.5, buildings, target.id, settings);
 
     expect(Math.abs(segResult.totalMinutes - rayResult.totalMinutes)).toBeLessThanOrEqual(10);
     expect(Math.abs(segResult.totalHours - rayResult.totalHours)).toBeLessThanOrEqual(0.15);

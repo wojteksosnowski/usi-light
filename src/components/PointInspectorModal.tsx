@@ -155,32 +155,64 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
             Kąt padania na rzucie ≥ 12° (§ 56 ust. 5)
           </span>
         </div>
-        <div style={{ display: 'flex', width: '100%', height: '10px', borderRadius: '5px', overflow: 'hidden', backgroundColor: '#020617', border: '1px solid #1e293b' }}>
-          {sunlight.timeSlots.map((slot, idx) => (
-            <div
-              key={idx}
-              title={`${slot.time} — ${
-                slot.isDirectSunlight
-                  ? 'Bezpośrednie słońce (Kąt ≥ 12°)'
-                  : slot.isAngleAbove12Deg
-                  ? 'Zacienione przez przeszkodę'
-                  : 'Brak nasłonecznienia (Kąt padania < 12° lub z tyłu ściany)'
-              }`}
-              style={{
-                flex: 1,
-                backgroundColor: slot.isDirectSunlight
-                  ? '#f59e0b'
-                  : slot.isAngleAbove12Deg
-                  ? '#334155'
-                  : '#020617',
-              }}
-            />
-          ))}
+        <div style={{ position: 'relative', display: 'flex', width: '100%', height: '10px', borderRadius: '5px', overflow: 'hidden', backgroundColor: '#020617', border: '1px solid #1e293b' }}>
+          {sunlight.sectors && sunlight.sectors.length > 0 ? (
+            sunlight.sectors.map((sec, idx) => {
+              const parseTimeDec = (tStr?: string) => {
+                if (!tStr) return 12;
+                const [hh, mm] = tStr.split(':').map(Number);
+                return hh + mm / 60;
+              };
+              const h1 = parseTimeDec(sec.startTimeStr);
+              const h2 = parseTimeDec(sec.endTimeStr);
+              // Window 07:00 to 17:00 (10.0 hours)
+              const leftPct = Math.max(0, Math.min(100, ((h1 - 7.0) / 10.0) * 100));
+              const rightPct = Math.max(0, Math.min(100, ((h2 - 7.0) / 10.0) * 100));
+              const widthPct = Math.max(0, rightPct - leftPct);
+
+              return (
+                <div
+                  key={idx}
+                  title={`${sec.startTimeStr} - ${sec.endTimeStr} (${sec.hours.toFixed(2)}h) — ${
+                    sec.isDirectSunlight ? 'Bezpośrednie słońce (Kąt ≥ 12°)' : 'Zacienione'
+                  }`}
+                  style={{
+                    position: 'absolute',
+                    left: `${leftPct}%`,
+                    width: `${widthPct}%`,
+                    height: '100%',
+                    backgroundColor: sec.isDirectSunlight ? '#f59e0b' : '#334155',
+                  }}
+                />
+              );
+            })
+          ) : sunlight.timeSlots && sunlight.timeSlots.length > 0 ? (
+            sunlight.timeSlots.map((slot, idx) => (
+              <div
+                key={idx}
+                title={`${slot.time} — ${
+                  slot.isDirectSunlight
+                    ? 'Bezpośrednie słońce (Kąt ≥ 12°)'
+                    : slot.isAngleAbove12Deg
+                    ? 'Zacienione przez przeszkodę'
+                    : 'Brak nasłonecznienia (Kąt padania < 12° lub z tyłu ściany)'
+                }`}
+                style={{
+                  flex: 1,
+                  backgroundColor: slot.isDirectSunlight
+                    ? '#f59e0b'
+                    : slot.isAngleAbove12Deg
+                    ? '#334155'
+                    : '#020617',
+                }}
+              />
+            ))
+          ) : null}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#64748b', fontFamily: 'monospace', marginTop: '4px' }}>
-          <span>{sunlight.timeSlots[0]?.time}</span>
-          <span>{sunlight.timeSlots[Math.floor(sunlight.timeSlots.length / 2)]?.time}</span>
-          <span>{sunlight.timeSlots[sunlight.timeSlots.length - 1]?.time}</span>
+          <span>07:00</span>
+          <span>12:00</span>
+          <span>17:00</span>
         </div>
       </div>
     </div>
