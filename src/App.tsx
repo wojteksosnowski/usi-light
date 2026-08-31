@@ -92,7 +92,7 @@ type SavedScene = {
   selectedLayerName: string | null;
   isLinkingMode: boolean;
   linkingSourceId: string | null;
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate';
   dimensions: DimensionItem[];
   isEditMode: boolean;
   isDimensionToolActive: boolean;
@@ -136,8 +136,8 @@ export const App: React.FC = () => {
   const [isLinkingMode, setIsLinkingMode] = useState<boolean>(false);
   const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
 
-  // Drawing Tools State (Rectangle, Polyline & Vertex Edit)
-  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline' | 'vertexEdit'>('none');
+  // Drawing Tools State (Rectangle, Polyline, Vertex Edit & Rotate)
+  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate'>('none');
   const [facadePointMode, setFacadePointMode] = useState<boolean>(false);
   const [drawingVerticesCount, setDrawingVerticesCount] = useState<number>(0);
 
@@ -552,6 +552,34 @@ export const App: React.FC = () => {
           vertices: newVertices,
           segments: newSegments,
         };
+      });
+    });
+  };
+
+  // Rotate building handler (rotates target building and all linked buildings in the same group around pivot)
+  const handleBuildingRotate = (id: string, pivot: Point2D, deltaAngleRad: number) => {
+    if (!isInteracting) setIsInteracting(true);
+    const cosA = Math.cos(deltaAngleRad);
+    const sinA = Math.sin(deltaAngleRad);
+
+    setBuildings((prev) => {
+      const targetBldg = prev.find((b) => b.id === id);
+      const targetGroupId = targetBldg?.groupId;
+
+      return prev.map((bldg) => {
+        const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
+        if (!shouldRotate) return bldg;
+
+        const newVertices = bldg.vertices.map((v) => {
+          const rx = v.x - pivot.x;
+          const ry = v.y - pivot.y;
+          return {
+            x: pivot.x + rx * cosA - ry * sinA,
+            y: pivot.y + rx * sinA + ry * cosA,
+          };
+        });
+
+        return rebuildBuildingSegments(bldg, newVertices);
       });
     });
   };
@@ -1883,6 +1911,23 @@ export const App: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => {
+                            setDrawingMode(drawingMode === 'rotate' ? 'none' : 'rotate');
+                            setDrawingVerticesCount(0);
+                            setIsDimensionToolActive(false);
+                            setDimensionPendingRef(null);
+                            setFacadePointMode(false);
+                          }}
+                          className={`btn-tile ${drawingMode === 'rotate' ? 'active-indigo' : 'inactive'}`}
+                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                          title="Obrót obiektów: przeciągaj wokół przesuwalnego punktu obrotu (obiekty połączone obracają się wspólnie)"
+                        >
+                          <RotateCw size={13} />
+                          <span style={{ fontWeight: 600 }}>Obrót</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
                             setDrawingMode(drawingMode === 'vertexEdit' ? 'none' : 'vertexEdit');
                             setDrawingVerticesCount(0);
                             setIsDimensionToolActive(false);
@@ -1891,7 +1936,7 @@ export const App: React.FC = () => {
                           }}
                           className={`btn-tile ${drawingMode === 'vertexEdit' ? 'active-indigo' : 'inactive'}`}
                           style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                          title="Edycja wierzchołków brył: przeciągaj punkty, klikaj [+] by dodać nowy wierzchołek"
+                          title="Edycja wierzchołków brył: przeciągaj punkty, klikaj [+] by dodać wierzchołek, klawisz Del by usunąć"
                         >
                           <Edit3 size={13} />
                           <span style={{ fontWeight: 600 }}>Wierzchołki</span>
@@ -2094,6 +2139,47 @@ export const App: React.FC = () => {
                         </div>
                       )}
 
+                      {drawingMode === 'rotate' && (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(129, 140, 248, 0.12)',
+                            border: '1px solid rgba(129, 140, 248, 0.35)',
+                            fontSize: '11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                          }}
+                        >
+                          <div style={{ color: '#a5b4fc', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <RotateCw size={13} />
+                            <span>Narzędzie Obrót obiektów</span>
+                          </div>
+                          <div style={{ color: '#cbd5e1', fontSize: '10px', lineHeight: '1.4' }}>
+                            • Przeciągaj wokół punktu obrotu, aby obrócić obiekt (lub całą połączoną grupę).<br />
+                            • Przeciągnij bursztynowy celownik <b style={{ color: '#f59e0b' }}>(+)</b>, aby zmienić środek obrotu.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setDrawingMode('none')}
+                            style={{
+                              marginTop: '4px',
+                              padding: '4px 8px',
+                              borderRadius: '5px',
+                              border: '1px solid rgba(129, 140, 248, 0.4)',
+                              backgroundColor: 'rgba(129, 140, 248, 0.15)',
+                              color: '#a5b4fc',
+                              fontSize: '10.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Zakończ obracanie
+                          </button>
+                        </div>
+                      )}
+
                       {drawingMode === 'vertexEdit' && (
                         <div
                           style={{
@@ -2112,9 +2198,9 @@ export const App: React.FC = () => {
                             <span>Tryb edycji wierzchołków</span>
                           </div>
                           <div style={{ color: '#cbd5e1', fontSize: '10px', lineHeight: '1.4' }}>
-                            • Przeciągnij niebieski wierzchołek, aby zmienić kształt.<br />
+                            • Przeciągnij niebieski punkt, aby zmienić kształt.<br />
                             • Kliknij zielony punkt <b style={{ color: '#10b981' }}>[+]</b> na krawędzi, aby wstawić nowy wierzchołek.<br />
-                            • Kliknij <b>PPM</b> na wierzchołku, aby go usunąć.
+                            • Usuwanie: zaznacz punkt i naciśnij <b>Delete / Backspace</b>, kliknij czerwone <b>[x]</b> lub kliknij <b>PPM</b>.
                           </div>
                           <button
                             type="button"
@@ -2877,6 +2963,7 @@ export const App: React.FC = () => {
             onCancelDrawing={handleCancelDrawing}
             onDrawingVerticesCountChange={setDrawingVerticesCount}
             onUpdateBuildingVertices={handleUpdateBuildingVertices}
+            onBuildingRotate={handleBuildingRotate}
             facadePointMode={facadePointMode}
             onFacadePointMove={handleFacadePointMove}
             isEditMode={isEditMode}

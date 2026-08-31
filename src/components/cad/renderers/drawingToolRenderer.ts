@@ -3,7 +3,7 @@ import { BuildingLoop } from '../../../types/geometry';
 
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit',
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate',
   drawingVertices: any[],
   currentMouseWorld: any,
   selectedBuilding?: BuildingLoop | null,
@@ -220,6 +220,157 @@ export function renderDrawingToolPreview(
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${i + 1}`, sx, sy);
+
+        // Delete indicator badge [x] on hover if polygon has more than 3 vertices
+        if (isHovered && verts.length > 3 && draggedVertexIndex === null) {
+          const dx = sx + 13;
+          const dy = sy - 13;
+          ctx.beginPath();
+          ctx.arc(dx, dy, 7.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#ef4444';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(dx - 3, dy - 3);
+          ctx.lineTo(dx + 3, dy + 3);
+          ctx.moveTo(dx + 3, dy - 3);
+          ctx.lineTo(dx - 3, dy + 3);
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // 4. Object Rotate Tool (with Movable Pivot Point & Angle Arc)
+  if (drawingMode === 'rotate' && selectedBuilding && selectedBuilding.vertices) {
+    const verts = selectedBuilding.vertices;
+    if (verts.length >= 3) {
+      ctx.save();
+
+      // Compute centroid if no custom pivot passed
+      let pivot = (selectedBuilding as any).customPivot;
+      if (!pivot) {
+        let cx = 0;
+        let cy = 0;
+        for (const v of verts) {
+          cx += v.x;
+          cy += v.y;
+        }
+        pivot = { x: cx / verts.length, y: cy / verts.length };
+      }
+
+      const pS = worldToScreen(pivot.x, pivot.y);
+      const isPivotHovered = (selectedBuilding as any).isPivotHovered;
+      const isDraggingPivot = (selectedBuilding as any).isDraggingPivot;
+      const isRotating = (selectedBuilding as any).isRotating;
+      const rotAngleDeg = (selectedBuilding as any).rotAngleDeg || 0;
+
+      // Rotation track / guide circle around pivot
+      const ringRadiusPx = Math.max(45, Math.min(120, 3.5 * rc.viewState.scale));
+      ctx.beginPath();
+      ctx.arc(pS.sx, pS.sy, ringRadiusPx, 0, Math.PI * 2);
+      ctx.strokeStyle = isRotating ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
+      ctx.lineWidth = isRotating ? 2.5 : 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // If rotating, draw swept arc and angle label
+      if (isRotating && currentMouseWorld) {
+        const mouseScreen = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
+        const mouseAngle = Math.atan2(mouseScreen.sy - pS.sy, mouseScreen.sx - pS.sx);
+        const startAngle = (selectedBuilding as any).rotStartAngleScreen || 0;
+
+        ctx.beginPath();
+        ctx.moveTo(pS.sx, pS.sy);
+        ctx.arc(pS.sx, pS.sy, ringRadiusPx, startAngle, mouseAngle, false);
+        ctx.fillStyle = 'rgba(129, 140, 248, 0.18)';
+        ctx.fill();
+
+        // Ray to cursor
+        ctx.beginPath();
+        ctx.moveTo(pS.sx, pS.sy);
+        ctx.lineTo(mouseScreen.sx, mouseScreen.sy);
+        ctx.strokeStyle = '#818cf8';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Angle Badge
+        const badgeAngle = (startAngle + mouseAngle) / 2;
+        const badgeX = pS.sx + Math.cos(badgeAngle) * (ringRadiusPx + 22);
+        const badgeY = pS.sy + Math.sin(badgeAngle) * (ringRadiusPx + 22);
+        const badgeText = `${rotAngleDeg >= 0 ? '+' : ''}${rotAngleDeg.toFixed(1)}°`;
+
+        ctx.font = 'bold 11px monospace';
+        const bw = ctx.measureText(badgeText).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.strokeStyle = '#818cf8';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(badgeX - bw / 2 - 6, badgeY - 10, bw + 12, 20, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#c7d2fe';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, badgeX, badgeY);
+      }
+
+      // Movable Pivot Point Handle
+      const pr = isPivotHovered || isDraggingPivot ? 10 : 8;
+
+      if (isPivotHovered || isDraggingPivot) {
+        ctx.beginPath();
+        ctx.arc(pS.sx, pS.sy, pr + 5, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Center disc
+      ctx.beginPath();
+      ctx.arc(pS.sx, pS.sy, pr, 0, Math.PI * 2);
+      ctx.fillStyle = isPivotHovered || isDraggingPivot ? '#f59e0b' : '#0f172a';
+      ctx.strokeStyle = isPivotHovered || isDraggingPivot ? '#ffffff' : '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.fill();
+      ctx.stroke();
+
+      // Crosshair lines inside pivot
+      ctx.beginPath();
+      ctx.moveTo(pS.sx - pr - 4, pS.sy);
+      ctx.lineTo(pS.sx + pr + 4, pS.sy);
+      ctx.moveTo(pS.sx, pS.sy - pr - 4);
+      ctx.lineTo(pS.sx, pS.sy + pr + 4);
+      ctx.strokeStyle = isPivotHovered || isDraggingPivot ? '#0f172a' : '#f59e0b';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+
+      // Pivot label tooltip
+      if (!isRotating) {
+        const pivotText = 'Punkt obrotu (przeciągnij)';
+        ctx.font = 'bold 9.5px sans-serif';
+        const ptw = ctx.measureText(pivotText).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(pS.sx - ptw / 2 - 4, pS.sy - pr - 18, ptw + 8, 15, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#fde68a';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pivotText, pS.sx, pS.sy - pr - 10);
       }
 
       ctx.restore();

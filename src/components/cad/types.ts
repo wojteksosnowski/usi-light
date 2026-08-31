@@ -51,11 +51,12 @@ export interface CadCanvasProps {
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;
   linkingSourceId?: string | null;
-  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'vertexEdit';
+  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate';
   onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => void;
   onCancelDrawing?: () => void;
   onDrawingVerticesCountChange?: (count: number) => void;
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
+  onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
   facadePointMode?: boolean;
   onFacadePointMove?: (buildingId: string, segmentId: string, offsetRatio: number) => void;
   isEditMode?: boolean;

@@ -41,6 +41,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   onCancelDrawing,
   onDrawingVerticesCountChange,
   onUpdateBuildingVertices,
+  onBuildingRotate,
   facadePointMode = false,
   onFacadePointMove,
   isEditMode = false,
@@ -65,9 +66,19 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   const [currentMouseWorld, setCurrentMouseWorld] = useState<Point2D | null>(null);
 
   // Vertex edit state
+  const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
   const [hoveredVertexIndex, setHoveredVertexIndex] = useState<number | null>(null);
   const [hoveredMidpointIndex, setHoveredMidpointIndex] = useState<number | null>(null);
   const [draggedVertexIndex, setDraggedVertexIndex] = useState<number | null>(null);
+
+  // Object rotation tool state (with movable pivot)
+  const [customPivot, setCustomPivot] = useState<Point2D | null>(null);
+  const [isDraggingPivot, setIsDraggingPivot] = useState<boolean>(false);
+  const [isPivotHovered, setIsPivotHovered] = useState<boolean>(false);
+  const [isRotating, setIsRotating] = useState<boolean>(false);
+  const [lastMouseAngleWorld, setLastMouseAngleWorld] = useState<number | null>(null);
+  const [rotStartAngleScreen, setRotStartAngleScreen] = useState<number>(0);
+  const [rotAngleDeg, setRotAngleDeg] = useState<number>(0);
 
   // Edge editing state (parallel offset)
   const [hoveredEdge, setHoveredEdge] = useState<{ buildingId: string; edgeIndex: number } | null>(null);
@@ -97,11 +108,45 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     layerSettings
   );
 
+  // Calculate effective rotation pivot (custom or group centroid)
+  const effectivePivot = useMemo<Point2D | null>(() => {
+    if (!selectedBuildingId) return null;
+    if (customPivot) return customPivot;
+    const bldg = buildings.find((b) => b.id === selectedBuildingId);
+    if (!bldg || bldg.vertices.length === 0) return null;
+
+    const targetGroupId = bldg.groupId;
+    const groupBldgs = targetGroupId ? buildings.filter((b) => b.groupId === targetGroupId) : [bldg];
+    let cx = 0;
+    let cy = 0;
+    let totalCount = 0;
+    for (const b of groupBldgs) {
+      for (const v of b.vertices) {
+        cx += v.x;
+        cy += v.y;
+        totalCount++;
+      }
+    }
+    return totalCount > 0 ? { x: cx / totalCount, y: cy / totalCount } : null;
+  }, [selectedBuildingId, customPivot, buildings]);
+
+  const handleDeleteSelectedVertex = useCallback(() => {
+    if (selectedVertexIndex === null || !selectedBuildingId) return;
+    const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+    if (selBldg && selBldg.vertices.length > 3) {
+      const filtered = selBldg.vertices.filter((_, idx) => idx !== selectedVertexIndex);
+      onUpdateBuildingVertices?.(selBldg.id, filtered);
+      setSelectedVertexIndex(null);
+    }
+  }, [selectedVertexIndex, selectedBuildingId, buildings, onUpdateBuildingVertices]);
+
   // Hotkeys hook
   useCadHotkeys({
     drawingMode,
     drawingVertices,
     hoveredBuildings,
+    selectedVertexIndex,
+    onDeleteSelectedVertex: handleDeleteSelectedVertex,
     onCancelDrawing,
     onFinishDrawing,
     setDrawingVertices,
@@ -118,7 +163,19 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       setDrawingVertices([]);
       setCurrentMouseWorld(null);
     }
+    if (drawingMode !== 'rotate') {
+      setCustomPivot(null);
+      setIsRotating(false);
+      setIsDraggingPivot(false);
+    }
+    if (drawingMode !== 'vertexEdit') {
+      setSelectedVertexIndex(null);
+    }
   }, [drawingMode]);
+
+  useEffect(() => {
+    setCustomPivot(null);
+  }, [selectedBuildingId]);
 
   useEffect(() => {
     if (!viewRotationMode) setRotationHover(null);
@@ -304,14 +361,26 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       selectedBuildingId
     );
 
-    // 6. Drawing Tool Live Previews & Vertex Edit Handles
+    // 6. Drawing Tool Live Previews, Vertex Edit Handles & Object Rotation
     const activeSelectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
+    const buildingForPreview = activeSelectedBuilding
+      ? ({
+          ...activeSelectedBuilding,
+          customPivot: effectivePivot,
+          isPivotHovered,
+          isDraggingPivot,
+          isRotating,
+          rotStartAngleScreen,
+          rotAngleDeg,
+        } as any)
+      : null;
+
     renderDrawingToolPreview(
       renderContext,
       drawingMode,
       drawingVertices,
       currentMouseWorld,
-      activeSelectedBuilding,
+      buildingForPreview,
       hoveredVertexIndex,
       hoveredMidpointIndex,
       draggedVertexIndex
@@ -344,6 +413,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     hoveredVertexIndex,
     hoveredMidpointIndex,
     draggedVertexIndex,
+    effectivePivot,
+    isPivotHovered,
+    isDraggingPivot,
+    isRotating,
+    rotStartAngleScreen,
+    rotAngleDeg,
     isLinkingMode,
     linkingSourceId,
     isEditMode,
@@ -405,11 +480,26 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       if (drawingMode === 'vertexEdit' && selectedBuildingId) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && selBldg.vertices.length >= 3) {
+          // Check if clicked on delete badge [x] of any vertex
+          if (selBldg.vertices.length > 3) {
+            for (let i = 0; i < selBldg.vertices.length; i++) {
+              const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
+              if (Math.hypot(sx - (s.sx + 13), sy - (s.sy - 13)) <= 9) {
+                const filtered = selBldg.vertices.filter((_, idx) => idx !== i);
+                onUpdateBuildingVertices?.(selBldg.id, filtered);
+                setSelectedVertexIndex(null);
+                setHoveredVertexIndex(null);
+                return;
+              }
+            }
+          }
+
           // Check existing vertices
           for (let i = 0; i < selBldg.vertices.length; i++) {
             const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
             if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
               setDraggedVertexIndex(i);
+              setSelectedVertexIndex(i);
               onInteractionChange?.(true);
               return;
             }
@@ -425,11 +515,33 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               newVerts.splice(i + 1, 0, newPt);
               onUpdateBuildingVertices?.(selBldg.id, newVerts);
               setDraggedVertexIndex(i + 1);
+              setSelectedVertexIndex(i + 1);
               onInteractionChange?.(true);
               return;
             }
           }
+          setSelectedVertexIndex(null);
         }
+      }
+
+      if (drawingMode === 'rotate' && selectedBuildingId && effectivePivot) {
+        const pS = worldToScreen(effectivePivot.x, effectivePivot.y);
+        // If clicked directly on pivot handle -> drag pivot
+        if (Math.hypot(sx - pS.sx, sy - pS.sy) <= 14) {
+          setIsDraggingPivot(true);
+          onInteractionChange?.(true);
+          return;
+        }
+
+        // Start rotating around pivot
+        const mouseAngleWorld = Math.atan2(world.wy - effectivePivot.y, world.wx - effectivePivot.x);
+        const mouseAngleScreen = Math.atan2(sy - pS.sy, sx - pS.sx);
+        setIsRotating(true);
+        setLastMouseAngleWorld(mouseAngleWorld);
+        setRotStartAngleScreen(mouseAngleScreen);
+        setRotAngleDeg(0);
+        onInteractionChange?.(true);
+        return;
       }
 
       if (drawingMode === 'rectangle') {
@@ -628,7 +740,30 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       if (hoveredMidpointIndex !== null) setHoveredMidpointIndex(null);
     }
 
-    if (drawingMode !== 'none' && drawingMode !== 'vertexEdit') {
+    if (drawingMode === 'rotate' && selectedBuildingId && effectivePivot) {
+      const pS = worldToScreen(effectivePivot.x, effectivePivot.y);
+      const isPivot = Math.hypot(sx - pS.sx, sy - pS.sy) <= 14;
+      setIsPivotHovered(isPivot);
+
+      if (isDraggingPivot) {
+        setCustomPivot({ x: world.wx, y: world.wy });
+        return;
+      }
+
+      if (isRotating && lastMouseAngleWorld !== null) {
+        const currAngleWorld = Math.atan2(world.wy - effectivePivot.y, world.wx - effectivePivot.x);
+        let delta = currAngleWorld - lastMouseAngleWorld;
+        while (delta > Math.PI) delta -= 2 * Math.PI;
+        while (delta < -Math.PI) delta += 2 * Math.PI;
+
+        onBuildingRotate?.(selectedBuildingId, effectivePivot, delta);
+        setLastMouseAngleWorld(currAngleWorld);
+        setRotAngleDeg((prev) => prev + (delta * 180) / Math.PI);
+        return;
+      }
+    }
+
+    if (drawingMode !== 'none' && drawingMode !== 'vertexEdit' && drawingMode !== 'rotate') {
       setCurrentMouseWorld({ x: world.wx, y: world.wy });
     }
 
@@ -762,7 +897,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   }, [getHoverCandidates, screenToWorld]);
 
   const handleMouseUp = () => {
-    if (isDraggingBuilding || draggingEdge || draggingFacadePoint || draggedVertexIndex !== null) {
+    if (
+      isDraggingBuilding ||
+      draggingEdge ||
+      draggingFacadePoint ||
+      draggedVertexIndex !== null ||
+      isDraggingPivot ||
+      isRotating
+    ) {
       onInteractionChange?.(false);
     }
     setIsPanning(false);
@@ -770,6 +912,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     setDraggingEdge(null);
     setDraggingFacadePoint(null);
     setDraggedVertexIndex(null);
+    setIsDraggingPivot(false);
+    setIsRotating(false);
+    setLastMouseAngleWorld(null);
     setDragStart(null);
   };
 
@@ -787,6 +932,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
             const filtered = selBldg.vertices.filter((_, idx) => idx !== i);
             onUpdateBuildingVertices?.(selBldg.id, filtered);
+            setSelectedVertexIndex(null);
             setHoveredVertexIndex(null);
             setHoveredMidpointIndex(null);
             return;
@@ -833,6 +979,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
                 : hoveredMidpointIndex !== null
                 ? 'copy'
                 : 'default'
+              : drawingMode === 'rotate'
+              ? isDraggingPivot || isPivotHovered
+                ? 'move'
+                : isRotating
+                ? 'grabbing'
+                : 'grab'
               : drawingMode !== 'none'
               ? 'crosshair'
               : draggingEdge
