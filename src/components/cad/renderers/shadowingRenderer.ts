@@ -24,22 +24,6 @@ export function renderShadowingVisualization(
   ctx.scale(viewState.scale, -viewState.scale);
   ctx.lineWidth = 1 / viewState.scale;
 
-  // 0. Light dotted concentric arcs at R = n * 3m (e.g. 3m, 6m, 9m, ..., 36m)
-  {
-    const fanStartRad = ((normalWorldDeg - 78) * Math.PI) / 180;
-    const fanEndRad   = ((normalWorldDeg + 78) * Math.PI) / 180;
-    ctx.save();
-    ctx.setLineDash([2, 4]);
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.2)';
-    ctx.lineWidth = 1 / viewState.scale;
-    for (let r = 3; r <= 36; r += 3) {
-      ctx.beginPath();
-      ctx.arc(0, 0, r, fanStartRad, fanEndRad, false);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
   for (let sIdx = 0; sIdx < sectors.length; sIdx++) {
     const sector = sectors[sIdx];
     const isFree = sector.isFree;
@@ -75,15 +59,18 @@ export function renderShadowingVisualization(
     let strokeColor = 'rgba(244, 63, 94, 0.85)';
     let fillColor   = 'rgba(244, 63, 94, 0.12)';
     let textColor   = '#f87171';
+    let arcGridColor = 'rgba(244, 63, 94, 0.22)';
 
     if (isFree) {
       strokeColor = 'rgba(52, 211, 153, 0.85)';
       fillColor   = 'rgba(52, 211, 153, 0.12)';
       textColor   = '#34d399';
+      arcGridColor = 'rgba(52, 211, 153, 0.22)';
     } else if (isTolerated) {
       strokeColor = 'rgba(234, 179, 8, 0.9)';
       fillColor   = 'rgba(234, 179, 8, 0.18)';
       textColor   = '#facc15';
+      arcGridColor = 'rgba(234, 179, 8, 0.25)';
     }
 
     const lineWidth = 1.5 / viewState.scale;
@@ -101,7 +88,19 @@ export function renderShadowingVisualization(
     ctx.fillStyle = fillColor;
     ctx.fill();
 
-    // 2. Edge rays
+    // 2. Concentric solid continuous arcs at R = n * 3m contained strictly within the sector
+    ctx.save();
+    ctx.setLineDash([]); // No gaps, continuous solid line
+    ctx.strokeStyle = arcGridColor;
+    ctx.lineWidth = 1 / viewState.scale;
+    for (let r = 3; r < radius - 0.2; r += 3) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r, startRad, endRad, false);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 3. Edge rays
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(Math.cos(startRad) * radius, Math.sin(startRad) * radius);
@@ -114,7 +113,7 @@ export function renderShadowingVisualization(
     ctx.lineTo(Math.cos(endRad) * radius, Math.sin(endRad) * radius);
     ctx.stroke();
 
-    // 3. Connecting arc at radius
+    // 4. Connecting arc at radius
     ctx.beginPath();
     ctx.arc(0, 0, radius, startRad, endRad, false);
     ctx.stroke();
