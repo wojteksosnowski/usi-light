@@ -1445,8 +1445,6 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-
           {/* ========================================================================= */}
           {/* GRUPA 2: OBIEKTY I NARZĘDZIA                                              */}
           {/* (Edycja Obiektu 2.5D, Narzędzia)                                          */}
