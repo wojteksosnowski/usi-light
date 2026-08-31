@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import {
@@ -20,6 +20,7 @@ import {
 } from './utils/dxfParser';
 import {
   runFullAnalysis,
+  prefilterObstacleSegments,
   analyzeShadowingAtPoint,
   analyzeSunlightAtPoint,
   analyzeSunlightAtPointSegments,
@@ -38,6 +39,8 @@ import {
   Shield,
   Layers,
   Upload,
+  Download,
+  RotateCw,
   RotateCcw,
   Sparkles,
   Building,
@@ -74,6 +77,38 @@ import {
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
 
+const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
+
+type SavedScene = {
+  version: 1;
+  buildings: BuildingLoop[];
+  selectedBuildingId: string | null;
+  selectedPointKey: { buildingId: string; segmentId: string; offsetRatio: number } | null;
+  settings: ProjectSettings;
+  layerSettings: Record<string, CadLayerSettings>;
+  selectedLayerName: string | null;
+  isLinkingMode: boolean;
+  linkingSourceId: string | null;
+  drawingMode: 'none' | 'rectangle' | 'polyline';
+  dimensions: DimensionItem[];
+  isEditMode: boolean;
+  isDimensionToolActive: boolean;
+  dimensionType: DimensionType;
+  showNormals: boolean;
+  showShadowingLines: boolean;
+  showSunlightLines: boolean;
+  showShadowRange: boolean;
+  sunlightMethod: 'raycasting' | 'segments';
+  activePointMode: 'shadowing' | 'sunlight';
+  selectedCity: string;
+  mapsInput: string;
+  mapsParseError: boolean;
+  viewRotationDeg: number;
+  savedViewRotationDeg: number;
+  dxfUnit: DxfUnitOption;
+  dxfImportInfo: DxfUnitInfo | null;
+};
+
 export const App: React.FC = () => {
   // State
   const [buildings, setBuildings] = useState<BuildingLoop[]>(createSampleBuildings());
@@ -82,9 +117,13 @@ export const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [fitKey, setFitKey] = useState<number>(0);
 
-  // Collapsible Sidebar Groups State
-  const [isProjectGroupOpen, setIsProjectGroupOpen] = useState<boolean>(true);
-  const [isModelingGroupOpen, setIsModelingGroupOpen] = useState<boolean>(true);
+  // Collapsible Sidebar Groups State (Accordion: expanding one closes the other)
+  const [openSidebarGroup, setOpenSidebarGroup] = useState<'project' | 'modeling' | null>('project');
+  const isProjectGroupOpen = openSidebarGroup === 'project';
+  const isModelingGroupOpen = openSidebarGroup === 'modeling';
+  const toggleSidebarGroup = (group: 'project' | 'modeling') => {
+    setOpenSidebarGroup((prev) => (prev === group ? null : group));
+  };
 
   // CAD Layers Settings & Selection State
   const [layerSettings, setLayerSettings] = useState<Record<string, CadLayerSettings>>({});
@@ -96,10 +135,14 @@ export const App: React.FC = () => {
 
   // Drawing Tools State (Rectangle & Polyline)
   const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline'>('none');
+  const [facadePointMode, setFacadePointMode] = useState<boolean>(false);
   const [drawingVerticesCount, setDrawingVerticesCount] = useState<number>(0);
 
   // Edge Parallel Editing Mode State
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [viewRotationMode, setViewRotationMode] = useState<boolean>(false);
+  const [viewRotationDeg, setViewRotationDeg] = useState<number>(0);
+  const [savedViewRotationDeg, setSavedViewRotationDeg] = useState<number>(0);
 
   // Dimension Tool State (Linear / Angular)
   const [dimensions, setDimensions] = useState<DimensionItem[]>([]);
@@ -115,6 +158,7 @@ export const App: React.FC = () => {
   const [dxfUnit, setDxfUnit] = useState<DxfUnitOption>('auto');
   const [lastDxfText, setLastDxfText] = useState<string | null>(null);
   const [dxfImportInfo, setDxfImportInfo] = useState<DxfUnitInfo | null>(null);
+  const sceneHydratedRef = useRef(false);
 
   // Polish Cities list with accurate geographic coordinates
   const POLISH_CITIES = [
@@ -204,7 +248,7 @@ export const App: React.FC = () => {
   const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
     switch (accuracyStage) {
       case 'live':
-        return { samplingInterval: 1.5, angleStepDeg: 2.0, sunlightStepMinutes: 15 };
+        return { samplingInterval: 2.0, angleStepDeg: 2.0, sunlightStepMinutes: 15 };
       case 'stage1':
         return { samplingInterval: 1.0, angleStepDeg: 1.0, sunlightStepMinutes: 10 };
       case 'stage2':
@@ -224,6 +268,7 @@ export const App: React.FC = () => {
   const avgShadowingMs = analysisOutput.avgShadowingMs;
   const avgSunlightMs = analysisOutput.avgSunlightMs;
   const avgSunlightSegMs = analysisOutput.avgSunlightSegMs;
+  const totalAnalysisMs = analysisOutput.totalAnalysisMs;
 
   const [selectedPointKey, setSelectedPointKey] = useState<{
     buildingId: string;
@@ -246,20 +291,27 @@ export const App: React.FC = () => {
       y: seg.p1.y + r * (seg.p2.y - seg.p1.y),
     };
 
+    const prefilteredObstacles = prefilterObstacleSegments(exactPoint, seg, buildings, bldg.id);
+
     const shadowRes = analyzeShadowingAtPoint(
       exactPoint, seg, r, buildings, bldg.id,
-      currentAccuracyOptions.angleStepDeg
+      currentAccuracyOptions.angleStepDeg,
+      prefilteredObstacles
     );
 
     const sunRes =
       sunlightMethod === 'segments'
         ? analyzeSunlightAtPointSegments(
             exactPoint, seg, r, buildings, bldg.id, settings,
-            currentAccuracyOptions.sunlightStepMinutes
+            currentAccuracyOptions.sunlightStepMinutes,
+            undefined,
+            prefilteredObstacles
           )
         : analyzeSunlightAtPoint(
             exactPoint, seg, r, buildings, bldg.id, settings,
-            currentAccuracyOptions.sunlightStepMinutes
+            currentAccuracyOptions.sunlightStepMinutes,
+            undefined,
+            prefilteredObstacles
           );
 
     return {
@@ -276,6 +328,116 @@ export const App: React.FC = () => {
 
   // Selected building object
   const selectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SCENE_STORAGE_KEY);
+      if (!raw) return;
+      const scene = JSON.parse(raw) as SavedScene;
+      if (!scene || scene.version !== 1) return;
+
+      setBuildings(scene.buildings ?? createSampleBuildings());
+      setSelectedBuildingId(scene.selectedBuildingId ?? null);
+      setSelectedPointKey(scene.selectedPointKey ?? null);
+      setSettings(scene.settings ?? {
+        latitude: 52.2297,
+        longitude: 21.0122,
+        isCityCentreDefault: false,
+        samplingInterval: 0.25,
+        equinoxDate: 'spring',
+      });
+      setLayerSettings(scene.layerSettings ?? {});
+      setSelectedLayerName(scene.selectedLayerName ?? null);
+      setIsLinkingMode(scene.isLinkingMode ?? false);
+      setLinkingSourceId(scene.linkingSourceId ?? null);
+      setDrawingMode(scene.drawingMode ?? 'none');
+      setDimensions(scene.dimensions ?? []);
+      setIsEditMode(scene.isEditMode ?? false);
+      setIsDimensionToolActive(scene.isDimensionToolActive ?? false);
+      setDimensionType(scene.dimensionType ?? 'linear');
+      setShowNormals(scene.showNormals ?? false);
+      setShowShadowingLines(scene.showShadowingLines ?? true);
+      setShowSunlightLines(scene.showSunlightLines ?? true);
+      setShowShadowRange(scene.showShadowRange ?? true);
+      setSunlightMethod(scene.sunlightMethod ?? 'raycasting');
+      setActivePointMode(scene.activePointMode ?? 'shadowing');
+      setSelectedCity(scene.selectedCity ?? 'Warszawa');
+      setMapsInput(scene.mapsInput ?? '');
+      setMapsParseError(scene.mapsParseError ?? false);
+      setViewRotationDeg(scene.viewRotationDeg ?? 0);
+      setSavedViewRotationDeg(scene.savedViewRotationDeg ?? 0);
+      setDxfUnit(scene.dxfUnit ?? 'auto');
+      setDxfImportInfo(scene.dxfImportInfo ?? null);
+      sceneHydratedRef.current = true;
+    } catch (err) {
+      console.warn('Nie udało się wczytać zapisanej sceny:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sceneHydratedRef.current) return;
+    const scene: SavedScene = {
+      version: 1,
+      buildings,
+      selectedBuildingId,
+      selectedPointKey,
+      settings,
+      layerSettings,
+      selectedLayerName,
+      isLinkingMode,
+      linkingSourceId,
+      drawingMode,
+      dimensions,
+      isEditMode,
+      isDimensionToolActive,
+      dimensionType,
+      showNormals,
+      showShadowingLines,
+      showSunlightLines,
+      showShadowRange,
+      sunlightMethod,
+      activePointMode,
+      selectedCity,
+      mapsInput,
+      mapsParseError,
+      viewRotationDeg,
+      savedViewRotationDeg,
+      dxfUnit,
+      dxfImportInfo,
+    };
+    try {
+      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(scene));
+    } catch (err) {
+      console.warn('Nie udało się zapisać sceny:', err);
+    }
+  }, [
+    buildings,
+    selectedBuildingId,
+    selectedPointKey,
+    settings,
+    layerSettings,
+    selectedLayerName,
+    isLinkingMode,
+    linkingSourceId,
+    drawingMode,
+    dimensions,
+    isEditMode,
+    isDimensionToolActive,
+    dimensionType,
+    showNormals,
+    showShadowingLines,
+    showSunlightLines,
+    showShadowRange,
+    sunlightMethod,
+    activePointMode,
+    selectedCity,
+    mapsInput,
+    mapsParseError,
+    viewRotationDeg,
+    savedViewRotationDeg,
+    dxfUnit,
+    dxfImportInfo,
+  ]);
 
   // Link two buildings together into a shared movement group
   const performLinkBuildings = (id1: string, id2: string) => {
@@ -440,6 +602,10 @@ export const App: React.FC = () => {
     setSelectedPointKey(null);
     setDrawingMode('none');
     setDrawingVerticesCount(0);
+  };
+
+  const handleFacadePointMove = (buildingId: string, segmentId: string, offsetRatio: number) => {
+    setSelectedPointKey({ buildingId, segmentId, offsetRatio });
   };
 
   // Cancel active drawing mode
@@ -608,6 +774,24 @@ export const App: React.FC = () => {
     );
   };
 
+  const adjustSelectedBuildingHeight = (deltaMeters: number) => {
+    if (!selectedBuildingId) return;
+    setBuildings((prev) =>
+      prev.map((bldg) => {
+        if (bldg.id !== selectedBuildingId) return bldg;
+        const nextHeight = Math.max(0.5, Number((bldg.defaultHeight + deltaMeters).toFixed(2)));
+        return {
+          ...bldg,
+          defaultHeight: nextHeight,
+          segments: bldg.segments.map((seg) => ({
+            ...seg,
+            hTop: nextHeight,
+          })),
+        };
+      })
+    );
+  };
+
   // Handle DXF File Upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -656,9 +840,110 @@ export const App: React.FC = () => {
     }
   };
 
+  const applyLoadedScene = (scene: SavedScene) => {
+    if (!scene || scene.version !== 1) {
+      alert('Nieprawidłowy plik sceny.');
+      return;
+    }
+
+    setBuildings(scene.buildings ?? createSampleBuildings());
+    setSelectedBuildingId(scene.selectedBuildingId ?? null);
+    setSelectedPointKey(scene.selectedPointKey ?? null);
+    setSettings(scene.settings ?? settings);
+    setLayerSettings(scene.layerSettings ?? {});
+    setSelectedLayerName(scene.selectedLayerName ?? null);
+    setIsLinkingMode(scene.isLinkingMode ?? false);
+    setLinkingSourceId(scene.linkingSourceId ?? null);
+    setDrawingMode(scene.drawingMode ?? 'none');
+    setDimensions(scene.dimensions ?? []);
+    setIsEditMode(scene.isEditMode ?? false);
+    setIsDimensionToolActive(scene.isDimensionToolActive ?? false);
+    setDimensionType(scene.dimensionType ?? 'linear');
+    setShowNormals(scene.showNormals ?? false);
+    setShowShadowingLines(scene.showShadowingLines ?? true);
+    setShowSunlightLines(scene.showSunlightLines ?? true);
+    setShowShadowRange(scene.showShadowRange ?? true);
+    setSunlightMethod(scene.sunlightMethod ?? 'raycasting');
+    setActivePointMode(scene.activePointMode ?? 'shadowing');
+    setSelectedCity(scene.selectedCity ?? 'Warszawa');
+    setMapsInput(scene.mapsInput ?? '');
+    setMapsParseError(scene.mapsParseError ?? false);
+    setViewRotationDeg(scene.viewRotationDeg ?? 0);
+    setSavedViewRotationDeg(scene.savedViewRotationDeg ?? 0);
+    setDxfUnit(scene.dxfUnit ?? 'auto');
+    setDxfImportInfo(scene.dxfImportInfo ?? null);
+    setFitKey((prev) => prev + 1);
+    sceneHydratedRef.current = true;
+  };
+
+  const handleSceneFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const scene = JSON.parse(text) as SavedScene;
+        applyLoadedScene(scene);
+      } catch (err) {
+        alert('Błąd podczas wczytywania sceny JSON.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleSceneDownload = () => {
+    const scene: SavedScene = {
+      version: 1,
+      buildings,
+      selectedBuildingId,
+      selectedPointKey,
+      settings,
+      layerSettings,
+      selectedLayerName,
+      isLinkingMode,
+      linkingSourceId,
+      drawingMode,
+      dimensions,
+      isEditMode,
+      isDimensionToolActive,
+      dimensionType,
+      showNormals,
+      showShadowingLines,
+      showSunlightLines,
+      showShadowRange,
+      sunlightMethod,
+      activePointMode,
+      selectedCity,
+      mapsInput,
+      mapsParseError,
+      viewRotationDeg,
+      savedViewRotationDeg,
+      dxfUnit,
+      dxfImportInfo,
+    };
+    const blob = new Blob([JSON.stringify(scene, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `usi-light-scene-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Global Escape key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTypingTarget =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
       if (e.key === 'Escape') {
         if (isDimensionToolActive) handleCancelDimension();
         if (drawingMode !== 'none') handleCancelDrawing();
@@ -667,11 +952,34 @@ export const App: React.FC = () => {
           setLinkingSourceId(null);
         }
         if (isEditMode) setIsEditMode(false);
+        return;
+      }
+
+      if (isTypingTarget || !selectedBuildingId) return;
+
+      const isPlusKey =
+        e.key === '+' ||
+        e.key === '=' ||
+        e.code === 'NumpadAdd';
+      const isMinusKey =
+        e.key === '-' ||
+        e.key === '_' ||
+        e.code === 'NumpadSubtract';
+
+      if (isPlusKey || isMinusKey) {
+        e.preventDefault();
+        adjustSelectedBuildingHeight(isPlusKey ? 0.5 : -0.5);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDimensionToolActive, drawingMode, isLinkingMode, isEditMode]);
+  }, [
+    isDimensionToolActive,
+    drawingMode,
+    isLinkingMode,
+    isEditMode,
+    selectedBuildingId,
+  ]);
 
   return (
     <div className="app-container">
@@ -723,7 +1031,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="sidebar-group-header"
-              onClick={() => setIsProjectGroupOpen(!isProjectGroupOpen)}
+              onClick={() => toggleSidebarGroup('project')}
               title="Zwiń / rozwiń grupę: Projekt, Rzut i Warstwy"
             >
               <div className="sidebar-group-title">
@@ -984,6 +1292,17 @@ export const App: React.FC = () => {
                     <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
                   </label>
 
+                  <label className="btn-primary" style={{ margin: 0 }}>
+                    <Upload size={16} />
+                    <span>Wgraj scene</span>
+                    <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
+                  </label>
+
+                  <button type="button" onClick={handleSceneDownload} className="btn-secondary">
+                    <Download size={15} />
+                    <span>Zapisz scenę JSON</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => {
@@ -1072,7 +1391,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="sidebar-group-header"
-              onClick={() => setIsModelingGroupOpen(!isModelingGroupOpen)}
+              onClick={() => toggleSidebarGroup('modeling')}
               title="Zwiń / rozwiń grupę: Obiekty i Narzędzia"
             >
               <div className="sidebar-group-title">
@@ -1463,6 +1782,7 @@ export const App: React.FC = () => {
                             setDrawingVerticesCount(0);
                             setIsDimensionToolActive(false);
                             setDimensionPendingRef(null);
+                            setFacadePointMode(false);
                           }}
                           className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
                           style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
@@ -1479,6 +1799,7 @@ export const App: React.FC = () => {
                             setDrawingVerticesCount(0);
                             setIsDimensionToolActive(false);
                             setDimensionPendingRef(null);
+                            setFacadePointMode(false);
                           }}
                           className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
                           style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
@@ -1495,6 +1816,7 @@ export const App: React.FC = () => {
                             setDimensionPendingRef(null);
                             setDrawingMode('none');
                             setDrawingVerticesCount(0);
+                            setFacadePointMode(false);
                           }}
                           className={`btn-tile ${isDimensionToolActive ? 'active-indigo' : 'inactive'}`}
                           style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
@@ -1502,6 +1824,22 @@ export const App: React.FC = () => {
                         >
                           <Ruler size={13} />
                           <span style={{ fontWeight: 600 }}>Wymiar</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFacadePointMode((prev) => !prev);
+                            setDrawingMode('none');
+                            setIsDimensionToolActive(false);
+                            setDimensionPendingRef(null);
+                          }}
+                          className={`btn-tile ${facadePointMode ? 'active-indigo' : 'inactive'}`}
+                          style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                          title="Kliknij lub przeciągnij punkt wzdłuż krawędzi fasady"
+                        >
+                          <MapPin size={13} />
+                          <span style={{ fontWeight: 600 }}>Punkt fasady</span>
                         </button>
                       </div>
 
@@ -2125,10 +2463,11 @@ export const App: React.FC = () => {
           {/* § 56 Method Toggle */}
           <div
             style={{ display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: 'rgba(15,23,42,0.6)', borderRadius: '8px', padding: '3px', border: '1px solid #1e293b' }}
-            title="Metoda obliczania nasłonecznienia § 56"
+            title="Metoda obliczania czasu nasłonecznienia § 56"
           >
             <button
               onClick={() => setSunlightMethod('raycasting')}
+              title="Metoda Astronomiczna — rzucanie promieni i astronomiczna pozycja słońca"
               style={{
                 padding: '3px 8px',
                 borderRadius: '5px',
@@ -2141,10 +2480,11 @@ export const App: React.FC = () => {
                 letterSpacing: '0.02em',
               }}
             >
-              Raycasting
+              Astro
             </button>
             <button
               onClick={() => setSunlightMethod('segments')}
+              title="Metoda Linijki Słońca — uproszczona metoda wykreślna Twarowskiego"
               style={{
                 padding: '3px 8px',
                 borderRadius: '5px',
@@ -2157,14 +2497,16 @@ export const App: React.FC = () => {
                 letterSpacing: '0.02em',
               }}
             >
-              Segmenty
+              Linijka
             </button>
           </div>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
           <button
-            onClick={() => setFitKey((prev) => prev + 1)}
+            onClick={() => {
+              setFitKey((prev) => prev + 1);
+            }}
             title="Dopasuj widok do obiektów (Zoom Extents)"
             style={{
               display: 'flex',
@@ -2182,6 +2524,58 @@ export const App: React.FC = () => {
           >
             <Maximize2 size={13} />
             <span>Centruj</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setViewRotationMode((prev) => !prev);
+            }}
+            title="Ustaw obrót widoku względem odcinka"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: '1px solid #334155',
+              backgroundColor: viewRotationMode ? 'rgba(59, 130, 246, 0.25)' : 'rgba(30, 41, 59, 0.8)',
+              color: viewRotationMode ? '#bfdbfe' : '#f8fafc',
+            }}
+          >
+            <RotateCw size={13} />
+            <span>Obrót widoku</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setViewRotationDeg((prev) => {
+                if (Math.abs(prev) < 0.001) {
+                  return savedViewRotationDeg;
+                }
+                setSavedViewRotationDeg(prev);
+                return 0;
+              });
+            }}
+            title="Wróć do domyślnej orientacji układu"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: '1px solid #334155',
+              backgroundColor: 'rgba(30, 41, 59, 0.8)',
+              color: '#f8fafc',
+            }}
+          >
+            <RotateCcw size={13} />
+            <span>Orientacja domyślna</span>
           </button>
         </div>
 
@@ -2250,7 +2644,7 @@ export const App: React.FC = () => {
             <Activity size={12} />
             <span>
               {accuracyStage === 'live'
-                ? 'Live: 1.5m'
+                ? 'Live: 2.0m'
                 : accuracyStage === 'stage1'
                 ? 'Siatka: 1.0m'
                 : accuracyStage === 'stage2'
@@ -2272,7 +2666,7 @@ export const App: React.FC = () => {
               fontSize: '10px',
               fontFamily: 'monospace',
             }}
-            title={`Średni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms`}
+            title={`Czas pełnego przeliczenia aktywnych warstw analitycznych:\n• Łącznie: ${totalAnalysisMs.toFixed(3)} ms\n\nŚredni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms`}
           >
             <Timer size={11} color="#94a3b8" />
             <span style={{ color: '#34d399', fontWeight: 600 }}>
@@ -2281,6 +2675,10 @@ export const App: React.FC = () => {
             <span style={{ color: '#475569' }}>|</span>
             <span style={{ color: '#fbbf24', fontWeight: 600 }}>
               §56: {avgSunlightMs < 0.01 ? '<0.01' : avgSunlightMs.toFixed(2)}ms
+            </span>
+            <span style={{ color: '#475569' }}>|</span>
+            <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
+              Razem: {totalAnalysisMs < 0.01 ? '<0.01' : totalAnalysisMs.toFixed(2)}ms
             </span>
           </div>
         </div>
@@ -2310,7 +2708,9 @@ export const App: React.FC = () => {
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
             showShadowRange={showShadowRange}
+            sunlightMethod={sunlightMethod}
             latitude={settings.latitude}
+            longitude={settings.longitude}
             equinoxDate={settings.equinoxDate}
             fitTrigger={fitKey}
             onInteractionChange={setIsInteracting}
@@ -2320,6 +2720,8 @@ export const App: React.FC = () => {
             onFinishDrawing={handleFinishDrawing}
             onCancelDrawing={handleCancelDrawing}
             onDrawingVerticesCountChange={setDrawingVerticesCount}
+            facadePointMode={facadePointMode}
+            onFacadePointMove={handleFacadePointMove}
             isEditMode={isEditMode}
             onBuildingEdgeMove={handleBuildingEdgeMove}
             dimensions={dimensions}
@@ -2329,6 +2731,13 @@ export const App: React.FC = () => {
             onDimensionClickEdge={handleDimensionClickEdge}
             onDeleteDimension={handleDeleteDimension}
             layerSettings={layerSettings}
+            viewRotationMode={viewRotationMode}
+            viewRotationDeg={viewRotationDeg}
+            onViewRotationChange={(deg) => {
+              setViewRotationDeg(deg);
+              if (Math.abs(deg) > 0.001) setSavedViewRotationDeg(deg);
+            }}
+            onEndViewRotationMode={() => setViewRotationMode(false)}
           />
         </div>
 
@@ -2336,6 +2745,7 @@ export const App: React.FC = () => {
         <PointInspectorModal
           pointResult={selectedPointResult}
           activeMode={activePointMode}
+          sunlightMethod={sunlightMethod}
           onModeChange={setActivePointMode}
           onClose={() => setSelectedPointKey(null)}
         />

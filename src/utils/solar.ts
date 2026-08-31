@@ -156,3 +156,353 @@ export function getSolarElevationAtAzimuth(
   return pos.elevationDeg;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SYSTEMY WYZNACZANIA GODZIN I PROSTYCH AZYMUTÓW (Astro vs Linijka Słońca)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Vector2DLike {
+  x: number;
+  y: number;
+}
+
+export interface Line2DEquation {
+  /** Współczynnik A w postaci ogólnej: A*x + B*y + C = 0 */
+  A: number;
+  /** Współczynnik B w postaci ogólnej: A*x + B*y + C = 0 */
+  B: number;
+  /** Współczynnik C w postaci ogólnej: A*x + B*y + C = 0 (dla prostej przez (0,0) C=0) */
+  C: number;
+}
+
+export interface HourLine2D {
+  hourFraction: number; // Godzina w czasie lokalnym (np. 11.633 lub 12.0)
+  timeStr: string;      // np. "11:38" lub "12:00"
+  offsetHours: number;  // Odchylenie od górowania słońca: -5, -4, ..., 0, ..., +5
+  offsetLabel: string;  // np. "11:38 (Górowanie)" lub "10:38 (-1h)" / "12:38 (+1h)"
+  azimuthDeg: number;   // Azymut geograficzny (0°=N, 90°=E, 180°=S, 270°=W)
+  elevationDeg: number; // Kąt elewacji nad horyzontem
+  dir: Vector2DLike;    // Wektor jednostkowy w CAD (x=sin(az), y=cos(az))
+  lineEq: Line2DEquation; // Postać ogólna prostej znormalizowana (A^2 + B^2 = 1)
+}
+
+export interface ISolarHourSystem {
+  readonly systemType: 'astro' | 'linijka';
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly equinoxDate: 'spring' | 'autumn';
+  readonly solarNoonDecimal: number;
+  readonly solarNoonTime: string;
+  getHourLines(startOffset?: number, endOffset?: number, stepHours?: number): HourLine2D[];
+  getAzimuthForHour(hourFraction: number): number;
+  getHourForAzimuth(azimuthDeg: number): number;
+  getElevationForAzimuth(azimuthDeg: number): number;
+  getLineEquationForHour(hourFraction: number): Line2DEquation;
+  getLineEquationForAzimuth(azimuthDeg: number): Line2DEquation;
+}
+
+/**
+ * Tworzy znormalizowane równanie prostej 2D A*x + B*y + C = 0 przechodzącej przez (0,0) w kierunku zadanego azymutu.
+ * W układzie CAD: +Y to Północ, +X to Wschód. Wektor kierunkowy: (sin(az), cos(az)).
+ * Normalna prostej: A = cos(az), B = -sin(az), C = 0.
+ */
+export function createLineEquationFromAzimuth(azimuthDeg: number): Line2DEquation {
+  const azRad = azimuthDeg * DEG2RAD;
+  const A = Math.cos(azRad);
+  const B = -Math.sin(azRad);
+  return { A, B, C: 0 };
+}
+
+/**
+ * 1. System Astronomiczny (Astro)
+ * Wyznacza pozycje, azymuty i elewacje na podstawie algorytmu astronomicznego NOAA.
+ * Punktem odniesienia jest moment górowania słońca (solar noon), od którego wyznaczane są
+ * godziny w przedziale [-5h, +5h] (oraz dla przedszkoli [-4h, +4h]).
+ */
+export class AstroSolarSystem implements ISolarHourSystem {
+  readonly systemType = 'astro' as const;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly equinoxDate: 'spring' | 'autumn';
+  readonly month: number;
+  readonly day: number;
+  readonly tzOffset: number;
+  readonly solarNoonDecimal: number;
+  readonly solarNoonTime: string;
+
+  private cachedHourLines: HourLine2D[] | null = null;
+  private cachedKey: string = '';
+
+  constructor(
+    latitude: number = 52.2297,
+    longitude: number = 21.0122,
+    equinoxDate: 'spring' | 'autumn' = 'spring',
+    tzOffset: number = 1.0
+  ) {
+    this.latitude = latitude;
+    this.longitude = longitude;
+    this.equinoxDate = equinoxDate;
+    this.month = equinoxDate === 'autumn' ? 9 : 3;
+    this.day = equinoxDate === 'autumn' ? 23 : 21;
+    this.tzOffset = tzOffset;
+
+    const noonPos = calculateSolarPosition(
+      this.latitude,
+      this.longitude,
+      this.month,
+      this.day,
+      12.0,
+      this.tzOffset
+    );
+    this.solarNoonDecimal = noonPos.solarNoonDecimal;
+    this.solarNoonTime = noonPos.solarNoonTime;
+  }
+
+  /**
+   * Zwraca linie pełnych godzin zegarowych (czasu lokalnego) w oknie analizy [-5h, +5h]
+   * oraz wyróżnioną linię momentu astronomicznego górowania słońca (solar noon, 180°).
+   */
+  getHourLines(startOffset: number = -5, endOffset: number = 5, stepHours: number = 1): HourLine2D[] {
+    const key = `${startOffset}_${endOffset}_${stepHours}`;
+    if (this.cachedHourLines && this.cachedKey === key) {
+      return this.cachedHourLines;
+    }
+
+    const lines: HourLine2D[] = [];
+    const minHour = Math.max(5, Math.floor(this.solarNoonDecimal + startOffset));
+    const maxHour = Math.min(19, Math.ceil(this.solarNoonDecimal + endOffset));
+
+    // 1. Dodanie pełnych godzin zegarowych (np. 07:00, 08:00, ..., 12:00, ..., 17:00)
+    for (let h = minHour; h <= maxHour; h += stepHours) {
+      const pos = calculateSolarPosition(
+        this.latitude,
+        this.longitude,
+        this.month,
+        this.day,
+        h,
+        this.tzOffset
+      );
+
+      const timeStr = `${String(h).padStart(2, '0')}:00`;
+      const azRad = pos.azimuthDeg * DEG2RAD;
+      const dir: Vector2DLike = {
+        x: Math.sin(azRad),
+        y: Math.cos(azRad),
+      };
+
+      const lineEq = createLineEquationFromAzimuth(pos.azimuthDeg);
+      const diffFromNoon = Math.round((h - this.solarNoonDecimal) * 10) / 10;
+      const offsetSign = diffFromNoon > 0 ? `+${diffFromNoon}h` : `${diffFromNoon}h`;
+
+      lines.push({
+        hourFraction: h,
+        timeStr,
+        offsetHours: diffFromNoon,
+        offsetLabel: `${timeStr} (${offsetSign})`,
+        azimuthDeg: pos.azimuthDeg,
+        elevationDeg: pos.elevationDeg,
+        dir,
+        lineEq,
+      });
+    }
+
+    // 2. Dodanie linii dokładnego górowania słońca (solar noon, azymut 180.0° S)
+    const noonPos = calculateSolarPosition(
+      this.latitude,
+      this.longitude,
+      this.month,
+      this.day,
+      this.solarNoonDecimal,
+      this.tzOffset
+    );
+    const noonAzRad = noonPos.azimuthDeg * DEG2RAD;
+    lines.push({
+      hourFraction: this.solarNoonDecimal,
+      timeStr: this.solarNoonTime,
+      offsetHours: 0,
+      offsetLabel: `${this.solarNoonTime} (Górowanie 180°)`,
+      azimuthDeg: noonPos.azimuthDeg,
+      elevationDeg: noonPos.elevationDeg,
+      dir: { x: Math.sin(noonAzRad), y: Math.cos(noonAzRad) },
+      lineEq: createLineEquationFromAzimuth(noonPos.azimuthDeg),
+    });
+
+    // Sortowanie po godzinie
+    lines.sort((a, b) => a.hourFraction - b.hourFraction);
+
+    this.cachedHourLines = lines;
+    this.cachedKey = key;
+    return lines;
+  }
+
+  getAzimuthForHour(hourFraction: number): number {
+    const pos = calculateSolarPosition(
+      this.latitude,
+      this.longitude,
+      this.month,
+      this.day,
+      hourFraction,
+      this.tzOffset
+    );
+    return pos.azimuthDeg;
+  }
+
+  getHourForAzimuth(azimuthDeg: number): number {
+    return getHourAtSolarAzimuth(
+      azimuthDeg,
+      this.latitude,
+      this.longitude,
+      this.month,
+      this.day,
+      this.tzOffset
+    );
+  }
+
+  getElevationForAzimuth(azimuthDeg: number): number {
+    return getSolarElevationAtAzimuth(
+      azimuthDeg,
+      this.latitude,
+      this.longitude,
+      this.month,
+      this.day,
+      this.tzOffset
+    );
+  }
+
+  getLineEquationForHour(hourFraction: number): Line2DEquation {
+    const az = this.getAzimuthForHour(hourFraction);
+    return createLineEquationFromAzimuth(az);
+  }
+
+  getLineEquationForAzimuth(azimuthDeg: number): Line2DEquation {
+    return createLineEquationFromAzimuth(azimuthDeg);
+  }
+}
+
+/**
+ * 2. System Geometryczny Linijki Słońca (Twarowski)
+ * Wyznacza azymuty godzin na podstawie wykreślnego rzutowania kierunków słońca
+ * z płaszczyzny równika niebieskiego (płaszczyzny słońca, krok 15°/h) na płaszczyznę poziomą XY (2D).
+ * Punktem odniesienia jest południe słoneczne geometryczne (12:00, 180°), od którego odliczamy [-5h, +5h].
+ */
+export class LinijkaSolarSystem implements ISolarHourSystem {
+  readonly systemType = 'linijka' as const;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly equinoxDate: 'spring' | 'autumn';
+  readonly solarNoonDecimal: number;
+  readonly solarNoonTime: string;
+  private readonly latRad: number;
+  private readonly sinLat: number;
+  private readonly tanLat: number;
+
+  private cachedHourLines: HourLine2D[] | null = null;
+  private cachedKey: string = '';
+
+  constructor(
+    latitude: number = 52.2297,
+    longitude: number = 21.0122,
+    equinoxDate: 'spring' | 'autumn' = 'spring'
+  ) {
+    this.latitude = latitude;
+    this.longitude = longitude;
+    this.equinoxDate = equinoxDate;
+    // W klasycznej Linijce Słońca południe słoneczne geometryczne przypada na 12:00 (kąt 180° / Południe)
+    this.solarNoonDecimal = 12.0;
+    this.solarNoonTime = '12:00';
+
+    this.latRad = latitude * DEG2RAD;
+    this.sinLat = Math.sin(this.latRad);
+    this.tanLat = Math.tan(this.latRad);
+  }
+
+  /**
+   * Zwraca linie godzinowe wyznaczone jako odchylenia od punktu odniesienia 12:00 (południe geometryczne 180°).
+   */
+  getHourLines(startOffset: number = -5, endOffset: number = 5, stepHours: number = 1): HourLine2D[] {
+    const key = `${startOffset}_${endOffset}_${stepHours}`;
+    if (this.cachedHourLines && this.cachedKey === key) {
+      return this.cachedHourLines;
+    }
+
+    const lines: HourLine2D[] = [];
+
+    for (let offset = startOffset; offset <= endOffset + 1e-4; offset += stepHours) {
+      const hDec = this.solarNoonDecimal + offset;
+      const az = this.getAzimuthForHour(hDec);
+      const elev = this.getElevationForAzimuth(az);
+
+      let hInt = Math.floor(hDec);
+      let mInt = Math.round((hDec - hInt) * 60);
+      if (mInt >= 60) {
+        hInt += 1;
+        mInt = 0;
+      }
+      const timeStr = `${String(hInt).padStart(2, '0')}:${String(mInt).padStart(2, '0')}`;
+
+      const azRad = az * DEG2RAD;
+      const dir: Vector2DLike = {
+        x: Math.sin(azRad),
+        y: Math.cos(azRad),
+      };
+
+      const lineEq = createLineEquationFromAzimuth(az);
+      const roundedOffset = Math.round(offset * 100) / 100;
+      const offsetSign = roundedOffset > 0 ? `+${roundedOffset}h` : `${roundedOffset}h`;
+      const offsetLabel = Math.abs(roundedOffset) < 1e-3
+        ? '12:00 (Południe)'
+        : `${timeStr} (${offsetSign})`;
+
+      lines.push({
+        hourFraction: hDec,
+        timeStr,
+        offsetHours: roundedOffset,
+        offsetLabel,
+        azimuthDeg: az,
+        elevationDeg: elev,
+        dir,
+        lineEq,
+      });
+    }
+
+    this.cachedHourLines = lines;
+    this.cachedKey = key;
+    return lines;
+  }
+
+  getAzimuthForHour(hourFraction: number): number {
+    const H = (hourFraction - 12.0) * 15.0 * DEG2RAD;
+    const x = -Math.sin(H);
+    const y = -Math.cos(H) * this.sinLat;
+    let azDeg = Math.atan2(x, y) * RAD2DEG;
+    return ((azDeg % 360) + 360) % 360;
+  }
+
+  getHourForAzimuth(azimuthDeg: number): number {
+    const azRad = azimuthDeg * DEG2RAD;
+    const sinAz = Math.sin(azRad);
+    const cosAz = Math.cos(azRad);
+    const hRad = Math.atan2(-sinAz, -cosAz / (this.sinLat || 1e-6));
+    const hDeg = hRad * RAD2DEG;
+    return 12.0 + hDeg / 15.0;
+  }
+
+  getElevationForAzimuth(azimuthDeg: number): number {
+    const azRad = azimuthDeg * DEG2RAD;
+    const tanElev = -Math.cos(azRad) / (this.tanLat || 1e-6);
+    if (tanElev <= 0) return 0;
+    return Math.atan(tanElev) * RAD2DEG;
+  }
+
+  getLineEquationForHour(hourFraction: number): Line2DEquation {
+    const az = this.getAzimuthForHour(hourFraction);
+    return createLineEquationFromAzimuth(az);
+  }
+
+  getLineEquationForAzimuth(azimuthDeg: number): Line2DEquation {
+    return createLineEquationFromAzimuth(azimuthDeg);
+  }
+}
+
+
+
+

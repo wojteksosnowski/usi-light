@@ -5,6 +5,7 @@ import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
   activeMode?: 'shadowing' | 'sunlight';
+  sunlightMethod?: 'raycasting' | 'segments';
   onModeChange?: (mode: 'shadowing' | 'sunlight') => void;
   onClose: () => void;
 }
@@ -12,6 +13,7 @@ interface PointInspectorModalProps {
 export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
   pointResult,
   activeMode = 'shadowing',
+  sunlightMethod = 'raycasting',
   onModeChange,
   onClose,
 }) => {
@@ -20,6 +22,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
   const { point, shadowing, sunlight } = pointResult;
   const isCompliant12 = shadowing.isCompliant;
   const isCompliant56 = sunlight.isCompliant;
+  const isLinijka = sunlightMethod === 'segments' || sunlight.sectors !== undefined;
 
   return (
     <div className="inspector-card">
@@ -63,7 +66,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {isCompliant12 ? <ShieldCheck size={16} color="#34d399" /> : <ShieldAlert size={16} color="#fb7185" />}
             <span style={{ fontSize: '12px', fontWeight: 'bold', color: activeMode === 'shadowing' ? '#34d399' : '#e2e8f0' }}>
-              § 12 Przesłanianie {activeMode === 'shadowing' ? '• WIDOK CAD' : ''}
+              § 12 Przesłanianie
             </span>
           </div>
           <span
@@ -87,37 +90,35 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = ({
             <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#f8fafc', marginTop: '2px' }}>
               {shadowing.maxContinuousFreeSpanDeg.toFixed(1)}°
             </div>
-            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 60.0°</div>
           </div>
           <div style={{ backgroundColor: '#0f172a', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-            <div style={{ color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', fontWeight: 600 }}>Kąt w oknie (przeszkoda ≤15°)</div>
+            <div style={{ color: '#94a3b8', fontSize: '9px', textTransform: 'uppercase', fontWeight: 600 }}>Łączony kąt</div>
             <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#f8fafc', marginTop: '2px' }}>
               {shadowing.totalFreeSpanDeg.toFixed(1)}°
             </div>
-            <div style={{ color: '#64748b', fontSize: '9px' }}>Wymóg: min. 60° w oknie ≥75°</div>
           </div>
         </div>
       </div>
 
-      {/* § 56 Nasłonecznienie Box (Clickable to activate Linijka Słońca Twarowskiego) */}
+      {/* § 56 Nasłonecznienie Box (Clickable to activate Linijka Słońca vs Astro) */}
       <div
         onClick={() => onModeChange?.('sunlight')}
         style={{
           backgroundColor: activeMode === 'sunlight' ? 'rgba(30, 41, 59, 0.9)' : 'rgba(2, 6, 23, 0.7)',
           borderRadius: '12px',
           padding: '12px',
-          border: activeMode === 'sunlight' ? '2px solid #f59e0b' : '1px solid #1e293b',
+          border: activeMode === 'sunlight' ? (isLinijka ? '2px solid #818cf8' : '2px solid #f59e0b') : '1px solid #1e293b',
           cursor: 'pointer',
           transition: 'all 0.2s ease',
-          boxShadow: activeMode === 'sunlight' ? '0 0 16px rgba(245, 158, 11, 0.2)' : 'none',
+          boxShadow: activeMode === 'sunlight' ? (isLinijka ? '0 0 16px rgba(129, 140, 248, 0.25)' : '0 0 16px rgba(245, 158, 11, 0.2)') : 'none',
         }}
-        title="Kliknij, aby włączyć wizualizację nasłonecznienia (Linijka Słońca Twarowskiego)"
+        title={isLinijka ? 'Kliknij, aby włączyć wizualizację nasłonecznienia (Linijka Słońca Twarowskiego)' : 'Kliknij, aby włączyć wizualizację nasłonecznienia (Metoda Astronomiczna)'}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Sun size={16} color="#fbbf24" />
-            <span style={{ fontSize: '12px', fontWeight: 'bold', color: activeMode === 'sunlight' ? '#fbbf24' : '#e2e8f0' }}>
-              § 56 Linijka Słońca {activeMode === 'sunlight' ? '• WIDOK CAD' : ''}
+            <Sun size={16} color={isLinijka ? '#a5b4fc' : '#fbbf24'} />
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: activeMode === 'sunlight' ? (isLinijka ? '#a5b4fc' : '#fbbf24') : '#e2e8f0' }}>
+              {isLinijka ? '§ 56 Linijka Słońca' : '§ 56 Metoda Astro'}
             </span>
           </div>
           <span
