@@ -237,36 +237,4 @@ export function renderDimensions(
     }
     ctx.restore();
   }
-
-  // 3. Dimension Length Annotations for Selected Building Edges
-  const activeSelectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
-  if (activeSelectedBuilding) {
-    ctx.save();
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    for (const seg of activeSelectedBuilding.segments) {
-      const midX = (seg.p1.x + seg.p2.x) / 2;
-      const midY = (seg.p1.y + seg.p2.y) / 2;
-      const labelWorldX = midX + seg.normal.x * 1.0;
-      const labelWorldY = midY + seg.normal.y * 1.0;
-      const { sx, sy } = worldToScreen(labelWorldX, labelWorldY);
-
-      const text = `${seg.length.toFixed(1)}m`;
-      const textWidth = ctx.measureText(text).width;
-
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(sx - textWidth / 2 - 4, sy - 8, textWidth + 8, 16, 4);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#e0e7ff';
-      ctx.fillText(text, sx, sy);
-    }
-    ctx.restore();
-  }
 }

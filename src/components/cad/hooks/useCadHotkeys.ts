@@ -48,19 +48,36 @@ export function useCadHotkeys({
           onCancelEdgeLength?.();
           return;
         }
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' || e.code === 'NumpadEnter') {
           e.preventDefault();
           onCommitEdgeLength?.();
           return;
         }
-        if (e.key === '[' || e.key === '{') {
+        // Decrease step: '[' or '-'
+        if (
+          e.key === '[' ||
+          e.key === '{' ||
+          e.code === 'BracketLeft' ||
+          e.key === '-' ||
+          e.code === 'Minus' ||
+          e.code === 'NumpadSubtract'
+        ) {
           e.preventDefault();
-          onAdjustEdgeLengthStep?.(e.shiftKey ? -0.1 : -0.5);
+          onAdjustEdgeLengthStep?.(e.shiftKey ? -0.5 : -0.1);
           return;
         }
-        if (e.key === ']' || e.key === '}') {
+        // Increase step: ']' or '+' / '='
+        if (
+          e.key === ']' ||
+          e.key === '}' ||
+          e.code === 'BracketRight' ||
+          e.key === '+' ||
+          e.key === '=' ||
+          e.code === 'Equal' ||
+          e.code === 'NumpadAdd'
+        ) {
           e.preventDefault();
-          onAdjustEdgeLengthStep?.(e.shiftKey ? 0.1 : 0.5);
+          onAdjustEdgeLengthStep?.(e.shiftKey ? 0.5 : 0.1);
           return;
         }
         if (e.key === 'Backspace') {
@@ -68,9 +85,20 @@ export function useCadHotkeys({
           onEdgeLengthBackspace?.();
           return;
         }
+        // Numeric input (digits and decimal separator)
         if (/^[0-9.,]$/.test(e.key)) {
           e.preventDefault();
           onEdgeLengthInputChar?.(e.key === ',' ? '.' : e.key);
+          return;
+        }
+        if (e.code.startsWith('Numpad') && /^[0-9]$/.test(e.code.replace('Numpad', ''))) {
+          e.preventDefault();
+          onEdgeLengthInputChar?.(e.code.replace('Numpad', ''));
+          return;
+        }
+        if (e.code === 'NumpadDecimal' || e.code === 'Period' || e.code === 'Comma') {
+          e.preventDefault();
+          onEdgeLengthInputChar?.('.');
           return;
         }
       }

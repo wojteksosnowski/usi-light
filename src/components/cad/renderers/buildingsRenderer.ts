@@ -6,6 +6,7 @@ export interface EditingEdgeLengthState {
   currentLength: number;
   targetLength: number;
   inputStr: string;
+  isFresh?: boolean;
   previewVertices?: any[];
 }
 
@@ -199,7 +200,7 @@ export function renderBuildings(
               hoveredEdgeLengthBadge?.buildingId === bldg.id && hoveredEdgeLengthBadge?.edgeIndex === eIdx;
 
             const labelText = isEditingThisEdge
-              ? `[ ${editingEdgeLength.inputStr || editingEdgeLength.targetLength.toFixed(2)}m ]`
+              ? `[ ${editingEdgeLength.inputStr ? editingEdgeLength.inputStr : '_'}m ]`
               : `${len.toFixed(2)}m`;
 
             ctx.font = 'bold 10px Inter, monospace';

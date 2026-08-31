@@ -169,6 +169,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       ...editingEdgeLength,
       targetLength: nextLen,
       inputStr: nextLen.toFixed(2),
+      isFresh: false,
       previewVertices: preview,
     });
   }, [editingEdgeLength, buildings]);
@@ -177,8 +178,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     if (!editingEdgeLength) return;
     const selBldg = buildings.find((b) => b.id === editingEdgeLength.buildingId);
     if (!selBldg || !selBldg.vertices) return;
-    const isFirstType = editingEdgeLength.inputStr === editingEdgeLength.currentLength.toFixed(2);
-    const nextStr = (isFirstType ? '' : editingEdgeLength.inputStr) + char;
+    const isFirstType = editingEdgeLength.isFresh || editingEdgeLength.inputStr === editingEdgeLength.currentLength.toFixed(2);
+    let nextStr = isFirstType ? '' : editingEdgeLength.inputStr;
+    if (char === '.' && nextStr.includes('.')) return;
+    nextStr += char;
     const parsed = parseFloat(nextStr);
     const validLen = !isNaN(parsed) && parsed > 0.01 ? parsed : editingEdgeLength.targetLength;
     const preview = adjustEdgeLength(selBldg.vertices, editingEdgeLength.edgeIndex, validLen);
@@ -186,6 +189,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       ...editingEdgeLength,
       inputStr: nextStr,
       targetLength: validLen,
+      isFresh: false,
       previewVertices: preview,
     });
   }, [editingEdgeLength, buildings]);
@@ -196,12 +200,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     if (!selBldg || !selBldg.vertices) return;
     const nextStr = editingEdgeLength.inputStr.slice(0, -1);
     const parsed = parseFloat(nextStr);
-    const validLen = !isNaN(parsed) && parsed > 0.01 ? parsed : editingEdgeLength.targetLength;
+    const validLen = !isNaN(parsed) && parsed > 0.01 ? parsed : editingEdgeLength.currentLength;
     const preview = adjustEdgeLength(selBldg.vertices, editingEdgeLength.edgeIndex, validLen);
     setEditingEdgeLength({
       ...editingEdgeLength,
       inputStr: nextStr,
       targetLength: validLen,
+      isFresh: false,
       previewVertices: preview,
     });
   }, [editingEdgeLength, buildings]);
@@ -601,18 +606,25 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
             const sm = worldToScreen(midX, midY);
             const len = Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
             if (Math.abs(sx - sm.sx) <= 25 && Math.abs(sy - sm.sy) <= 12) {
+              (document.activeElement as HTMLElement)?.blur();
               setEditingEdgeLength({
                 buildingId: selBldg.id,
                 edgeIndex: eIdx,
                 currentLength: len,
                 targetLength: len,
                 inputStr: len.toFixed(2),
+                isFresh: true,
                 previewVertices: selBldg.vertices,
               });
               return;
             }
           }
         }
+      }
+
+      // If active edge editing is in progress, block building dragging / deselection
+      if (editingEdgeLength) {
+        return;
       }
 
       // Check click on Pinned Facade Points
