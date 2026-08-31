@@ -188,17 +188,33 @@ export function renderBuildings(
 
         // Edge Length Badge on Selected Building (Interactive for editing)
         if (isSelected && seg.p1 && seg.p2) {
-          const midX = (seg.p1.x + seg.p2.x) / 2;
-          const midY = (seg.p1.y + seg.p2.y) / 2;
+          const isEditingThisEdge =
+            editingEdgeLength?.buildingId === bldg.id && editingEdgeLength?.edgeIndex === eIdx;
+          const isHoveredBadge =
+            hoveredEdgeLengthBadge?.buildingId === bldg.id && hoveredEdgeLengthBadge?.edgeIndex === eIdx;
+
+          let midX = (seg.p1.x + seg.p2.x) / 2;
+          let midY = (seg.p1.y + seg.p2.y) / 2;
+          if (
+            isEditingThisEdge &&
+            editingEdgeLength?.previewVertices &&
+            editingEdgeLength.previewVertices.length >= 3
+          ) {
+            const p1 = editingEdgeLength.previewVertices[eIdx];
+            const p2 =
+              editingEdgeLength.previewVertices[
+                (eIdx + 1) % editingEdgeLength.previewVertices.length
+              ];
+            if (p1 && p2) {
+              midX = (p1.x + p2.x) / 2;
+              midY = (p1.y + p2.y) / 2;
+            }
+          }
+
           const len = Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
           const { sx: msx, sy: msy } = worldToScreen(midX, midY);
 
           if (Number.isFinite(msx) && Number.isFinite(msy)) {
-            const isEditingThisEdge =
-              editingEdgeLength?.buildingId === bldg.id && editingEdgeLength?.edgeIndex === eIdx;
-            const isHoveredBadge =
-              hoveredEdgeLengthBadge?.buildingId === bldg.id && hoveredEdgeLengthBadge?.edgeIndex === eIdx;
-
             const labelText = isEditingThisEdge
               ? `[ ${editingEdgeLength.inputStr ? editingEdgeLength.inputStr : '_'}m ]`
               : `${len.toFixed(2)}m`;

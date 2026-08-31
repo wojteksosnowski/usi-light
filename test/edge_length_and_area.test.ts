@@ -47,4 +47,33 @@ describe('Polygon Area and Edge Length Adjustment', () => {
     // New area should be 15 * 20 = 300 m²
     expect(computePolygonArea(adjusted)).toBeCloseTo(300, 2);
   });
+
+  it('performs instant edge length adjustments on complex real-world wro.json buildings', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const wroPath = path.resolve(__dirname, '../reference/wro.json');
+    if (!fs.existsSync(wroPath)) return;
+
+    const data = JSON.parse(fs.readFileSync(wroPath, 'utf8'));
+    const buildings = data.buildings;
+    expect(buildings.length).toBeGreaterThan(10);
+
+    const tStart = performance.now();
+    let adjustmentsCount = 0;
+
+    for (const bldg of buildings) {
+      if (bldg.vertices && bldg.vertices.length >= 3) {
+        for (let i = 0; i < bldg.vertices.length; i++) {
+          const adj = adjustEdgeLength(bldg.vertices, i, 25.0);
+          expect(adj.length).toBe(bldg.vertices.length);
+          adjustmentsCount++;
+        }
+      }
+    }
+    const tTotal = performance.now() - tStart;
+    const avgPerAdjustmentMs = tTotal / adjustmentsCount;
+
+    // Must be well under 0.05ms per adjustment (sub-millisecond 60 FPS guarantee)
+    expect(avgPerAdjustmentMs).toBeLessThan(0.05);
+  });
 });
