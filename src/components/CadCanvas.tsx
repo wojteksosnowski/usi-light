@@ -1,6 +1,6 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Point2D } from '../types/geometry';
-import { isPointInPolygon } from '../utils/math2d';
+import { isPointInPolygon, computeCombinedShadowEnvelope } from '../utils/math2d';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
@@ -146,6 +146,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       ? hoveredBuildings[Math.min(hoveredBuildingIndex, hoveredBuildings.length - 1)]
       : null;
 
+  const visibleBuildings = useMemo(() => {
+    return buildings.filter((b) => {
+      const lyr = b.layer || 'Domyślna (0)';
+      return layerSettings[lyr]?.isVisible !== false;
+    });
+  }, [buildings, layerSettings]);
+
+  const shadowRangeLoops = useMemo(() => {
+    if (!showShadowRange) return [];
+    return computeCombinedShadowEnvelope(visibleBuildings, latitude, equinoxDate);
+  }, [visibleBuildings, showShadowRange, latitude, equinoxDate]);
+
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
     height: typeof window !== 'undefined' ? window.innerHeight : 800,
@@ -238,11 +250,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       layerSettings
     );
 
-    const visibleBuildings = buildings.filter((b) => {
-      const lyr = b.layer || 'Domyślna (0)';
-      return layerSettings[lyr]?.isVisible !== false;
-    });
-
     // 3. Buildings Base & Outlines
     renderBuildings(
       renderContext,
@@ -261,7 +268,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     );
 
     // 3. Shadow Range § 12 (only for visible tested buildings)
-    renderShadowRange(renderContext, visibleBuildings, showShadowRange);
+    renderShadowRange(renderContext, shadowRangeLoops, showShadowRange);
 
     // 4. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12)
     if (selectedPointResult) {

@@ -1,16 +1,14 @@
 import { CadRenderContext } from '../types';
-import { computeCombinedShadowEnvelope } from '../../../utils/math2d';
+import { Point2D } from '../../../types/geometry';
 
 export function renderShadowRange(
   rc: CadRenderContext,
-  buildings: any[],
+  loops: Point2D[][],
   showShadowRange: boolean
 ) {
   if (!showShadowRange) return;
-  const { ctx, worldToScreen, latitude, equinoxDate } = rc;
-
-  const loops = computeCombinedShadowEnvelope(buildings, latitude, equinoxDate);
-  if (loops.length === 0) return;
+  if (!loops || loops.length === 0) return;
+  const { ctx, worldToScreen } = rc;
 
   ctx.save();
 

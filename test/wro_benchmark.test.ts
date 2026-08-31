@@ -61,4 +61,64 @@ describe('Performance Benchmark on reference/wro.json', () => {
     expect(resUpdated.results.length).toBeGreaterThan(resLive.results.length);
     expect(t3 - t2).toBeLessThan(1500);
   });
+
+  it('maintains constant fast execution time during 30 consecutive rapid moves', () => {
+    if (!fileExists) return;
+
+    const data = JSON.parse(fs.readFileSync(wroPath, 'utf8'));
+    let buildings: BuildingLoop[] = [...data.buildings];
+    const settings: ProjectSettings = data.settings || {
+      latitude: 51.1079,
+      longitude: 17.0385,
+      equinoxDate: 'spring',
+    };
+
+    const newRect = createBuildingFromVertices(
+      [
+        { x: 50, y: 50 },
+        { x: 80, y: 50 },
+        { x: 80, y: 70 },
+        { x: 50, y: 70 },
+      ],
+      'Draggable Bldg',
+      15.0,
+      true
+    );
+    buildings.push(newRect);
+
+    const moveDurations: number[] = [];
+
+    // Simulate 30 consecutive moves (rapid mouse dragging)
+    for (let step = 1; step <= 30; step++) {
+      const dx = 1.5;
+      const dy = 0.8;
+      buildings = buildings.map((b) => {
+        if (b.id !== newRect.id) return b;
+        const newVerts = b.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+        const newSegs = b.segments.map((s) => ({
+          ...s,
+          p1: { x: s.p1.x + dx, y: s.p1.y + dy },
+          p2: { x: s.p2.x + dx, y: s.p2.y + dy },
+        }));
+        return { ...b, vertices: newVerts, segments: newSegs };
+      });
+
+      const t0 = performance.now();
+      const res = runFullAnalysis(
+        buildings,
+        settings,
+        { samplingInterval: 1.5, angleStepDeg: 1.5, sunlightStepMinutes: 15 },
+        'raycasting'
+      );
+      const t1 = performance.now();
+      moveDurations.push(t1 - t0);
+      expect(res.results.length).toBeGreaterThan(1000);
+    }
+
+    // Verify time does not grow with consecutive moves (no performance degradation or leak)
+    const first5Avg = moveDurations.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
+    const last5Avg = moveDurations.slice(-5).reduce((a, b) => a + b, 0) / 5;
+
+    expect(last5Avg).toBeLessThan(first5Avg * 1.5); // Last moves must not be slower than first moves
+  });
 });

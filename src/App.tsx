@@ -219,30 +219,20 @@ export const App: React.FC = () => {
 
   // Progressive Accuracy Refinement Effect
   // When interacting/moving: use fast low-resolution mesh (1.5m).
-  // When still: automatically refine in stages stopping at target 0.25m.
+  // When still: automatically refine directly to target 0.25m with single debounce window.
   useEffect(() => {
     if (isInteracting) {
       setAccuracyStage('live');
       return;
     }
 
-    // Schedule progressive refinement when idle
-    const t1 = setTimeout(() => {
-      setAccuracyStage((prev) => (prev === 'live' ? 'stage1' : prev));
-    }, 100);
-
-    const t2 = setTimeout(() => {
-      setAccuracyStage((prev) => (prev === 'live' || prev === 'stage1' ? 'stage2' : prev));
-    }, 250);
-
-    const t3 = setTimeout(() => {
-      setAccuracyStage('final'); // Stop at target 0.25m
-    }, 500);
+    // Schedule final refinement when idle after 200ms
+    const timer = setTimeout(() => {
+      setAccuracyStage('final');
+    }, 200);
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      clearTimeout(timer);
     };
   }, [buildings, isInteracting]);
 
@@ -250,11 +240,7 @@ export const App: React.FC = () => {
   const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
     switch (accuracyStage) {
       case 'live':
-        return { samplingInterval: 2.0, angleStepDeg: 2.0, sunlightStepMinutes: 15 };
-      case 'stage1':
-        return { samplingInterval: 1.0, angleStepDeg: 1.0, sunlightStepMinutes: 10 };
-      case 'stage2':
-        return { samplingInterval: 0.5, angleStepDeg: 0.5, sunlightStepMinutes: 5 };
+        return { samplingInterval: 1.5, angleStepDeg: 1.5, sunlightStepMinutes: 15 };
       case 'final':
       default:
         return { samplingInterval: 0.25, angleStepDeg: 0.5, sunlightStepMinutes: 5 };
@@ -286,7 +272,8 @@ export const App: React.FC = () => {
     effectiveBuildings,
     settings,
     currentAccuracyOptions,
-    sunlightMethod
+    sunlightMethod,
+    isInteracting
   );
 
   const analysisResults = analysisOutput?.results || [];
