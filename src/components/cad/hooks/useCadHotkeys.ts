@@ -7,6 +7,7 @@ export function useCadHotkeys({
   hoveredBuildings,
   selectedVertexIndex,
   onDeleteSelectedVertex,
+  onCycleVertexSelection,
   onCancelDrawing,
   onFinishDrawing,
   setDrawingVertices,
@@ -24,6 +25,7 @@ export function useCadHotkeys({
   hoveredBuildings: string[];
   selectedVertexIndex?: number | null;
   onDeleteSelectedVertex?: () => void;
+  onCycleVertexSelection?: (direction: 'prev' | 'next') => void;
   onCancelDrawing?: () => void;
   onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => void;
   setDrawingVertices: React.Dispatch<React.SetStateAction<Point2D[]>>;
@@ -120,6 +122,14 @@ export function useCadHotkeys({
           e.preventDefault();
           onDeleteSelectedVertex?.();
         }
+      } else if (drawingMode === 'vertexEdit' && !isEditingEdgeLength) {
+        if (e.key === '[' || e.key === '{' || e.code === 'BracketLeft') {
+          e.preventDefault();
+          onCycleVertexSelection?.('prev');
+        } else if (e.key === ']' || e.key === '}' || e.code === 'BracketRight') {
+          e.preventDefault();
+          onCycleVertexSelection?.('next');
+        }
       } else if (e.key === 'Tab' && hoveredBuildings.length > 1) {
         e.preventDefault();
         setHoveredBuildingIndex((prev) => (prev + 1) % hoveredBuildings.length);
@@ -131,6 +141,7 @@ export function useCadHotkeys({
     drawingMode,
     selectedVertexIndex,
     onDeleteSelectedVertex,
+    onCycleVertexSelection,
     drawingVertices,
     hoveredBuildings,
     onCancelDrawing,
@@ -146,3 +157,4 @@ export function useCadHotkeys({
     onCancelEdgeLength,
   ]);
 }
+

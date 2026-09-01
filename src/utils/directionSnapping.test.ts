@@ -88,4 +88,21 @@ describe('directionSnapping', () => {
 
     expect(snap).toBeNull();
   });
+
+  it('snaps a dragged vertex relative to its adjacent polygon vertex', () => {
+    // Polygon vertex at (10, 0) and previous at (0, 0)
+    const prevV = { x: 0, y: 0 };
+    const mouse = { x: 15.2, y: 0.1 }; // dragged near horizontal extension
+
+    const snap = calculateDirectionSnap({
+      originPoint: prevV,
+      currentMouseWorld: mouse,
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 4.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.snappedPoint.y).toBeCloseTo(0, 2);
+    expect(snap?.snappedPoint.x).toBeCloseTo(15.2, 1);
+  });
 });

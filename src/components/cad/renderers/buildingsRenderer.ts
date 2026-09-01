@@ -29,7 +29,8 @@ export function renderBuildings(
   pinnedPointResults: any[] = [],
   activePinnedPointId?: string | null,
   liveFacadeSnap?: { point: { x: number; y: number }; buildingId: string; segmentId: string; ratio: number } | null,
-  facadePointMode?: boolean
+  facadePointMode?: boolean,
+  isVertexEditMode?: boolean
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -39,7 +40,6 @@ export function renderBuildings(
     ctx.strokeStyle = '#f59e0b';
     ctx.lineWidth = 2.5;
     ctx.setLineDash([6, 4]);
-    ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
     ctx.beginPath();
     const first = worldToScreen(editingEdgeLength.previewVertices[0].x, editingEdgeLength.previewVertices[0].y);
     ctx.moveTo(first.sx, first.sy);
@@ -48,21 +48,20 @@ export function renderBuildings(
       ctx.lineTo(pt.sx, pt.sy);
     }
     ctx.closePath();
-    ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
 
-  // 1. Render Building Fills
   for (const bldg of buildings) {
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
-    const lyr = bldg.layer || 'Domyślna (0)';
+
+    const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
 
     const isGhosted = lyrSetting.isGhosted === true;
+    const isLocked = lyrSetting.isLocked === true;
     const isSelected = bldg.id === selectedBuildingId;
-    const isHovered = bldg.id === hoveredBuildingId;
     const isTested = bldg.isTested;
     const isIncluded = bldg.isIncluded !== false;
 
@@ -71,52 +70,57 @@ export function renderBuildings(
       ctx.globalAlpha = 0.35;
     }
 
+    // Filled Polygon Body
     ctx.beginPath();
-    let validCount = 0;
-    bldg.vertices.forEach((v: any) => {
-      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) return;
-      const { sx, sy } = worldToScreen(v.x, v.y);
-      if (!Number.isFinite(sx) || !Number.isFinite(sy)) return;
-      if (validCount === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
-      validCount++;
-    });
-    if (validCount >= 3) {
-      ctx.closePath();
+    const firstScreen = worldToScreen(bldg.vertices[0].x, bldg.vertices[0].y);
+    if (!Number.isFinite(firstScreen.sx) || !Number.isFinite(firstScreen.sy)) {
+      ctx.restore();
+      continue;
     }
+    ctx.moveTo(firstScreen.sx, firstScreen.sy);
 
-    if (!isIncluded) {
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+    for (let i = 1; i < bldg.vertices.length; i++) {
+      const v = bldg.vertices[i];
+      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) continue;
+      const { sx, sy } = worldToScreen(v.x, v.y);
+      if (Number.isFinite(sx) && Number.isFinite(sy)) {
+        ctx.lineTo(sx, sy);
+      }
+    }
+    ctx.closePath();
+
+    if (bldg.id === hoveredBuildingId && !isSelected) {
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+    } else if (isSelected) {
+      ctx.fillStyle = isTested ? 'rgba(59, 130, 246, 0.22)' : 'rgba(148, 163, 184, 0.2)';
     } else if (isTested) {
-      ctx.fillStyle = isSelected
-        ? 'rgba(59, 130, 246, 0.30)'
-        : isHovered
-        ? 'rgba(59, 130, 246, 0.22)'
-        : 'rgba(59, 130, 246, 0.16)';
+      ctx.fillStyle = isIncluded ? 'rgba(96, 165, 250, 0.12)' : 'rgba(100, 116, 139, 0.08)';
     } else {
-      ctx.fillStyle = isSelected
-        ? 'rgba(148, 163, 184, 0.28)'
-        : isHovered
-        ? 'rgba(148, 163, 184, 0.22)'
-        : 'rgba(71, 85, 105, 0.18)';
+      ctx.fillStyle = isIncluded ? 'rgba(51, 65, 85, 0.25)' : 'rgba(30, 41, 59, 0.15)';
     }
     ctx.fill();
 
-    if (isHovered) {
-      ctx.save();
-      ctx.strokeStyle = '#fbbf24';
-      ctx.lineWidth = 2.5;
+    // Linking mode highlight
+    if (isLinkingMode && linkingSourceId && bldg.id !== linkingSourceId) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#f59e0b';
       ctx.setLineDash([6, 4]);
       ctx.stroke();
-      ctx.restore();
+      ctx.setLineDash([]);
+    } else if (isSelected) {
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isTested ? '#60a5fa' : '#94a3b8';
+      ctx.stroke();
     }
+
     ctx.restore();
   }
 
-  // 2. Render Building Segments (Outlines & Edges)
+  // 2. Render Outer Edge Strokes & Interactive Edge Hovering
   for (const bldg of buildings) {
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
-    const lyr = bldg.layer || 'Domyślna (0)';
+
+    const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
 
@@ -187,7 +191,8 @@ export function renderBuildings(
         }
 
         // Edge Length Badge on Selected Building (Interactive for editing)
-        if (isSelected && seg.p1 && seg.p2) {
+        // Hidden during vertex editing to not obstruct [+] midpoint vertex insertion
+        if (isSelected && seg.p1 && seg.p2 && !isVertexEditMode) {
           const isEditingThisEdge =
             editingEdgeLength?.buildingId === bldg.id && editingEdgeLength?.edgeIndex === eIdx;
           const isHoveredBadge =

@@ -12,7 +12,8 @@ export function renderDrawingToolPreview(
   hoveredVertexIndex?: number | null,
   hoveredMidpointIndex?: number | null,
   draggedVertexIndex?: number | null,
-  directionSnapResult?: DirectionSnapResult | null
+  directionSnapResult?: DirectionSnapResult | null,
+  selectedVertexIndex?: number | null
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -253,16 +254,28 @@ export function renderDrawingToolPreview(
         ctx.stroke();
       }
 
-      // 2. Vertex handles (draggable)
+      // 2. Vertex handles (draggable and selectable)
       for (let i = 0; i < verts.length; i++) {
         const v = verts[i];
         const { sx, sy } = worldToScreen(v.x, v.y);
         if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
 
+        const isSelected = selectedVertexIndex === i;
         const isHovered = hoveredVertexIndex === i || draggedVertexIndex === i;
-        const r = isHovered ? 7.5 : 5.5;
+        const r = isSelected ? 8.5 : isHovered ? 7.5 : 5.5;
 
-        if (isHovered) {
+        if (isSelected) {
+          // Distinct outer halo/selection ring for selected vertex
+          ctx.beginPath();
+          ctx.arc(sx, sy, r + 6, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 2]);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (isHovered) {
           ctx.beginPath();
           ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
           ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
@@ -272,40 +285,18 @@ export function renderDrawingToolPreview(
 
         ctx.beginPath();
         ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fillStyle = isHovered ? '#38bdf8' : '#0f172a';
-        ctx.strokeStyle = isHovered ? '#ffffff' : '#38bdf8';
-        ctx.lineWidth = 2;
+        ctx.fillStyle = isSelected ? '#f59e0b' : isHovered ? '#38bdf8' : '#0f172a';
+        ctx.strokeStyle = isSelected ? '#ffffff' : isHovered ? '#ffffff' : '#38bdf8';
+        ctx.lineWidth = isSelected ? 2.5 : 2;
         ctx.fill();
         ctx.stroke();
 
         // Vertex index number
-        ctx.font = 'bold 8.5px monospace';
-        ctx.fillStyle = isHovered ? '#020617' : '#94a3b8';
+        ctx.font = isSelected ? 'bold 9px monospace' : 'bold 8.5px monospace';
+        ctx.fillStyle = isSelected ? '#020617' : isHovered ? '#020617' : '#94a3b8';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${i + 1}`, sx, sy);
-
-        // Delete indicator badge [x] on hover if polygon has more than 3 vertices
-        if (isHovered && verts.length > 3 && draggedVertexIndex === null) {
-          const dx = sx + 13;
-          const dy = sy - 13;
-          ctx.beginPath();
-          ctx.arc(dx, dy, 7.5, 0, Math.PI * 2);
-          ctx.fillStyle = '#ef4444';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.5;
-          ctx.fill();
-          ctx.stroke();
-
-          ctx.beginPath();
-          ctx.moveTo(dx - 3, dy - 3);
-          ctx.lineTo(dx + 3, dy + 3);
-          ctx.moveTo(dx + 3, dy - 3);
-          ctx.lineTo(dx - 3, dy + 3);
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.8;
-          ctx.stroke();
-        }
       }
 
       ctx.restore();

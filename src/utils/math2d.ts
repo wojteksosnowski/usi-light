@@ -1041,7 +1041,9 @@ export function computePolygonArea(vertices: Point2D[]): number {
 
 /**
  * Zmienia długość wybranej krawędzi wielokąta z zachowaniem stałego początku (V_i)
- * i równoległym przesunięciem (offsetem) kolejnego doczepionego odcinka (V_{i+1} -> V_{i+2}).
+ * oraz bez zmiany kierunków (kątów) żadnego z pozostałych odcinków wielokąta.
+ * Nowy wierzchołek doczepiony wyznaczany jest poprzez geometryczne przecięcie
+ * prostych kierunkowych sąsiednich krawędzi.
  */
 export function adjustEdgeLength(
   vertices: Point2D[],
@@ -1053,9 +1055,9 @@ export function adjustEdgeLength(
     return vertices;
   }
 
-  const p1 = vertices[edgeIndex]; // Fixed start
+  const p1 = vertices[edgeIndex]; // Fixed start V_i
   const nextIdx = (edgeIndex + 1) % n;
-  const p2 = vertices[nextIdx];   // Old end
+  const p2 = vertices[nextIdx];   // Old end V_{i+1}
 
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
@@ -1066,29 +1068,56 @@ export function adjustEdgeLength(
   const uy = dy / currentLen;
 
   // New end point of edgeIndex
-  const newP2 = {
+  const newP2: Point2D = {
     x: p1.x + ux * newLength,
     y: p1.y + uy * newLength,
   };
 
-  // Translation delta for the following attached segment(s)
   const shiftX = newP2.x - p2.x;
   const shiftY = newP2.y - p2.y;
 
   // Clone vertices
   const result = vertices.map((v) => ({ ...v }));
-
-  // Set the new end point for edgeIndex
   result[nextIdx] = newP2;
 
-  // Shift subsequent vertex (edgeIndex + 2) to translate the attached edge parallel
   const afterNextIdx = (edgeIndex + 2) % n;
+  const vNext = vertices[afterNextIdx]; // V_{i+2}
+  const vAfterNext = vertices[(edgeIndex + 3) % n]; // V_{i+3}
+
+  // Direction of edge (i+1): from old V_{i+1} to V_{i+2}
+  const d1x = vNext.x - p2.x;
+  const d1y = vNext.y - p2.y;
+
+  // Direction of edge (i+2): from V_{i+2} to V_{i+3}
+  const d2x = vAfterNext.x - vNext.x;
+  const d2y = vAfterNext.y - vNext.y;
+
+  // Line 1: through newP2 with direction (d1x, d1y)
+  // Line 2: through vAfterNext with direction (d2x, d2y)
+  const det = d1x * d2y - d1y * d2x;
+
+  if (Math.abs(det) > 1e-6) {
+    // Non-parallel lines: compute exact intersection to strictly preserve directions
+    const t = ((vAfterNext.x - newP2.x) * d2y - (vAfterNext.y - newP2.y) * d2x) / det;
+    const newVNext: Point2D = {
+      x: newP2.x + t * d1x,
+      y: newP2.y + t * d1y,
+    };
+
+    if (Number.isFinite(newVNext.x) && Number.isFinite(newVNext.y)) {
+      result[afterNextIdx] = newVNext;
+      return result;
+    }
+  }
+
+  // Fallback if lines are parallel / collinear
   result[afterNextIdx] = {
-    x: vertices[afterNextIdx].x + shiftX,
-    y: vertices[afterNextIdx].y + shiftY,
+    x: vNext.x + shiftX,
+    y: vNext.y + shiftY,
   };
 
   return result;
 }
+
 
 

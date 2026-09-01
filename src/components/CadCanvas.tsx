@@ -228,6 +228,19 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     setEditingEdgeLength(null);
   }, []);
 
+  const handleCycleVertexSelection = useCallback((direction: 'prev' | 'next') => {
+    if (!selectedBuildingId) return;
+    const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+    if (!selBldg || !selBldg.vertices || selBldg.vertices.length === 0) return;
+    const n = selBldg.vertices.length;
+    setSelectedVertexIndex((prev) => {
+      if (prev === null || prev === undefined) {
+        return direction === 'next' ? 0 : n - 1;
+      }
+      return direction === 'next' ? (prev + 1) % n : (prev - 1 + n) % n;
+    });
+  }, [selectedBuildingId, buildings]);
+
   // Hotkeys hook
   useCadHotkeys({
     drawingMode,
@@ -235,6 +248,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     hoveredBuildings,
     selectedVertexIndex,
     onDeleteSelectedVertex: handleDeleteSelectedVertex,
+    onCycleVertexSelection: handleCycleVertexSelection,
     onCancelDrawing,
     onFinishDrawing,
     setDrawingVertices,
@@ -470,7 +484,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       pinnedPointResults,
       activePinnedPointId,
       liveFacadeSnap,
-      facadePointMode
+      facadePointMode,
+      drawingMode === 'vertexEdit'
     );
 
     // 3. Shadow Range § 12 (only for visible tested buildings)
@@ -536,7 +551,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       hoveredVertexIndex,
       hoveredMidpointIndex,
       draggedVertexIndex,
-      activeDirectionSnap
+      activeDirectionSnap,
+      selectedVertexIndex
     );
   }, [
     buildings,
@@ -633,8 +649,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
-      // Check click on Edge Length Badges of Selected Building
-      if (selectedBuildingId) {
+      // Check click on Edge Length Badges of Selected Building (disabled in vertexEdit mode)
+      if (selectedBuildingId && drawingMode !== 'vertexEdit') {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && selBldg.segments) {
           for (let eIdx = 0; eIdx < selBldg.segments.length; eIdx++) {
@@ -691,21 +707,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       if (drawingMode === 'vertexEdit' && selectedBuildingId) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && selBldg.vertices.length >= 3) {
-          // Check if clicked on delete badge [x] of any vertex
-          if (selBldg.vertices.length > 3) {
-            for (let i = 0; i < selBldg.vertices.length; i++) {
-              const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
-              if (Math.hypot(sx - (s.sx + 13), sy - (s.sy - 13)) <= 9) {
-                const filtered = selBldg.vertices.filter((_, idx) => idx !== i);
-                onUpdateBuildingVertices?.(selBldg.id, filtered);
-                setSelectedVertexIndex(null);
-                setHoveredVertexIndex(null);
-                return;
-              }
-            }
-          }
-
-          // Check existing vertices
+          // Check existing vertices (click selects and begins drag)
           for (let i = 0; i < selBldg.vertices.length; i++) {
             const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
             if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
@@ -899,8 +901,53 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       if (selBldg && selBldg.vertices.length >= 3) {
         if (draggedVertexIndex !== null) {
+          let targetPt: Point2D = { x: world.wx, y: world.wy };
+          if (isDirectionSnappingActive) {
+            const n = selBldg.vertices.length;
+            const prevV = selBldg.vertices[(draggedVertexIndex - 1 + n) % n];
+            const nextV = selBldg.vertices[(draggedVertexIndex + 1) % n];
+            const prevPrevV = selBldg.vertices[(draggedVertexIndex - 2 + n) % n];
+            const nextNextV = selBldg.vertices[(draggedVertexIndex + 2) % n];
+
+            const snapPrev = calculateDirectionSnap({
+              currentMouseWorld: targetPt,
+              originPoint: prevV,
+              buildings,
+              dominantDirections,
+              polylineVertices: [prevPrevV, prevV],
+              worldToScreen,
+            });
+
+            const snapNext = calculateDirectionSnap({
+              currentMouseWorld: targetPt,
+              originPoint: nextV,
+              buildings,
+              dominantDirections,
+              polylineVertices: [nextNextV, nextV],
+              worldToScreen,
+            });
+
+            let chosenSnap: import('../utils/directionSnapping').DirectionSnapResult | null = null;
+            if (snapPrev && snapNext) {
+              chosenSnap = snapPrev.diffAngleDeg <= snapNext.diffAngleDeg ? snapPrev : snapNext;
+            } else {
+              chosenSnap = snapPrev || snapNext || null;
+            }
+
+            if (chosenSnap) {
+              targetPt = chosenSnap.snappedPoint;
+              setActiveDirectionSnap(chosenSnap);
+            } else {
+              setActiveDirectionSnap(null);
+            }
+          } else {
+            setActiveDirectionSnap(null);
+          }
+
+          setCurrentMouseWorld(targetPt);
+
           const updatedVerts = selBldg.vertices.map((v, idx) =>
-            idx === draggedVertexIndex ? { x: world.wx, y: world.wy } : v
+            idx === draggedVertexIndex ? targetPt : v
           );
           onUpdateBuildingVertices?.(selBldg.id, updatedVerts);
           return;
@@ -961,8 +1008,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // Check Hover on Edge Length Badges of Selected Building
-    if (selectedBuildingId) {
+    // Check Hover on Edge Length Badges of Selected Building (disabled in vertexEdit mode)
+    if (selectedBuildingId && drawingMode !== 'vertexEdit') {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       let foundEdgeBadge: { buildingId: string; edgeIndex: number } | null = null;
       if (selBldg && selBldg.segments) {
@@ -1216,6 +1263,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       isRotating
     ) {
       onInteractionChange?.(false);
+    }
+    if (activeDirectionSnap) {
+      setActiveDirectionSnap(null);
     }
     setIsPanning(false);
     setIsDraggingBuilding(false);

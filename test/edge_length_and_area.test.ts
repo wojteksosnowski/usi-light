@@ -48,6 +48,57 @@ describe('Polygon Area and Edge Length Adjustment', () => {
     expect(computePolygonArea(adjusted)).toBeCloseTo(300, 2);
   });
 
+  it('strictly preserves the direction (angles) of all segments in L-shaped and non-rectangular polygons', () => {
+    // L-shaped polygon (6 vertices)
+    const lShape: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 5 },
+      { x: 5, y: 5 },
+      { x: 5, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // Helper to compute normalized segment directions (dx/len, dy/len)
+    const getDirections = (pts: Point2D[]) => {
+      const dirs: { ux: number; uy: number }[] = [];
+      const n = pts.length;
+      for (let i = 0; i < n; i++) {
+        const pA = pts[i];
+        const pB = pts[(i + 1) % n];
+        const len = Math.hypot(pB.x - pA.x, pB.y - pA.y);
+        dirs.push({ ux: (pB.x - pA.x) / len, uy: (pB.y - pA.y) / len });
+      }
+      return dirs;
+    };
+
+    const origDirs = getDirections(lShape);
+
+    // Adjust edge 1 (from (10,0) to (10,5)) to new length 8
+    const adjLShape = adjustEdgeLength(lShape, 1, 8);
+    const newDirs = getDirections(adjLShape);
+
+    for (let i = 0; i < origDirs.length; i++) {
+      expect(newDirs[i].ux).toBeCloseTo(origDirs[i].ux, 4);
+      expect(newDirs[i].uy).toBeCloseTo(origDirs[i].uy, 4);
+    }
+
+    // Triangular polygon with slanted edges
+    const triangle: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 5, y: 8 },
+    ];
+    const origTriDirs = getDirections(triangle);
+    const adjTri = adjustEdgeLength(triangle, 0, 15);
+    const newTriDirs = getDirections(adjTri);
+
+    for (let i = 0; i < origTriDirs.length; i++) {
+      expect(newTriDirs[i].ux).toBeCloseTo(origTriDirs[i].ux, 4);
+      expect(newTriDirs[i].uy).toBeCloseTo(origTriDirs[i].uy, 4);
+    }
+  });
+
   it('performs instant edge length adjustments on complex real-world wro.json buildings', async () => {
     const fs = await import('fs');
     const path = await import('path');
