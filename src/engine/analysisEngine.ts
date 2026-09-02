@@ -109,7 +109,7 @@ export function prefilterObstacleSegments(
   const filtered: PrefilteredObstacle[] = [];
 
   for (const bldg of allBuildings) {
-    if (bldg.isIncluded === false) continue;
+    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
     // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż 35m od punktu P
     const aabb = getBuildingAABB(bldg);
@@ -197,6 +197,8 @@ export function analyzeShadowingAtPoint(
   for (const { seg, bldgId } of baseObstacles) {
     const bldg = bldgMap.get(bldgId);
     if (!bldg) continue;
+    // § 12 ust. 6: balkony i elementy drugorzędne są ignorowane w analizie przesłaniania
+    if (bldg.category === 'balcony') continue;
 
     // Required clearance for this obstacle (§ 12)
     const deltaH = Math.max(0, seg.hTop);
@@ -1072,7 +1074,7 @@ export function runFullAnalysis(
   }
 
   const results: AnalysisPointResult[] = [];
-  const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false);
+  const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary');
   const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
   const angleStep = options?.angleStepDeg ?? 0.5;
   const sunlightStep = options?.sunlightStepMinutes ?? 5;

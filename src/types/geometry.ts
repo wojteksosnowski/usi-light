@@ -35,9 +35,16 @@ export interface FacadeSegment {
   lineEquation?: LineEquation2D;
 }
 
+export type ObjectCategory = 'building' | 'boundary' | 'balcony';
+
 export interface BuildingLoop {
   id: string;
   name: string;
+  category?: ObjectCategory; // Domyślnie 'building' dla zachowania kompatybilności wstecznej
+  plotNumber?: string; // Numer działki (np. "124/2") dla kategorii 'boundary'
+  firstFloorHeight?: number; // Wysokość 1. kondygnacji (m) dla kategorii 'building'
+  typicalFloorHeight?: number; // Wysokość kondygnacji typowej (m) dla kategorii 'building'
+  storeysCount?: number; // Wyliczona lub zadana liczba kondygnacji dla 'building'
   layer: string;
   isTested: boolean; // True for the building under analysis, false for existing/obstacles
   isIncluded?: boolean; // True (default) if included in calculations (as tested or obstacle); false to ignore

@@ -91,14 +91,37 @@ export function collectTargetDirections(
     priority = 10
   ) => {
     const norm = normalizeAngle180(angleDeg);
+    // Podwyższony próg deduplikacji z 1.2° do 3.0° dla eliminacji szumu mikro-odchyleń
+    const dedupThreshold = relationType === 'dominant' ? 1.5 : 3.0;
     for (const sa of seenAngles) {
-      if (angleDiff180(sa, norm) < 1.2) return; // 1.2 deg deduplication
+      if (angleDiff180(sa, norm) < dedupThreshold) return;
     }
     seenAngles.push(norm);
     candidates.push({ angleDeg: norm, relationType, sourceLabel, priority });
   };
 
-  // 1. All segments of active Polyline history (0° Parallel & 90° Perpendicular ONLY)
+  // 1. Dominant scene axes from statistics (Siatka główna) - NAJWYŻSZA WAGA DLA SPÓJNOŚCI PROJEKTU
+  // Silna promocja siatki głównej: dodajemy jako pierwsze z priorytetem 2
+  const domPair: { angle: number; ortho: number } | null =
+    dominantDirections && dominantDirections.length > 0
+      ? { angle: dominantDirections[0].angleDeg, ortho: dominantDirections[0].orthogonalDeg }
+      : null;
+
+  if (domPair) {
+    addCandidate(domPair.angle, 'dominant', `Siatka główna (${domPair.angle.toFixed(1)}°)`, 2);
+    addCandidate(domPair.ortho, 'dominant', `Siatka poprzeczna (${domPair.ortho.toFixed(1)}°)`, 2);
+  }
+
+  // Pomocnicza funkcja: jeśli kąt leży w odległości <= 4.0° od siatki dominującej,
+  // traktujemy go jako tożsamy z siatką dominującą i nie dodajemy nowego prawie zbieżnego kąta
+  const isNearDominant = (ang: number) => {
+    if (!domPair) return false;
+    const d1 = angleDiff180(ang, domPair.angle);
+    const d2 = angleDiff180(ang, domPair.ortho);
+    return d1 <= 4.0 || d2 <= 4.0;
+  };
+
+  // 2. All segments of active Polyline history (0° Parallel & 90° Perpendicular ONLY)
   const nPoly = polylineVertices.length;
   if (nPoly >= 2) {
     for (let i = nPoly - 2; i >= 0; i--) {
@@ -111,18 +134,22 @@ export function collectTargetDirections(
 
       const segIdx = i + 1;
       const isLastSeg = i === nPoly - 2;
-      const basePri = isLastSeg ? 1 : 2;
+      const basePri = isLastSeg ? 1 : 3;
       const segAngle = normalizeAngle180((Math.atan2(dy, dx) * 180) / Math.PI);
       const perpAngle = normalizeAngle180(segAngle + 90);
 
+      // Jeśli kąt pokrywa się z dominującym (np. różnica < 4.0°), pozwól dominującemu rządzić
+      const effectiveSegAngle = isNearDominant(segAngle) && domPair ? domPair.angle : segAngle;
+      const effectivePerpAngle = isNearDominant(perpAngle) && domPair ? domPair.ortho : perpAngle;
+
       addCandidate(
-        segAngle,
+        effectiveSegAngle,
         'parallel',
         isLastSeg ? 'Polilinia (Równoległy)' : `Polilinia (Równoległy do seg. ${segIdx})`,
         basePri
       );
       addCandidate(
-        perpAngle,
+        effectivePerpAngle,
         'perpendicular',
         isLastSeg ? 'Polilinia (Prostopadły 90°)' : `Polilinia (Prostopadły 90° do seg. ${segIdx})`,
         basePri
@@ -130,7 +157,7 @@ export function collectTargetDirections(
     }
   }
 
-  // 2. Priorytetyzacja wskazanego/najechanego obiektu (z pominięciem wykluczonych segmentów)
+  // 3. Priorytetyzacja wskazanego/najechanego obiektu (z pominięciem wykluczonych segmentów)
   const prioritizedBuildingIds = new Set<string>();
   if (hoveredBuildingId && hoveredBuildingId !== excludeBuildingId) {
     prioritizedBuildingIds.add(hoveredBuildingId);
@@ -139,7 +166,7 @@ export function collectTargetDirections(
     prioritizedBuildingIds.add(selectedBuildingId);
   }
 
-  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false);
+  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false && b.category !== 'boundary');
   for (const bldg of prioBuildings) {
     if (!Array.isArray(bldg.segments)) continue;
     for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
@@ -148,20 +175,25 @@ export function collectTargetDirections(
       const sdx = seg.p2.x - seg.p1.x;
       const sdy = seg.p2.y - seg.p1.y;
       if (Math.hypot(sdx, sdy) >= 0.05) {
-        const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+        const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+        // Tłumienie szumu: jeśli kąt ściany różni się od siatki dominującej o <= 4.0°, przyciągamy do siatki
+        const segAng = isNearDominant(rawSegAng) && domPair
+          ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
+          : rawSegAng;
+
         const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
-        addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 3);
-        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 3);
+        addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4);
+        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 4);
       }
     }
   }
 
-  // 3. Pozostałe pobliskie budynki posortowane według odległości
+  // 4. Pozostałe pobliskie budynki posortowane według odległości
   const maxSegments = APP_CONFIG.directionSnapping.maxNearbySegments;
   const otherNearbySegs: { angleDeg: number; dist: number; buildingName: string }[] = [];
 
   for (const bldg of buildings) {
-    if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id) || !Array.isArray(bldg.segments)) continue;
+    if (bldg.isIncluded === false || bldg.category === 'boundary' || prioritizedBuildingIds.has(bldg.id) || !Array.isArray(bldg.segments)) continue;
     for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
       if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
       const seg = bldg.segments[sIdx];
@@ -175,6 +207,8 @@ export function collectTargetDirections(
       const sdy = seg.p2.y - seg.p1.y;
       if (Math.hypot(sdx, sdy) >= 0.05) {
         const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+        // Odrzuć jeśli to szum bliski dominującej siatki (różnica < 4.0°)
+        if (isNearDominant(segAng)) continue;
         otherNearbySegs.push({ angleDeg: segAng, dist, buildingName: bldg.name });
       }
     }
@@ -182,21 +216,13 @@ export function collectTargetDirections(
 
   otherNearbySegs.sort((a, b) => a.dist - b.dist);
   for (const item of otherNearbySegs.slice(0, maxSegments)) {
-    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 5);
-    addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 5);
-  }
-
-  // 4. Dominant scene axes from statistics (Siatka główna)
-  if (dominantDirections && dominantDirections.length > 0) {
-    for (const dom of dominantDirections.slice(0, 1)) {
-      addCandidate(dom.angleDeg, 'dominant', `Siatka główna (${dom.angleDeg.toFixed(1)}°)`, 7);
-      addCandidate(dom.orthogonalDeg, 'dominant', `Siatka poprzeczna (${dom.orthogonalDeg.toFixed(1)}°)`, 7);
-    }
+    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 6);
+    addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 6);
   }
 
   // 5. Domyślne osie kartezjańskie Ortho (0° / 90°)
-  addCandidate(0, 'dominant', 'Oś X (0.0°)', 9);
-  addCandidate(90, 'dominant', 'Oś Y (90.0°)', 9);
+  addCandidate(0, 'dominant', 'Oś X (0.0°)', 8);
+  addCandidate(90, 'dominant', 'Oś Y (90.0°)', 8);
 
   return candidates;
 }
@@ -254,8 +280,10 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
   for (const cand of candidates) {
     const diff = angleDiff180(cand.angleDeg, rawMouseAxisDeg);
     if (diff <= angleToleranceDeg) {
-      // Score: łączymy różnicę kątową z wagą priorytetu (priorytet 1-3 ma przewagę nad priorytetem 7-9)
-      const score = diff + (cand.priority || 10) * 0.15;
+      // Score: łączymy różnicę kątową z wagą priorytetu
+      // Silna promocja kierunku dominującego (bonus -0.5 punktu w score)
+      const dominantBonus = cand.relationType === 'dominant' ? -0.5 : 0.0;
+      const score = diff + (cand.priority || 10) * 0.12 + dominantBonus;
       if (score >= bestScore) continue;
 
       // Determine ray forward angle (either cand.angleDeg or cand.angleDeg + 180)

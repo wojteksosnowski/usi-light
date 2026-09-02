@@ -182,4 +182,38 @@ describe('directionSnapping', () => {
     expect(bgCand).toBeDefined();
     expect(hoveredCand!.priority).toBeLessThan(bgCand!.priority);
   });
+
+  it('clusters directions near dominant scene axis to prevent noisy angular jitter', () => {
+    // Dominant axis from statistics is 15.0° (and 105.0°)
+    const dom = [{ angleDeg: 15.0, orthogonalDeg: 105.0, totalLength: 100, percentage: 80 }];
+
+    // Building with a slightly tilted wall at 16.5° (difference of 1.5°, well within 4° cluster threshold)
+    const slightlyTiltedWall = createBuildingFromVertices(
+      [
+        { x: 0, y: 0 },
+        { x: 10 * Math.cos((16.5 * Math.PI) / 180), y: 10 * Math.sin((16.5 * Math.PI) / 180) },
+        { x: 0, y: 10 },
+      ],
+      'Tilted Wall',
+      10.0,
+      false
+    );
+
+    const candidates = collectTargetDirections(
+      { x: 0, y: 0 },
+      { x: 10, y: 3 },
+      [slightlyTiltedWall],
+      dom,
+      []
+    );
+
+    // Candidates should NOT include the raw 16.5° competing direction; it should be clustered to 15.0°
+    const rawTilted = candidates.find((c) => Math.abs(c.angleDeg - 16.5) < 0.2);
+    expect(rawTilted).toBeUndefined();
+
+    // The dominant 15.0° must be present with top priority
+    const dominantCandidate = candidates.find((c) => Math.abs(c.angleDeg - 15.0) < 0.1);
+    expect(dominantCandidate).toBeDefined();
+    expect(dominantCandidate?.priority).toBe(2);
+  });
 });

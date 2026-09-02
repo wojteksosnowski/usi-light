@@ -155,7 +155,7 @@ export function analyzeSegmentsStatistics(
   const allLengths: number[] = [];
 
   for (const bldg of buildings) {
-    if (bldg.isIncluded === false) continue;
+    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
     for (const seg of bldg.segments) {
       const len = seg.length;
       if (Number.isFinite(len) && len >= 1e-4) {
@@ -187,7 +187,7 @@ export function analyzeSegmentsStatistics(
   const fineHistogram = new Float64Array(180);
 
   for (const bldg of buildings) {
-    if (bldg.isIncluded === false) continue;
+    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
     for (const seg of bldg.segments) {
       const len = seg.length;
@@ -245,7 +245,7 @@ export function analyzeSegmentsStatistics(
     // Measure exact length aligned within ±7.5° of bestAngle or bestAngle + 90
     let dominantLength = 0;
     for (const bldg of buildings) {
-      if (bldg.isIncluded === false) continue;
+      if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
       for (const seg of bldg.segments) {
         const lineEq = seg.lineEquation ?? computeLineEquation(seg.p1, seg.p2, seg.normal);
         const diff1 = Math.abs(lineEq.angleDeg - bestAngle);

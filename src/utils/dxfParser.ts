@@ -279,6 +279,10 @@ export function parseDxfWithMetadata(
           isTested: isTestedDefault,
           isCityCentre: false,
           buildingType: 'residential',
+          category: 'building',
+          firstFloorHeight: 3.5,
+          typicalFloorHeight: 2.875,
+          storeysCount: 5,
           defaultHeight: 15.0,
           hWindowBottom: 0.85,
           vertices: rawPoints,
@@ -371,11 +375,16 @@ export function createSampleBuildings(): BuildingLoop[] {
       });
     }
 
+    const count = hTop > 3.5 ? 1 + Math.max(1, Math.round((hTop - 3.5) / 2.875)) : 1;
     return {
       id,
       name,
       layer: isTested ? 'BUD_PROJEKTOWANY' : 'BUD_SASIEDNI',
       isTested,
+      category: 'building',
+      firstFloorHeight: 3.5,
+      typicalFloorHeight: 2.875,
+      storeysCount: count,
       isCityCentre: false,
       buildingType: 'residential',
       defaultHeight: hTop,
@@ -401,7 +410,8 @@ export function createBuildingFromVertices(
   vertices: Point2D[],
   name?: string,
   defaultHeight: number = 15.0,
-  isTested: boolean = false
+  isTested: boolean = false,
+  category: import('../types/geometry').ObjectCategory = 'building'
 ): BuildingLoop {
   const isCCW = isPolygonCCW(vertices);
   const newId = `bldg-${Date.now()}`;
@@ -432,11 +442,17 @@ export function createBuildingFromVertices(
     });
   }
 
+  const count = defaultHeight > 3.5 ? 1 + Math.max(1, Math.round((defaultHeight - 3.5) / 2.875)) : 1;
+
   return {
     id: newId,
     name: name || `Budynek ${newId.slice(-4)}`,
     layer: isTested ? 'BUD_PROJEKTOWANY' : 'BUD_NOWY',
     isTested,
+    category,
+    firstFloorHeight: 3.5,
+    typicalFloorHeight: 2.875,
+    storeysCount: count,
     isIncluded: true,
     isCityCentre: false,
     buildingType: 'residential',

@@ -105,7 +105,7 @@ describe('cadOsnapEngine', () => {
     });
 
     expect(snap2).not.toBeNull();
-    expect(snap2?.priority).toBe(4);
+    expect(snap2?.priority).toBe(2);
     expect(snap2?.type).toBe('midpoint');
     expect(snap2?.snappedPoint).toEqual({ x: 5, y: 0 });
 

@@ -804,7 +804,7 @@ export function computeCombinedShadowEnvelope(
   longitude: number = 21.01
 ): Point2D[][] {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
   );
   if (testedBuildings.length === 0) return [];
 
@@ -835,7 +835,7 @@ export function computeFullShadowAnalysis(
   const t0 = performance.now();
 
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
   );
 
   if (testedBuildings.length === 0) {
@@ -1342,5 +1342,60 @@ export function adjustEdgeLength(
   return result;
 }
 
+export interface BoundaryDistanceResult {
+  boundaryId: string;
+  boundaryName: string;
+  minDistance: number;
+  closestBuildingPoint: Point2D;
+  closestBoundaryPoint: Point2D;
+  buildingSegmentId?: string;
+  boundarySegmentId?: string;
+}
 
+/**
+ * Oblicza minimalne odległości krawędzi budynku od krawędzi granic (działek).
+ */
+export function computeDistancesToBoundaries(
+  building: BuildingLoop,
+  boundaries: BuildingLoop[]
+): BoundaryDistanceResult[] {
+  if (!building || !building.segments || building.segments.length === 0) return [];
+  const results: BoundaryDistanceResult[] = [];
 
+  for (const bnd of boundaries) {
+    if (!bnd || !bnd.segments || bnd.segments.length === 0) continue;
+
+    let minDistance = Infinity;
+    let closestBldgPt: Point2D = building.vertices[0] || { x: 0, y: 0 };
+    let closestBndPt: Point2D = bnd.vertices[0] || { x: 0, y: 0 };
+    let bestBldgSegId: string | undefined;
+    let bestBndSegId: string | undefined;
+
+    for (const bldgSeg of building.segments) {
+      for (const bndSeg of bnd.segments) {
+        const dim = computeLinearDimension(bldgSeg.p1, bldgSeg.p2, bndSeg.p1, bndSeg.p2);
+        if (dim.distance < minDistance) {
+          minDistance = dim.distance;
+          closestBldgPt = dim.p1;
+          closestBndPt = dim.p2;
+          bestBldgSegId = bldgSeg.id;
+          bestBndSegId = bndSeg.id;
+        }
+      }
+    }
+
+    if (Number.isFinite(minDistance)) {
+      results.push({
+        boundaryId: bnd.id,
+        boundaryName: bnd.plotNumber ? `Działka ${bnd.plotNumber}` : (bnd.name || 'Granica działki'),
+        minDistance,
+        closestBuildingPoint: closestBldgPt,
+        closestBoundaryPoint: closestBndPt,
+        buildingSegmentId: bestBldgSegId,
+        boundarySegmentId: bestBndSegId,
+      });
+    }
+  }
+
+  return results;
+}

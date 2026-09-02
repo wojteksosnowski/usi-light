@@ -38,6 +38,7 @@ import {
   computePolygonArea,
   computeBuildingsUnionArea,
   booleanUnionBuildings,
+  computeDistancesToBoundaries,
 } from './utils/math2d';
 import { rebuildBuildingSegments, analyzeSegmentsStatistics } from './utils/segmentStatistics';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
@@ -455,6 +456,61 @@ export const App: React.FC = () => {
     if (!selectedBuilding || !selectedBuilding.vertices || selectedBuilding.vertices.length < 3) return 0;
     return computePolygonArea(selectedBuilding.vertices);
   }, [selectedBuilding]);
+
+  // All boundary objects (działki)
+  const boundaryObjects = useMemo(() => {
+    return buildings.filter((b) => b.category === 'boundary' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3);
+  }, [buildings]);
+
+  // Total plot area (sum of all boundary parcels)
+  const totalBoundaryArea = useMemo(() => {
+    return boundaryObjects.reduce((sum, b) => sum + computePolygonArea(b.vertices), 0);
+  }, [boundaryObjects]);
+
+  // Distances from selected building to all boundaries
+  const distancesToBoundaries = useMemo(() => {
+    if (!selectedBuilding || selectedBuilding.category === 'boundary' || boundaryObjects.length === 0) return [];
+    return computeDistancesToBoundaries(selectedBuilding, boundaryObjects);
+  }, [selectedBuilding, boundaryObjects]);
+
+  // Summary of tested buildings (Projektowane)
+  const testedBuildingsSummary = useMemo(() => {
+    const tested = buildings.filter((b) => b.isTested && b.category !== 'boundary' && b.isIncluded !== false && b.vertices?.length >= 3);
+    const count = tested.length;
+    let totalPz = 0;
+    let totalPc = 0;
+    let totalVolume = 0;
+
+    for (const b of tested) {
+      const pz = computePolygonArea(b.vertices);
+      const n = b.storeysCount || (b.defaultHeight > 3.5 ? 1 + Math.max(1, Math.round((b.defaultHeight - 3.5) / 2.875)) : 1);
+      const h = b.defaultHeight;
+      totalPz += pz;
+      totalPc += pz * n;
+      totalVolume += pz * h;
+    }
+
+    const estimatedPUM = totalPc * 0.72; // ~72% współczynnik PUM
+    const plotCoverageRatio = totalBoundaryArea > 0 ? (totalPz / totalBoundaryArea) * 100 : 0;
+    const intensityRatio = totalBoundaryArea > 0 ? totalPc / totalBoundaryArea : 0;
+
+    return {
+      count,
+      totalPz,
+      totalPc,
+      totalVolume,
+      estimatedPUM,
+      plotCoverageRatio,
+      intensityRatio,
+    };
+  }, [buildings, totalBoundaryArea]);
+
+  // Toast notification state for copying
+  const [copiedToast, setCopiedToast] = useState<string | null>(null);
+  const showCopiedToast = (msg: string) => {
+    setCopiedToast(msg);
+    setTimeout(() => setCopiedToast(null), 2500);
+  };
 
   // Dimensions connected to selected building only
   const selectedBuildingDimensions = useMemo(() => {
@@ -1038,14 +1094,37 @@ export const App: React.FC = () => {
       prev.map((bldg) => {
         if (bldg.id !== selectedBuildingId) return bldg;
         const updated = { ...bldg, ...fields };
+
+        // Jeśli zmieniono kategorię na 'boundary', zerujemy wysokość
+        if (fields.category === 'boundary') {
+          updated.defaultHeight = 0;
+          updated.isTested = false;
+        }
+
+        // Automatyczne przeliczanie kondygnacji i wysokości
+        const h1 = updated.firstFloorHeight ?? 3.5;
+        const ht = updated.typicalFloorHeight ?? 2.875;
+
+        if (fields.defaultHeight !== undefined && fields.storeysCount === undefined) {
+          // Wylicz liczbę kondygnacji z wysokości
+          const H = fields.defaultHeight;
+          updated.storeysCount = H > h1 ? 1 + Math.max(1, Math.round((H - h1) / ht)) : 1;
+        } else if (fields.storeysCount !== undefined && fields.defaultHeight === undefined) {
+          // Wylicz wysokość z liczby kondygnacji
+          const n = Math.max(1, fields.storeysCount);
+          updated.storeysCount = n;
+          updated.defaultHeight = Number((h1 + (n - 1) * ht).toFixed(2));
+        }
+
         if (
           fields.defaultHeight !== undefined ||
           fields.hWindowBottom !== undefined ||
-          fields.isCityCentre !== undefined
+          fields.isCityCentre !== undefined ||
+          fields.category !== undefined
         ) {
           updated.segments = updated.segments.map((s) => ({
             ...s,
-            hTop: fields.defaultHeight ?? s.hTop,
+            hTop: updated.defaultHeight ?? s.hTop,
             hWindowBottom: fields.hWindowBottom ?? s.hWindowBottom,
             isCityCentre: fields.isCityCentre ?? s.isCityCentre,
           }));
@@ -2008,6 +2087,66 @@ export const App: React.FC = () => {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {/* Wybór kategorii obiektu: Budynek / Granica / (Balkon) */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                          Kategoria obiektu
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedBuilding({ category: 'building' })}
+                            style={{
+                              padding: '6px 8px',
+                              borderRadius: '6px',
+                              border: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony'
+                                ? '1px solid #818cf8'
+                                : '1px solid var(--border-light)',
+                              backgroundColor: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony'
+                                ? 'rgba(99, 102, 241, 0.25)'
+                                : 'var(--bg-input)',
+                              color: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony' ? '#e0e7ff' : '#94a3b8',
+                              fontWeight: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony' ? 700 : 500,
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <Building size={13} />
+                            <span>Budynek</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => updateSelectedBuilding({ category: 'boundary', defaultHeight: 0, isTested: false })}
+                            style={{
+                              padding: '6px 8px',
+                              borderRadius: '6px',
+                              border: selectedBuilding.category === 'boundary'
+                                ? '1px solid #ef4444'
+                                : '1px solid var(--border-light)',
+                              backgroundColor: selectedBuilding.category === 'boundary'
+                                ? 'rgba(239, 68, 68, 0.25)'
+                                : 'var(--bg-input)',
+                              color: selectedBuilding.category === 'boundary' ? '#fca5a5' : '#94a3b8',
+                              fontWeight: selectedBuilding.category === 'boundary' ? 700 : 500,
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <Square size={13} />
+                            <span>Granica</span>
+                          </button>
+                        </div>
+                      </div>
+
                       <div>
                         <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa</label>
                         <input
@@ -2026,47 +2165,133 @@ export const App: React.FC = () => {
                         />
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                        <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Wysokość H (m)</label>
-                        <input
-                          type="number"
-                          step="0.5"
-                          value={selectedBuilding.defaultHeight}
-                          onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
-                          style={{
-                            width: '80px',
-                            backgroundColor: 'var(--bg-input)',
-                            border: '1px solid var(--border-light)',
-                            borderRadius: '8px',
-                            padding: '6px 8px',
-                            color: '#fff',
-                            fontSize: '12px',
-                            fontWeight: 'bold',
-                            textAlign: 'right',
-                          }}
-                        />
-                      </div>
-
-                      {/* Kąt obrotu obiektu względem głównego układu współrzędnych projektu */}
-                      {(() => {
-                        const currentRotDeg = selectedBuilding.transform?.rotationDeg !== undefined
-                          ? selectedBuilding.transform.rotationDeg
-                          : selectedBuilding.segments.length > 0
-                          ? Number((((selectedBuilding.segments[0].angleRad * 180) / Math.PI + 360) % 360).toFixed(1))
-                          : 0;
-
-                        return (
+                      {/* Pola specyficzne dla GRANICY */}
+                      {selectedBuilding.category === 'boundary' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                            <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }} title="Kąt obrotu obiektu względem osi X (0°) głównego układu współrzędnych projektu">
-                              Obrót (°)
-                            </label>
+                            <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Numer działki</label>
+                            <input
+                              type="text"
+                              placeholder="np. 124/2"
+                              value={selectedBuilding.plotNumber || ''}
+                              onChange={(e) => updateSelectedBuilding({ plotNumber: e.target.value })}
+                              style={{
+                                width: '110px',
+                                backgroundColor: 'var(--bg-input)',
+                                border: '1px solid var(--border-light)',
+                                borderRadius: '8px',
+                                padding: '6px 8px',
+                                color: '#fca5a5',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                textAlign: 'right',
+                              }}
+                            />
+                          </div>
+
+                          <div
+                            style={{
+                              padding: '8px 10px',
+                              borderRadius: '8px',
+                              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              fontSize: '11px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ color: '#94a3b8' }}>Powierzchnia działki:</span>
+                              <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>{selectedBuildingArea.toFixed(1)} m² ({(selectedBuildingArea / 100).toFixed(2)} a)</b>
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#cbd5e1' }}>
+                              • Obrys geodezyjny (nie generuje cienia i kierunków śledzenia fasad).
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Pola specyficzne dla BUDYNKU */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Wysokość H (m)</label>
                             <input
                               type="number"
+                              step="0.5"
+                              value={selectedBuilding.defaultHeight}
+                              onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
+                              style={{
+                                width: '80px',
+                                backgroundColor: 'var(--bg-input)',
+                                border: '1px solid var(--border-light)',
+                                borderRadius: '8px',
+                                padding: '6px 8px',
+                                color: '#fff',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                textAlign: 'right',
+                              }}
+                            />
+                          </div>
+
+                          {/* Kondygnacje: H1, Ht, Liczba kondygnacji */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>Wys. parteru H₁</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={selectedBuilding.firstFloorHeight ?? 3.5}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 3.0;
+                                  updateSelectedBuilding({ firstFloorHeight: val });
+                                }}
+                                style={{
+                                  width: '100%',
+                                  backgroundColor: 'transparent',
+                                  border: '1px solid #475569',
+                                  borderRadius: '5px',
+                                  padding: '4px 6px',
+                                  color: '#cbd5e1',
+                                  fontSize: '11px',
+                                  textAlign: 'right',
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>Kond. typowa Hₜ</label>
+                              <input
+                                type="number"
+                                step="0.05"
+                                value={selectedBuilding.typicalFloorHeight ?? 2.875}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 2.8;
+                                  updateSelectedBuilding({ typicalFloorHeight: val });
+                                }}
+                                style={{
+                                  width: '100%',
+                                  backgroundColor: 'transparent',
+                                  border: '1px solid #475569',
+                                  borderRadius: '5px',
+                                  padding: '4px 6px',
+                                  color: '#cbd5e1',
+                                  fontSize: '11px',
+                                  textAlign: 'right',
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Liczba kondygnacji (N)</label>
+                            <input
+                              type="number"
+                              min="1"
                               step="1"
-                              value={currentRotDeg}
+                              value={selectedBuilding.storeysCount || (selectedBuilding.defaultHeight > (selectedBuilding.firstFloorHeight ?? 3.5) ? 1 + Math.max(1, Math.round((selectedBuilding.defaultHeight - (selectedBuilding.firstFloorHeight ?? 3.5)) / (selectedBuilding.typicalFloorHeight ?? 2.875))) : 1)}
                               onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                handleSetBuildingAbsoluteRotation(selectedBuilding.id, val);
+                                const val = parseInt(e.target.value, 10) || 1;
+                                updateSelectedBuilding({ storeysCount: Math.max(1, val) });
                               }}
                               style={{
                                 width: '80px',
@@ -2074,98 +2299,261 @@ export const App: React.FC = () => {
                                 border: '1px solid var(--border-light)',
                                 borderRadius: '8px',
                                 padding: '6px 8px',
-                                color: '#818cf8',
+                                color: '#38bdf8',
                                 fontSize: '12px',
                                 fontWeight: 'bold',
                                 textAlign: 'right',
-                                fontFamily: 'monospace',
                               }}
                             />
                           </div>
-                        );
-                      })()}
 
-                      {/* Real-world metric dimensions display */}
-                      {(() => {
-                        const xs = selectedBuilding.vertices.map((v) => v.x);
-                        const ys = selectedBuilding.vertices.map((v) => v.y);
-                        const w = Math.max(...xs) - Math.min(...xs);
-                        const h = Math.max(...ys) - Math.min(...ys);
-                        const perimeter = selectedBuilding.segments.reduce((sum, s) => sum + s.length, 0);
-                        const isHuge = w > 200 || h > 200;
+                          {/* Kąt obrotu obiektu względem głównego układu współrzędnych projektu */}
+                          {(() => {
+                            const currentRotDeg = selectedBuilding.transform?.rotationDeg !== undefined
+                              ? selectedBuilding.transform.rotationDeg
+                              : selectedBuilding.segments.length > 0
+                              ? Number((((selectedBuilding.segments[0].angleRad * 180) / Math.PI + 360) % 360).toFixed(1))
+                              : 0;
 
-                        return (
-                          <div
-                            style={{
-                              padding: '8px 10px',
-                              borderRadius: '8px',
-                              backgroundColor: isHuge ? 'rgba(244, 63, 94, 0.15)' : 'rgba(15, 23, 42, 0.7)',
-                              border: `1px solid ${isHuge ? 'rgba(244, 63, 94, 0.35)' : 'var(--border-light)'}`,
-                              fontSize: '11px',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '3px',
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ color: '#94a3b8' }}>Powierzchnia:</span>
-                              <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{selectedBuildingArea.toFixed(1)} m²</b>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ color: '#94a3b8' }}>Rzut (Szer × Głęb):</span>
-                              <b style={{ color: isHuge ? '#fca5a5' : '#38bdf8', fontFamily: 'monospace' }}>
-                                {w.toFixed(2)} m × {h.toFixed(2)} m
-                              </b>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ color: '#94a3b8' }}>Obwód fasad:</span>
-                              <span style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>{perimeter.toFixed(2)} m</span>
-                            </div>
-                            {isHuge && (
-                              <div style={{ fontSize: '10px', color: '#fda4af', marginTop: '2px' }}>
-                                ⚠️ Bardzo duży rzut ({w.toFixed(0)}m)! Jeśli budynek miał mieć np. 10m, zmień jednostkę DXF na <b>cm</b> lub <b>mm</b>.
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }} title="Kąt obrotu obiektu względem osi X (0°) głównego układu współrzędnych projektu">
+                                  Obrót (°)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="1"
+                                  value={currentRotDeg}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    handleSetBuildingAbsoluteRotation(selectedBuilding.id, val);
+                                  }}
+                                  style={{
+                                    width: '80px',
+                                    backgroundColor: 'var(--bg-input)',
+                                    border: '1px solid var(--border-light)',
+                                    borderRadius: '8px',
+                                    padding: '6px 8px',
+                                    color: '#818cf8',
+                                    fontSize: '12px',
+                                    fontWeight: 'bold',
+                                    textAlign: 'right',
+                                    fontFamily: 'monospace',
+                                  }}
+                                />
                               </div>
-                            )}
+                            );
+                          })()}
+
+                          {/* Odległość od granic działki jeśli istnieją */}
+                          {distancesToBoundaries.length > 0 && (
+                            <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.3)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <div style={{ color: '#fca5a5', fontWeight: 600 }}>Odległość od granicy działki:</div>
+                              {distancesToBoundaries.map((d) => (
+                                <div key={d.boundaryId} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ color: '#cbd5e1' }}>{d.boundaryName}:</span>
+                                  <b style={{ color: d.minDistance < 3.0 ? '#f43f5e' : d.minDistance < 4.0 ? '#fbbf24' : '#6ee7b7', fontFamily: 'monospace' }}>
+                                    {d.minDistance.toFixed(2)} m
+                                  </b>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Status Toggle Buttons */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
+                              className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
+                            >
+                              <span>Uwzględnij w kalkulacji</span>
+                              <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
+                              className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
+                            >
+                              <span>Obiekt badany (Projektowany)</span>
+                              <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
+                              className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
+                            >
+                              <span>Zabudowa śródmiejska</span>
+                              <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
+                            </button>
                           </div>
-                        );
-                      })()}
-
-                      {/* Status Toggle Buttons */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                        <button
-                          type="button"
-                          onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
-                          className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
-                        >
-                          <span>Uwzględnij w kalkulacji</span>
-                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
-                          className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
-                        >
-                          <span>Obiekt badany (Projektowany)</span>
-                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
-                          className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
-                        >
-                          <span>Zabudowa śródmiejska</span>
-                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
-                        </button>
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
                   <div className="ui-card" style={{ textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
-                    Kliknij dowolny budynek na rzucie CAD, aby edytować jego parametry.
+                    Kliknij dowolny obiekt na rzucie CAD, aby edytować jego parametry.
                   </div>
                 )}
+
+                {/* 2.2 Kafelek Informacyjny: Bilans Powierzchni & Kubatury */}
+                <div className="ui-card">
+                  <div className="ui-title">
+                    <span>Informacje i bilans powierzchni</span>
+                    <FileSpreadsheet size={14} color="#10b981" />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px' }}>
+                    {/* Sekcja Obiektu Wybranego (jeśli wybrano budynek) */}
+                    {selectedBuilding && selectedBuilding.category !== 'boundary' && (() => {
+                      const pz = selectedBuildingArea;
+                      const n = selectedBuilding.storeysCount || (selectedBuilding.defaultHeight > (selectedBuilding.firstFloorHeight ?? 3.5) ? 1 + Math.max(1, Math.round((selectedBuilding.defaultHeight - (selectedBuilding.firstFloorHeight ?? 3.5)) / (selectedBuilding.typicalFloorHeight ?? 2.875))) : 1);
+                      const pc = pz * n;
+                      const vol = pz * selectedBuilding.defaultHeight;
+                      const pum = pc * 0.72;
+
+                      return (
+                        <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontWeight: 700, color: '#e0e7ff', marginBottom: '2px', display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Wybrany: {selectedBuilding.name}</span>
+                            <span style={{ color: '#38bdf8' }}>{n} kond.</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#94a3b8' }}>Powierzchnia zabudowy (Pz):</span>
+                            <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{pz.toFixed(1)} m²</b>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#94a3b8' }}>Powierzchnia całkowita (Pc):</span>
+                            <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{pc.toFixed(1)} m²</b>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#94a3b8' }}>Kubatura brutto (V):</span>
+                            <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{vol.toFixed(1)} m³</b>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#94a3b8' }}>Szacowany PUM (~72%):</span>
+                            <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{pum.toFixed(1)} m²</b>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Sekcja Podsumowania Budynków Projektowanych */}
+                    <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontWeight: 700, color: '#a5b4fc', marginBottom: '2px' }}>
+                        Łącznie obiekty badane ({testedBuildingsSummary.count} szt.)
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#94a3b8' }}>Łączna pow. zabudowy (Pz):</span>
+                        <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{testedBuildingsSummary.totalPz.toFixed(1)} m²</b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#94a3b8' }}>Łączna pow. całkowita (Pc):</span>
+                        <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{testedBuildingsSummary.totalPc.toFixed(1)} m²</b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#94a3b8' }}>Łączna kubatura (V):</span>
+                        <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{testedBuildingsSummary.totalVolume.toFixed(1)} m³</b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#94a3b8' }}>Łączny szacowany PUM:</span>
+                        <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{testedBuildingsSummary.estimatedPUM.toFixed(1)} m²</b>
+                      </div>
+                    </div>
+
+                    {/* Sekcja Działek i Wskaźników Urbanistycznych */}
+                    <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: '2px' }}>
+                        Działki ewidencyjne ({boundaryObjects.length} szt.)
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#94a3b8' }}>Łączna pow. działek (Pdz):</span>
+                        <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>
+                          {totalBoundaryArea > 0 ? `${totalBoundaryArea.toFixed(1)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak zdefiniowanych działek'}
+                        </b>
+                      </div>
+                      {totalBoundaryArea > 0 && (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#94a3b8' }}>Wskaźnik pow. zabudowy:</span>
+                            <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%</b>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#94a3b8' }}>Wskaźnik intensywności:</span>
+                            <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityRatio.toFixed(2)}</b>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Klawisz kopiowania do clipboard danych powierzchniowych */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const lines: string[] = [
+                          '=== ZESTAWIENIE POWIERZCHNI I KUBATURY ===',
+                          `Projektowane budynki: ${testedBuildingsSummary.count}`,
+                          `Powierzchnia zabudowy (Pz): ${testedBuildingsSummary.totalPz.toFixed(1)} m²`,
+                          `Powierzchnia całkowita (Pc): ${testedBuildingsSummary.totalPc.toFixed(1)} m²`,
+                          `Kubatura brutto (V): ${testedBuildingsSummary.totalVolume.toFixed(1)} m³`,
+                          `Szacowany PUM (~72%): ${testedBuildingsSummary.estimatedPUM.toFixed(1)} m²`,
+                        ];
+
+                        if (totalBoundaryArea > 0) {
+                          lines.push(
+                            `Łączna powierzchnia działek (Pdz): ${totalBoundaryArea.toFixed(1)} m²`,
+                            `Wskaźnik powierzchni zabudowy: ${testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%`,
+                            `Wskaźnik intensywności zabudowy: ${testedBuildingsSummary.intensityRatio.toFixed(2)}`
+                          );
+                        }
+
+                        if (selectedBuilding && selectedBuilding.category !== 'boundary') {
+                          lines.push(
+                            '',
+                            `--- Wybrany obiekt: ${selectedBuilding.name} ---`,
+                            `Wysokość H: ${selectedBuilding.defaultHeight} m`,
+                            `Kondygnacje: ${selectedBuilding.storeysCount || 1}`,
+                            `Powierzchnia zabudowy: ${selectedBuildingArea.toFixed(1)} m²`,
+                            `Powierzchnia całkowita: ${(selectedBuildingArea * (selectedBuilding.storeysCount || 1)).toFixed(1)} m²`,
+                            `Kubatura: ${(selectedBuildingArea * selectedBuilding.defaultHeight).toFixed(1)} m³`
+                          );
+                        }
+
+                        navigator.clipboard.writeText(lines.join('\n')).then(() => {
+                          showCopiedToast('Skopiowano zestawienie do schowka!');
+                        }).catch(() => {
+                          showCopiedToast('Nie udało się skopiować.');
+                        });
+                      }}
+                      className="btn-tile active-indigo"
+                      style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px', marginTop: '2px' }}
+                      title="Skopiuj zestawienie danych powierzchniowych i kubaturowych do schowka"
+                    >
+                      <Copy size={13} />
+                      <span style={{ fontWeight: 600 }}>Kopiuj do schowka</span>
+                    </button>
+
+                    {copiedToast && (
+                      <div
+                        style={{
+                          textAlign: 'center',
+                          color: '#6ee7b7',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                          padding: '4px',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(16, 185, 129, 0.4)',
+                        }}
+                      >
+                        {copiedToast}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>

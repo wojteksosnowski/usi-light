@@ -385,7 +385,50 @@ export function evaluateOsnapSnap(options: EvaluateOsnapOptions): OsnapSnapResul
     : activeEdges;
 
   // =========================================================================
+  // PRIORYTET 2: Środek odcinka (Midpoint) - dyskretny punkt charakterystyczny
+  // =========================================================================
+  if (isEnabled('midpoint')) {
+    const midpointsList: { point: Point2D; edge: CachedLineEquation }[] = [];
+    for (const edge of significantEdges) {
+      const midX = (edge.p1.x + edge.p2.x) / 2;
+      const midY = (edge.p1.y + edge.p2.y) / 2;
+      if (
+        Math.abs(mouseWorld.x - midX) <= snapRadiusWorld &&
+        Math.abs(mouseWorld.y - midY) <= snapRadiusWorld
+      ) {
+        midpointsList.push({ point: { x: midX, y: midY }, edge });
+      }
+    }
+
+    const bestMidpoint = findClosestScreenPoint(
+      midpointsList,
+      (item) => item.point,
+      worldToScreen,
+      mouseScreen,
+      screenSnapThresholdPx,
+      (distPx, item, pt) => getEffectiveDist(distPx, 'midpoint', pt, item.edge.objectId)
+    );
+
+    if (bestMidpoint) {
+      return {
+        priority: 2,
+        type: 'midpoint',
+        snappedPoint: bestMidpoint.point,
+        screenDistancePx: bestMidpoint.distPx,
+        label: 'Środek odcinka (Midpoint)',
+        description: `Środek krawędzi ${bestMidpoint.item.edge.objectId}`,
+        sourcePoint: bestMidpoint.point,
+        sourceBuildingId: bestMidpoint.item.edge.objectId,
+        sourceEdgeIndex: bestMidpoint.item.edge.edgeIndex,
+      };
+    }
+  }
+
+  // =========================================================================
   // PRIORYTET 2.5: Rzut prostopadły z punktu bazowego (Perpendicular Drop Snap)
+  // Aktywuje się TYLKO gdy:
+  // 1. Rzut leży w fizycznych granicach odcinka (lub jego bezpośredniego lica)
+  // 2. Kursor myszy faktycznie zbliża się do samej krawędzi lub w bezpośrednie otoczenie punktu rzutu
   // =========================================================================
   if (isEnabled('perpendicular') && acquiredPoints.length > 0) {
     let bestPerp: {
@@ -400,6 +443,16 @@ export function evaluateOsnapSnap(options: EvaluateOsnapOptions): OsnapSnapResul
     for (const anchor of acquiredPoints) {
       for (const edge of significantEdges) {
         const proj = projectPointToLine(anchor.point, edge);
+
+        // 1. Wymagaj, aby rzut padał w odcinek (z minimalną tolerancją 0.05m)
+        if (proj.t < -0.05 || proj.t > edge.length + 0.05) continue;
+
+        // 2. Kursor myszy musi znajdować się blisko samej krawędzi (odległość w rzucie na krawędź)
+        const mouseProj = projectPointToLine(mouseWorld, edge);
+        const sMouseProj = worldToScreen(mouseProj.projectedPoint.x, mouseProj.projectedPoint.y);
+        const distMouseToEdgePx = Math.hypot(mouseScreen.sx - sMouseProj.sx, mouseScreen.sy - sMouseProj.sy);
+        if (distMouseToEdgePx > screenSnapThresholdPx * 1.5) continue;
+
         const sProj = worldToScreen(proj.projectedPoint.x, proj.projectedPoint.y);
         const distPx = Math.hypot(mouseScreen.sx - sProj.sx, mouseScreen.sy - sProj.sy);
         const effDist = getEffectiveDist(distPx, 'perpendicular', proj.projectedPoint, edge.objectId);
@@ -491,47 +544,8 @@ export function evaluateOsnapSnap(options: EvaluateOsnapOptions): OsnapSnapResul
   }
 
   // =========================================================================
-  // PRIORYTET 4: Środek odcinka (Midpoint)
-  // =========================================================================
-  if (isEnabled('midpoint')) {
-    const midpointsList: { point: Point2D; edge: CachedLineEquation }[] = [];
-    for (const edge of significantEdges) {
-      const midX = (edge.p1.x + edge.p2.x) / 2;
-      const midY = (edge.p1.y + edge.p2.y) / 2;
-      if (
-        Math.abs(mouseWorld.x - midX) <= snapRadiusWorld &&
-        Math.abs(mouseWorld.y - midY) <= snapRadiusWorld
-      ) {
-        midpointsList.push({ point: { x: midX, y: midY }, edge });
-      }
-    }
-
-    const bestMidpoint = findClosestScreenPoint(
-      midpointsList,
-      (item) => item.point,
-      worldToScreen,
-      mouseScreen,
-      screenSnapThresholdPx,
-      (distPx, item, pt) => getEffectiveDist(distPx, 'midpoint', pt, item.edge.objectId)
-    );
-
-    if (bestMidpoint) {
-      return {
-        priority: 4,
-        type: 'midpoint',
-        snappedPoint: bestMidpoint.point,
-        screenDistancePx: bestMidpoint.distPx,
-        label: 'Środek odcinka (Midpoint)',
-        description: `Środek krawędzi ${bestMidpoint.item.edge.objectId}`,
-        sourcePoint: bestMidpoint.point,
-        sourceBuildingId: bestMidpoint.item.edge.objectId,
-        sourceEdgeIndex: bestMidpoint.item.edge.edgeIndex,
-      };
-    }
-  }
-
-  // =========================================================================
   // PRIORYTET 5: Krawędź / Przedłużenie (Nearest / Extension Snap)
+  // Z surową karą odległościową (+5px) oraz strefą martwą wokół wierzchołków i środków
   // =========================================================================
   if (isEnabled('nearest') || isEnabled('extension')) {
     let bestEdgeSnap: {
@@ -557,8 +571,26 @@ export function evaluateOsnapSnap(options: EvaluateOsnapOptions): OsnapSnapResul
         if (proj.isOnSegment && !isEnabled('nearest')) continue;
         if (!proj.isOnSegment && !isEnabled('extension')) continue;
 
+        // Jeśli kursor jest w pobliżu wierzchołków lub środka tej krawędzi (promień 14px),
+        // wygaszamy 'nearest', aby nie blokować dyskretnego przyciągania do wierzchołka/środka
+        if (proj.isOnSegment && isEnabled('nearest')) {
+          const sP1 = worldToScreen(edge.p1.x, edge.p1.y);
+          const sP2 = worldToScreen(edge.p2.x, edge.p2.y);
+          const sMid = worldToScreen((edge.p1.x + edge.p2.x) / 2, (edge.p1.y + edge.p2.y) / 2);
+          const dP1 = Math.hypot(mouseScreen.sx - sP1.sx, mouseScreen.sy - sP1.sy);
+          const dP2 = Math.hypot(mouseScreen.sx - sP2.sx, mouseScreen.sy - sP2.sy);
+          const dMid = Math.hypot(mouseScreen.sx - sMid.sx, mouseScreen.sy - sMid.sy);
+
+          if (dP1 <= screenSnapThresholdPx || dP2 <= screenSnapThresholdPx || dMid <= screenSnapThresholdPx) {
+            // Ustąp pierwszeństwa punktom charakterystycznym
+            continue;
+          }
+        }
+
         const snapType: OsnapSnapType = proj.isOnSegment ? 'nearest' : 'extension';
-        const effDist = getEffectiveDist(distPx, snapType, proj.projectedPoint, edge.objectId);
+        // Kara odległościowa dla ciągłej krawędzi (+4 px), by preferować punkty dyskretne
+        const priorityPenalty = snapType === 'nearest' ? 4.0 : 0.0;
+        const effDist = getEffectiveDist(distPx, snapType, proj.projectedPoint, edge.objectId) + priorityPenalty;
 
         if (effDist <= minEdgeDist) {
           minEdgeDist = effDist;
