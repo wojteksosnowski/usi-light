@@ -85,5 +85,26 @@ export const APP_CONFIG = {
     badgeBgColor: 'rgba(15, 23, 42, 0.92)',
     badgeBorderColor: '#38bdf8',
   },
+
+  // Zaawansowany silnik OSNAP & OTRACK
+  osnap: {
+    enabledDefault: true,
+    snapRadiusPx: 14, // Promień łapania punktu snap w px
+    hoverAcquireDelayMs: 300, // Czas zatrzymania kursora dla nabycia punktu OTRACK (ms)
+    maxAcquiredPoints: 2, // Maksymalna liczba punktów referencyjnych OTRACK
+    collinearDistanceToleranceMeters: 0.35, // Dociąganie nośnika ścian (Collinear Lock)
+    parallelAngleToleranceDeg: 0.8, // Dociąganie kątowe ścian (Parallel Snap)
+    rayLengthMeters: 100.0,
+    // Kolory i style wskaźników CAD
+    endpointColor: '#10b981', // Zielony kwadrat
+    midpointColor: '#06b6d4', // Cyjanowy trójkąt
+    intersectionColor: '#f43f5e', // Różowy krzyżyk/klepsydra
+    nearestColor: '#38bdf8', // Błękitna klepsydra
+    extensionColor: '#38bdf8', // Błękitna linia przedłużenia
+    otrackAnchorColor: '#f59e0b', // Bursztynowy okrąg akwizycji
+    otrackRayColor: '#818cf8', // Fioletowo-niebieski promień śledzący
+    collinearColor: '#a855f7', // Fioletowa linia blokady kolinearnej
+  },
 } as const;
+
 

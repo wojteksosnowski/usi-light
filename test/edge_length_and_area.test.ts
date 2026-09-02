@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computePolygonArea, adjustEdgeLength } from '../src/utils/math2d';
+import { computePolygonArea, adjustEdgeLength, computeBuildingsUnionArea } from '../src/utils/math2d';
 import { Point2D } from '../src/types/geometry';
 
 describe('Polygon Area and Edge Length Adjustment', () => {
@@ -123,8 +123,53 @@ describe('Polygon Area and Edge Length Adjustment', () => {
     }
     const tTotal = performance.now() - tStart;
     const avgPerAdjustmentMs = tTotal / adjustmentsCount;
-
     // Must be well under 0.5ms per adjustment (sub-millisecond 60 FPS guarantee)
     expect(avgPerAdjustmentMs).toBeLessThan(0.5);
   });
+
+  it('computes union area of multiple buildings correctly without double-counting overlaps', () => {
+    // bldg1: 10x10 at (0,0) -> area 100
+    const bldg1 = {
+      vertices: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+    };
+
+    // bldg2: disjoint 10x10 at (20,0) -> area 100 => total 200
+    const bldg2 = {
+      vertices: [
+        { x: 20, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 10 },
+        { x: 20, y: 10 },
+      ],
+    };
+    expect(computeBuildingsUnionArea([bldg1, bldg2])).toBeCloseTo(200, 2);
+
+    // bldg3: overlapping 10x10 at (5,0) -> overlaps bldg1 by 5x10 (50 m²) => union area 150
+    const bldg3 = {
+      vertices: [
+        { x: 5, y: 0 },
+        { x: 15, y: 0 },
+        { x: 15, y: 10 },
+        { x: 5, y: 10 },
+      ],
+    };
+    expect(computeBuildingsUnionArea([bldg1, bldg3])).toBeCloseTo(150, 2);
+
+    // bldg4: totally inside bldg1 (2x2 at (2,2)) => union area is still 100
+    const bldg4 = {
+      vertices: [
+        { x: 2, y: 2 },
+        { x: 4, y: 2 },
+        { x: 4, y: 4 },
+        { x: 2, y: 4 },
+      ],
+    };
+    expect(computeBuildingsUnionArea([bldg1, bldg4])).toBeCloseTo(100, 2);
+  });
 });
+

@@ -36,6 +36,8 @@ import {
   computeLinearDimension,
   computeAngularDimension,
   computePolygonArea,
+  computeBuildingsUnionArea,
+  booleanUnionBuildings,
 } from './utils/math2d';
 import { rebuildBuildingSegments, analyzeSegmentsStatistics } from './utils/segmentStatistics';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
@@ -81,7 +83,9 @@ import {
   Copy,
   Compass,
   Magnet,
+  Combine,
 } from 'lucide-react';
+
 
 export type AccuracyStage = 'live' | 'stage1' | 'stage2' | 'final';
 
@@ -99,7 +103,7 @@ type SavedScene = {
   selectedLayerName: string | null;
   isLinkingMode: boolean;
   linkingSourceId: string | null;
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
   dimensions: DimensionItem[];
   isEditMode: boolean;
   isDimensionToolActive: boolean;
@@ -113,6 +117,8 @@ type SavedScene = {
   selectedCity: string;
   mapsInput: string;
   mapsParseError: boolean;
+  isDirectionSnappingActive?: boolean;
+  isOsnapActive?: boolean;
   viewRotationDeg: number;
   savedViewRotationDeg: number;
   dxfUnit: DxfUnitOption;
@@ -141,6 +147,15 @@ export const App: React.FC = () => {
     APP_CONFIG.directionSnapping.enabledDefault
   );
 
+  // OSNAP Geometry Snapping State (Wierzchołki, Środki, Krawędzie, OTRACK)
+  const [isOsnapActive, setIsOsnapActive] = useState<boolean>(
+    APP_CONFIG.osnap?.enabledDefault ?? true
+  );
+  const handleToggleOsnap = useCallback(() => {
+    setIsOsnapActive((prev) => !prev);
+  }, []);
+
+
 
   // CAD Layers Settings & Selection State
   const [layerSettings, setLayerSettings] = useState<Record<string, CadLayerSettings>>({});
@@ -150,9 +165,12 @@ export const App: React.FC = () => {
   const [isLinkingMode, setIsLinkingMode] = useState<boolean>(false);
   const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
 
-  // Drawing Tools State (Rectangle, Polyline, Vertex Edit & Rotate)
-  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate'>('none');
+  // Drawing Tools State (Rectangle, Polyline, Vertex Edit, Rotate, Union)
+  const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union'>('none');
+  const [rotateInitialBuildingsSnapshot, setRotateInitialBuildingsSnapshot] = useState<BuildingLoop[] | null>(null);
+
   const [facadePointMode, setFacadePointMode] = useState<boolean>(false);
+
   const [drawingVerticesCount, setDrawingVerticesCount] = useState<number>(0);
 
   // Edge Parallel Editing Mode State
@@ -716,8 +734,6 @@ export const App: React.FC = () => {
 
     setBuildings((prev) => [...prev, duplicate]);
     setSelectedBuildingId(newId);
-    setPinnedPoints([]);
-    setActivePinnedPointId(null);
   };
 
   // Delete building handler
@@ -745,8 +761,14 @@ export const App: React.FC = () => {
     }
   };
 
-  // Finish drawing new building from canvas (Rectangle / Polyline)
+  // Finish drawing new building from canvas (Rectangle / Polyline / Commit Rotate)
   const handleFinishDrawing = (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => {
+    if (drawingMode === 'rotate') {
+      setRotateInitialBuildingsSnapshot(null);
+      setDrawingMode('none');
+      setDrawingVerticesCount(0);
+      return;
+    }
     if (vertices.length < 3) return;
     const defaultHeight = 15.0;
     const count = buildings.length + 1;
@@ -765,11 +787,39 @@ export const App: React.FC = () => {
     handleAddPinnedPoint({ buildingId, segmentId, offsetRatio });
   };
 
-  // Cancel active drawing mode
+  // Cancel active drawing mode (reverting rotation if rotating)
   const handleCancelDrawing = () => {
+    if (drawingMode === 'rotate' && rotateInitialBuildingsSnapshot) {
+      setBuildings(rotateInitialBuildingsSnapshot);
+      setRotateInitialBuildingsSnapshot(null);
+    }
     setDrawingMode('none');
     setDrawingVerticesCount(0);
   };
+
+
+  // Boolean Union of two buildings
+  const handleBooleanUnion = useCallback(
+    (bldgIdA: string, bldgIdB: string) => {
+      const bA = buildings.find((b) => b.id === bldgIdA);
+      const bB = buildings.find((b) => b.id === bldgIdB);
+      if (!bA || !bB) return;
+
+      const res = booleanUnionBuildings(bA, bB);
+      if (res.success && res.building) {
+        setBuildings((prev) => [
+          ...prev.filter((b) => b.id !== bldgIdA && b.id !== bldgIdB),
+          res.building!,
+        ]);
+        setSelectedBuildingId(res.building.id);
+        setDrawingMode('none');
+      } else {
+        alert(res.error || 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.');
+      }
+    },
+    [buildings]
+  );
+
 
   // Update vertices for active building from vertex edit mode
   const handleUpdateBuildingVertices = (buildingId: string, newVertices: Point2D[]) => {
@@ -842,12 +892,18 @@ export const App: React.FC = () => {
 
   // Active CAD layers from current buildings
   const activeCadLayers = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, BuildingLoop[]>();
     buildings.forEach((b) => {
       const lyr = b.layer || 'Domyślna (0)';
-      map.set(lyr, (map.get(lyr) || 0) + 1);
+      const list = map.get(lyr) || [];
+      list.push(b);
+      map.set(lyr, list);
     });
-    return Array.from(map.entries()).map(([name, count]) => ({ name, count }));
+    return Array.from(map.entries()).map(([name, bldgs]) => ({
+      name,
+      count: bldgs.length,
+      area: computeBuildingsUnionArea(bldgs),
+    }));
   }, [buildings]);
 
   // Ensure selectedLayerName is valid
@@ -1144,6 +1200,12 @@ export const App: React.FC = () => {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
           target.isContentEditable);
+
+      if (e.key === 'F3' || (e.shiftKey && (e.key === 'S' || e.key === 's') && !isTypingTarget)) {
+        e.preventDefault();
+        setIsOsnapActive((prev) => !prev);
+        return;
+      }
 
       if (e.key === 'Escape') {
         // Poziom 1: Anulowanie / wyłączenie aktywnego narzędzia
@@ -1684,19 +1746,32 @@ export const App: React.FC = () => {
                               >
                                 {lyr.name}
                               </span>
-                              <span
-                                style={{
-                                  fontSize: '10px',
-                                  color: '#64748b',
-                                  backgroundColor: 'rgba(30, 41, 59, 0.6)',
-                                  padding: '1px 5px',
-                                  borderRadius: '4px',
-                                  fontWeight: 600,
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {lyr.count}
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                <span
+                                  style={{
+                                    fontSize: '10px',
+                                    color: '#cbd5e1',
+                                    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {lyr.count} {lyr.count === 1 ? 'ob.' : 'ob.'}
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: '10px',
+                                    color: '#38bdf8',
+                                    backgroundColor: 'rgba(14, 165, 233, 0.12)',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {lyr.area.toFixed(1)} m²
+                                </span>
+                              </div>
                             </div>
 
                             {/* 3 Action Controls: Kłódka, Duch, Żarówka */}
@@ -1793,10 +1868,29 @@ export const App: React.FC = () => {
                             borderTop: '1px dashed var(--border-light)',
                           }}
                         >
+                          {/* Layer Total Surface Area (Boolean Union) */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 8px',
+                              backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-light)',
+                              fontSize: '11px',
+                            }}
+                          >
+                            <span style={{ color: '#94a3b8' }}>Powierzchnia warstwy:</span>
+                            <span style={{ color: '#38bdf8', fontWeight: 700, fontFamily: 'monospace' }}>
+                              {computeBuildingsUnionArea(layerBuildings).toFixed(2)} m²
+                            </span>
+                          </div>
+
                           {/* Height H for all buildings on layer */}
-                          <div>
-                            <label style={{ display: 'block', fontSize: '10.5px', color: '#94a3b8', marginBottom: '3px' }}>
-                              Wysokość H dla całej warstwy (m)
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                              Wysokość H dla warstwy (m)
                             </label>
                             <input
                               type="number"
@@ -1807,7 +1901,7 @@ export const App: React.FC = () => {
                                 handleUpdateLayerBuildings(selectedLayerName, { defaultHeight: val });
                               }}
                               style={{
-                                width: '100%',
+                                width: '80px',
                                 backgroundColor: 'var(--bg-input)',
                                 border: '1px solid var(--border-light)',
                                 borderRadius: '6px',
@@ -1816,6 +1910,7 @@ export const App: React.FC = () => {
                                 fontWeight: 'bold',
                                 fontFamily: 'monospace',
                                 fontSize: '12px',
+                                textAlign: 'right',
                               }}
                             />
                           </div>
@@ -1871,7 +1966,7 @@ export const App: React.FC = () => {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa bryły</label>
+                        <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa</label>
                         <input
                           type="text"
                           value={selectedBuilding.name}
@@ -1888,22 +1983,23 @@ export const App: React.FC = () => {
                         />
                       </div>
 
-                      <div style={{ marginBottom: '10px' }}>
-                        <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Wysokość przesłaniania H (m)</label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Wysokość H (m)</label>
                         <input
                           type="number"
                           step="0.5"
                           value={selectedBuilding.defaultHeight}
                           onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
                           style={{
-                            width: '100%',
+                            width: '80px',
                             backgroundColor: 'var(--bg-input)',
                             border: '1px solid var(--border-light)',
                             borderRadius: '8px',
-                            padding: '7px 10px',
+                            padding: '6px 8px',
                             color: '#fff',
                             fontSize: '12px',
                             fontWeight: 'bold',
+                            textAlign: 'right',
                           }}
                         />
                       </div>
@@ -2022,22 +2118,42 @@ export const App: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    {/* Przełącznik Śledzenia Kierunków i Snapowania */}
-                    <button
-                      type="button"
-                      onClick={() => setIsDirectionSnappingActive(!isDirectionSnappingActive)}
-                      className={`btn-tile ${isDirectionSnappingActive ? 'active-indigo' : 'inactive'}`}
-                      style={{ padding: '7px 10px', justifyContent: 'space-between', marginBottom: '4px' }}
-                      title="Włącz / wyłącz inteligentne śledzenie kierunków (równoległe, prostopadłe 90° i osie dominujące)"
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Compass size={14} color={isDirectionSnappingActive ? '#818cf8' : '#64748b'} />
-                        <span style={{ fontWeight: 600 }}>Śledzenie kierunków</span>
-                      </div>
-                      <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                        {isDirectionSnappingActive ? 'WŁ' : 'WYŁ'}
-                      </span>
-                    </button>
+                    {/* Rząd przełączników: Dociąganie oraz Śledzenie */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px', marginBottom: '4px' }}>
+                      {/* Kontrolka Dociągania (OSNAP) */}
+                      <button
+                        type="button"
+                        onClick={handleToggleOsnap}
+                        className={`btn-tile ${isOsnapActive ? 'active-emerald' : 'inactive'}`}
+                        style={{ padding: '7px 8px', justifyContent: 'space-between' }}
+                        title="Włącz / wyłącz dociąganie geometryczne [F3] (wierzchołki, środki, krawędzie, przecięcia OTRACK)"
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <Magnet size={13} color={isOsnapActive ? '#10b981' : '#64748b'} />
+                          <span style={{ fontWeight: 600, fontSize: '11px' }}>Dociąganie [F3]</span>
+                        </div>
+                        <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                          {isOsnapActive ? 'WŁ' : 'WYŁ'}
+                        </span>
+                      </button>
+
+                      {/* Przełącznik Śledzenia */}
+                      <button
+                        type="button"
+                        onClick={() => setIsDirectionSnappingActive(!isDirectionSnappingActive)}
+                        className={`btn-tile ${isDirectionSnappingActive ? 'active-indigo' : 'inactive'}`}
+                        style={{ padding: '7px 8px', justifyContent: 'space-between' }}
+                        title="Włącz / wyłącz inteligentne śledzenie kątowe i kierunków (równoległe, prostopadłe 90° i osie dominujące)"
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#64748b'} />
+                          <span style={{ fontWeight: 600, fontSize: '11px' }}>Śledzenie</span>
+                        </div>
+                        <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                          {isDirectionSnappingActive ? 'WŁ' : 'WYŁ'}
+                        </span>
+                      </button>
+                    </div>
 
                     {/* Rząd 1: Prostokąt, Polilinia */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
@@ -2076,24 +2192,34 @@ export const App: React.FC = () => {
                       </button>
                     </div>
 
-                    {/* Rząd 2: Obrót, Wierzchołki, Krawędzie */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
+                    {/* Rząd 2: Obrót, Wierzchołki, Krawędzie, Suma */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
                       <button
                         type="button"
                         onClick={() => {
-                          setDrawingMode(drawingMode === 'rotate' ? 'none' : 'rotate');
-                          setDrawingVerticesCount(0);
-                          setIsDimensionToolActive(false);
-                          setDimensionPendingRef(null);
-                          setFacadePointMode(false);
+                          if (drawingMode === 'rotate') {
+                            setRotateInitialBuildingsSnapshot(null);
+                            setDrawingMode('none');
+                          } else {
+                            setRotateInitialBuildingsSnapshot(
+                              buildings.map((b) => ({ ...b, vertices: [...b.vertices], segments: [...b.segments] }))
+                            );
+                            setDrawingMode('rotate');
+                            setDrawingVerticesCount(0);
+                            setIsDimensionToolActive(false);
+                            setDimensionPendingRef(null);
+                            setFacadePointMode(false);
+                            setIsEditMode(false);
+                          }
                         }}
                         className={`btn-tile ${drawingMode === 'rotate' ? 'active-indigo' : 'inactive'}`}
                         style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-                        title="Obrót obiektów: przeciągaj wokół przesuwalnego punktu obrotu (obiekty połączone obracają się wspólnie)"
+                        title="Obrót obiektów: chwytaj za narożniki lub przeciągaj wokół punktu obrotu (z dociąganiem i śledzeniem). Enter = zatwierdź, Esc = anuluj."
                       >
                         <RotateCw size={13} />
                         <span style={{ fontWeight: 600 }}>Obrót</span>
                       </button>
+
 
                       <button
                         type="button"
@@ -2129,7 +2255,26 @@ export const App: React.FC = () => {
                         <Maximize2 size={13} />
                         <span style={{ fontWeight: 600 }}>Krawędzie</span>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
+                          setDrawingVerticesCount(0);
+                          setIsDimensionToolActive(false);
+                          setDimensionPendingRef(null);
+                          setFacadePointMode(false);
+                          setIsEditMode(false);
+                        }}
+                        className={`btn-tile ${drawingMode === 'union' ? 'active-indigo' : 'inactive'}`}
+                        style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                        title="Suma (Boolean Union): połącz 2 stykające się lub przenikające obiekty w jeden"
+                      >
+                        <Combine size={13} />
+                        <span style={{ fontWeight: 600 }}>Suma</span>
+                      </button>
                     </div>
+
 
                     {/* Rząd 3: Wymiar, Punkt fasady */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
@@ -2943,10 +3088,31 @@ export const App: React.FC = () => {
           </button>
 
           <button
+            onClick={handleToggleOsnap}
+            title="Włącz / wyłącz dociąganie geometryczne [F3] (wierzchołki, środki, krawędzie, przecięcia OTRACK)"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: isOsnapActive ? '1px solid #10b981' : '1px solid #334155',
+              backgroundColor: isOsnapActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(30, 41, 59, 0.8)',
+              color: isOsnapActive ? '#6ee7b7' : '#94a3b8',
+            }}
+          >
+            <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
+            <span>Dociąganie</span>
+          </button>
+
+          <button
             onClick={() => {
               setIsDirectionSnappingActive((prev) => !prev);
             }}
-            title="Włącz / wyłącz przyciąganie i śledzenie kierunków (równoległe i prostopadłe)"
+            title="Włącz / wyłącz inteligentne śledzenie kątowe i kierunków (równoległe i prostopadłe)"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -2962,8 +3128,10 @@ export const App: React.FC = () => {
             }}
           >
             <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#94a3b8'} />
-            <span>Śledzenie kierunków</span>
+            <span>Śledzenie</span>
           </button>
+
+
 
           <button
             onClick={() => {
@@ -2998,7 +3166,11 @@ export const App: React.FC = () => {
                 return 0;
               });
             }}
-            title="Wróć do domyślnej orientacji układu"
+            title={
+              Math.abs(viewRotationDeg) < 0.001
+                ? 'Przełącz na zapisaną orientację układu'
+                : 'Wróć do domyślnej orientacji układu (0°)'
+            }
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -3008,13 +3180,13 @@ export const App: React.FC = () => {
               fontSize: '11px',
               fontWeight: 600,
               cursor: 'pointer',
-              border: '1px solid #334155',
-              backgroundColor: 'rgba(30, 41, 59, 0.8)',
-              color: '#f8fafc',
+              border: Math.abs(viewRotationDeg) > 0.001 ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid #334155',
+              backgroundColor: Math.abs(viewRotationDeg) > 0.001 ? 'rgba(56, 189, 248, 0.15)' : 'rgba(30, 41, 59, 0.8)',
+              color: Math.abs(viewRotationDeg) > 0.001 ? '#38bdf8' : '#f8fafc',
             }}
           >
             <RotateCcw size={13} />
-            <span>Orientacja domyślna</span>
+            <span>{Math.abs(viewRotationDeg) < 0.001 ? 'Orientacja ustawiona' : 'Orientacja domyślna'}</span>
           </button>
         </div>
 
@@ -3188,7 +3360,9 @@ export const App: React.FC = () => {
             onDrawingVerticesCountChange={setDrawingVerticesCount}
             onUpdateBuildingVertices={handleUpdateBuildingVertices}
             onBuildingRotate={handleBuildingRotate}
+            onBooleanUnion={handleBooleanUnion}
             facadePointMode={facadePointMode}
+
             onFacadePointMove={handleFacadePointMove}
             isEditMode={isEditMode}
             onBuildingEdgeMove={handleBuildingEdgeMove}
@@ -3207,8 +3381,11 @@ export const App: React.FC = () => {
             }}
             onEndViewRotationMode={() => setViewRotationMode(false)}
             isDirectionSnappingActive={isDirectionSnappingActive}
+            isOsnapActive={isOsnapActive}
+            onToggleOsnap={handleToggleOsnap}
             dominantDirections={segmentStats.dominantDirections}
           />
+
         </div>
 
         {/* Floating Point Inspector Modal */}
@@ -3230,8 +3407,17 @@ export const App: React.FC = () => {
         {/* Rotatable Compass Rose (Bottom-Right) */}
         <CompassRose
           rotationDeg={viewRotationDeg}
+          savedRotationDeg={savedViewRotationDeg}
           onResetRotation={() => {
-            setViewRotationDeg(0);
+            setViewRotationDeg((prev) => {
+              if (Math.abs(prev) > 0.001) {
+                setSavedViewRotationDeg(prev);
+                return 0;
+              } else if (Math.abs(savedViewRotationDeg) > 0.001) {
+                return savedViewRotationDeg;
+              }
+              return 0;
+            });
           }}
         />
       </main>

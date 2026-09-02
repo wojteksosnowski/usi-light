@@ -19,9 +19,11 @@ export function useCadHotkeys({
   onEdgeLengthBackspace,
   onCommitEdgeLength,
   onCancelEdgeLength,
+  onToggleOsnap,
 }: {
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
   drawingVertices: Point2D[];
+
   hoveredBuildings: string[];
   selectedVertexIndex?: number | null;
   onDeleteSelectedVertex?: () => void;
@@ -37,6 +39,7 @@ export function useCadHotkeys({
   onEdgeLengthBackspace?: () => void;
   onCommitEdgeLength?: () => void;
   onCancelEdgeLength?: () => void;
+  onToggleOsnap?: () => void;
 }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -105,6 +108,12 @@ export function useCadHotkeys({
         }
       }
 
+      if (e.key === 'F3') {
+        e.preventDefault();
+        onToggleOsnap?.();
+        return;
+      }
+
       if (e.key === 'Escape') {
         if (drawingMode !== 'none' || drawingVertices.length > 0) {
           setDrawingVertices([]);
@@ -116,8 +125,11 @@ export function useCadHotkeys({
           onFinishDrawing?.(drawingVertices, 'polyline');
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
+        } else if (drawingMode === 'rotate') {
+          onFinishDrawing?.([], 'rectangle');
         }
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawingMode === 'vertexEdit') {
+
         if (selectedVertexIndex !== null && selectedVertexIndex !== undefined) {
           e.preventDefault();
           onDeleteSelectedVertex?.();

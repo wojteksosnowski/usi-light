@@ -53,13 +53,16 @@ export interface CadCanvasProps {
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;
   linkingSourceId?: string | null;
-  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate';
+  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
   onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => void;
+
   onCancelDrawing?: () => void;
   onDrawingVerticesCountChange?: (count: number) => void;
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
   onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
+  onBooleanUnion?: (bldgIdA: string, bldgIdB: string) => void;
   pinnedPoints?: import('../../types/geometry').PinnedFacadePoint[];
+
   pinnedPointResults?: AnalysisPointResult[];
   activePinnedPointId?: string | null;
   onSelectPinnedPoint?: (id: string | null) => void;
@@ -82,6 +85,9 @@ export interface CadCanvasProps {
   onViewRotationChange?: (deg: number) => void;
   onEndViewRotationMode?: () => void;
   isDirectionSnappingActive?: boolean;
+  isOsnapActive?: boolean;
+  onToggleOsnap?: () => void;
   dominantDirections?: DominantDirection[];
 }
+
 

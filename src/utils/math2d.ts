@@ -613,6 +613,130 @@ function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
   }
 }
 
+export interface BooleanUnionResult {
+  success: boolean;
+  building?: BuildingLoop;
+  error?: string;
+}
+
+/**
+ * Wykonuje operację sumy boolowskiej (Boolean Union) na dwóch bryłach budynków.
+ * Wymaga, aby obiekty się stykały (wspólna krawędź) lub przenikały (nachodzenie powierzchni).
+ */
+export function booleanUnionBuildings(
+  bldgA: BuildingLoop,
+  bldgB: BuildingLoop
+): BooleanUnionResult {
+  if (!bldgA || !bldgB || !bldgA.vertices || !bldgB.vertices) {
+    return { success: false, error: 'Nieprawidłowe obiekty wejściowe.' };
+  }
+  if (bldgA.vertices.length < 3 || bldgB.vertices.length < 3) {
+    return { success: false, error: 'Obiekty muszą posiadać co najmniej 3 wierzchołki.' };
+  }
+
+  const polyA: [number, number][] = bldgA.vertices.map((v) => [v.x, v.y]);
+  const polyB: [number, number][] = bldgB.vertices.map((v) => [v.x, v.y]);
+
+  if (polyA[0][0] !== polyA[polyA.length - 1][0] || polyA[0][1] !== polyA[polyA.length - 1][1]) {
+    polyA.push([polyA[0][0], polyA[0][1]]);
+  }
+  if (polyB[0][0] !== polyB[polyB.length - 1][0] || polyB[0][1] !== polyB[polyB.length - 1][1]) {
+    polyB.push([polyB[0][0], polyB[0][1]]);
+  }
+
+  try {
+    const unionRes = polygonClipping.union([[polyA]], [[polyB]]);
+    if (!unionRes || unionRes.length === 0) {
+      return { success: false, error: 'Nie udało się połączyć obiektów.' };
+    }
+
+    // Jeśli wynikiem jest więcej niż 1 poligon -> obiekty są rozłączne (brak styku / przenikania)
+    if (unionRes.length > 1) {
+      return {
+        success: false,
+        error: 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.',
+      };
+    }
+
+    const outerRing = unionRes[0][0];
+    if (!outerRing || outerRing.length < 4) {
+      return { success: false, error: 'Wynik sumy nie tworzy poprawnego wielokąta.' };
+    }
+
+    // Usunięcie domknięcia (ostatni punkt równy pierwszemu)
+    const isClosed =
+      outerRing[0][0] === outerRing[outerRing.length - 1][0] &&
+      outerRing[0][1] === outerRing[outerRing.length - 1][1];
+    const pointsRaw = isClosed ? outerRing.slice(0, -1) : outerRing;
+    const vertices: Point2D[] = pointsRaw.map(([x, y]) => ({ x, y }));
+
+    // Upewnij się, że wielokąt jest CCW (zgodny z konwencją CAD / obliczeń cienia)
+    const isCCW = isPolygonCCW(vertices);
+    const finalVertices = isCCW ? vertices : [...vertices].reverse();
+
+    // Konstrukcja segmentów i normalnych
+    const newId = `bldg-union-${Date.now().toString(36)}`;
+    const maxHeight = Math.max(bldgA.defaultHeight || 15, bldgB.defaultHeight || 15);
+    const mergedName = `${bldgA.name || 'Obiekt'} + ${bldgB.name || 'Obiekt'}`;
+
+    const segments: import('../types/geometry').FacadeSegment[] = [];
+
+    const n = finalVertices.length;
+    for (let i = 0; i < n; i++) {
+      const p1 = finalVertices[i];
+      const p2 = finalVertices[(i + 1) % n];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy);
+      const normal = calculateOutwardNormal(p1, p2, isCCW);
+      segments.push({
+        id: `${newId}-seg-${i + 1}`,
+        p1,
+        p2,
+        normal,
+        length: len,
+        angleRad: Math.atan2(dy, dx),
+        hTop: maxHeight,
+        hWindowBottom: bldgA.hWindowBottom ?? 0.85,
+        isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
+        buildingType: bldgA.buildingType || 'residential',
+      });
+    }
+
+    const mergedBuilding: BuildingLoop = {
+      id: newId,
+      name: mergedName,
+      layer: bldgA.layer || 'Domyślna (0)',
+      isTested: bldgA.isTested || bldgB.isTested || false,
+      isIncluded: true,
+      isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
+      buildingType: bldgA.buildingType || 'residential',
+      defaultHeight: maxHeight,
+      hWindowBottom: bldgA.hWindowBottom ?? 0.85,
+      vertices: finalVertices,
+      segments,
+      isClockwise: !isCCW,
+      transform: {
+        tx: 0,
+        ty: 0,
+        rotationDeg: 0,
+      },
+    };
+
+    return {
+      success: true,
+      building: mergedBuilding,
+    };
+
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Błąd podczas łączenia wielokątów: ${err?.message || 'Nieznany błąd'}`,
+    };
+  }
+}
+
+
 /**
  * Wyznacza sumę boolowską (Boolean Union) zakresów cienia wszystkich obiektów badanych.
  * Zwraca tablicę pętli konturów (Point2D[][]), zachowując rozłączne obiekty, wcięcia i otwory.
@@ -1037,6 +1161,49 @@ export function computePolygonArea(vertices: Point2D[]): number {
     area += vertices[i].x * vertices[j].y - vertices[j].x * vertices[i].y;
   }
   return Math.abs(area) / 2;
+}
+
+/**
+ * Oblicza łączną powierzchnię 2D zbioru obiektów / wielokątów z uwzględnieniem sumy boolowskiej
+ * (nakładające się fragmenty nie są liczone podwójnie, otwory są odejmowane).
+ */
+export function computeBuildingsUnionArea(buildings: Array<{ vertices: Point2D[] }>): number {
+  if (!buildings || buildings.length === 0) return 0;
+
+  const validPolys = buildings
+    .map((b) => b.vertices)
+    .filter((v) => Array.isArray(v) && v.length >= 3);
+
+  if (validPolys.length === 0) return 0;
+  if (validPolys.length === 1) return computePolygonArea(validPolys[0]);
+
+  const clippingPolys: [number, number][][][] = [];
+  for (const poly of validPolys) {
+    const ring: [number, number][] = poly.map((p) => [p.x, p.y]);
+    if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) {
+      ring.push([ring[0][0], ring[0][1]]);
+    }
+    clippingPolys.push([ring]);
+  }
+
+  try {
+    const unionResult = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
+    let totalArea = 0;
+
+    for (const polygon of unionResult) {
+      if (!Array.isArray(polygon) || polygon.length === 0) continue;
+      const outerRing = polygon[0];
+      totalArea += computePolygonArea(outerRing.map(([x, y]) => ({ x, y })));
+
+      for (let i = 1; i < polygon.length; i++) {
+        const holeRing = polygon[i];
+        totalArea -= computePolygonArea(holeRing.map(([x, y]) => ({ x, y })));
+      }
+    }
+    return Math.max(0, totalArea);
+  } catch {
+    return validPolys.reduce((sum, p) => sum + computePolygonArea(p), 0);
+  }
 }
 
 /**

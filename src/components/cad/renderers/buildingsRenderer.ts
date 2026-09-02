@@ -30,8 +30,10 @@ export function renderBuildings(
   activePinnedPointId?: string | null,
   liveFacadeSnap?: { point: { x: number; y: number }; buildingId: string; segmentId: string; ratio: number } | null,
   facadePointMode?: boolean,
-  isVertexEditMode?: boolean
+  isVertexEditMode?: boolean,
+  isRotateMode?: boolean
 ) {
+
   const { ctx, worldToScreen } = rc;
 
   // 0. Render Dashed Ghost Preview for Edge Length Editing
@@ -66,9 +68,6 @@ export function renderBuildings(
     const isIncluded = bldg.isIncluded !== false;
 
     ctx.save();
-    if (isGhosted) {
-      ctx.globalAlpha = 0.35;
-    }
 
     // Filled Polygon Body
     ctx.beginPath();
@@ -93,6 +92,14 @@ export function renderBuildings(
       ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
     } else if (isSelected) {
       ctx.fillStyle = isTested ? 'rgba(59, 130, 246, 0.22)' : 'rgba(148, 163, 184, 0.2)';
+    } else if (isGhosted) {
+      if (isTested) {
+        ctx.fillStyle = 'rgba(96, 165, 250, 0.14)';
+      } else if (isIncluded) {
+        ctx.fillStyle = 'rgba(51, 65, 85, 0.25)';
+      } else {
+        ctx.fillStyle = 'rgba(71, 85, 105, 0.20)';
+      }
     } else if (isTested) {
       ctx.fillStyle = isIncluded ? 'rgba(96, 165, 250, 0.12)' : 'rgba(100, 116, 139, 0.08)';
     } else {
@@ -131,9 +138,6 @@ export function renderBuildings(
     const isIncluded = bldg.isIncluded !== false;
 
     ctx.save();
-    if (isGhosted) {
-      ctx.globalAlpha = 0.35;
-    }
 
     if (Array.isArray(bldg.segments)) {
       for (let eIdx = 0; eIdx < bldg.segments.length; eIdx++) {
@@ -151,6 +155,18 @@ export function renderBuildings(
         if (isEdgeHovered) {
           ctx.strokeStyle = '#38bdf8';
           ctx.lineWidth = 4;
+        } else if (isGhosted) {
+          if (isTested) {
+            ctx.strokeStyle = 'rgba(96, 165, 250, 0.55)';
+            ctx.lineWidth = 1.2;
+          } else if (isIncluded) {
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
+            ctx.lineWidth = 1.2;
+          } else {
+            // Delicate visible contour for non-tested non-included ghost
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.50)';
+            ctx.lineWidth = 1.0;
+          }
         } else if (!isIncluded) {
           ctx.strokeStyle = 'rgba(71, 85, 105, 0.4)';
           ctx.lineWidth = 1;
@@ -191,9 +207,10 @@ export function renderBuildings(
         }
 
         // Edge Length Badge on Selected Building (Interactive for editing)
-        // Hidden during vertex editing to not obstruct [+] midpoint vertex insertion
-        if (isSelected && seg.p1 && seg.p2 && !isVertexEditMode) {
+        // Hidden during vertex editing and rotation to not obstruct handles/rotations
+        if (isSelected && seg.p1 && seg.p2 && !isVertexEditMode && !isRotateMode) {
           const isEditingThisEdge =
+
             editingEdgeLength?.buildingId === bldg.id && editingEdgeLength?.edgeIndex === eIdx;
           const isHoveredBadge =
             hoveredEdgeLengthBadge?.buildingId === bldg.id && hoveredEdgeLengthBadge?.edgeIndex === eIdx;
