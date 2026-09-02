@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewportState } from '../types';
 import { BuildingLoop } from '../../../types/geometry';
 
@@ -15,6 +15,46 @@ export function useCadViewport(
     panY: 450,
     scale: 14,
   });
+
+  const prevRotationRef = useRef<number>(viewRotationDeg);
+
+  // Zabezpieczenie środka ekranu przy obrocie widoku (obrót wokół centrum ekranu, a nie wokół (0,0))
+  useEffect(() => {
+    const prevRot = prevRotationRef.current;
+    if (Math.abs(prevRot - viewRotationDeg) > 1e-4) {
+      const container = containerRef.current;
+      const cx = (container?.clientWidth ?? 1000) / 2;
+      const cy = (container?.clientHeight ?? 800) / 2;
+
+      // Punkt w świecie na środku ekranu przed obrotem
+      const rotPrevRad = (prevRot * Math.PI) / 180;
+      const rxPrev = (cx - viewState.panX) / viewState.scale;
+      const ryPrev = -(cy - viewState.panY) / viewState.scale;
+      const cosPrev = Math.cos(-rotPrevRad);
+      const sinPrev = Math.sin(-rotPrevRad);
+      const wx = rxPrev * cosPrev - ryPrev * sinPrev;
+      const wy = rxPrev * sinPrev + ryPrev * cosPrev;
+
+      // Wyznaczenie nowego panX i panY dla nowego kąta
+      const rotNewRad = (viewRotationDeg * Math.PI) / 180;
+      const cosNew = Math.cos(rotNewRad);
+      const sinNew = Math.sin(rotNewRad);
+      const rxNew = wx * cosNew - wy * sinNew;
+      const ryNew = wx * sinNew + wy * cosNew;
+
+      const newPanX = cx - rxNew * viewState.scale;
+      const newPanY = cy + ryNew * viewState.scale;
+
+      prevRotationRef.current = viewRotationDeg;
+      setViewState((prev) => ({
+        ...prev,
+        panX: newPanX,
+        panY: newPanY,
+      }));
+    } else {
+      prevRotationRef.current = viewRotationDeg;
+    }
+  }, [viewRotationDeg, viewState.scale, containerRef]);
 
   const worldToScreen = useCallback(
     (wx: number, wy: number) => {

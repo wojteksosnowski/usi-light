@@ -20,10 +20,10 @@ export function useCadHotkeys({
   onCommitEdgeLength,
   onCancelEdgeLength,
   onToggleOsnap,
+  onStepRotateBuilding,
 }: {
   drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
   drawingVertices: Point2D[];
-
   hoveredBuildings: string[];
   selectedVertexIndex?: number | null;
   onDeleteSelectedVertex?: () => void;
@@ -40,12 +40,20 @@ export function useCadHotkeys({
   onCommitEdgeLength?: () => void;
   onCancelEdgeLength?: () => void;
   onToggleOsnap?: () => void;
+  onStepRotateBuilding?: (direction: 'cw' | 'ccw') => void;
 }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // If actively typing into an HTML input, don't intercept
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea') return;
+      // Don't intercept when user is typing inside an HTML input/textarea
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
 
       if (isEditingEdgeLength) {
         if (e.key === 'Escape') {
@@ -129,7 +137,6 @@ export function useCadHotkeys({
           onFinishDrawing?.([], 'rectangle');
         }
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawingMode === 'vertexEdit') {
-
         if (selectedVertexIndex !== null && selectedVertexIndex !== undefined) {
           e.preventDefault();
           onDeleteSelectedVertex?.();
@@ -141,6 +148,14 @@ export function useCadHotkeys({
         } else if (e.key === ']' || e.key === '}' || e.code === 'BracketRight') {
           e.preventDefault();
           onCycleVertexSelection?.('next');
+        }
+      } else if (drawingMode === 'rotate') {
+        if (e.key === '[' || e.key === '{' || e.code === 'BracketLeft') {
+          e.preventDefault();
+          onStepRotateBuilding?.('ccw');
+        } else if (e.key === ']' || e.key === '}' || e.code === 'BracketRight') {
+          e.preventDefault();
+          onStepRotateBuilding?.('cw');
         }
       } else if (e.key === 'Tab' && hoveredBuildings.length > 1) {
         e.preventDefault();
@@ -154,6 +169,7 @@ export function useCadHotkeys({
     selectedVertexIndex,
     onDeleteSelectedVertex,
     onCycleVertexSelection,
+    onStepRotateBuilding,
     drawingVertices,
     hoveredBuildings,
     onCancelDrawing,
@@ -167,6 +183,6 @@ export function useCadHotkeys({
     onEdgeLengthBackspace,
     onCommitEdgeLength,
     onCancelEdgeLength,
+    onToggleOsnap,
   ]);
 }
-

@@ -8,6 +8,7 @@ export interface DirectionSnapResult {
   originPoint: Point2D;
   guideAngleDeg: number;
   relationType: 'parallel' | 'perpendicular' | 'dominant';
+  isStatistical?: boolean; // true dla siatek głównych i statystycznych, false dla konkretnych krawędzi
   guideLine: { p1: Point2D; p2: Point2D };
   distanceFromOrigin: number;
   diffAngleDeg: number;
@@ -24,6 +25,10 @@ export interface CalculateDirectionSnapOptions {
   angleToleranceDeg?: number;
   screenSnapThresholdPx?: number;
   minDistanceMeters?: number;
+  hoveredBuildingId?: string;
+  selectedBuildingId?: string;
+  excludeBuildingId?: string;
+  excludeSegmentIndices?: number[];
 }
 
 /**
@@ -56,78 +61,110 @@ export function angleDiff180(a1: number, a2: number): number {
 }
 
 /**
- * Gathers candidate target direction axes (in degrees [0, 180)) from:
- * 1. Previously drawn segments of the active polyline.
- * 2. Dominant orthogonal axes from global scene segment statistics.
- * 3. Segments of nearby buildings around origin and mouse.
+ * Gathers candidate target direction axes (in degrees [0, 180)) with strict spatial and hierarchy prioritization:
+ * 1. Active polyline segments (0° parallel and 90° exact perpendicular).
+ * 2. Currently hovered / intersected building walls and selected building static walls.
+ * 3. Nearest neighbouring building walls (sorted by spatial proximity).
+ * 4. Dominant orthogonal axes from global facade statistics (theta and theta + 90°).
+ * 5. Default Cartesian Ortho axes (0° / 90°).
+ *
+ * NOTE: Secondary angle splits (45°, 30°, 60°) are explicitly excluded to keep CAD snapping clean and deterministic.
  */
 export function collectTargetDirections(
   origin: Point2D,
   currentMouse: Point2D,
   buildings: BuildingLoop[] = [],
   dominantDirections: DominantDirection[] = [],
-  polylineVertices: Point2D[] = []
-): { angleDeg: number; relationType: 'parallel' | 'perpendicular' | 'dominant'; sourceLabel?: string }[] {
-  const candidates: { angleDeg: number; relationType: 'parallel' | 'perpendicular' | 'dominant'; sourceLabel?: string }[] = [];
+  polylineVertices: Point2D[] = [],
+  hoveredBuildingId?: string,
+  selectedBuildingId?: string,
+  excludeBuildingId?: string,
+  excludeSegmentIndices?: number[]
+): { angleDeg: number; relationType: 'parallel' | 'perpendicular' | 'dominant'; sourceLabel?: string; priority: number }[] {
+  const candidates: { angleDeg: number; relationType: 'parallel' | 'perpendicular' | 'dominant'; sourceLabel?: string; priority: number }[] = [];
   const seenAngles: number[] = [];
 
-  const addCandidate = (angleDeg: number, relationType: 'parallel' | 'perpendicular' | 'dominant', sourceLabel?: string) => {
+  const addCandidate = (
+    angleDeg: number,
+    relationType: 'parallel' | 'perpendicular' | 'dominant',
+    sourceLabel?: string,
+    priority = 10
+  ) => {
     const norm = normalizeAngle180(angleDeg);
-    // Avoid duplicate candidates within 0.5 degrees
     for (const sa of seenAngles) {
-      if (angleDiff180(sa, norm) < 0.5) return;
+      if (angleDiff180(sa, norm) < 1.2) return; // 1.2 deg deduplication
     }
     seenAngles.push(norm);
-    candidates.push({ angleDeg: norm, relationType, sourceLabel });
+    candidates.push({ angleDeg: norm, relationType, sourceLabel, priority });
   };
 
-  // 1. Current Polyline history (Highest Priority)
-  if (polylineVertices.length >= 2) {
-    const lastP = polylineVertices[polylineVertices.length - 1];
-    const prevP = polylineVertices[polylineVertices.length - 2];
-    const dx = lastP.x - prevP.x;
-    const dy = lastP.y - prevP.y;
-    const len = Math.hypot(dx, dy);
-    if (len >= 0.05) {
-      const segAngle = normalizeAngle180((Math.atan2(dy, dx) * 180) / Math.PI);
-      const perpAngle = normalizeAngle180(segAngle + 90);
-      addCandidate(segAngle, 'parallel', 'Polilinia (Równoległy)');
-      addCandidate(perpAngle, 'perpendicular', 'Polilinia (Prostopadły 90°)');
-    }
-
-    // Also consider earlier segments if any
-    for (let i = polylineVertices.length - 3; i >= 0 && i >= polylineVertices.length - 5; i--) {
+  // 1. All segments of active Polyline history (0° Parallel & 90° Perpendicular ONLY)
+  const nPoly = polylineVertices.length;
+  if (nPoly >= 2) {
+    for (let i = nPoly - 2; i >= 0; i--) {
       const pA = polylineVertices[i];
       const pB = polylineVertices[i + 1];
-      const sdx = pB.x - pA.x;
-      const sdy = pB.y - pA.y;
+      const dx = pB.x - pA.x;
+      const dy = pB.y - pA.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.05) continue;
+
+      const segIdx = i + 1;
+      const isLastSeg = i === nPoly - 2;
+      const basePri = isLastSeg ? 1 : 2;
+      const segAngle = normalizeAngle180((Math.atan2(dy, dx) * 180) / Math.PI);
+      const perpAngle = normalizeAngle180(segAngle + 90);
+
+      addCandidate(
+        segAngle,
+        'parallel',
+        isLastSeg ? 'Polilinia (Równoległy)' : `Polilinia (Równoległy do seg. ${segIdx})`,
+        basePri
+      );
+      addCandidate(
+        perpAngle,
+        'perpendicular',
+        isLastSeg ? 'Polilinia (Prostopadły 90°)' : `Polilinia (Prostopadły 90° do seg. ${segIdx})`,
+        basePri
+      );
+    }
+  }
+
+  // 2. Priorytetyzacja wskazanego/najechanego obiektu (z pominięciem wykluczonych segmentów)
+  const prioritizedBuildingIds = new Set<string>();
+  if (hoveredBuildingId && hoveredBuildingId !== excludeBuildingId) {
+    prioritizedBuildingIds.add(hoveredBuildingId);
+  }
+  if (selectedBuildingId && selectedBuildingId !== excludeBuildingId) {
+    prioritizedBuildingIds.add(selectedBuildingId);
+  }
+
+  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false);
+  for (const bldg of prioBuildings) {
+    if (!Array.isArray(bldg.segments)) continue;
+    for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
+      if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+      const seg = bldg.segments[sIdx];
+      const sdx = seg.p2.x - seg.p1.x;
+      const sdy = seg.p2.y - seg.p1.y;
       if (Math.hypot(sdx, sdy) >= 0.05) {
-        const a = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-        addCandidate(a, 'parallel', 'Polilinia (Segment)');
-        addCandidate(normalizeAngle180(a + 90), 'perpendicular', 'Polilinia (Prostopadły)');
+        const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+        const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
+        addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 3);
+        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 3);
       }
     }
   }
 
-  // 2. Dominant scene axes from statistics (e.g. 0°/90° or main building orientations)
-  if (dominantDirections && dominantDirections.length > 0) {
-    for (const dom of dominantDirections.slice(0, 2)) {
-      addCandidate(dom.angleDeg, 'dominant', `Siatka główna (${dom.angleDeg.toFixed(1)}°)`);
-      addCandidate(dom.orthogonalDeg, 'dominant', `Siatka poprzeczna (${dom.orthogonalDeg.toFixed(1)}°)`);
-    }
-  }
-
-  // Default Cartesian Ortho axes if nothing added yet
-  addCandidate(0, 'dominant', 'Oś X (0.0°)');
-  addCandidate(90, 'dominant', 'Oś Y (90.0°)');
-
-  // 3. Nearby Building Segments
+  // 3. Pozostałe pobliskie budynki posortowane według odległości
   const maxSegments = APP_CONFIG.directionSnapping.maxNearbySegments;
-  const nearbySegs: { angleDeg: number; dist: number; buildingName: string }[] = [];
+  const otherNearbySegs: { angleDeg: number; dist: number; buildingName: string }[] = [];
 
   for (const bldg of buildings) {
-    if (bldg.isIncluded === false || !Array.isArray(bldg.segments)) continue;
-    for (const seg of bldg.segments) {
+    if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id) || !Array.isArray(bldg.segments)) continue;
+    for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
+      if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+      const seg = bldg.segments[sIdx];
       const midX = (seg.p1.x + seg.p2.x) / 2;
       const midY = (seg.p1.y + seg.p2.y) / 2;
       const dist = Math.min(
@@ -138,17 +175,28 @@ export function collectTargetDirections(
       const sdy = seg.p2.y - seg.p1.y;
       if (Math.hypot(sdx, sdy) >= 0.05) {
         const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-        nearbySegs.push({ angleDeg: segAng, dist, buildingName: bldg.name });
+        otherNearbySegs.push({ angleDeg: segAng, dist, buildingName: bldg.name });
       }
     }
   }
 
-  // Sort nearby segments by proximity and add top ones
-  nearbySegs.sort((a, b) => a.dist - b.dist);
-  for (const item of nearbySegs.slice(0, maxSegments)) {
-    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`);
-    addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły)`);
+  otherNearbySegs.sort((a, b) => a.dist - b.dist);
+  for (const item of otherNearbySegs.slice(0, maxSegments)) {
+    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 5);
+    addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 5);
   }
+
+  // 4. Dominant scene axes from statistics (Siatka główna)
+  if (dominantDirections && dominantDirections.length > 0) {
+    for (const dom of dominantDirections.slice(0, 1)) {
+      addCandidate(dom.angleDeg, 'dominant', `Siatka główna (${dom.angleDeg.toFixed(1)}°)`, 7);
+      addCandidate(dom.orthogonalDeg, 'dominant', `Siatka poprzeczna (${dom.orthogonalDeg.toFixed(1)}°)`, 7);
+    }
+  }
+
+  // 5. Domyślne osie kartezjańskie Ortho (0° / 90°)
+  addCandidate(0, 'dominant', 'Oś X (0.0°)', 9);
+  addCandidate(90, 'dominant', 'Oś Y (90.0°)', 9);
 
   return candidates;
 }
@@ -167,6 +215,10 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     angleToleranceDeg = APP_CONFIG.directionSnapping.angleToleranceDeg,
     screenSnapThresholdPx = APP_CONFIG.directionSnapping.screenSnapThresholdPx,
     minDistanceMeters = APP_CONFIG.directionSnapping.minDistanceMeters,
+    hoveredBuildingId,
+    selectedBuildingId,
+    excludeBuildingId,
+    excludeSegmentIndices,
   } = options;
 
   if (!currentMouseWorld || !originPoint) return null;
@@ -187,17 +239,25 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     currentMouseWorld,
     buildings,
     dominantDirections,
-    polylineVertices
+    polylineVertices,
+    hoveredBuildingId,
+    selectedBuildingId,
+    excludeBuildingId,
+    excludeSegmentIndices
   );
 
   let bestSnap: DirectionSnapResult | null = null;
-  let minDiff = 99999;
+  let bestScore = 99999;
 
   const guideHalfLength = APP_CONFIG.directionSnapping.guideLineLengthMeters;
 
   for (const cand of candidates) {
     const diff = angleDiff180(cand.angleDeg, rawMouseAxisDeg);
-    if (diff <= angleToleranceDeg && diff < minDiff) {
+    if (diff <= angleToleranceDeg) {
+      // Score: łączymy różnicę kątową z wagą priorytetu (priorytet 1-3 ma przewagę nad priorytetem 7-9)
+      const score = diff + (cand.priority || 10) * 0.15;
+      if (score >= bestScore) continue;
+
       // Determine ray forward angle (either cand.angleDeg or cand.angleDeg + 180)
       const diff1 = Math.abs(normalizeAngle360(cand.angleDeg) - rawMouseAngleDeg);
       const altDiff1 = Math.min(diff1, 360 - diff1);
@@ -224,12 +284,13 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         }
       }
 
-      minDiff = diff;
+      bestScore = score;
       bestSnap = {
         snappedPoint: { x: snappedX, y: snappedY },
         originPoint: { x: originPoint.x, y: originPoint.y },
         guideAngleDeg: forwardAngleDeg,
         relationType: cand.relationType,
+        isStatistical: cand.relationType === 'dominant',
         guideLine: {
           p1: { x: originPoint.x - guideHalfLength * cosA, y: originPoint.y - guideHalfLength * sinA },
           p2: { x: originPoint.x + guideHalfLength * cosA, y: originPoint.y + guideHalfLength * sinA },

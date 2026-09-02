@@ -201,16 +201,22 @@ export function renderDrawingToolPreview(
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Render Active Rays for OTRACK
+      // Render Active Rays for OTRACK (Rozróżnienie: statystyczne vs przedłużenia krawędzi)
       if (osnapSnapResult.activeRays && osnapSnapResult.activeRays.length > 0) {
         for (const ray of osnapSnapResult.activeRays) {
           const r1 = worldToScreen(ray.p1.x, ray.p1.y);
           const r2 = worldToScreen(ray.p2.x, ray.p2.y);
           if (Number.isFinite(r1.sx) && Number.isFinite(r2.sx)) {
+            const isStatistical = ray.isStatistical ?? (ray.type === 'horizontal' || ray.type === 'vertical');
+            const rayColor = isStatistical
+              ? (APP_CONFIG.osnap?.statisticalRayColor || '#f59e0b')
+              : (APP_CONFIG.osnap?.edgeRayColor || '#38bdf8');
+            const rayDash = isStatistical ? [8, 4] : [5, 4];
+
             ctx.beginPath();
-            ctx.strokeStyle = APP_CONFIG.osnap?.otrackRayColor || '#818cf8';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([5, 4]);
+            ctx.strokeStyle = rayColor;
+            ctx.lineWidth = 1.6;
+            ctx.setLineDash(rayDash);
             ctx.moveTo(r1.sx, r1.sy);
             ctx.lineTo(r2.sx, r2.sy);
             ctx.stroke();
@@ -219,14 +225,14 @@ export function renderDrawingToolPreview(
         }
       }
 
-      // Render Extension guide line if available
+      // Render Extension guide line if available (zawsze z konkretnej krawędzi - błękit)
       if (osnapSnapResult.rayLine) {
         const e1 = worldToScreen(osnapSnapResult.rayLine.p1.x, osnapSnapResult.rayLine.p1.y);
         const e2 = worldToScreen(osnapSnapResult.rayLine.p2.x, osnapSnapResult.rayLine.p2.y);
         if (Number.isFinite(e1.sx) && Number.isFinite(e2.sx)) {
           ctx.beginPath();
           ctx.strokeStyle = APP_CONFIG.osnap?.extensionColor || '#38bdf8';
-          ctx.lineWidth = 1.2;
+          ctx.lineWidth = 1.4;
           ctx.setLineDash([4, 4]);
           ctx.moveTo(e1.sx, e1.sy);
           ctx.lineTo(e2.sx, e2.sy);
@@ -293,10 +299,15 @@ export function renderDrawingToolPreview(
         ctx.lineWidth = 1.8;
         ctx.stroke();
       } else {
-        // Default / OTRACK Ray Dot + Ring
+        // Default / OTRACK Ray Dot + Ring (Kolor zależny od typu: bursztyn vs błękit)
+        const isStat = osnapSnapResult.isStatisticalGuide ?? true;
+        const otrackColor = isStat
+          ? (APP_CONFIG.osnap?.statisticalRayColor || '#f59e0b')
+          : (APP_CONFIG.osnap?.edgeRayColor || '#38bdf8');
+
         ctx.beginPath();
         ctx.arc(pSnap.sx, pSnap.sy, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = APP_CONFIG.osnap?.otrackRayColor || '#818cf8';
+        ctx.fillStyle = otrackColor;
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
@@ -304,6 +315,18 @@ export function renderDrawingToolPreview(
       }
 
       // Information Badge near cursor
+      const isStatGuide = osnapSnapResult.isStatisticalGuide ?? (snapType === 'otrack_ray');
+      const badgeBorder =
+        snapType === 'endpoint'
+          ? '#10b981'
+          : snapType === 'midpoint'
+          ? '#06b6d4'
+          : snapType === 'otrack_intersection'
+          ? '#f43f5e'
+          : snapType === 'extension' || !isStatGuide
+          ? '#38bdf8'
+          : '#f59e0b';
+
       const badgeText = `${osnapSnapResult.label}`;
       ctx.font = 'bold 10px Inter, sans-serif';
       const tw = ctx.measureText(badgeText).width;
@@ -311,15 +334,8 @@ export function renderDrawingToolPreview(
       const by = pSnap.sy - 16;
 
       ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
-      ctx.strokeStyle =
-        snapType === 'endpoint'
-          ? '#10b981'
-          : snapType === 'midpoint'
-          ? '#06b6d4'
-          : snapType === 'otrack_intersection'
-          ? '#f43f5e'
-          : '#818cf8';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = badgeBorder;
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.roundRect(bx, by - 10, tw + 12, 20, 5);
       ctx.fill();
@@ -340,10 +356,18 @@ export function renderDrawingToolPreview(
 
     if (Number.isFinite(p1.sx) && Number.isFinite(p2.sx) && Number.isFinite(pSnap.sx)) {
       ctx.save();
+      const isStatistical = directionSnapResult.relationType === 'dominant' || directionSnapResult.isStatistical === true;
+      const guideColor = isStatistical
+        ? (APP_CONFIG.directionSnapping.statisticalGuideColor || '#f59e0b')
+        : (APP_CONFIG.directionSnapping.edgeGuideColor || '#38bdf8');
+      const guideDash = isStatistical
+        ? [...APP_CONFIG.directionSnapping.statisticalGuideDash]
+        : [...APP_CONFIG.directionSnapping.edgeGuideDash];
+
       ctx.beginPath();
-      ctx.strokeStyle = APP_CONFIG.directionSnapping.guideLineColor;
-      ctx.lineWidth = APP_CONFIG.directionSnapping.guideLineWidth;
-      ctx.setLineDash([...APP_CONFIG.directionSnapping.guideLineDash]);
+      ctx.strokeStyle = guideColor;
+      ctx.lineWidth = APP_CONFIG.directionSnapping.guideLineWidth || 1.6;
+      ctx.setLineDash(guideDash);
       ctx.moveTo(p1.sx, p1.sy);
       ctx.lineTo(p2.sx, p2.sy);
       ctx.stroke();
@@ -351,7 +375,7 @@ export function renderDrawingToolPreview(
 
       ctx.beginPath();
       ctx.arc(pSnap.sx, pSnap.sy, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#38bdf8';
+      ctx.fillStyle = guideColor;
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1.5;
@@ -359,10 +383,10 @@ export function renderDrawingToolPreview(
 
       const relationLabel =
         directionSnapResult.relationType === 'perpendicular'
-          ? '⟂ 90° (Prostopadły)'
+          ? '⟂ 90° (Prostopadły do ściany)'
           : directionSnapResult.relationType === 'parallel'
-          ? '∥ (Równoległy)'
-          : '⊞ (Siatka główna)';
+          ? '∥ (Równoległy do ściany)'
+          : '📊 (Siatka statystyczna)';
 
       const distLabel = `${directionSnapResult.distanceFromOrigin.toFixed(2)} m`;
       const angleLabel = `${directionSnapResult.guideAngleDeg.toFixed(1)}°`;
@@ -374,14 +398,14 @@ export function renderDrawingToolPreview(
       const by = pSnap.sy - 16;
 
       ctx.fillStyle = APP_CONFIG.directionSnapping.badgeBgColor;
-      ctx.strokeStyle = APP_CONFIG.directionSnapping.badgeBorderColor;
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = guideColor;
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
       ctx.roundRect(bx, by - 10, tw + 12, 20, 5);
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = '#e0f2fe';
+      ctx.fillStyle = isStatistical ? '#fef3c7' : '#e0f2fe';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(badgeText, bx + 6, by);
@@ -672,18 +696,41 @@ export function renderDrawingToolPreview(
       }
 
       const ringRadiusPx = Math.max(45, Math.min(120, 3.5 * rc.viewState.scale));
+
+      // 7.2 Protractor Dial (Podziałka kątowa i tarcza referencyjna wokół punktu obrotu)
       ctx.beginPath();
       ctx.arc(pS.sx, pS.sy, ringRadiusPx, 0, Math.PI * 2);
+      ctx.fillStyle = isRotating ? 'rgba(99, 102, 241, 0.06)' : 'rgba(15, 23, 42, 0.35)';
+      ctx.fill();
       ctx.strokeStyle = isRotating ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
-      ctx.lineWidth = isRotating ? 2.5 : 1.5;
-      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = isRotating ? 2 : 1.5;
+      ctx.setLineDash(isRotating ? [] : [4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 7.2 Angle Tracking guideline ray when angle is snapped
+      // Tick marks on the protractor dial
+      for (let deg = 0; deg < 360; deg += 15) {
+        const isMajor = deg % 90 === 0;
+        const isSemi = deg % 45 === 0;
+        const tickLen = isMajor ? 8 : isSemi ? 5 : 3;
+        const rad = (deg * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const r1 = ringRadiusPx - tickLen;
+        const r2 = ringRadiusPx;
+
+        ctx.beginPath();
+        ctx.moveTo(pS.sx + cos * r1, pS.sy + sin * r1);
+        ctx.lineTo(pS.sx + cos * r2, pS.sy + sin * r2);
+        ctx.strokeStyle = isMajor ? '#818cf8' : isSemi ? 'rgba(129, 140, 248, 0.6)' : 'rgba(148, 163, 184, 0.3)';
+        ctx.lineWidth = isMajor ? 1.5 : 1;
+        ctx.stroke();
+      }
+
+      // 7.3 Angle Tracking guideline ray when angle is snapped
       if (activeRotateAngleSnap && isRotating) {
         const rad = ((activeRotateAngleSnap.angleDeg) * Math.PI) / 180;
-        const rayLen = ringRadiusPx * 1.8;
+        const rayLen = ringRadiusPx * 2.0;
         const rx = pS.sx + Math.cos(rad) * rayLen;
         const ry = pS.sy + Math.sin(rad) * rayLen;
 
@@ -702,12 +749,27 @@ export function renderDrawingToolPreview(
         const mouseAngle = Math.atan2(mouseScreen.sy - pS.sy, mouseScreen.sx - pS.sx);
         const startAngle = (selectedBuilding as any).rotStartAngleScreen || 0;
 
+        // Dynamic filled arc illustrating the rotation range
         ctx.beginPath();
         ctx.moveTo(pS.sx, pS.sy);
         ctx.arc(pS.sx, pS.sy, ringRadiusPx, startAngle, mouseAngle, false);
-        ctx.fillStyle = 'rgba(129, 140, 248, 0.18)';
+        ctx.fillStyle = 'rgba(129, 140, 248, 0.22)';
         ctx.fill();
+        ctx.strokeStyle = '#818cf8';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
+        // Start vector ray
+        ctx.beginPath();
+        ctx.moveTo(pS.sx, pS.sy);
+        ctx.lineTo(pS.sx + Math.cos(startAngle) * ringRadiusPx, pS.sy + Math.sin(startAngle) * ringRadiusPx);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Current mouse ray
         ctx.beginPath();
         ctx.moveTo(pS.sx, pS.sy);
         ctx.lineTo(mouseScreen.sx, mouseScreen.sy);
@@ -716,22 +778,47 @@ export function renderDrawingToolPreview(
         ctx.stroke();
 
         const badgeAngle = (startAngle + mouseAngle) / 2;
-        const badgeX = pS.sx + Math.cos(badgeAngle) * (ringRadiusPx + 22);
-        const badgeY = pS.sy + Math.sin(badgeAngle) * (ringRadiusPx + 22);
-        const trackingLabel = activeRotateAngleSnap ? ' [Śledzenie]' : '';
+        const badgeX = pS.sx + Math.cos(badgeAngle) * (ringRadiusPx + 24);
+        const badgeY = pS.sy + Math.sin(badgeAngle) * (ringRadiusPx + 24);
+        const trackingLabel = activeRotateAngleSnap?.label
+          ? ` [${activeRotateAngleSnap.label}]`
+          : activeRotateAngleSnap
+          ? ' [Śledzenie]'
+          : '';
         const badgeText = `${rotAngleDeg >= 0 ? '+' : ''}${rotAngleDeg.toFixed(1)}°${trackingLabel}`;
 
         ctx.font = 'bold 11px monospace';
         const bw = ctx.measureText(badgeText).width;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
         ctx.strokeStyle = activeRotateAngleSnap ? '#38bdf8' : '#818cf8';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.roundRect(badgeX - bw / 2 - 6, badgeY - 10, bw + 12, 20, 5);
         ctx.fill();
         ctx.stroke();
 
         ctx.fillStyle = activeRotateAngleSnap ? '#7dd3fc' : '#c7d2fe';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, badgeX, badgeY);
+      } else if (!isRotating && !isDraggingPivot) {
+        // Idle state dial badge
+        const badgeX = pS.sx;
+        const badgeY = pS.sy - ringRadiusPx - 14;
+        const currentRot = (selectedBuilding as any).transform?.rotationDeg || 0;
+        const badgeText = `Kąt: ${currentRot.toFixed(1)}°`;
+
+        ctx.font = 'bold 10px monospace';
+        const bw = ctx.measureText(badgeText).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.strokeStyle = 'rgba(129, 140, 248, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(badgeX - bw / 2 - 5, badgeY - 9, bw + 10, 18, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#c7d2fe';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(badgeText, badgeX, badgeY);

@@ -103,6 +103,7 @@ export interface AngleBin {
   count: number;
   totalLength: number;
   percentage: number;
+  isTrackingActive?: boolean; // true jeśli koszyk jest aktywnie wykorzystywany przez śledzenie
 }
 
 export interface DominantDirection {
@@ -110,6 +111,12 @@ export interface DominantDirection {
   orthogonalDeg: number; // e.g. 114.5°
   totalLength: number; // Total length aligned with this axis (within ±7.5°)
   percentage: number;
+  isTrackingActive?: boolean;
+}
+
+export interface AnalyzeSegmentsOptions {
+  noisePercentileCutoff?: number; // np. 20 dla 20. percentylu
+  minLengthMeters?: number; // np. 0.2m
 }
 
 export interface SegmentStatistics {
@@ -122,18 +129,51 @@ export interface SegmentStatistics {
   obstacleLength: number;
   dominantDirections: DominantDirection[];
   angleBins: AngleBin[];
+  lengthCutoffMeters: number; // wyliczony próg odcięcia długości
+  noisePercentileCutoff: number; // zastosowany percentyl
 }
 
 /**
- * Performs comprehensive statistical and geometric analysis of all facade segments across buildings.
+ * Performs comprehensive statistical and geometric analysis of all facade segments across buildings,
+ * with noise percentile cut-off to eliminate short/noisy DXF fragments from dominant tracking directions.
  */
-export function analyzeSegmentsStatistics(buildings: BuildingLoop[]): SegmentStatistics {
+export function analyzeSegmentsStatistics(
+  buildings: BuildingLoop[],
+  options?: AnalyzeSegmentsOptions
+): SegmentStatistics {
+  const noisePercentileCutoff = options?.noisePercentileCutoff ?? 20; // Domyślnie 20%
+  const minLengthThreshold = options?.minLengthMeters ?? 0.15;
+
   let totalSegments = 0;
   let totalLength = 0;
   let testedSegmentsCount = 0;
   let testedLength = 0;
   let obstacleSegmentsCount = 0;
   let obstacleLength = 0;
+
+  // 1. Zbieranie wszystkich długości do wyznaczenia percentylu odcięcia
+  const allLengths: number[] = [];
+
+  for (const bldg of buildings) {
+    if (bldg.isIncluded === false) continue;
+    for (const seg of bldg.segments) {
+      const len = seg.length;
+      if (Number.isFinite(len) && len >= 1e-4) {
+        allLengths.push(len);
+      }
+    }
+  }
+
+  // Obliczenie wartości długości dla percentylu
+  allLengths.sort((a, b) => a - b);
+  let lengthCutoffMeters = minLengthThreshold;
+  if (allLengths.length > 0 && noisePercentileCutoff > 0) {
+    const idx = Math.min(
+      allLengths.length - 1,
+      Math.max(0, Math.floor((allLengths.length * noisePercentileCutoff) / 100))
+    );
+    lengthCutoffMeters = Math.max(minLengthThreshold, allLengths[idx]);
+  }
 
   // 12 angle bins of 15 degrees each: 0-15, 15-30, ..., 165-180
   const binStep = 15;
@@ -143,7 +183,7 @@ export function analyzeSegmentsStatistics(buildings: BuildingLoop[]): SegmentSta
     length: 0,
   }));
 
-  // Fine-grained 1-degree histogram for dominant axis detection
+  // Fine-grained 1-degree histogram for dominant axis detection (tylko segmenty powyżej progu)
   const fineHistogram = new Float64Array(180);
 
   for (const bldg of buildings) {
@@ -168,40 +208,28 @@ export function analyzeSegmentsStatistics(buildings: BuildingLoop[]): SegmentSta
       const lineEq = seg.lineEquation ?? computeLineEquation(seg.p1, seg.p2, seg.normal);
       const angle = lineEq.angleDeg;
 
-      // Add to bin
+      // Add to bin (dla pełnej statystyki)
       const bIdx = Math.min(numBins - 1, Math.max(0, Math.floor(angle / binStep)));
       bins[bIdx].count++;
       bins[bIdx].length += len;
 
-      // Add to fine histogram (with smooth kernel ±3 deg)
-      const centerDeg = Math.round(angle) % 180;
-      for (let offset = -3; offset <= 3; offset++) {
-        const d = (centerDeg + offset + 180) % 180;
-        const weight = Math.exp(-(offset * offset) / 4);
-        fineHistogram[d] += len * weight;
+      // Add to fine histogram tylko dla segmentów istotnych (powyżej odcięcia szumu)
+      if (len >= lengthCutoffMeters) {
+        const centerDeg = Math.round(angle) % 180;
+        for (let offset = -3; offset <= 3; offset++) {
+          const d = (centerDeg + offset + 180) % 180;
+          const weight = Math.exp(-(offset * offset) / 4);
+          fineHistogram[d] += len * weight;
+        }
       }
     }
   }
 
   const averageLength = totalSegments > 0 ? totalLength / totalSegments : 0;
 
-  const angleBins: AngleBin[] = bins.map((b, idx) => {
-    const start = idx * binStep;
-    const end = start + binStep;
-    return {
-      binStartDeg: start,
-      binEndDeg: end,
-      label: `${start}° - ${end}°`,
-      count: b.count,
-      totalLength: b.length,
-      percentage: totalLength > 0 ? (b.length / totalLength) * 100 : 0,
-    };
-  });
-
   // Detect dominant orthogonal pair (angle and angle + 90)
   const dominantDirections: DominantDirection[] = [];
   if (totalLength > 0) {
-    // Check angles in [0, 90) and combine with orthogonal (angle + 90)
     let bestAngle = 0;
     let bestScore = 0;
 
@@ -228,13 +256,55 @@ export function analyzeSegmentsStatistics(buildings: BuildingLoop[]): SegmentSta
       }
     }
 
-    dominantDirections.push({
-      angleDeg: bestAngle,
-      orthogonalDeg: (bestAngle + 90) % 180,
-      totalLength: dominantLength,
-      percentage: (dominantLength / totalLength) * 100,
-    });
+    const percentage = totalLength > 0 ? (dominantLength / totalLength) * 100 : 0;
+    // Odrzucenie marginalnych próbek: wymagane co najmniej 15% łącznej długości
+    if (percentage >= 15.0 || totalSegments <= 4) {
+      dominantDirections.push({
+        angleDeg: bestAngle,
+        orthogonalDeg: (bestAngle + 90) % 180,
+        totalLength: dominantLength,
+        percentage,
+        isTrackingActive: true,
+      });
+    } else {
+      // Fallback: standardowa siatka kartezjańska 0°/90°
+      dominantDirections.push({
+        angleDeg: 0,
+        orthogonalDeg: 90,
+        totalLength: dominantLength,
+        percentage,
+        isTrackingActive: true,
+      });
+    }
   }
+
+  // Zbuduj koszyki kątowe z oznaczeniem aktywności dla śledzenia
+  const angleBins: AngleBin[] = bins.map((b, idx) => {
+    const start = idx * binStep;
+    const end = start + binStep;
+    const binCenter = (start + end) / 2;
+    const percentage = totalLength > 0 ? (b.length / totalLength) * 100 : 0;
+
+    let isTrackingActive = false;
+    if (dominantDirections.length > 0) {
+      const dom = dominantDirections[0];
+      const diff1 = Math.abs(binCenter - dom.angleDeg);
+      const diff2 = Math.abs(binCenter - dom.orthogonalDeg);
+      if (diff1 <= 10 || diff1 >= 170 || diff2 <= 10 || diff2 >= 170) {
+        isTrackingActive = true;
+      }
+    }
+
+    return {
+      binStartDeg: start,
+      binEndDeg: end,
+      label: `${start}° - ${end}°`,
+      count: b.count,
+      totalLength: b.length,
+      percentage,
+      isTrackingActive,
+    };
+  });
 
   return {
     totalSegments,
@@ -246,5 +316,7 @@ export function analyzeSegmentsStatistics(buildings: BuildingLoop[]): SegmentSta
     obstacleLength,
     dominantDirections,
     angleBins,
+    lengthCutoffMeters,
+    noisePercentileCutoff,
   };
 }

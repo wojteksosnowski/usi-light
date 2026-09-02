@@ -326,7 +326,13 @@ export const App: React.FC = () => {
   const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
 
   // Statistical analysis of facade segments directions & linear equations
-  const segmentStats = useMemo(() => analyzeSegmentsStatistics(buildings), [buildings]);
+  const [noisePercentileCutoff, setNoisePercentileCutoff] = useState<number>(
+    APP_CONFIG.statistics?.defaultNoisePercentile ?? 20
+  );
+  const segmentStats = useMemo(
+    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff }),
+    [buildings, noisePercentileCutoff]
+  );
 
 
   // Multi-point facade analysis (limit max 3 points)
@@ -679,6 +685,7 @@ export const App: React.FC = () => {
     if (!isInteracting) setIsInteracting(true);
     const cosA = Math.cos(deltaAngleRad);
     const sinA = Math.sin(deltaAngleRad);
+    const deltaDeg = (deltaAngleRad * 180) / Math.PI;
 
     setBuildings((prev) => {
       const targetBldg = prev.find((b) => b.id === id);
@@ -697,9 +704,42 @@ export const App: React.FC = () => {
           };
         });
 
-        return rebuildBuildingSegments(bldg, newVertices);
+        const updatedTransform = {
+          ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
+          rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
+        };
+
+        const rebuilt = rebuildBuildingSegments(bldg, newVertices);
+        rebuilt.transform = updatedTransform;
+        return rebuilt;
       });
     });
+  };
+
+  // Set absolute rotation angle for a building around its centroid
+  const handleSetBuildingAbsoluteRotation = (buildingId: string, targetDeg: number) => {
+    const target = buildings.find((b) => b.id === buildingId);
+    if (!target || target.vertices.length < 3) return;
+
+    const currentRot = target.transform?.rotationDeg !== undefined
+      ? target.transform.rotationDeg
+      : target.segments.length > 0
+      ? ((target.segments[0].angleRad * 180) / Math.PI + 360) % 360
+      : 0;
+
+    let deltaDeg = targetDeg - currentRot;
+    while (deltaDeg > 180) deltaDeg -= 360;
+    while (deltaDeg < -180) deltaDeg += 360;
+
+    const deltaRad = (deltaDeg * Math.PI) / 180;
+    let cx = 0;
+    let cy = 0;
+    for (const v of target.vertices) {
+      cx += v.x;
+      cy += v.y;
+    }
+    const pivot = { x: cx / target.vertices.length, y: cy / target.vertices.length };
+    handleBuildingRotate(buildingId, pivot, deltaRad);
   };
 
   // Duplicate building handler
@@ -2004,6 +2044,44 @@ export const App: React.FC = () => {
                         />
                       </div>
 
+                      {/* Kąt obrotu obiektu względem głównego układu współrzędnych projektu */}
+                      {(() => {
+                        const currentRotDeg = selectedBuilding.transform?.rotationDeg !== undefined
+                          ? selectedBuilding.transform.rotationDeg
+                          : selectedBuilding.segments.length > 0
+                          ? Number((((selectedBuilding.segments[0].angleRad * 180) / Math.PI + 360) % 360).toFixed(1))
+                          : 0;
+
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }} title="Kąt obrotu obiektu względem osi X (0°) głównego układu współrzędnych projektu">
+                              Obrót (°)
+                            </label>
+                            <input
+                              type="number"
+                              step="1"
+                              value={currentRotDeg}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                handleSetBuildingAbsoluteRotation(selectedBuilding.id, val);
+                              }}
+                              style={{
+                                width: '80px',
+                                backgroundColor: 'var(--bg-input)',
+                                border: '1px solid var(--border-light)',
+                                borderRadius: '8px',
+                                padding: '6px 8px',
+                                color: '#818cf8',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                textAlign: 'right',
+                                fontFamily: 'monospace',
+                              }}
+                            />
+                          </div>
+                        );
+                      })()}
+
                       {/* Real-world metric dimensions display */}
                       {(() => {
                         const xs = selectedBuilding.vertices.map((v) => v.x);
@@ -2561,28 +2639,73 @@ export const App: React.FC = () => {
                       {/* Analiza Statystyczna Kierunków Odcinków */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px', paddingTop: '6px', borderTop: '1px solid var(--border-light)' }}>
                         <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>Analiza kierunków fasad</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span>Analiza kierunków fasad</span>
+                          </span>
                           <span style={{ color: '#818cf8', fontSize: '10.5px' }}>{segmentStats.totalSegments} odc. ({segmentStats.totalLength.toFixed(1)}m)</span>
                         </div>
 
+                        {/* Modyfikator percentylu odcinającego szum */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', backgroundColor: 'var(--bg-input)', padding: '5px 7px', borderRadius: '5px', border: '1px solid var(--border-light)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
+                            <span>Odcięcie szumu (długość):</span>
+                            <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                              {noisePercentileCutoff}% ({segmentStats.lengthCutoffMeters > 0 ? `> ${segmentStats.lengthCutoffMeters.toFixed(2)}m` : 'brak'})
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                              type="range"
+                              min="0"
+                              max="60"
+                              step="5"
+                              value={noisePercentileCutoff}
+                              onChange={(e) => setNoisePercentileCutoff(Number(e.target.value))}
+                              style={{ width: '100%', height: '4px', accentColor: '#f59e0b', cursor: 'pointer' }}
+                              title={`Odrzuć najkrótsze ${noisePercentileCutoff}% odcinków przy wykrywaniu siatek śledzenia`}
+                            />
+                          </div>
+                        </div>
+
                         {segmentStats.dominantDirections.length > 0 && (
-                          <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(129, 140, 248, 0.1)', border: '1px solid rgba(129, 140, 248, 0.25)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                            <div style={{ color: '#a5b4fc', fontWeight: 600 }}>Główna siatka ortogonalna:</div>
+                          <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.35)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <div style={{ color: '#fbbf24', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>📊 Główna siatka śledzenia:</span>
+                              <span style={{ fontSize: '9px', backgroundColor: 'rgba(245, 158, 11, 0.25)', padding: '1px 5px', borderRadius: '3px', color: '#f59e0b', fontWeight: 700 }}>Aktywne OTRACK</span>
+                            </div>
                             <div style={{ color: '#f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
                               <span>Osie: <b>{segmentStats.dominantDirections[0].angleDeg.toFixed(1)}°</b> / <b>{segmentStats.dominantDirections[0].orthogonalDeg.toFixed(1)}°</b></span>
-                              <span style={{ color: '#38bdf8', fontWeight: 600 }}>{segmentStats.dominantDirections[0].percentage.toFixed(0)}% długości</span>
+                              <span style={{ color: '#fbbf24', fontWeight: 600 }}>{segmentStats.dominantDirections[0].percentage.toFixed(0)}% długości</span>
                             </div>
                           </div>
                         )}
 
-                        {/* Mini rozkład kątów */}
+                        {/* Mini rozkład kątów z wyróżnieniem aktywnych dla śledzenia */}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginTop: '2px' }}>
-                          {segmentStats.angleBins.filter(b => b.count > 0).slice(0, 8).map((b) => (
-                            <div key={b.label} style={{ padding: '3px 4px', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-light)', fontSize: '9.5px', textAlign: 'center' }}>
-                              <div style={{ color: '#94a3b8' }}>{b.binStartDeg}°-{b.binEndDeg}°</div>
-                              <div style={{ color: '#e2e8f0', fontWeight: 600 }}>{b.totalLength.toFixed(0)}m ({b.percentage.toFixed(0)}%)</div>
-                            </div>
-                          ))}
+                          {segmentStats.angleBins.filter(b => b.count > 0).slice(0, 8).map((b) => {
+                            const isTracking = b.isTrackingActive;
+                            return (
+                              <div
+                                key={b.label}
+                                style={{
+                                  padding: '3px 4px',
+                                  borderRadius: '4px',
+                                  backgroundColor: isTracking ? 'rgba(245, 158, 11, 0.14)' : 'var(--bg-input)',
+                                  border: isTracking ? '1px solid #f59e0b' : '1px solid var(--border-light)',
+                                  fontSize: '9.5px',
+                                  textAlign: 'center',
+                                  position: 'relative',
+                                }}
+                                title={isTracking ? 'Ten kierunek jest aktywnie rozpoznawany i naprowadzany przez śledzenie polarne' : 'Kierunek w granicach tolerancji'}
+                              >
+                                <div style={{ color: isTracking ? '#fbbf24' : '#94a3b8', fontWeight: isTracking ? 600 : 400, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '2px' }}>
+                                  {isTracking && <span style={{ fontSize: '8px' }}>📊</span>}
+                                  <span>{b.binStartDeg}°-{b.binEndDeg}°</span>
+                                </div>
+                                <div style={{ color: isTracking ? '#fef3c7' : '#e2e8f0', fontWeight: 600 }}>{b.totalLength.toFixed(0)}m ({b.percentage.toFixed(0)}%)</div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
 

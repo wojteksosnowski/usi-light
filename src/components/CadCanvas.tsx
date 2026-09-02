@@ -98,7 +98,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   // Advanced OSNAP & OTRACK state
   const [activeOsnapSnap, setActiveOsnapSnap] = useState<OsnapSnapResult | null>(null);
   const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | null>(null);
-  const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean } | null>(null);
+  const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
   const [hoveredRotateVertexIndex, setHoveredRotateVertexIndex] = useState<number | null>(null);
   const [acquiredAnchors, setAcquiredAnchors] = useState<AnchorPoint[]>([]);
   const [acquiringState, setAcquiringState] = useState<{ point: Point2D; progress: number; label?: string } | null>(null);
@@ -326,6 +326,81 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     });
   }, [selectedBuildingId, buildings]);
 
+  const handleStepRotateBuilding = useCallback(
+    (direction: 'cw' | 'ccw') => {
+      if (!selectedBuildingId || !effectivePivot) return;
+      const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+      if (!selBldg) return;
+
+      if (isDirectionSnappingActive) {
+        // Zbuduj unikalną, posortowaną listę celów kątowych w [0, 360)
+        const rawAngles: number[] = [0, 90, 180, 270];
+
+        // Kąty widoku
+        const viewRot = viewRotationDeg || 0;
+        if (Math.abs(viewRot) > 0.05) {
+          const baseView = (-viewRot + 3600) % 360;
+          for (let k = 0; k < 4; k++) {
+            rawAngles.push((baseView + k * 90) % 360);
+          }
+        }
+
+        // Kąty dominant statystycznych
+        if (dominantDirections && dominantDirections.length > 0) {
+          const dom0 = (dominantDirections[0].angleDeg + 3600) % 360;
+          for (let k = 0; k < 4; k++) {
+            rawAngles.push((dom0 + k * 90) % 360);
+          }
+        }
+
+        // Deduplikacja w tolerancji 1.0°
+        const sorted = Array.from(new Set(rawAngles.map((a) => (a + 3600) % 360))).sort((a, b) => a - b);
+        const uniqueTargets: number[] = [];
+        for (const a of sorted) {
+          if (!uniqueTargets.some((u) => Math.abs(u - a) < 1.0 || Math.abs(Math.abs(u - a) - 360) < 1.0)) {
+            uniqueTargets.push(a);
+          }
+        }
+        uniqueTargets.sort((a, b) => a - b);
+
+        // Aktualny kąt obiektu
+        const currRot = ((rotAngleDeg % 360) + 360) % 360;
+
+        let targetAngle: number;
+        if (direction === 'cw') {
+          const next = uniqueTargets.find((a) => a > currRot + 0.5);
+          targetAngle = next !== undefined ? next : uniqueTargets[0] + 360;
+        } else {
+          const prev = [...uniqueTargets].reverse().find((a) => a < currRot - 0.5);
+          targetAngle = prev !== undefined ? prev : uniqueTargets[uniqueTargets.length - 1] - 360;
+        }
+
+        let deltaDeg = targetAngle - currRot;
+        while (deltaDeg > 180) deltaDeg -= 360;
+        while (deltaDeg < -180) deltaDeg += 360;
+
+        const deltaRad = (deltaDeg * Math.PI) / 180;
+        onBuildingRotate?.(selectedBuildingId, effectivePivot, deltaRad);
+        setRotAngleDeg((prev) => prev + deltaDeg);
+      } else {
+        const stepDeg = direction === 'cw' ? 5 : -5;
+        const deltaRad = (stepDeg * Math.PI) / 180;
+        onBuildingRotate?.(selectedBuildingId, effectivePivot, deltaRad);
+        setRotAngleDeg((prev) => prev + stepDeg);
+      }
+    },
+    [
+      selectedBuildingId,
+      effectivePivot,
+      buildings,
+      isDirectionSnappingActive,
+      viewRotationDeg,
+      dominantDirections,
+      rotAngleDeg,
+      onBuildingRotate,
+    ]
+  );
+
   // Hotkeys hook
   useCadHotkeys({
     drawingMode,
@@ -334,6 +409,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     selectedVertexIndex,
     onDeleteSelectedVertex: handleDeleteSelectedVertex,
     onCycleVertexSelection: handleCycleVertexSelection,
+    onStepRotateBuilding: handleStepRotateBuilding,
     onCancelDrawing,
     onFinishDrawing,
     setDrawingVertices,
@@ -1032,6 +1108,21 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       setRotationHover(closest);
     }
 
+    // Wykrywanie wskazanego/najbliższego budynku do kursora
+    let hoveredBldgId: string | undefined;
+    let minBldgDistPx = 45;
+    for (const bldg of buildings) {
+      if (bldg.isIncluded === false || !Array.isArray(bldg.vertices)) continue;
+      for (const v of bldg.vertices) {
+        const sv = worldToScreen(v.x, v.y);
+        const d = Math.hypot(sx - sv.sx, sy - sv.sy);
+        if (d < minBldgDistPx) {
+          minBldgDistPx = d;
+          hoveredBldgId = bldg.id;
+        }
+      }
+    }
+
     // 0. OTRACK Hover acquisition calculation (when drawing or editing vertices)
     if ((drawingMode !== 'none' || isEditMode) && isOsnapActive) {
       let candidate: { point: Point2D; id: string; buildingId?: string; edgeAngle?: number; type: 'vertex' | 'midpoint' } | null = null;
@@ -1139,6 +1230,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               worldToScreen,
               screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
               excludeBuildingId: selBldg.id,
+              previousSnapResult: activeOsnapSnap,
+              hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
             });
           }
 
@@ -1155,6 +1248,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               const prevPrevV = selBldg.vertices[(draggedVertexIndex - 2 + n) % n];
               const nextNextV = selBldg.vertices[(draggedVertexIndex + 2) % n];
 
+              // Wyklucz 2 ruchome krawędzie edytowanego budynku połączone z przesuwanym wierzchołkiem
+              const movingSegIndices = [(draggedVertexIndex - 1 + n) % n, draggedVertexIndex];
+
               const snapPrev = calculateDirectionSnap({
                 currentMouseWorld: targetPt,
                 originPoint: prevV,
@@ -1162,6 +1258,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
                 dominantDirections,
                 polylineVertices: [prevPrevV, prevV],
                 worldToScreen,
+                hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                excludeBuildingId: selBldg.id,
+                excludeSegmentIndices: movingSegIndices,
               });
 
               const snapNext = calculateDirectionSnap({
@@ -1171,6 +1270,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
                 dominantDirections,
                 polylineVertices: [nextNextV, nextV],
                 worldToScreen,
+                hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                excludeBuildingId: selBldg.id,
+                excludeSegmentIndices: movingSegIndices,
               });
 
               let chosenSnap: import('../utils/directionSnapping').DirectionSnapResult | null = null;
@@ -1257,10 +1359,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           const osnap = evaluateOsnapSnap({
             mouseWorld: pivotPt,
             lineBuffer,
-            acquiredPoints: acquiredAnchors,
+            acquiredPoints: isDirectionSnappingActive ? acquiredAnchors : [],
             worldToScreen,
             screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
-            excludeBuildingId: selectedBuildingId,
+            excludeBuildingId: undefined, // Pozwala przyciągać punkt obrotu do narożników samego obracanego budynku
+            previousSnapResult: activeOsnapSnap,
           });
           if (osnap) {
             pivotPt = osnap.snappedPoint;
@@ -1276,7 +1379,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       if (isRotating && lastMouseAngleWorld !== null) {
         let currWorldPos: Point2D = { x: world.wx, y: world.wy };
         let osnapAngle: number | null = null;
-        let snapInfo: { angleDeg: number; isCardinal?: boolean } | null = null;
+        let snapInfo: { angleDeg: number; isCardinal?: boolean; label?: string } | null = null;
 
         if (isOsnapActive) {
           const osnap = evaluateOsnapSnap({
@@ -1286,6 +1389,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
             worldToScreen,
             screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
             excludeBuildingId: selectedBuildingId,
+            previousSnapResult: activeOsnapSnap,
           });
           if (osnap) {
             currWorldPos = osnap.snappedPoint;
@@ -1302,13 +1406,86 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           const tentativeDeltaDeg = ((currAngleWorld - lastMouseAngleWorld) * 180) / Math.PI;
           const tentativeTotalDeg = rotAngleDeg + tentativeDeltaDeg;
           
-          // Snap do kątów co 15° (ze szczególnym uwzględnieniem 0°, 45°, 90°, 180°, 270°)
-          const snapStep = 15;
-          const nearestStep = Math.round(tentativeTotalDeg / snapStep) * snapStep;
-          if (Math.abs(tentativeTotalDeg - nearestStep) <= 2.8) {
-            const radCorrection = ((nearestStep - rotAngleDeg) * Math.PI) / 180;
+          // Zbuduj listę celów kardynalnych dla rotacji
+          interface RotateTarget {
+            targetTotalDeg: number;
+            label: string;
+            isCardinal: boolean;
+            priority: number;
+          }
+          const targets: RotateTarget[] = [];
+
+          // 1. Kardynalne projektu (Global Project Cardinal): 0°, 90°, 180°, 270°, -90°, -180°, -270°
+          for (const k of [-270, -180, -90, 0, 90, 180, 270, 360]) {
+            targets.push({
+              targetTotalDeg: k,
+              label: `📐 Projekt ${k >= 0 ? '+' : ''}${k}°`,
+              isCardinal: true,
+              priority: 1,
+            });
+          }
+
+          // 2. Kardynalne widoku (Viewport View Cardinal): zorientowane z aktualnym obrotem widoku
+          const viewRot = viewRotationDeg || 0;
+          if (Math.abs(viewRot) > 0.05) {
+            const baseView = -viewRot;
+            for (let mult = -3; mult <= 3; mult++) {
+              const ang = baseView + mult * 90;
+              targets.push({
+                targetTotalDeg: ang,
+                label: `🖥️ Widok ${ang >= 0 ? '+' : ''}${ang.toFixed(1)}°`,
+                isCardinal: true,
+                priority: 2,
+              });
+            }
+          }
+
+          // 3. Dominujące kierunki statystyczne (Dominant Statistical Grid)
+          if (dominantDirections && dominantDirections.length > 0) {
+            const dom0 = dominantDirections[0].angleDeg;
+            for (let mult = -3; mult <= 3; mult++) {
+              const ang = dom0 + mult * 90;
+              targets.push({
+                targetTotalDeg: ang,
+                label: `📊 Siatka ${ang >= 0 ? '+' : ''}${ang.toFixed(1)}°`,
+                isCardinal: false,
+                priority: 3,
+              });
+            }
+          }
+
+          // 4. Krok względny 90° od kąta bazowego
+          const nearest90 = Math.round(tentativeTotalDeg / 90) * 90;
+          targets.push({
+            targetTotalDeg: nearest90,
+            label: `🔄 ${nearest90 >= 0 ? '+' : ''}${nearest90}°`,
+            isCardinal: true,
+            priority: 4,
+          });
+
+          // Znajdź najbliższy cel w tolerancji 3.2°
+          let bestTarget: RotateTarget | null = null;
+          let bestScore = 999;
+
+          for (const tgt of targets) {
+            const diff = Math.abs(tentativeTotalDeg - tgt.targetTotalDeg);
+            if (diff <= 3.2) {
+              const score = diff + tgt.priority * 0.1;
+              if (score < bestScore) {
+                bestScore = score;
+                bestTarget = tgt;
+              }
+            }
+          }
+
+          if (bestTarget) {
+            const radCorrection = ((bestTarget.targetTotalDeg - rotAngleDeg) * Math.PI) / 180;
             currAngleWorld = lastMouseAngleWorld + radCorrection;
-            snapInfo = { angleDeg: nearestStep, isCardinal: nearestStep % 90 === 0 };
+            snapInfo = {
+              angleDeg: bestTarget.targetTotalDeg,
+              isCardinal: bestTarget.isCardinal,
+              label: bestTarget.label,
+            };
           }
         }
 
@@ -1363,6 +1540,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           acquiredPoints: acquiredAnchors,
           worldToScreen,
           screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
+          previousSnapResult: activeOsnapSnap,
+          hoveredBuildingId: hoveredBldgId,
+          selectedBuildingId: selectedBuildingId ?? undefined,
         });
       }
 
@@ -1388,6 +1568,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               dominantDirections,
               polylineVertices: drawingMode === 'polyline' ? drawingVertices : [],
               worldToScreen,
+              hoveredBuildingId: hoveredBldgId,
+              selectedBuildingId: selectedBuildingId ?? undefined,
             });
             if (snap) {
               mousePos = snap.snappedPoint;

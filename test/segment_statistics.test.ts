@@ -98,6 +98,32 @@ describe('Segment Statistics & Linear Equations (Analiza Statystyczna Odcinków)
       expect(stats.dominantDirections[0].angleDeg).toBeCloseTo(0);
       expect(stats.dominantDirections[0].orthogonalDeg).toBeCloseTo(90);
       expect(stats.dominantDirections[0].percentage).toBeCloseTo(100);
+
+      // Verify active tracking flag in angle bins
+      const bin0 = stats.angleBins.find((b) => b.binStartDeg === 0);
+      expect(bin0?.isTrackingActive).toBe(true);
+    });
+
+    it('filters out noisy short segments when noisePercentileCutoff is provided', () => {
+      // Building with 2 long segments (20m) and multiple short chamfer/noise segments (0.1m)
+      const bldg = createBuildingFromVertices(
+        [
+          { x: 0, y: 0 },
+          { x: 20, y: 0 },
+          { x: 20.1, y: 0.1 },
+          { x: 20.2, y: 0.15 },
+          { x: 20.2, y: 10 },
+          { x: 0, y: 10 },
+        ],
+        'Bldg Noisy',
+        10.0,
+        true
+      );
+
+      const statsWithCutoff = analyzeSegmentsStatistics([bldg], { noisePercentileCutoff: 30 });
+      expect(statsWithCutoff.noisePercentileCutoff).toBe(30);
+      expect(statsWithCutoff.lengthCutoffMeters).toBeGreaterThan(0.1);
+      expect(statsWithCutoff.dominantDirections.length).toBeGreaterThan(0);
     });
   });
 });

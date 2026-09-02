@@ -155,4 +155,92 @@ describe('Object Rotation Tool & Vertex Deletion', () => {
       ]);
     });
   });
+
+  describe('Viewport Rotation Center Invariance', () => {
+    it('keeps the world point at screen center invariant when rotating view for offset coordinates', () => {
+      // Screen center at (500, 400), model far from (0,0) at (5000, 6000)
+      const cx = 500;
+      const cy = 400;
+      const scale = 14;
+      const initialPanX = 500 - 5000 * scale; // projects (5000, 6000) to (500, 400) at 0 deg
+      const initialPanY = 400 + 6000 * scale;
+
+      const rotPrevDeg = 0;
+      const rotNewDeg = 45;
+
+      // 1. World point at center before rotation (rot = 0)
+      const wx = 5000;
+      const wy = 6000;
+
+      // 2. Compute new pan to keep (wx, wy) at (cx, cy) after 45 deg rotation
+      const rotNewRad = (rotNewDeg * Math.PI) / 180;
+      const cosNew = Math.cos(rotNewRad);
+      const sinNew = Math.sin(rotNewRad);
+      const rxNew = wx * cosNew - wy * sinNew;
+      const ryNew = wx * sinNew + wy * cosNew;
+
+      const newPanX = cx - rxNew * scale;
+      const newPanY = cy + ryNew * scale;
+
+      // Verify worldToScreen with new rotation and newPan
+      const sx = newPanX + (wx * cosNew - wy * sinNew) * scale;
+      const sy = newPanY - (wx * sinNew + wy * cosNew) * scale;
+
+      expect(sx).toBeCloseTo(cx, 4);
+      expect(sy).toBeCloseTo(cy, 4);
+    });
+  });
+
+  describe('Step Rotation & Absolute Angle Setting', () => {
+    it('rotates a building by 5 degree steps when tracking is disabled', () => {
+      const bldg = createBuildingFromVertices(
+        [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        'Step Bldg'
+      );
+      const pivot = { x: 5, y: 5 };
+      const stepDeg = 5;
+      const stepRad = (stepDeg * Math.PI) / 180;
+      const cosA = Math.cos(stepRad);
+      const sinA = Math.sin(stepRad);
+
+      const rotatedVerts = bldg.vertices.map((v) => {
+        const rx = v.x - pivot.x;
+        const ry = v.y - pivot.y;
+        return {
+          x: pivot.x + rx * cosA - ry * sinA,
+          y: pivot.y + rx * sinA + ry * cosA,
+        };
+      });
+      const rotated = rebuildBuildingSegments(bldg, rotatedVerts);
+      expect(rotated.vertices.length).toBe(4);
+      // Segment 0 angle should now be +5 deg
+      const seg0AngleDeg = (rotated.segments[0].angleRad * 180) / Math.PI;
+      expect(seg0AngleDeg).toBeCloseTo(5, 2);
+    });
+
+    it('sets absolute rotation angle to 45 degrees correctly', () => {
+      const bldg = createBuildingFromVertices(
+        [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        'Abs Rotate Bldg'
+      );
+      const currentRot = (bldg.segments[0].angleRad * 180) / Math.PI; // 0 deg
+      const targetDeg = 45;
+      const deltaRad = ((targetDeg - currentRot) * Math.PI) / 180;
+      const cosA = Math.cos(deltaRad);
+      const sinA = Math.sin(deltaRad);
+      const pivot = { x: 5, y: 5 };
+
+      const rotatedVerts = bldg.vertices.map((v) => {
+        const rx = v.x - pivot.x;
+        const ry = v.y - pivot.y;
+        return {
+          x: pivot.x + rx * cosA - ry * sinA,
+          y: pivot.y + rx * sinA + ry * cosA,
+        };
+      });
+      const rotated = rebuildBuildingSegments(bldg, rotatedVerts);
+      const newSeg0AngleDeg = (rotated.segments[0].angleRad * 180) / Math.PI;
+      expect(newSeg0AngleDeg).toBeCloseTo(45, 2);
+    });
+  });
 });

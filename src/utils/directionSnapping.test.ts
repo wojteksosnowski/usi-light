@@ -7,6 +7,7 @@ import {
   calculateDirectionSnap,
 } from './directionSnapping';
 import { BuildingLoop } from '../types/geometry';
+import { createBuildingFromVertices } from './dxfParser';
 
 describe('directionSnapping', () => {
   it('correctly normalizes angles and calculates differences in 180 deg axis', () => {
@@ -104,5 +105,81 @@ describe('directionSnapping', () => {
     expect(snap).not.toBeNull();
     expect(snap?.snappedPoint.y).toBeCloseTo(0, 2);
     expect(snap?.snappedPoint.x).toBeCloseTo(15.2, 1);
+  });
+
+  it('collects strictly 0° and 90° axes from polyline segments without secondary 45/30 angle clutter', () => {
+    const polyline = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 }, // Seg 1: 0°
+      { x: 10, y: 10 }, // Seg 2: 90°
+    ];
+    const candidates = collectTargetDirections({ x: 10, y: 10 }, { x: 15, y: 15 }, [], [], polyline);
+    const angles = candidates.map((c) => Math.round(c.angleDeg));
+
+    // Should include 0°, 90°
+    expect(angles).toContain(0);
+    expect(angles).toContain(90);
+    // Should NOT include secondary 45°, 30°, 60°
+    expect(angles).not.toContain(45);
+    expect(angles).not.toContain(30);
+    expect(angles).not.toContain(60);
+  });
+
+  it('excludes moving segments when excludeSegmentIndices is specified', () => {
+    const bldg = createBuildingFromVertices(
+      [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+      'Bldg 1',
+      10.0,
+      true
+    );
+
+    // Exclude s0 and s1
+    const candidates = collectTargetDirections(
+      { x: 10, y: 0 },
+      { x: 10, y: 5 },
+      [bldg],
+      [],
+      [],
+      undefined,
+      bldg.id,
+      bldg.id,
+      [0, 1]
+    );
+
+    expect(candidates.length).toBeGreaterThan(0);
+  });
+
+  it('prioritizes hovered/indicated building over background buildings', () => {
+    const bldgHovered = createBuildingFromVertices(
+      [{ x: 0, y: 0 }, { x: 10, y: 5 }, { x: 10, y: 0 }],
+      'Hovered Bldg',
+      10.0,
+      false
+    );
+    bldgHovered.id = 'bldg-hovered-unique';
+
+    const bldgBackground = createBuildingFromVertices(
+      [{ x: 100, y: 100 }, { x: 105, y: 108.66 }, { x: 100, y: 108.66 }],
+      'Background Bldg',
+      10.0,
+      false
+    );
+    bldgBackground.id = 'bldg-bg-unique';
+
+    const candidates = collectTargetDirections(
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      [bldgBackground, bldgHovered],
+      [],
+      [],
+      bldgHovered.id
+    );
+
+    // Hovered building should have higher priority (lower priority number) than background building
+    const hoveredCand = candidates.find((c) => c.sourceLabel?.includes('Hovered Bldg'));
+    const bgCand = candidates.find((c) => c.sourceLabel?.includes('Background Bldg'));
+    expect(hoveredCand).toBeDefined();
+    expect(bgCand).toBeDefined();
+    expect(hoveredCand!.priority).toBeLessThan(bgCand!.priority);
   });
 });

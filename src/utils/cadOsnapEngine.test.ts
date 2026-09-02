@@ -13,24 +13,46 @@ import { createCachedLineEquation } from './lineBufferEngine';
 describe('cadOsnapEngine', () => {
   const worldToScreenMock = (wx: number, wy: number) => ({ sx: wx * 10, sy: wy * 10 });
 
-  it('generates tracking rays (horizontal, vertical, parallel, perpendicular) for anchor point', () => {
-    const anchor: AnchorPoint = {
+  it('deduplicates tracking rays when source edge is near orthogonal (deadzone < 2°)', () => {
+    // Edge at 0° (horizontal) -> only 2 rays (horizontal & vertical)
+    const anchor0: AnchorPoint = {
       id: 'k1',
       point: { x: 5, y: 10 },
       sourceType: 'vertex',
-      sourceEdgeAngle: 0, // Horizontal edge
+      sourceEdgeAngle: 0,
       acquiredAt: Date.now(),
     };
+    const rays0 = generateTrackingRaysForAnchor(anchor0, 100);
+    expect(rays0.length).toBe(2);
+    expect(rays0.find((r) => r.type === 'horizontal')).toBeDefined();
+    expect(rays0.find((r) => r.type === 'vertical')).toBeDefined();
 
-    const rays = generateTrackingRaysForAnchor(anchor, 100);
-    expect(rays.length).toBe(4);
-    expect(rays.find((r) => r.type === 'horizontal')).toBeDefined();
-    expect(rays.find((r) => r.type === 'vertical')).toBeDefined();
-    expect(rays.find((r) => r.type === 'parallel')).toBeDefined();
-    expect(rays.find((r) => r.type === 'perpendicular')).toBeDefined();
+    // Edge at 0.5° (near horizontal) -> still 2 rays (no jittery duplicate parallel ray)
+    const anchorNear0: AnchorPoint = {
+      id: 'k2',
+      point: { x: 5, y: 10 },
+      sourceType: 'vertex',
+      sourceEdgeAngle: (0.5 * Math.PI) / 180,
+      acquiredAt: Date.now(),
+    };
+    const raysNear0 = generateTrackingRaysForAnchor(anchorNear0, 100);
+    expect(raysNear0.length).toBe(2);
+
+    // Edge at 30° (oblique) -> 4 distinct rays (horizontal, vertical, parallel, perpendicular)
+    const anchor30: AnchorPoint = {
+      id: 'k3',
+      point: { x: 5, y: 10 },
+      sourceType: 'vertex',
+      sourceEdgeAngle: (30 * Math.PI) / 180,
+      acquiredAt: Date.now(),
+    };
+    const rays30 = generateTrackingRaysForAnchor(anchor30, 100);
+    expect(rays30.length).toBe(4);
+    expect(rays30.find((r) => r.type === 'parallel')).toBeDefined();
+    expect(rays30.find((r) => r.type === 'perpendicular')).toBeDefined();
   });
 
-  it('calculates OTRACK ray intersections between 2 anchor points', () => {
+  it('calculates safe OTRACK ray intersections and filters sharp angles / out of bounds', () => {
     const k1: AnchorPoint = {
       id: 'k1',
       point: { x: 0, y: 0 },
@@ -134,6 +156,98 @@ describe('cadOsnapEngine', () => {
     expect(lock?.isParallel).toBe(true);
     expect(lock?.isCollinear).toBe(true);
     expect(lock?.correctedC).toBe(refEdge.C);
+  });
+
+  it('rejects near-parallel OTRACK intersections (<10°) and out-of-range intersections', () => {
+    // Anchor 1 at (0, 0) with 30° edge
+    const k1: AnchorPoint = {
+      id: 'k1',
+      point: { x: 0, y: 0 },
+      sourceType: 'vertex',
+      sourceEdgeAngle: (30 * Math.PI) / 180,
+      acquiredAt: Date.now(),
+    };
+    // Anchor 2 at (10, 0) with 32° edge (diff = 2° < 10°)
+    const k2: AnchorPoint = {
+      id: 'k2',
+      point: { x: 10, y: 0 },
+      sourceType: 'vertex',
+      sourceEdgeAngle: (32 * Math.PI) / 180,
+      acquiredAt: Date.now(),
+    };
+
+    const intersections = calculateOtrackIntersections([k1, k2], 50);
+    // Parallel rays at 30° and 32° should be rejected due to det < 0.173
+    const badInt = intersections.find(
+      (i) => i.ray1.type === 'parallel' && i.ray2.type === 'parallel'
+    );
+    expect(badInt).toBeUndefined();
+  });
+
+  it('stabilizes cursor snapping using hysteresis (sticky snap)', () => {
+    // Two points: P1=(0, 0) and P2=(0.5, 0)
+    // Cursor at (0.24, 0), worldToScreen scale = 10 -> Screen X: P1=0px, P2=5px, Cursor=2.4px
+    // Raw distance to P1 = 2.4px, to P2 = 2.6px.
+    // Without previous snap, P1 wins (2.4px <= 2.6px).
+    const edge1 = createCachedLineEquation('e1', 'b1', 0, { x: 0, y: 0 }, { x: 0, y: 10 });
+    const edge2 = createCachedLineEquation('e2', 'b2', 0, { x: 0.5, y: 0 }, { x: 0.5, y: 10 });
+
+    const snapInitial = evaluateOsnapSnap({
+      mouseWorld: { x: 0.24, y: 0 },
+      lineBuffer: [edge1, edge2],
+      worldToScreen: worldToScreenMock,
+      screenSnapThresholdPx: 20,
+    });
+    expect(snapInitial?.snappedPoint).toEqual({ x: 0, y: 0 });
+
+    // When previous snap was P2, hysteresis bonus (3.5px) keeps P2 active even if cursor is at 2.4px (closer to P1 raw)
+    const previousP2Snap = {
+      priority: 1 as const,
+      type: 'endpoint' as const,
+      snappedPoint: { x: 0.5, y: 0 },
+      screenDistancePx: 2.6,
+      label: 'Wierzchołek (Endpoint)',
+      description: 'Wierzchołek polilinii (b2)',
+      sourceBuildingId: 'b2',
+    };
+
+    const snapSticky = evaluateOsnapSnap({
+      mouseWorld: { x: 0.24, y: 0 },
+      lineBuffer: [edge1, edge2],
+      worldToScreen: worldToScreenMock,
+      screenSnapThresholdPx: 20,
+      previousSnapResult: previousP2Snap,
+      hysteresisBonusPx: 3.5,
+    });
+
+    // P2 wins because effective dist = max(0, 2.6 - 3.5) = 0px vs P1 = 2.4px
+    expect(snapSticky?.snappedPoint).toEqual({ x: 0.5, y: 0 });
+  });
+
+  it('filters out short edges from midpoint/nearest/extension while keeping endpoints', () => {
+    // Very short micro-segment: length = 0.02m (2cm)
+    const microEdge = createCachedLineEquation('micro', 'b_micro', 0, { x: 10, y: 10 }, { x: 10.02, y: 10 });
+
+    // Endpoint snap still works on micro-edge
+    const endpointSnap = evaluateOsnapSnap({
+      mouseWorld: { x: 10.001, y: 10 },
+      lineBuffer: [microEdge],
+      worldToScreen: worldToScreenMock,
+      screenSnapThresholdPx: 20,
+      minEdgeLengthMeters: 0.05,
+    });
+    expect(endpointSnap?.type).toBe('endpoint');
+
+    // Midpoint snap is filtered out on micro-edge (< 0.05m)
+    const midpointSnap = evaluateOsnapSnap({
+      mouseWorld: { x: 10.01, y: 10 },
+      lineBuffer: [microEdge],
+      worldToScreen: worldToScreenMock,
+      screenSnapThresholdPx: 20,
+      minEdgeLengthMeters: 0.05,
+      activeSnapTypes: { endpoint: false, midpoint: true, nearest: true },
+    });
+    expect(midpointSnap).toBeNull();
   });
 
   describe('evaluateBuildingDragMultiSnap', () => {

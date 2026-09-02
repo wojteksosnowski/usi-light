@@ -82,7 +82,12 @@ export const APP_CONFIG = {
     guideLineColor: '#38bdf8',
     guideLineDash: [6, 4],
     guideLineWidth: 1.5,
-    badgeBgColor: 'rgba(15, 23, 42, 0.92)',
+    // Rozróżnienie kolorystyczne: statystyczne vs przedłużenia krawędzi
+    statisticalGuideColor: '#f59e0b', // Bursztynowy/Złoty dla siatek głównych i statystycznych
+    edgeGuideColor: '#38bdf8', // Błękitny/Cyjanowy dla konkretnych krawędzi i ścian
+    statisticalGuideDash: [8, 4],
+    edgeGuideDash: [5, 4],
+    badgeBgColor: 'rgba(15, 23, 42, 0.94)',
     badgeBorderColor: '#38bdf8',
   },
 
@@ -100,10 +105,19 @@ export const APP_CONFIG = {
     midpointColor: '#06b6d4', // Cyjanowy trójkąt
     intersectionColor: '#f43f5e', // Różowy krzyżyk/klepsydra
     nearestColor: '#38bdf8', // Błękitna klepsydra
-    extensionColor: '#38bdf8', // Błękitna linia przedłużenia
+    extensionColor: '#38bdf8', // Błękitna linia przedłużenia konkretnej ściany
     otrackAnchorColor: '#f59e0b', // Bursztynowy okrąg akwizycji
-    otrackRayColor: '#818cf8', // Fioletowo-niebieski promień śledzący
+    otrackRayColor: '#818cf8', // Fioletowo-niebieski domyślny promień
+    statisticalRayColor: '#f59e0b', // Bursztynowa prowadnica OTRACK (kierunki statystyczne / ortho 0°/90°)
+    edgeRayColor: '#38bdf8', // Błękitna prowadnica OTRACK (pochodząca z konkretnej ściany/krawędzi)
     collinearColor: '#a855f7', // Fioletowa linia blokady kolinearnej
+  },
+
+  // Konfiguracja analizy statystycznej kierunków fasad
+  statistics: {
+    defaultNoisePercentile: 20, // 20% najkrótszych odcinków ignorowanych przy wyznaczaniu siatek
+    minSegmentLengthMeters: 0.2, // Minimalna długość ściany w metrach
+    highlightColor: '#f59e0b', // Kolor aktywnego koszyka kątowego w UI
   },
 } as const;
 
