@@ -11,7 +11,7 @@ export function renderDimensions(
   dimensionType: string,
   selectedBuildingId: string | null
 ) {
-  const { ctx, worldToScreen } = rc;
+  const { ctx, worldToScreen, width, height } = rc;
 
   // 1. Existing Saved Dimensions
   if (dimensions.length > 0) {
@@ -28,6 +28,17 @@ export function renderDimensions(
         const s1 = worldToScreen(res.p1.x, res.p1.y);
         const s2 = worldToScreen(res.p2.x, res.p2.y);
         if (!Number.isFinite(s1.sx) || !Number.isFinite(s1.sy) || !Number.isFinite(s2.sx) || !Number.isFinite(s2.sy)) continue;
+
+        // Viewport culling for dimension
+        const pad = 60;
+        if (
+          (s1.sx < -pad && s2.sx < -pad) ||
+          (s1.sx > width + pad && s2.sx > width + pad) ||
+          (s1.sy < -pad && s2.sy < -pad) ||
+          (s1.sy > height + pad && s2.sy > height + pad)
+        ) {
+          continue;
+        }
 
         ctx.beginPath();
         ctx.moveTo(s1.sx, s1.sy);

@@ -89,6 +89,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Drawing state
   const [drawingVertices, setDrawingVertices] = useState<Point2D[]>([]);
@@ -585,7 +586,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     }).filter(Boolean) as AnalysisPointResult[];
   }, [propPinnedPointResults, pinnedPoints, buildings, selectedPointResult]);
 
-  // Main Render Loop
+  // 1. Base Render Loop (Siatka, Wstęgi, Budynki, Cienie, Wymiary) - ciężka geometria przerysowywana tylko przy zmianie sceny lub widoku
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -652,18 +653,15 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       drawingMode === 'rotate'
     );
 
-
-    // 3. Shadow Range § 12 (only for visible tested buildings)
+    // 4. Shadow Range § 12 (only for visible tested buildings)
     renderShadowRange(renderContext, shadowRangeLoops, showShadowRange, shadowAnalysis?.hourlyShadows);
 
-
-    // 4. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
+    // 5. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
     const pointsToVisualize = (pinnedPointResults && pinnedPointResults.length > 0)
       ? pinnedPointResults
       : (selectedPointResult ? [selectedPointResult] : []);
 
     if (pointsToVisualize.length > 0) {
-      // Sort so active pinned point is rendered last (on top)
       const sortedVisualizations = [...pointsToVisualize].sort((a, b) => {
         const aActive = a.id === activePinnedPointId || a.id === selectedPointResult?.id;
         const bActive = b.id === activePinnedPointId || b.id === selectedPointResult?.id;
@@ -681,7 +679,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 5. Dimensions & Annotations
+    // 6. Dimensions & Annotations
     renderDimensions(
       renderContext,
       visibleBuildings,
@@ -692,8 +690,80 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       dimensionType,
       selectedBuildingId
     );
+  }, [
+    buildings,
+    selectedBuildingId,
+    hoveredBuildingId,
+    hoveredEdge,
+    selectedPointResult,
+    activePointMode,
+    showNormals,
+    showShadowingLines,
+    showSunlightLines,
+    showShadowRange,
+    latitude,
+    longitude,
+    equinoxDate,
+    sunlightMethod,
+    dimensions,
+    isDimensionMode,
+    dimensionType,
+    dimHoveredEdge,
+    viewState,
+    canvasDimensions,
+    drawingMode,
+    editingEdgeLength,
+    hoveredEdgeLengthBadge,
+    pinnedPointResults,
+    activePinnedPointId,
+    liveFacadeSnap,
+    facadePointMode,
+    isLinkingMode,
+    linkingSourceId,
+    isEditMode,
+    viewRotationMode,
+    viewRotationDeg,
+    rotationHover,
+    analysisResults,
+    layerSettings,
+    shadowRangeLoops,
+    shadowAnalysis,
+    worldToScreen,
+    screenToWorld,
+    visibleBuildings,
+  ]);
 
-    // 6. Drawing Tool Live Previews, Vertex Edit Handles & Object Rotation
+  // 2. Overlay Render Loop (Kursor, OSNAP, OTRACK, Rubberband, Narzędzia Rysowania) - natychmiastowe 60/120 FPS
+  useEffect(() => {
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!overlayCanvas) return;
+    const ctx = overlayCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvasDimensions.width;
+    const height = canvasDimensions.height;
+
+    if (overlayCanvas.width !== width || overlayCanvas.height !== height) {
+      overlayCanvas.width = width;
+      overlayCanvas.height = height;
+    }
+
+    ctx.clearRect(0, 0, width, height);
+
+    const renderContext: CadRenderContext = {
+      ctx,
+      width,
+      height,
+      viewState,
+      viewRotationDeg,
+      worldToScreen,
+      screenToWorld,
+      latitude,
+      longitude,
+      equinoxDate,
+      sunlightMethod,
+    };
+
     const activeSelectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
     const buildingForPreview = activeSelectedBuilding
       ? ({
@@ -726,64 +796,37 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       activeBuildingDragSnap
     );
   }, [
-    buildings,
-    selectedBuildingId,
-    hoveredBuildingId,
-    hoveredEdge,
-    selectedPointResult,
-    activePointMode,
-    showNormals,
-    showShadowingLines,
-    showSunlightLines,
-    showShadowRange,
+    canvasDimensions,
+    viewState,
+    viewRotationDeg,
+    worldToScreen,
+    screenToWorld,
     latitude,
     longitude,
     equinoxDate,
     sunlightMethod,
-    dimensions,
-    isDimensionMode,
-    dimensionType,
-    dimensionPendingRef,
-    dimHoveredEdge,
-    viewState,
-    canvasDimensions,
-    drawingMode,
-    drawingVertices,
-    currentMouseWorld,
-    hoveredVertexIndex,
-    hoveredMidpointIndex,
-    draggedVertexIndex,
-    hoveredRotateVertexIndex,
-    activeRotateAngleSnap,
+    buildings,
+    selectedBuildingId,
     effectivePivot,
     isPivotHovered,
     isDraggingPivot,
     isRotating,
     rotStartAngleScreen,
     rotAngleDeg,
-    isLinkingMode,
-    linkingSourceId,
-    isEditMode,
-    viewRotationMode,
-    viewRotationDeg,
-    rotationHover,
-    analysisResults,
-    editingEdgeLength,
-    hoveredEdgeLengthBadge,
-    pinnedPointResults,
-    activePinnedPointId,
-    liveFacadeSnap,
+    hoveredRotateVertexIndex,
+    activeRotateAngleSnap,
+    drawingMode,
+    drawingVertices,
+    currentMouseWorld,
+    hoveredVertexIndex,
+    hoveredMidpointIndex,
+    draggedVertexIndex,
     activeDirectionSnap,
+    selectedVertexIndex,
     activeOsnapSnap,
-    activeBuildingDragSnap,
     acquiredAnchors,
     acquiringState,
-    facadePointMode,
-    layerSettings,
-    shadowRangeLoops,
-    shadowAnalysis,
-    worldToScreen,
-    screenToWorld,
+    activeBuildingDragSnap,
   ]);
 
 
@@ -1919,6 +1962,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               : isPanning || isDraggingBuilding
               ? 'grabbing'
               : 'grab',
+        }}
+      />
+      <canvas
+        ref={overlayCanvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          pointerEvents: 'none',
         }}
       />
     </div>

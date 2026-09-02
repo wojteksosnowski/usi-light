@@ -13,6 +13,8 @@ import {
 } from '../types/geometry';
 import {
   raySegmentIntersection,
+  raySegmentDistance2D,
+  crossProduct2D,
   sampleSegmentPoints,
   distancePointToSegment,
   clipSegmentToCircle,
@@ -56,6 +58,37 @@ export interface PrefilteredObstacle {
  *    „tyłem” do punktu P i tak jest zasłonięty przez ścianę przednią tej samej bryły.
  * 6. Wykluczenie własnego badanego odcinka oraz obiektów wyłączonych z analizy.
  */
+// Szybki cache AABB budynków w pamięci silnika analitycznego
+interface BuildingAABB {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+const buildingAabbCache = new WeakMap<object, BuildingAABB>();
+
+function getBuildingAABB(bldg: BuildingLoop): BuildingAABB | null {
+  if (!bldg.vertices || bldg.vertices.length < 3) return null;
+  const cached = buildingAabbCache.get(bldg);
+  if (cached) return cached;
+
+  let minX = bldg.vertices[0].x;
+  let maxX = minX;
+  let minY = bldg.vertices[0].y;
+  let maxY = minY;
+  for (let vi = 1; vi < bldg.vertices.length; vi++) {
+    const vx = bldg.vertices[vi].x;
+    const vy = bldg.vertices[vi].y;
+    if (vx < minX) minX = vx;
+    if (vx > maxX) maxX = vx;
+    if (vy < minY) minY = vy;
+    if (vy > maxY) maxY = vy;
+  }
+  const aabb: BuildingAABB = { minX, maxX, minY, maxY };
+  buildingAabbCache.set(bldg, aabb);
+  return aabb;
+}
+
 export function prefilterObstacleSegments(
   point: Point2D,
   segment: FacadeSegment,
@@ -79,25 +112,14 @@ export function prefilterObstacleSegments(
     if (bldg.isIncluded === false) continue;
 
     // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż 35m od punktu P
-    if (bldg.vertices && bldg.vertices.length >= 3) {
-      let minX = bldg.vertices[0].x;
-      let maxX = minX;
-      let minY = bldg.vertices[0].y;
-      let maxY = minY;
-      for (let vi = 1; vi < bldg.vertices.length; vi++) {
-        const vx = bldg.vertices[vi].x;
-        const vy = bldg.vertices[vi].y;
-        if (vx < minX) minX = vx;
-        if (vx > maxX) maxX = vx;
-        if (vy < minY) minY = vy;
-        if (vy > maxY) maxY = vy;
-      }
+    const aabb = getBuildingAABB(bldg);
+    if (aabb) {
       const maxReach = bldg.isCityCentre ? 17.5 : 35.0;
       if (
-        point.x < minX - maxReach ||
-        point.x > maxX + maxReach ||
-        point.y < minY - maxReach ||
-        point.y > maxY + maxReach
+        point.x < aabb.minX - maxReach ||
+        point.x > aabb.maxX + maxReach ||
+        point.y < aabb.minY - maxReach ||
+        point.y > aabb.maxY + maxReach
       ) {
         continue;
       }
@@ -151,7 +173,8 @@ export function analyzeShadowingAtPoint(
   allBuildings: BuildingLoop[],
   targetBuildingId: string,
   angleStepDeg: number = 0.5,
-  prefilteredObstacles?: PrefilteredObstacle[]
+  prefilteredObstacles?: PrefilteredObstacle[],
+  buildingMap?: Map<string, BuildingLoop>
 ): ShadowingResult {
   const normal = segment.normal;
   const normalAngleRad = Math.atan2(normal.y, normal.x);
@@ -169,8 +192,10 @@ export function analyzeShadowingAtPoint(
 
   const candidates: Candidate[] = [];
 
+  const bldgMap = buildingMap ?? new Map<string, BuildingLoop>(allBuildings.map((b) => [b.id, b]));
+
   for (const { seg, bldgId } of baseObstacles) {
-    const bldg = allBuildings.find((b) => b.id === bldgId);
+    const bldg = bldgMap.get(bldgId);
     if (!bldg) continue;
 
     // Required clearance for this obstacle (§ 12)
@@ -643,10 +668,20 @@ export function analyzeSunlightAtPoint(
       const dotNormal = sunDir.x * seg.normal.x + sunDir.y * seg.normal.y;
       if (dotNormal >= -1e-4) continue;
 
-      const hit = raySegmentIntersection(point, sunDir, seg.p1, seg.p2);
-      if (hit.hit && hit.distance > 0.05) {
+      const hitDist = raySegmentDistance2D(
+        point.x,
+        point.y,
+        sunDir.x,
+        sunDir.y,
+        seg.p1.x,
+        seg.p1.y,
+        seg.p2.x,
+        seg.p2.y
+      );
+
+      if (hitDist > 0.05 && hitDist < Infinity) {
         const deltaH = Math.max(0, seg.hTop);
-        const betaDeg = Math.atan2(deltaH, hit.distance) * RAD2DEG;
+        const betaDeg = Math.atan2(deltaH, hitDist) * RAD2DEG;
 
         if (betaDeg > maxObstacleAngleDeg) {
           maxObstacleAngleDeg = betaDeg;
@@ -829,6 +864,12 @@ export function analyzeSunlightAtPointSegments(
     const az1 = ((Math.atan2(p1.x - point.x, p1.y - point.y) * RAD2DEG + 360) % 360);
     const az2 = ((Math.atan2(p2.x - point.x, p2.y - point.y) * RAD2DEG + 360) % 360);
 
+    // Wykorzystaj znak iloczynu wektorowego 2D (Cross Product) do natychmiastowego ustalenia relacji kątowej
+    // cross > 0 oznacza, że p2 leży na lewo (przeciwnie do ruchu wskazówek zegara) od p1 względem punktu P
+    const cp = crossProduct2D(p1.x, p1.y, p2.x, p2.y, point.x, point.y);
+    const startAzCandidate = cp >= 0 ? az1 : az2;
+    const endAzCandidate = cp >= 0 ? az2 : az1;
+
     const intervals: [number, number][] = [];
     if (Math.abs(az1 - az2) > 180) {
       const minA = Math.min(az1, az2);
@@ -863,14 +904,20 @@ export function analyzeSunlightAtPointSegments(
     }
   }
 
-  // 4. Wyznaczanie wolnych sektorów nasłonecznienia i obliczanie czasu
+  // 4. Wyznaczanie wolnych sektorów nasłonecznienia i obliczanie czasu (z użyciem szybkiego LUT Binary Search)
   const sectors: import('../types/geometry').SunlightSector[] = [];
   let cursor = azActiveMin;
   let totalHours = 0;
 
+  const isFastLutSupported = typeof (sys as any).getHourForAzimuthFast === 'function';
+
   function addFreeSector(startAz: number, endAz: number) {
-    const rawH1 = sys.getHourForAzimuth(startAz);
-    const rawH2 = sys.getHourForAzimuth(endAz);
+    const rawH1 = isFastLutSupported
+      ? (sys as any).getHourForAzimuthFast(startAz)
+      : sys.getHourForAzimuth(startAz);
+    const rawH2 = isFastLutSupported
+      ? (sys as any).getHourForAzimuthFast(endAz)
+      : sys.getHourForAzimuth(endAz);
     const hStart = Math.min(rawH1, rawH2);
     const hEnd   = Math.max(rawH1, rawH2);
     const secHours = hEnd - hStart;
@@ -952,6 +999,8 @@ export interface AnalysisBatchOutput {
   avgShadowingMs: number;
   avgSunlightMs: number;
   avgSunlightSegMs: number; // Czas metody segment-intersection (porównanie)
+  totalShadowingTimeMs?: number; // Całkowity czas analizy § 12 w danym cyklu
+  totalSunlightTimeMs?: number; // Całkowity czas analizy § 56 w danym cyklu
   shadowEnvelopeMs: number; // Czas obliczenia obrysów i koperty cienia
   shadowAnalysis?: ShadowAnalysisResult; // Wynik analizy obrysu cienia i godzinowych obrysów
   totalAnalysisMs: number; // Full wall-clock time for the active batch analysis
@@ -1009,11 +1058,17 @@ export function runFullAnalysis(
       avgShadowingMs: 0,
       avgSunlightMs: 0,
       avgSunlightSegMs: 0,
+      totalShadowingTimeMs: 0,
+      totalSunlightTimeMs: 0,
       shadowEnvelopeMs: 0,
       shadowAnalysis: { hourlyShadows: [], envelopeLoops: [], calculationTimeMs: 0 },
       totalAnalysisMs: performance.now() - analysisStart,
       totalPoints: 0,
     };
+  }
+
+  if (analysisPointCache.size > 15000) {
+    analysisPointCache.clear();
   }
 
   const results: AnalysisPointResult[] = [];
@@ -1091,6 +1146,8 @@ export function runFullAnalysis(
   let totalHoursDiffAbs = 0;
 
   if (isShadowingEnabled || isSunlightEnabled) {
+    const batchBuildingMap = new Map<string, BuildingLoop>(buildings.map((b) => [b.id, b]));
+
     for (const bldg of testedBuildings) {
       for (const seg of bldg.segments) {
         const isChildcare = seg.buildingType === 'childcare';
@@ -1140,7 +1197,7 @@ export function runFullAnalysis(
           if (isShadowingEnabled) {
             const tShadow0 = performance.now();
             shadowing = analyzeShadowingAtPoint(
-              sample.point, seg, sample.ratio, buildings, bldg.id, angleStep, prefilteredObstacles
+              sample.point, seg, sample.ratio, buildings, bldg.id, angleStep, prefilteredObstacles, batchBuildingMap
             );
             totalShadowingTimeMs += performance.now() - tShadow0;
           } else {
@@ -1255,6 +1312,8 @@ export function runFullAnalysis(
     avgShadowingMs,
     avgSunlightMs,
     avgSunlightSegMs,
+    totalShadowingTimeMs,
+    totalSunlightTimeMs,
     shadowEnvelopeMs,
     shadowAnalysis,
     totalAnalysisMs,

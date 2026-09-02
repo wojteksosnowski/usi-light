@@ -10,6 +10,66 @@ export interface EditingEdgeLengthState {
   previewVertices?: any[];
 }
 
+// Global Path2D and AABB cache keyed by building reference and vertex version
+interface BuildingCachedGeometry {
+  path: Path2D;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  centerX: number;
+  centerY: number;
+}
+
+const buildingGeoCache = new WeakMap<object, BuildingCachedGeometry>();
+
+function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
+  if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return null;
+  const cached = buildingGeoCache.get(bldg);
+  if (cached) return cached;
+
+  const path = new Path2D();
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let sumX = 0;
+  let sumY = 0;
+  let validCount = 0;
+
+  for (let i = 0; i < bldg.vertices.length; i++) {
+    const v = bldg.vertices[i];
+    if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) continue;
+    if (validCount === 0) {
+      path.moveTo(v.x, v.y);
+    } else {
+      path.lineTo(v.x, v.y);
+    }
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+    sumX += v.x;
+    sumY += v.y;
+    validCount++;
+  }
+  path.closePath();
+
+  if (validCount < 3) return null;
+
+  const res: BuildingCachedGeometry = {
+    path,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    centerX: sumX / validCount,
+    centerY: sumY / validCount,
+  };
+  buildingGeoCache.set(bldg, res);
+  return res;
+}
+
 export function renderBuildings(
   rc: CadRenderContext,
   buildings: any[],
@@ -34,7 +94,17 @@ export function renderBuildings(
   isRotateMode?: boolean
 ) {
 
-  const { ctx, worldToScreen } = rc;
+  const { ctx, worldToScreen, screenToWorld, width, height, viewState, viewRotationDeg } = rc;
+
+  // Viewport bounds in world space for culling
+  const c1 = screenToWorld(0, 0);
+  const c2 = screenToWorld(width, 0);
+  const c3 = screenToWorld(width, height);
+  const c4 = screenToWorld(0, height);
+  const vpMinX = Math.min(c1.wx, c2.wx, c3.wx, c4.wx);
+  const vpMaxX = Math.max(c1.wx, c2.wx, c3.wx, c4.wx);
+  const vpMinY = Math.min(c1.wy, c2.wy, c3.wy, c4.wy);
+  const vpMaxY = Math.max(c1.wy, c2.wy, c3.wy, c4.wy);
 
   // 0. Render Dashed Ghost Preview for Edge Length Editing
   if (editingEdgeLength?.previewVertices && editingEdgeLength.previewVertices.length >= 3) {
@@ -57,6 +127,14 @@ export function renderBuildings(
   for (const bldg of buildings) {
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
 
+    const geo = getOrComputeBuildingGeo(bldg);
+    if (!geo) continue;
+
+    // Viewport Culling check
+    if (geo.maxX < vpMinX || geo.minX > vpMaxX || geo.maxY < vpMinY || geo.minY > vpMaxY) {
+      continue;
+    }
+
     const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
@@ -69,24 +147,25 @@ export function renderBuildings(
 
     ctx.save();
 
-    // Filled Polygon Body
-    ctx.beginPath();
-    const firstScreen = worldToScreen(bldg.vertices[0].x, bldg.vertices[0].y);
-    if (!Number.isFinite(firstScreen.sx) || !Number.isFinite(firstScreen.sy)) {
-      ctx.restore();
-      continue;
-    }
-    ctx.moveTo(firstScreen.sx, firstScreen.sy);
+    // Matrix transforming world (wx, wy) -> screen (sx, sy):
+    // According to worldToScreen(wx, wy):
+    // rx = wx * cos - wy * sin
+    // ry = wx * sin + wy * cos
+    // sx = panX + rx * scale = panX + scale * cos * wx - scale * sin * wy
+    // sy = panY - ry * scale = panY - scale * sin * wx - scale * cos * wy
+    const rot = ((viewRotationDeg || 0) * Math.PI) / 180;
+    const cosR = Math.cos(rot);
+    const sinR = Math.sin(rot);
+    const s = viewState.scale;
 
-    for (let i = 1; i < bldg.vertices.length; i++) {
-      const v = bldg.vertices[i];
-      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) continue;
-      const { sx, sy } = worldToScreen(v.x, v.y);
-      if (Number.isFinite(sx) && Number.isFinite(sy)) {
-        ctx.lineTo(sx, sy);
-      }
-    }
-    ctx.closePath();
+    const a = s * cosR;
+    const b = -s * sinR;
+    const c = -s * sinR;
+    const d = -s * cosR;
+    const e = viewState.panX;
+    const f = viewState.panY;
+
+    ctx.setTransform(a, b, c, d, e, f);
 
     if (bldg.id === hoveredBuildingId && !isSelected) {
       ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
@@ -105,19 +184,18 @@ export function renderBuildings(
     } else {
       ctx.fillStyle = isIncluded ? 'rgba(51, 65, 85, 0.25)' : 'rgba(30, 41, 59, 0.15)';
     }
-    ctx.fill();
+    ctx.fill(geo.path);
 
     // Linking mode highlight
     if (isLinkingMode && linkingSourceId && bldg.id !== linkingSourceId) {
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3 / s;
       ctx.strokeStyle = '#f59e0b';
-      ctx.setLineDash([6, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.setLineDash([6 / s, 4 / s]);
+      ctx.stroke(geo.path);
     } else if (isSelected) {
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2.5 / s;
       ctx.strokeStyle = isTested ? '#60a5fa' : '#94a3b8';
-      ctx.stroke();
+      ctx.stroke(geo.path);
     }
 
     ctx.restore();
@@ -126,6 +204,14 @@ export function renderBuildings(
   // 2. Render Outer Edge Strokes & Interactive Edge Hovering
   for (const bldg of buildings) {
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
+
+    const geo = getOrComputeBuildingGeo(bldg);
+    if (!geo) continue;
+
+    // Viewport Culling check
+    if (geo.maxX < vpMinX || geo.minX > vpMaxX || geo.maxY < vpMinY || geo.minY > vpMaxY) {
+      continue;
+    }
 
     const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
@@ -268,21 +354,10 @@ export function renderBuildings(
     }
 
     // Centroid Label for Building
-    if (bldg.vertices && bldg.vertices.length >= 3) {
-      let cx = 0;
-      let cy = 0;
-      let count = 0;
-      for (const v of bldg.vertices) {
-        if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
-          cx += v.x;
-          cy += v.y;
-          count++;
-        }
-      }
-      if (count >= 3) {
-        cx /= count;
-        cy /= count;
-        const { sx: csx, sy: csy } = worldToScreen(cx, cy);
+    if (geo) {
+      const cx = geo.centerX;
+      const cy = geo.centerY;
+      const { sx: csx, sy: csy } = worldToScreen(cx, cy);
 
         if (Number.isFinite(csx) && Number.isFinite(csy)) {
           const lockTag = isLocked ? ' 🔒' : '';
@@ -340,7 +415,6 @@ export function renderBuildings(
             ctx.fill();
           }
         }
-      }
     }
     ctx.restore();
   }

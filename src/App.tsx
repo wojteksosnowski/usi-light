@@ -321,9 +321,12 @@ export const App: React.FC = () => {
   const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
   const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
   const avgSunlightSegMs = analysisOutput?.avgSunlightSegMs || 0;
+  const totalShadowingMs = analysisOutput?.totalShadowingTimeMs ?? (avgShadowingMs * (analysisOutput?.totalPoints || 0));
+  const totalSunlightMs = analysisOutput?.totalSunlightTimeMs ?? (avgSunlightMs * (analysisOutput?.totalPoints || 0));
   const shadowEnvelopeMs = analysisOutput?.shadowEnvelopeMs || 0;
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
   const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
+  const totalPoints = analysisOutput?.totalPoints ?? analysisResults.length;
 
   // Statistical analysis of facade segments directions & linear equations
   const [noisePercentileCutoff, setNoisePercentileCutoff] = useState<number>(
@@ -3384,32 +3387,38 @@ export const App: React.FC = () => {
             </span>
           </div>
 
-          {/* Performance per point benchmark badge */}
+          {/* Performance & points count badge */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '2px 7px',
+              gap: '6px',
+              padding: '2px 8px',
               borderRadius: '5px',
               backgroundColor: 'rgba(15, 23, 42, 0.85)',
               border: '1px solid #334155',
               fontSize: '10px',
               fontFamily: 'monospace',
             }}
-            title={`Czas pełnego przeliczenia aktywnych warstw analitycznych:\n• Łącznie: ${totalAnalysisMs.toFixed(3)} ms\n\nŚredni czas kalkulacji pojedynczego punktu fasady:\n• § 12 (Przesłanianie): ${avgShadowingMs.toFixed(3)} ms\n• § 56 (Nasłonecznienie): ${avgSunlightMs.toFixed(3)} ms\n\nAnaliza obrysu cienia:\n• Obrys cienia (§ 56 koperta & godziny): ${shadowEnvelopeMs.toFixed(3)} ms`}
+            title={`Czas pełnego przeliczenia metod analitycznych w bieżącym cyklu:\n• Liczba zbadanych punktów: ${totalPoints.toLocaleString()} (${(totalPoints / 1000).toFixed(2)}k pkt)\n• § 12 (Przesłanianie) łącznie: ${totalShadowingMs.toFixed(2)} ms (śr. ${avgShadowingMs.toFixed(3)} ms/pkt)\n• § 56 (Nasłonecznienie) łącznie: ${totalSunlightMs.toFixed(2)} ms (śr. ${avgSunlightMs.toFixed(3)} ms/pkt)\n• Obrys i koperta cienia (§ 56): ${shadowEnvelopeMs.toFixed(2)} ms\n• Całkowity czas cyklu: ${totalAnalysisMs.toFixed(2)} ms`}
           >
             <Timer size={11} color="#94a3b8" />
+            <span style={{ color: '#93c5fd', fontWeight: 600 }}>
+              {totalPoints >= 1000
+                ? `${(totalPoints / 1000).toFixed(1)}k pkt`
+                : `${totalPoints} pkt`}
+            </span>
+            <span style={{ color: '#475569' }}>|</span>
             <span style={{ color: '#34d399', fontWeight: 600 }}>
-              §12: {avgShadowingMs < 0.01 ? '<0.01' : avgShadowingMs.toFixed(2)}ms
+              §12: {totalShadowingMs < 0.1 && totalShadowingMs > 0 ? '<0.1' : totalShadowingMs.toFixed(1)}ms
             </span>
             <span style={{ color: '#475569' }}>|</span>
             <span style={{ color: '#fbbf24', fontWeight: 600 }}>
-              §56: {avgSunlightMs < 0.01 ? '<0.01' : avgSunlightMs.toFixed(2)}ms
+              §56: {totalSunlightMs < 0.1 && totalSunlightMs > 0 ? '<0.1' : totalSunlightMs.toFixed(1)}ms
             </span>
             <span style={{ color: '#475569' }}>|</span>
             <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
-              Razem: {totalAnalysisMs < 0.01 ? '<0.01' : totalAnalysisMs.toFixed(2)}ms
+              Cykl: {totalAnalysisMs < 0.1 && totalAnalysisMs > 0 ? '<0.1' : totalAnalysisMs.toFixed(1)}ms
             </span>
           </div>
 

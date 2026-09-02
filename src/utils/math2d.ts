@@ -29,6 +29,23 @@ export function isPolygonCCW(points: Point2D[]): boolean {
 }
 
 /**
+ * 2D Cross product (z-component) of vectors (P1 - Origin) and (P2 - Origin).
+ * Positive => P2 is to the left of P1 (CCW) relative to Origin.
+ * Negative => P2 is to the right of P1 (CW) relative to Origin.
+ * Zero => Collinear with Origin.
+ */
+export function crossProduct2D(
+  p1x: number,
+  p1y: number,
+  p2x: number,
+  p2y: number,
+  ox: number,
+  oy: number
+): number {
+  return (p1x - ox) * (p2y - oy) - (p1y - oy) * (p2x - ox);
+}
+
+/**
  * Calculates the outward unit normal vector for segment P1->P2.
  * For a CCW polygon, the outward normal is ( (y2-y1)/L, -(x2-x1)/L ).
  * For a CW polygon, we flip the normal to keep it pointing outward.
@@ -133,6 +150,45 @@ export function raySegmentIntersection(
   }
 
   return { hit: false, distance: Infinity };
+}
+
+/**
+ * Zero-allocation ray-segment intersection distance in 2D.
+ * Returns positive distance t if hit, or Infinity if no intersection.
+ * Uses pure primitive numbers without creating temporary Point2D or hit objects.
+ */
+export function raySegmentDistance2D(
+  ox: number,
+  oy: number,
+  dx: number,
+  dy: number,
+  p1x: number,
+  p1y: number,
+  p2x: number,
+  p2y: number
+): number {
+  const segDx = p2x - p1x;
+  const segDy = p2y - p1y;
+
+  const cross = dx * segDy - dy * segDx;
+  if (Math.abs(cross) < 1e-9) {
+    return Infinity;
+  }
+
+  const vOriginX = p1x - ox;
+  const vOriginY = p1y - oy;
+
+  const t = (vOriginX * segDy - vOriginY * segDx) / cross;
+  if (t < 1e-5) {
+    return Infinity;
+  }
+
+  const u = (vOriginX * dy - vOriginY * dx) / cross;
+  if (u >= 0 && u <= 1) {
+    return t;
+  }
+
+  return Infinity;
 }
 
 /**

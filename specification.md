@@ -11,12 +11,15 @@ Aplikacja działa w pełni po stronie klienta (Client-Side Only), zapewniając n
 ### Stos Technologiczny (Tech Stack)
 * **Frontend Core:** React 19, TypeScript (strict mode), Vite 6 / 8.
 * **Styling & UI:** Tailwind CSS 3.4, Lucide React (ikony architektoniczne i CAD), `clsx`.
-* **Warstwa Renderowania:** Wielowarstwowy silnik Canvas 2D API (HTML5 Canvas) z dedykowanymi rendererami modułowymi, buforem transformacji macierzowej, obsługą subpikselowego antyaliasingu i dynamicznym skalowaniem DPI.
+* **Warstwa Renderowania:** Zoptymalizowany podwójny silnik Canvas 2D API (**Dual-Canvas Architecture**):
+  * **Base Canvas (`canvasRef`):** bufor podkładowy sceny (siatka, geometrie budynków, cienie rzucane, pasma analityczne § 12 i § 56, wymiary) odświeżany wyłącznie przy zmianie geometrii lub transformacji kamery.
+  * **Interactive Overlay Canvas (`overlayCanvasRef`):** niezależna nakładka renderująca kursor, podglądy tworzenia/edycji obiektów, znaczniki OSNAP/OTRACK i linie pomocnicze w pełnej częstotliwości (60/120 FPS) bez narzutu na przerysowywanie geometrii sceny.
+  * **Path2D & AABB Viewport Culling:** kompilacja obrysów budynków do zbuforowanych obiektów `Path2D` (WeakMap cache) rysowanych pojedynczym wywołaniem transformacji afinicznej (`setTransform`) oraz automatyczne odrzucanie obiektów poza widocznym kadrem.
 * **Wielowątkowość Obliczeniowa:** Web Workers (`analysis.worker.ts` sterowany hookiem `useAnalysisWorker`) z mechanizmem automatycznego fallbacku do wątku głównego oraz dwuetapowym kalkulowaniem LOD (*Progressive Accuracy Refinement*).
 * **Struktury Przestrzenne i Algorytmy Geometrii:** 
   * `rbush` – dynamiczne drzewa R-Tree (Spatial Indexing) do przyspieszenia zapytań kolizyjnych.
   * `polygon-clipping` – zaawansowane operacje boolowskie na wielokątach 2D (Union/Difference/Intersection) do wyznaczania kopert i obrysów cieni.
-  * Własny moduł 2D Math CAD (`math2d.ts`) – analityczne przecięcia, rzutowania, rzut promieni, odległości punkt-odcinek, offsety krawędzi i transformacje afiniczne.
+  * Własny moduł 2D Math CAD (`math2d.ts`) – analityczne przecięcia, rzutowania, bezalokacyjny raycasting (`raySegmentDistance2D`), odległości punkt-odcinek, offsety krawędzi i transformacje afiniczne.
 * **Parsowanie i Eksport Danych:**
   * `dxf-parser` – odczyt wektorów CAD (`LWPOLYLINE`, `POLYLINE`, `LINE`) z automatyczną detekcją jednostek (m, cm, mm).
   * `jspdf` – generowanie formalnych raportów bilansowych PDF z tabelami i metrykami.

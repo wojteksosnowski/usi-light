@@ -398,6 +398,10 @@ export class LinijkaSolarSystem implements ISolarHourSystem {
   private cachedHourLines: HourLine2D[] | null = null;
   private cachedKey: string = '';
 
+  // Tablica LUT dla szybkiego wyszukiwania binarnego azymut -> godzina (1201 próbek dla zakresu 6:00 - 18:00 co 36 sekund)
+  private readonly lutAzimuths: Float64Array;
+  private readonly lutHours: Float64Array;
+
   constructor(
     latitude: number = 52.2297,
     longitude: number = 21.0122,
@@ -413,6 +417,61 @@ export class LinijkaSolarSystem implements ISolarHourSystem {
     this.latRad = latitude * DEG2RAD;
     this.sinLat = Math.sin(this.latRad);
     this.tanLat = Math.tan(this.latRad);
+
+    // Prekompilacja LUT: zakres od 4.0h do 20.0h co 0.01h (36s) = 1601 próbek
+    const lutSamples = 1601;
+    this.lutAzimuths = new Float64Array(lutSamples);
+    this.lutHours = new Float64Array(lutSamples);
+
+    for (let i = 0; i < lutSamples; i++) {
+      const hDec = 4.0 + (i / (lutSamples - 1)) * 16.0;
+      const H = (hDec - 12.0) * 15.0 * DEG2RAD;
+      const x = -Math.sin(H);
+      const y = -Math.cos(H) * this.sinLat;
+      const azDeg = ((Math.atan2(x, y) * RAD2DEG % 360) + 360) % 360;
+
+      this.lutHours[i] = hDec;
+      this.lutAzimuths[i] = azDeg;
+    }
+  }
+
+  /**
+   * Szybkie mapowanie azymutu na godzinę za pomocą wyszukiwania binarnego (Binary Search) w stablicowanym LUT.
+   * Złożoność O(log K) <= 11 operacji bez wywoływania Math.atan2/sin/cos.
+   */
+  getHourForAzimuthFast(azimuthDeg: number): number {
+    const azs = this.lutAzimuths;
+    const hrs = this.lutHours;
+    const len = azs.length;
+
+    if (azimuthDeg <= azs[0]) return hrs[0];
+    if (azimuthDeg >= azs[len - 1]) return hrs[len - 1];
+
+    let low = 0;
+    let high = len - 1;
+
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const val = azs[mid];
+
+      if (val < azimuthDeg) {
+        low = mid + 1;
+      } else if (val > azimuthDeg) {
+        high = mid - 1;
+      } else {
+        return hrs[mid];
+      }
+    }
+
+    // Interpolacja liniowa pomiędzy high a low (high = low - 1)
+    const idx1 = Math.max(0, high);
+    const idx2 = Math.min(len - 1, low);
+    if (idx1 === idx2) return hrs[idx1];
+
+    const az1 = azs[idx1];
+    const az2 = azs[idx2];
+    const t = (azimuthDeg - az1) / (az2 - az1);
+    return hrs[idx1] + t * (hrs[idx2] - hrs[idx1]);
   }
 
   /**
