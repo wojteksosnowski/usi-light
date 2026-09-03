@@ -131,29 +131,49 @@ export function isPolygonConvex(polygon: Point2D[]): boolean {
 /**
  * Pomocnicza funkcja łącząca poligony za pomocą polygonClipping.union
  */
-export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
-  if (polygons.length === 0) return [];
-  if (polygons.length === 1) return polygons;
-
-  const clippingPolys: [number, number][][][] = [];
-  for (const poly of polygons) {
-    if (poly.length >= 3) {
-      const ring: [number, number][] = poly.map((p) => [p.x, p.y]);
-      if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) {
-        ring.push([ring[0][0], ring[0][1]]);
-      }
-      clippingPolys.push([ring]);
+/**
+ * Pomocnicza funkcja normalizująca i zamykająca pierścień wielokąta z zaokrągleniem do zadanej precyzji.
+ * Eliminuje zdegenerowane odcinki o zerowej długości i duplikaty wierzchołków.
+ */
+function toNormalizedClippingRing(poly: Point2D[], precision: number = 1000): [number, number][] | null {
+  if (!poly || poly.length < 3) return null;
+  const ring: [number, number][] = [];
+  for (const pt of poly) {
+    const x = Math.round(pt.x * precision) / precision;
+    const y = Math.round(pt.y * precision) / precision;
+    if (ring.length === 0 || ring[ring.length - 1][0] !== x || ring[ring.length - 1][1] !== y) {
+      ring.push([x, y]);
     }
   }
+  // Usunięcie zduplikowanego punktu końcowego jeśli pokrywa się z początkowym
+  if (ring.length >= 2 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]) {
+    ring.pop();
+  }
+  if (ring.length < 3) return null;
+  // Zamknięcie pierścienia dla polygon-clipping
+  ring.push([ring[0][0], ring[0][1]]);
+  return ring;
+}
 
-  if (clippingPolys.length === 0) return [];
-
-  try {
-    const unionResult = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
-    const resultLoops: Point2D[][] = [];
-
-    for (const polygon of unionResult) {
-      for (const ring of polygon) {
+/**
+ * Konwertuje wynik polygonClipping (MultiPolygon lub Polygon) z powrotem na tablicę Point2D[][].
+ */
+function clippingResultToLoops(unionResult: polygonClipping.MultiPolygon | polygonClipping.Polygon): Point2D[][] {
+  const resultLoops: Point2D[][] = [];
+  for (const poly of unionResult) {
+    // poly może być Polygon (tablica Ring) lub bezpośrednio Ring jeśli unionResult to Polygon
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    if (typeof poly[0][0] === 'number') {
+      // poly jest Ring: Pair[]
+      const ring = poly as unknown as polygonClipping.Ring;
+      if (ring.length >= 3) {
+        const isClosed = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1];
+        const sliceEnd = isClosed && ring.length > 3 ? ring.length - 1 : ring.length;
+        resultLoops.push(ring.slice(0, sliceEnd).map(([x, y]) => ({ x, y })));
+      }
+    } else {
+      // poly jest Polygon: Ring[]
+      for (const ring of poly as polygonClipping.Polygon) {
         if (ring.length >= 3) {
           const isClosed = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1];
           const sliceEnd = isClosed && ring.length > 3 ? ring.length - 1 : ring.length;
@@ -161,9 +181,160 @@ export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
         }
       }
     }
-    return resultLoops;
+  }
+  return resultLoops;
+}
+
+/**
+ * Odporna unia hierarchiczna (Batch Union) zabezpieczająca algorytm Sweep-Line
+ * przed przepełnieniem kolejki zdarzeń i mikrodegeneracjami zmiennoprzecinkowymi.
+ */
+function batchUnionRings(rings: polygonClipping.Polygon[], batchSize: number = 32): polygonClipping.MultiPolygon {
+  if (rings.length === 0) return [];
+  if (rings.length === 1) return [rings[0]];
+
+  // 1. Pierwsza faza: grupowanie w pakiety
+  let currentBatches: polygonClipping.MultiPolygon[] = [];
+  for (let i = 0; i < rings.length; i += batchSize) {
+    const chunk = rings.slice(i, i + batchSize);
+    try {
+      const u = polygonClipping.union(chunk[0], ...chunk.slice(1));
+      if (u && u.length > 0) currentBatches.push(u);
+    } catch {
+      for (const single of chunk) {
+        currentBatches.push([single]);
+      }
+    }
+  }
+
+  // 2. Druga faza: hierarchiczne łączenie partii parami (Tree Reduction)
+  while (currentBatches.length > 1) {
+    const nextBatches: polygonClipping.MultiPolygon[] = [];
+    for (let i = 0; i < currentBatches.length; i += 2) {
+      if (i + 1 < currentBatches.length) {
+        try {
+          const merged = polygonClipping.union(currentBatches[i], currentBatches[i + 1]);
+          nextBatches.push(merged);
+        } catch {
+          nextBatches.push(currentBatches[i]);
+          nextBatches.push(currentBatches[i + 1]);
+        }
+      } else {
+        nextBatches.push(currentBatches[i]);
+      }
+    }
+    if (nextBatches.length === currentBatches.length) {
+      break;
+    }
+    currentBatches = nextBatches;
+  }
+
+  return currentBatches[0] || [];
+}
+
+/**
+ * Pomocnicza funkcja łącząca poligony za pomocą polygonClipping.union
+ * Wykorzystuje normalizację wierzchołków do 1 mm i hierarchiczne łączenie pakietowe.
+ */
+export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
+  if (polygons.length === 0) return [];
+  if (polygons.length === 1) return polygons;
+
+  // 1. Zbuduj znormalizowane pierścienie ze snappingiem 1mm
+  const clippingPolys: polygonClipping.Polygon[] = [];
+  for (const poly of polygons) {
+    const ring = toNormalizedClippingRing(poly, 1000);
+    if (ring) {
+      clippingPolys.push([ring]);
+    }
+  }
+
+  if (clippingPolys.length === 0) return [];
+  if (clippingPolys.length === 1) return clippingResultToLoops([clippingPolys[0]]);
+
+  // 2. Jeśli mamy dużą liczbę wielokątów (> 30), bezpośrednie wywołanie union() z wieloma argumentami
+  // powoduje błąd SweepEvent w polygon-clipping i spowalnia obliczenia. Uruchamiamy od razu zoptymalizowany Batch Union.
+  if (clippingPolys.length > 30) {
+    try {
+      const batchedResult = batchUnionRings(clippingPolys, 32);
+      const loops = clippingResultToLoops(batchedResult);
+      if (loops.length > 0) return loops;
+    } catch {
+      // fallback poniżej
+    }
+  }
+
+  // 3. Dla mniejszych partii: bezpośrednia unia
+  try {
+    const unionResult = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
+    return clippingResultToLoops(unionResult);
   } catch {
+    // 4. Odporna unia hierarchiczna (Batch Union) w razie błędu
+    try {
+      const batchedResult = batchUnionRings(clippingPolys, 20);
+      const loops = clippingResultToLoops(batchedResult);
+      if (loops.length > 0) return loops;
+    } catch {
+      // 5. Snapping z niższą precyzją (1 cm) w razie skrajnych zdegenerowań
+      try {
+        const coarsePolys: polygonClipping.Polygon[] = [];
+        for (const poly of polygons) {
+          const ring = toNormalizedClippingRing(poly, 100);
+          if (ring) coarsePolys.push([ring]);
+        }
+        if (coarsePolys.length > 0) {
+          const coarseResult = batchUnionRings(coarsePolys, 16);
+          const loops = clippingResultToLoops(coarseResult);
+          if (loops.length > 0) return loops;
+        }
+      } catch {
+        // ostateczny fallback
+      }
+    }
     return polygons;
+  }
+}
+
+/**
+ * Pomocnicza funkcja odejmująca poligony negatywne od poligonów pozytywnych (A \ B)
+ * za pomocą polygonClipping.difference. Używana m.in. do negatywnego cienia.
+ */
+export function differencePolygonLoops(
+  positiveLoops: Point2D[][],
+  negativeLoops: Point2D[][]
+): Point2D[][] {
+  if (positiveLoops.length === 0) return [];
+  if (negativeLoops.length === 0) return positiveLoops;
+
+  const toClippingRings = (loops: Point2D[][]): polygonClipping.Polygon[] => {
+    const list: polygonClipping.Polygon[] = [];
+    for (const poly of loops) {
+      const ring = toNormalizedClippingRing(poly, 1000);
+      if (ring) {
+        list.push([ring]);
+      }
+    }
+    return list;
+  };
+
+  const cPos = toClippingRings(positiveLoops);
+  const cNeg = toClippingRings(negativeLoops);
+  if (cPos.length === 0) return [];
+  if (cNeg.length === 0) return positiveLoops;
+
+  try {
+    // Bezpośrednie odejmowanie partii poligonów (A \ B) bez zbędnego potrójnego sweep-line (union + union + difference)
+    const diffResult = polygonClipping.difference(cPos as any, cNeg as any);
+    return clippingResultToLoops(diffResult);
+  } catch {
+    try {
+      const uPos = batchUnionRings(cPos, 24);
+      const uNeg = batchUnionRings(cNeg, 24);
+      const diffResult = polygonClipping.difference(uPos, uNeg);
+      return clippingResultToLoops(diffResult);
+    } catch {
+      return positiveLoops;
+    }
   }
 }
 

@@ -190,6 +190,7 @@ export interface ShadowAnalysisResult {
   envelopeLoops: Point2D[][]; // Łączna koperta zasięgu cienia (Union)
   hourlyShadows: HourlyShadowLoop[]; // Obrysy cienia dla poszczególnych godzin
   calculationTimeMs: number; // Czas kalkulacji samej geometrii cienia
+  stepHours?: number; // Krok czasowy próbkowania (np. 0.5 lub 0.25)
 }
 
 

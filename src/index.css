@@ -202,10 +202,10 @@ html, body, #root {
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-light);
   border-radius: 16px;
-  padding: 6px 12px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
 }
 

@@ -125,6 +125,12 @@ export const APP_CONFIG = {
     apiKey: 'AIzaSyC6fe9THidhFMg1TT0OcIPJ_vRCUWFfra4',
     defaultOpacity: 0.65,
   },
+
+  // Wypełnienie cienia godzinowego (warstwa Zakres cienia)
+  shadowFill: {
+    // 95% przezroczystości (alpha = 0.05) — subtelne, prawie niewidoczne tło
+    fillAlpha: 0.05,
+  },
 } as const;
 
 

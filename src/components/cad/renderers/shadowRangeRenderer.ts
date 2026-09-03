@@ -1,10 +1,12 @@
 import { CadRenderContext } from '../types';
 import { Point2D, HourlyShadowLoop } from '../../../types/geometry';
+import { APP_CONFIG } from '../../../config/appConfig';
 
 export function renderShadowRange(
   rc: CadRenderContext,
   envelopeLoops: Point2D[][],
   showShadowRange: boolean,
+  showShadowFill: boolean,
   hourlyShadows?: HourlyShadowLoop[]
 ) {
   if (!showShadowRange) return;
@@ -12,14 +14,15 @@ export function renderShadowRange(
 
   ctx.save();
 
-  // 1. Render hourly shadow contours (subtle dashed lines for each hour from solar noon)
-  if (hourlyShadows && hourlyShadows.length > 0) {
-    ctx.lineWidth = 1.0;
-    ctx.setLineDash([3, 4]);
-
+  // 1. Render hourly shadow shapes (only fill with transparency when enabled, no outline stroke)
+  if (showShadowFill && hourlyShadows && hourlyShadows.length > 0) {
+    const step = hourlyShadows.length > 1
+      ? Math.abs(hourlyShadows[1].hourOffset - hourlyShadows[0].hourOffset)
+      : 1.0;
+    // Zależność przezroczystości od kroku próbkowania — dla gęstszego kroku alpha jest proporcjonalnie mniejsza
+    const effectiveAlpha = Math.max(0.005, Math.min(0.2, APP_CONFIG.shadowFill.fillAlpha * Math.min(1.0, step)));
+    ctx.fillStyle = `rgba(129, 140, 248, ${effectiveAlpha})`;
     for (const hourly of hourlyShadows) {
-      ctx.strokeStyle = 'rgba(129, 140, 248, 0.35)';
-
       for (const poly of hourly.polygons) {
         if (poly.length < 3) continue;
         ctx.beginPath();
@@ -29,7 +32,7 @@ export function renderShadowRange(
           else ctx.lineTo(sx, sy);
         });
         ctx.closePath();
-        ctx.stroke();
+        ctx.fill();
       }
     }
   }

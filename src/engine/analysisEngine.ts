@@ -1112,8 +1112,8 @@ export interface AnalysisBatchOutput {
   avgShadowingMs: number;
   avgSunlightMs: number;
   avgSunlightSegMs: number; // Czas metody segment-intersection (porównanie)
-  totalShadowingTimeMs?: number; // Całkowity czas analizy § 12 w danym cyklu
-  totalSunlightTimeMs?: number; // Całkowity czas analizy § 56 w danym cyklu
+  totalShadowingTimeMs: number; // Całkowity czas analizy § 12 w danym cyklu
+  totalSunlightTimeMs: number; // Całkowity czas analizy § 56 w danym cyklu
   shadowEnvelopeMs: number; // Czas obliczenia obrysów i koperty cienia
   shadowAnalysis?: ShadowAnalysisResult; // Wynik analizy obrysu cienia i godzinowych obrysów
   totalAnalysisMs: number; // Full wall-clock time for the active batch analysis
@@ -1306,13 +1306,15 @@ export function runFullAnalysis(
           const sample = sampled[i];
 
           let shadowing: ShadowingResult;
+          let pointShadowMs = 0;
           if (isShadowingEnabled) {
             const prefilteredShadowing = prefilterShadowingObstacles(sample.point, seg, buildings, bldg.id);
             const tShadow0 = performance.now();
             shadowing = analyzeShadowingAtPoint(
               sample.point, seg, sample.ratio, buildings, bldg.id, angleStep, prefilteredShadowing, batchBuildingMap
             );
-            totalShadowingTimeMs += performance.now() - tShadow0;
+            pointShadowMs = performance.now() - tShadow0;
+            totalShadowingTimeMs += pointShadowMs;
           } else {
             shadowing = {
               point: sample.point,
@@ -1327,6 +1329,7 @@ export function runFullAnalysis(
           }
 
           let sunlight: SunlightResult;
+          let pointSunlightMs = 0;
           if (isSunlightEnabled) {
             const prefilteredSunlight = prefilterSunlightObstacles(sample.point, seg, buildings, bldg.id);
             const tSun0 = performance.now();
@@ -1338,7 +1341,8 @@ export function runFullAnalysis(
                 : analyzeSunlightAtPoint(
                     sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, trajectory, prefilteredSunlight, windowInfo || undefined, astroSystem!
                   );
-            totalSunlightTimeMs += performance.now() - tSun0;
+            pointSunlightMs = performance.now() - tSun0;
+            totalSunlightTimeMs += pointSunlightMs;
 
             let sunlightRay = sunlight;
             if (sunlightMethod === 'segments' && refTrajectory && refWindowInfo && astroSystem) {
@@ -1368,7 +1372,7 @@ export function runFullAnalysis(
             };
           }
 
-          const result: AnalysisPointResult = {
+          const result: AnalysisPointResult & { evalShadowMs?: number; evalSunlightMs?: number } = {
             id: `${bldg.id}-${seg.id}-p${i}`,
             point: sample.point,
             normal: seg.normal,
@@ -1376,6 +1380,8 @@ export function runFullAnalysis(
             buildingId: bldg.id,
             shadowing,
             sunlight,
+            evalShadowMs: pointShadowMs,
+            evalSunlightMs: pointSunlightMs,
           };
           sampleResults[i] = result;
           analysisPointCache.set(sampleKeys[i], result);
@@ -1389,8 +1395,45 @@ export function runFullAnalysis(
     }
   }
 
-  const avgShadowingMs   = pointCount > 0 && isShadowingEnabled ? totalShadowingTimeMs  / pointCount : 0;
-  const avgSunlightMs    = pointCount > 0 && isSunlightEnabled  ? totalSunlightTimeMs   / pointCount : 0;
+  // Obliczenie sumarycznych czasów § 12 i § 56 obejmujących WSZYSTKIE punkty zbadanej siatki
+  let allPointsShadowingTimeMs = 0;
+  let allPointsSunlightTimeMs = 0;
+  if (pointCount > 0) {
+    let measuredShadowCount = 0;
+    let measuredSunlightCount = 0;
+    for (const res of results) {
+      const customRes = res as AnalysisPointResult & { evalShadowMs?: number; evalSunlightMs?: number };
+      if (customRes.evalShadowMs !== undefined && customRes.evalShadowMs > 0) {
+        allPointsShadowingTimeMs += customRes.evalShadowMs;
+        measuredShadowCount++;
+      }
+      if (customRes.evalSunlightMs !== undefined && customRes.evalSunlightMs > 0) {
+        allPointsSunlightTimeMs += customRes.evalSunlightMs;
+        measuredSunlightCount++;
+      }
+    }
+    // Jeśli część punktów była zinterpolowana (nie mierzona bezpośrednio),
+    // ekstrapolujemy średni koszt na wszystkie punkty fasady, aby reprezentować pełen koszt analizy 100% punktów
+    if (measuredShadowCount > 0 && measuredShadowCount < pointCount && isShadowingEnabled) {
+      const avgPointShadowMs = allPointsShadowingTimeMs / measuredShadowCount;
+      allPointsShadowingTimeMs = avgPointShadowMs * pointCount;
+    } else if (allPointsShadowingTimeMs === 0 && isShadowingEnabled && totalShadowingTimeMs > 0) {
+      allPointsShadowingTimeMs = totalShadowingTimeMs;
+    }
+
+    if (measuredSunlightCount > 0 && measuredSunlightCount < pointCount && isSunlightEnabled) {
+      const avgPointSunlightMs = allPointsSunlightTimeMs / measuredSunlightCount;
+      allPointsSunlightTimeMs = avgPointSunlightMs * pointCount;
+    } else if (allPointsSunlightTimeMs === 0 && isSunlightEnabled && totalSunlightTimeMs > 0) {
+      allPointsSunlightTimeMs = totalSunlightTimeMs;
+    }
+  }
+
+  const finalShadowingTimeMs = isShadowingEnabled ? Math.max(totalShadowingTimeMs, allPointsShadowingTimeMs) : 0;
+  const finalSunlightTimeMs = isSunlightEnabled ? Math.max(totalSunlightTimeMs, allPointsSunlightTimeMs) : 0;
+
+  const avgShadowingMs   = pointCount > 0 && isShadowingEnabled ? finalShadowingTimeMs  / pointCount : 0;
+  const avgSunlightMs    = pointCount > 0 && isSunlightEnabled  ? finalSunlightTimeMs   / pointCount : 0;
   const avgSunlightSegMs = pointCount > 0 && isSunlightEnabled  ? totalSunlightSegTimeMs/ pointCount : 0;
 
   // ── Analiza obrysu cienia rzucanego (Silhouette Edges + Koperta + Godziny 0, +-1h..+-5h) ──
@@ -1400,7 +1443,9 @@ export function runFullAnalysis(
       buildings,
       settings.latitude,
       settings.longitude,
-      settings.equinoxDate
+      settings.equinoxDate,
+      0.25,
+      sunlightMethod
     );
   }
   const shadowEnvelopeMs = shadowAnalysis.calculationTimeMs;
@@ -1426,8 +1471,8 @@ export function runFullAnalysis(
     avgShadowingMs,
     avgSunlightMs,
     avgSunlightSegMs,
-    totalShadowingTimeMs,
-    totalSunlightTimeMs,
+    totalShadowingTimeMs: finalShadowingTimeMs,
+    totalSunlightTimeMs: finalSunlightTimeMs,
     shadowEnvelopeMs,
     shadowAnalysis,
     totalAnalysisMs,

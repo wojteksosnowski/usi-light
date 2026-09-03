@@ -154,12 +154,14 @@ export function useCadViewport(
       if (p.y < rMinY) rMinY = p.y;
       if (p.y > rMaxY) rMaxY = p.y;
     }
+    const rBboxWidth = Math.max(5, rMaxX - rMinX);
+    const rBboxHeight = Math.max(5, rMaxY - rMinY);
     const rotatedCenterX = (rMinX + rMaxX) / 2;
     const rotatedCenterY = (rMinY + rMaxY) / 2;
 
     const scaleFactor = selectedBuildingId ? 0.70 : 0.80;
-    const scaleX = (width * scaleFactor) / bboxWidth;
-    const scaleY = (height * scaleFactor) / bboxHeight;
+    const scaleX = (width * scaleFactor) / rBboxWidth;
+    const scaleY = (height * scaleFactor) / rBboxHeight;
     const newScale = Math.max(0.001, Math.min(100, Math.min(scaleX, scaleY)));
 
     const panX = width / 2 - rotatedCenterX * newScale;

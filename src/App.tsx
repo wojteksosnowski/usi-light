@@ -88,6 +88,7 @@ import {
   Magnet,
   Combine,
   Globe,
+  Move,
 } from 'lucide-react';
 
 
@@ -251,9 +252,12 @@ export const App: React.FC = () => {
   const [showSunlightLines, setShowSunlightLines] = useState<boolean>(true);
   const [showShadowRange, setShowShadowRange] = useState<boolean>(true);
 
-  // Podkład satelitarny Google Maps
-  const [showSatelliteLayer, setShowSatelliteLayer] = useState<boolean>(false);
+  // Podkład satelitarny Google Maps (domyślnie włączony)
+  const [showSatelliteLayer, setShowSatelliteLayer] = useState<boolean>(true);
   const [satelliteOpacity, setSatelliteOpacity] = useState<number>(0.65);
+
+  // Wypełnienie cienia godzinowego
+  const [showShadowFill, setShowShadowFill] = useState<boolean>(false);
 
   // Metoda obliczania nasłonecznienia § 56
   const [sunlightMethod, setSunlightMethod] = useState<'raycasting' | 'segments'>('raycasting');
@@ -329,8 +333,8 @@ export const App: React.FC = () => {
   const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
   const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
   const avgSunlightSegMs = analysisOutput?.avgSunlightSegMs || 0;
-  const totalShadowingMs = analysisOutput?.totalShadowingTimeMs ?? (avgShadowingMs * (analysisOutput?.totalPoints || 0));
-  const totalSunlightMs = analysisOutput?.totalSunlightTimeMs ?? (avgSunlightMs * (analysisOutput?.totalPoints || 0));
+  const totalShadowingMs = analysisOutput?.totalShadowingTimeMs ?? 0;
+  const totalSunlightMs = analysisOutput?.totalSunlightTimeMs ?? 0;
   const shadowEnvelopeMs = analysisOutput?.shadowEnvelopeMs || 0;
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
   const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
@@ -1596,6 +1600,26 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Przyciski importu i eksportu sceny/DXF */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label className="btn-primary" style={{ margin: 0 }}>
+                    <Upload size={16} />
+                    <span>Wgraj plik DXF</span>
+                    <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
+                  </label>
+
+                  <label className="btn-primary" style={{ margin: 0 }}>
+                    <Upload size={16} />
+                    <span>Wgraj scene</span>
+                    <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
+                  </label>
+
+                  <button type="button" onClick={handleSceneDownload} className="btn-secondary">
+                    <Download size={15} />
+                    <span>Zapisz scenę JSON</span>
+                  </button>
+                </div>
+
                 {/* 1.2 Jednostki DXF / Skala */}
                 <div className="ui-card">
                   <div className="ui-title">
@@ -1706,43 +1730,6 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 1.3 Przyciski Wgraj plik DXF i Załaduj Scenę */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label className="btn-primary" style={{ margin: 0 }}>
-                    <Upload size={16} />
-                    <span>Wgraj plik DXF</span>
-                    <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
-                  </label>
-
-                  <label className="btn-primary" style={{ margin: 0 }}>
-                    <Upload size={16} />
-                    <span>Wgraj scene</span>
-                    <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
-                  </label>
-
-                  <button type="button" onClick={handleSceneDownload} className="btn-secondary">
-                    <Download size={15} />
-                    <span>Zapisz scenę JSON</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBuildings(createSampleBuildings());
-                      setSelectedBuildingId('bldg-1');
-                      setPinnedPoints([]);
-                      setActivePinnedPointId(null);
-                      setLastDxfText(null);
-                      setDxfImportInfo(null);
-                      setFitKey((prev) => prev + 1);
-                    }}
-                    className="btn-secondary"
-                  >
-                    <RotateCcw size={15} />
-                    <span>Załaduj scenę wzorcową</span>
-                  </button>
-                </div>
-
                 {/* 1.3 Analizy */}
                 <div className="ui-card">
                   <div className="ui-title">
@@ -1751,70 +1738,22 @@ export const App: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowShadowingLines(!showShadowingLines)}
-                      className={`btn-tile ${showShadowingLines ? 'active-emerald' : 'inactive'}`}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showShadowingLines ? '#34d399' : '#64748b' }} />
-                        <span>Przesłanianie § 12 (Wewnętrzny obrys)</span>
-                      </div>
-                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowingLines ? 'WŁ' : 'WYŁ'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowSunlightLines(!showSunlightLines)}
-                      className={`btn-tile ${showSunlightLines ? 'active-amber' : 'inactive'}`}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showSunlightLines ? '#fbbf24' : '#64748b' }} />
-                        <span>Nasłonecznienie § 56 (Zewnętrzny pas)</span>
-                      </div>
-                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showSunlightLines ? 'WŁ' : 'WYŁ'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowNormals(!showNormals)}
-                      className={`btn-tile ${showNormals ? 'active-indigo' : 'inactive'}`}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showNormals ? '#818cf8' : '#64748b' }} />
-                        <span>Wektory normalne fasad (Zwrot ścian)</span>
-                      </div>
-                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showNormals ? 'WŁ' : 'WYŁ'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowShadowRange(!showShadowRange)}
-                      className={`btn-tile ${showShadowRange ? 'active-indigo' : 'inactive'}`}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: showShadowRange ? '#a5b4fc' : '#64748b' }} />
-                        <span>Zakres cienia (Obwiednia obiektów badanych)</span>
-                      </div>
-                      <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowRange ? 'WŁ' : 'WYŁ'}</span>
-                    </button>
-
-                    {/* Podkład satelitarny Google Maps */}
+                    {/* 1. Przesłanianie § 12 */}
                     <div
                       style={{
-                        marginTop: '4px',
                         padding: '8px 10px',
                         borderRadius: '10px',
-                        backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.5)',
-                        border: showSatelliteLayer ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid #1e293b',
+                        backgroundColor: showShadowingLines ? 'rgba(16, 185, 129, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+                        border: showShadowingLines ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #1e293b',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '8px',
+                        transition: 'all 0.2s ease',
                       }}
                     >
                       <button
                         type="button"
-                        onClick={() => setShowSatelliteLayer(!showSatelliteLayer)}
+                        onClick={() => setShowShadowingLines(!showShadowingLines)}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -1828,40 +1767,455 @@ export const App: React.FC = () => {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Globe size={14} color={showSatelliteLayer ? '#38bdf8' : '#64748b'} />
-                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny Google</span>
+                          <span
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: showShadowingLines ? '#10b981' : '#64748b',
+                              boxShadow: showShadowingLines ? '0 0 8px rgba(16, 185, 129, 0.6)' : 'none',
+                            }}
+                          />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Przesłanianie § 12 (Wewnętrzny pas)</span>
                         </div>
-                        <span
+                        {/* Toggle-switch lewo/prawo */}
+                        <div
                           style={{
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            color: showSatelliteLayer ? '#38bdf8' : '#64748b',
+                            width: '28px',
+                            height: '16px',
+                            borderRadius: '999px',
+                            backgroundColor: showShadowingLines ? '#10b981' : '#334155',
+                            position: 'relative',
+                            transition: 'background-color 0.2s ease',
+                            flexShrink: 0,
                           }}
                         >
-                          {showSatelliteLayer ? 'WŁ' : 'WYŁ'}
-                        </span>
+                          <div
+                            style={{
+                              width: '12px',
+                              height: '12px',
+                              borderRadius: '50%',
+                              backgroundColor: '#ffffff',
+                              position: 'absolute',
+                              top: '2px',
+                              left: showShadowingLines ? '14px' : '2px',
+                              transition: 'left 0.2s ease',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                            }}
+                          />
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* 2. Nasłonecznienie § 56 (z wyborem metody) */}
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '10px',
+                        backgroundColor: showSunlightLines ? 'rgba(245, 158, 11, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+                        border: showSunlightLines ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid #1e293b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setShowSunlightLines(!showSunlightLines)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: 'none',
+                          border: 'none',
+                          color: '#f8fafc',
+                          cursor: 'pointer',
+                          padding: 0,
+                          width: '100%',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: showSunlightLines ? '#fbbf24' : '#64748b',
+                              boxShadow: showSunlightLines ? '0 0 8px rgba(251, 191, 36, 0.6)' : 'none',
+                            }}
+                          />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Nasłonecznienie § 56 (Zewnętrzny pas)</span>
+                        </div>
+                        {/* Toggle-switch lewo/prawo */}
+                        <div
+                          style={{
+                            width: '28px',
+                            height: '16px',
+                            borderRadius: '999px',
+                            backgroundColor: showSunlightLines ? '#f59e0b' : '#334155',
+                            position: 'relative',
+                            transition: 'background-color 0.2s ease',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: '12px',
+                              height: '12px',
+                              borderRadius: '50%',
+                              backgroundColor: '#ffffff',
+                              position: 'absolute',
+                              top: '2px',
+                              left: showSunlightLines ? '14px' : '2px',
+                              transition: 'left 0.2s ease',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                            }}
+                          />
+                        </div>
                       </button>
 
-                      {showSatelliteLayer && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '4px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
-                            <span>Krycie podkładu:</span>
-                            <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(satelliteOpacity * 100)}%</span>
+                      {showSunlightLines && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingTop: '6px',
+                            borderTop: '1px solid rgba(51, 65, 85, 0.5)',
+                          }}
+                        >
+                          <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>Metoda obliczeń § 56:</span>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              borderRadius: '7px',
+                              padding: '2px',
+                              border: '1px solid #334155',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setSunlightMethod('raycasting')}
+                              title="Metoda Astronomiczna — rzucanie promieni i astronomiczna pozycja słońca"
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '5px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                border: 'none',
+                                backgroundColor: sunlightMethod === 'raycasting' ? 'rgba(245,158,11,0.25)' : 'transparent',
+                                color: sunlightMethod === 'raycasting' ? '#fcd34d' : '#64748b',
+                                letterSpacing: '0.02em',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              Astro
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSunlightMethod('segments')}
+                              title="Metoda Linijki Słońca — uproszczona metoda wykreślna Twarowskiego"
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '5px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                border: 'none',
+                                backgroundColor: sunlightMethod === 'segments' ? 'rgba(99,102,241,0.25)' : 'transparent',
+                                color: sunlightMethod === 'segments' ? '#a5b4fc' : '#64748b',
+                                letterSpacing: '0.02em',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              Linijka
+                            </button>
                           </div>
-                          <input
-                            type="range"
-                            min="0.1"
-                            max="1.0"
-                            step="0.05"
-                            value={satelliteOpacity}
-                            onChange={(e) => setSatelliteOpacity(parseFloat(e.target.value))}
-                            style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
-                          />
                         </div>
                       )}
                     </div>
+
+                    {/* 3. Wektory normalne fasad */}
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '10px',
+                        backgroundColor: showNormals ? 'rgba(99, 102, 241, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+                        border: showNormals ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #1e293b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setShowNormals(!showNormals)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: 'none',
+                          border: 'none',
+                          color: '#f8fafc',
+                          cursor: 'pointer',
+                          padding: 0,
+                          width: '100%',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: showNormals ? '#818cf8' : '#64748b',
+                              boxShadow: showNormals ? '0 0 8px rgba(129, 140, 248, 0.6)' : 'none',
+                            }}
+                          />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Wektory normalne fasad (Zwrot ścian)</span>
+                        </div>
+                        {/* Toggle-switch lewo/prawo */}
+                        <div
+                          style={{
+                            width: '28px',
+                            height: '16px',
+                            borderRadius: '999px',
+                            backgroundColor: showNormals ? '#6366f1' : '#334155',
+                            position: 'relative',
+                            transition: 'background-color 0.2s ease',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: '12px',
+                              height: '12px',
+                              borderRadius: '50%',
+                              backgroundColor: '#ffffff',
+                              position: 'absolute',
+                              top: '2px',
+                              left: showNormals ? '14px' : '2px',
+                              transition: 'left 0.2s ease',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                            }}
+                          />
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* 4. Zakres cienia (z przełącznikiem Wypełnienie) */}
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '10px',
+                        backgroundColor: showShadowRange ? 'rgba(129, 140, 248, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+                        border: showShadowRange ? '1px solid rgba(129, 140, 248, 0.35)' : '1px solid #1e293b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setShowShadowRange(!showShadowRange)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: 'none',
+                          border: 'none',
+                          color: '#f8fafc',
+                          cursor: 'pointer',
+                          padding: 0,
+                          width: '100%',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: showShadowRange ? '#a5b4fc' : '#64748b',
+                              boxShadow: showShadowRange ? '0 0 8px rgba(165, 180, 252, 0.6)' : 'none',
+                            }}
+                          />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Zakres cienia (Obwiednia badanych)</span>
+                        </div>
+                        {/* Toggle-switch lewo/prawo */}
+                        <div
+                          style={{
+                            width: '28px',
+                            height: '16px',
+                            borderRadius: '999px',
+                            backgroundColor: showShadowRange ? '#818cf8' : '#334155',
+                            position: 'relative',
+                            transition: 'background-color 0.2s ease',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: '12px',
+                              height: '12px',
+                              borderRadius: '50%',
+                              backgroundColor: '#ffffff',
+                              position: 'absolute',
+                              top: '2px',
+                              left: showShadowRange ? '14px' : '2px',
+                              transition: 'left 0.2s ease',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                            }}
+                          />
+                        </div>
+                      </button>
+
+                      {showShadowRange && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingTop: '6px',
+                            borderTop: '1px solid rgba(51, 65, 85, 0.5)',
+                          }}
+                        >
+                          <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>Wypełnienie cienia (godziny ±5h):</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowShadowFill(!showShadowFill)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: 0,
+                            }}
+                            title="Rysuj wypełnienie cienia dla każdej pełnej godziny (±5h od górowania słońca)"
+                          >
+                            <span style={{ fontSize: '10px', fontWeight: 700, color: showShadowFill ? '#a5b4fc' : '#64748b' }}>
+                              {showShadowFill ? 'WŁ' : 'WYŁ'}
+                            </span>
+                            {/* Toggle-switch lewo/prawo */}
+                            <div
+                              style={{
+                                width: '28px',
+                                height: '16px',
+                                borderRadius: '999px',
+                                backgroundColor: showShadowFill ? '#818cf8' : '#334155',
+                                position: 'relative',
+                                transition: 'background-color 0.2s ease',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <div
+                                style={{
+                                width: '12px',
+                                height: '12px',
+                                borderRadius: '50%',
+                                backgroundColor: '#ffffff',
+                                position: 'absolute',
+                                top: '2px',
+                                left: showShadowFill ? '14px' : '2px',
+                                transition: 'left 0.2s ease',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                              }}
+                            />
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 5. Podkład satelitarny Google Maps */}
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '10px',
+                      backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+                      border: showSatelliteLayer ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid #1e293b',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setShowSatelliteLayer(!showSatelliteLayer)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: 'none',
+                        border: 'none',
+                        color: '#f8fafc',
+                        cursor: 'pointer',
+                        padding: 0,
+                        width: '100%',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Globe size={14} color={showSatelliteLayer ? '#38bdf8' : '#64748b'} />
+                        <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny Google</span>
+                      </div>
+                      {/* Toggle-switch lewo/prawo */}
+                      <div
+                        style={{
+                          width: '28px',
+                          height: '16px',
+                          borderRadius: '999px',
+                          backgroundColor: showSatelliteLayer ? '#38bdf8' : '#334155',
+                          position: 'relative',
+                          transition: 'background-color 0.2s ease',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: '12px',
+                            height: '12px',
+                            borderRadius: '50%',
+                            backgroundColor: '#ffffff',
+                            position: 'absolute',
+                            top: '2px',
+                            left: showSatelliteLayer ? '14px' : '2px',
+                            transition: 'left 0.2s ease',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                          }}
+                        />
+                      </div>
+                    </button>
+
+                    {showSatelliteLayer && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
+                          <span>Krycie podkładu:</span>
+                          <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(satelliteOpacity * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.05"
+                          value={satelliteOpacity}
+                          onChange={(e) => setSatelliteOpacity(parseFloat(e.target.value))}
+                          style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
+              </div>
               </div>
             )}
           </div>
@@ -2191,7 +2545,7 @@ export const App: React.FC = () => {
 
                           <button
                             type="button"
-                            onClick={() => updateSelectedBuilding({ category: 'boundary', defaultHeight: 0, isTested: false })}
+                            onClick={() => updateSelectedBuilding({ category: 'boundary', defaultHeight: 0 })}
                             style={{
                               padding: '6px 8px',
                               borderRadius: '6px',
@@ -2430,26 +2784,8 @@ export const App: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Status Toggle Buttons */}
+                          {/* Zabudowa śródmiejska — tylko dla budynków */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                            <button
-                              type="button"
-                              onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
-                              className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
-                            >
-                              <span>Uwzględnij w kalkulacji</span>
-                              <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
-                              className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
-                            >
-                              <span>Obiekt badany (Projektowany)</span>
-                              <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
-                            </button>
-
                             <button
                               type="button"
                               onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
@@ -2461,6 +2797,27 @@ export const App: React.FC = () => {
                           </div>
                         </div>
                       )}
+
+                      {/* Status Toggle Buttons — wspólne dla Budynków i Granic */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
+                          className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
+                        >
+                          <span>Uwzględnij w kalkulacji</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
+                          className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
+                        >
+                          <span>Obiekt badany (Projektowany)</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -3544,14 +3901,19 @@ export const App: React.FC = () => {
           <button
             onClick={() => setShowShadowingLines(!showShadowingLines)}
             style={{
-              padding: '5px 9px',
+              height: '28px',
+              padding: '0 9px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
               cursor: 'pointer',
               border: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: showShadowingLines ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
               color: showShadowingLines ? '#6ee7b7' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
           >
             § 12
@@ -3559,14 +3921,19 @@ export const App: React.FC = () => {
           <button
             onClick={() => setShowSunlightLines(!showSunlightLines)}
             style={{
-              padding: '5px 9px',
+              height: '28px',
+              padding: '0 9px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
               cursor: 'pointer',
               border: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: showSunlightLines ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
               color: showSunlightLines ? '#fcd34d' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
           >
             § 56
@@ -3574,14 +3941,19 @@ export const App: React.FC = () => {
           <button
             onClick={() => setShowNormals(!showNormals)}
             style={{
-              padding: '5px 9px',
+              height: '28px',
+              padding: '0 9px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
               cursor: 'pointer',
               border: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: showNormals ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
               color: showNormals ? '#a5b4fc' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
           >
             Wektory
@@ -3589,26 +3961,33 @@ export const App: React.FC = () => {
           <button
             onClick={() => setShowShadowRange(!showShadowRange)}
             style={{
-              padding: '5px 9px',
+              height: '28px',
+              padding: '0 9px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
               cursor: 'pointer',
               border: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               backgroundColor: showShadowRange ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
               color: showShadowRange ? '#c7d2fe' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
             title="Włącz / wyłącz widoczność obwiedni maksymalnego zasięgu cienia rzucanego przez obiekty badane w równonoc"
           >
-            Zakres cienia
+            Cień
           </button>
           <button
             onClick={() => setShowSatelliteLayer(!showSatelliteLayer)}
             style={{
-              display: 'flex',
+              height: '28px',
+              display: 'inline-flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '5px',
-              padding: '5px 9px',
+              padding: '0 9px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
@@ -3616,6 +3995,7 @@ export const App: React.FC = () => {
               border: 'none',
               backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
               color: showSatelliteLayer ? '#38bdf8' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
             title="Włącz / wyłącz podkład z mapy satelitarnej Google Maps pod sceną CAD"
           >
@@ -3625,80 +4005,125 @@ export const App: React.FC = () => {
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
-          {/* § 56 Method Toggle */}
+          {/* Grupa Widok: centruj, obrót, przełącz */}
           <div
-            style={{ display: 'flex', alignItems: 'center', gap: '2px', backgroundColor: 'rgba(15,23,42,0.6)', borderRadius: '8px', padding: '3px', border: '1px solid #1e293b' }}
-            title="Metoda obliczania czasu nasłonecznienia § 56"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', paddingRight: '2px' }}>
+              Widok:
+            </span>
+
             <button
-              onClick={() => setSunlightMethod('raycasting')}
-              title="Metoda Astronomiczna — rzucanie promieni i astronomiczna pozycja słońca"
+              onClick={() => {
+                setFitKey((prev) => prev + 1);
+              }}
+              title="Dopasuj widok do obiektów (Zoom Extents)"
               style={{
-                padding: '3px 8px',
-                borderRadius: '5px',
-                fontSize: '10px',
-                fontWeight: 700,
+                height: '28px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px',
+                padding: '0 10px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
                 cursor: 'pointer',
-                border: 'none',
-                backgroundColor: sunlightMethod === 'raycasting' ? 'rgba(245,158,11,0.25)' : 'transparent',
-                color: sunlightMethod === 'raycasting' ? '#fcd34d' : '#64748b',
-                letterSpacing: '0.02em',
+                border: '1px solid #334155',
+                backgroundColor: 'rgba(30, 41, 59, 0.8)',
+                color: '#f8fafc',
+                transition: 'all 0.15s ease',
               }}
             >
-              Astro
+              <Maximize2 size={13} />
+              <span>Centruj</span>
             </button>
+
             <button
-              onClick={() => setSunlightMethod('segments')}
-              title="Metoda Linijki Słońca — uproszczona metoda wykreślna Twarowskiego"
+              onClick={() => {
+                setViewRotationMode((prev) => !prev);
+              }}
+              title="Ustaw obrót widoku względem odcinka"
               style={{
-                padding: '3px 8px',
-                borderRadius: '5px',
-                fontSize: '10px',
-                fontWeight: 700,
+                height: '28px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px',
+                padding: '0 10px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
                 cursor: 'pointer',
-                border: 'none',
-                backgroundColor: sunlightMethod === 'segments' ? 'rgba(99,102,241,0.25)' : 'transparent',
-                color: sunlightMethod === 'segments' ? '#a5b4fc' : '#64748b',
-                letterSpacing: '0.02em',
+                border: viewRotationMode ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid #334155',
+                backgroundColor: viewRotationMode ? 'rgba(59, 130, 246, 0.25)' : 'rgba(30, 41, 59, 0.8)',
+                color: viewRotationMode ? '#bfdbfe' : '#f8fafc',
+                transition: 'all 0.15s ease',
               }}
             >
-              Linijka
+              <RotateCw size={13} />
+              <span>Obrót</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewRotationDeg((prev) => {
+                  if (Math.abs(prev) < 0.001) {
+                    return savedViewRotationDeg;
+                  }
+                  setSavedViewRotationDeg(prev);
+                  return 0;
+                });
+              }}
+              title={
+                Math.abs(viewRotationDeg) < 0.001
+                  ? 'Przełącz na zapisaną orientację układu (krzyż obrócony o 45° = główny UCS)'
+                  : 'Wróć do domyślnej orientacji układu (0°)'
+              }
+              style={{
+                height: '28px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '5px',
+                padding: '0 10px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                border: Math.abs(viewRotationDeg) > 0.001 ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid #334155',
+                backgroundColor: Math.abs(viewRotationDeg) > 0.001 ? 'rgba(56, 189, 248, 0.2)' : 'rgba(30, 41, 59, 0.8)',
+                color: Math.abs(viewRotationDeg) > 0.001 ? '#38bdf8' : '#f8fafc',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Move
+                size={13}
+                style={{
+                  transform: Math.abs(viewRotationDeg) < 0.001 ? 'rotate(45deg)' : 'none',
+                  transition: 'transform 0.2s ease',
+                }}
+              />
+              <span>Przełącz</span>
             </button>
           </div>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
           <button
-            onClick={() => {
-              setFitKey((prev) => prev + 1);
-            }}
-            title="Dopasuj widok do obiektów (Zoom Extents)"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '5px 10px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: '1px solid #334155',
-              backgroundColor: 'rgba(30, 41, 59, 0.8)',
-              color: '#f8fafc',
-            }}
-          >
-            <Maximize2 size={13} />
-            <span>Centruj</span>
-          </button>
-
-          <button
             onClick={handleToggleOsnap}
             title="Włącz / wyłącz dociąganie geometryczne [F3] (wierzchołki, środki, krawędzie, przecięcia OTRACK)"
             style={{
-              display: 'flex',
+              height: '28px',
+              display: 'inline-flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '5px',
-              padding: '5px 10px',
+              padding: '0 10px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
@@ -3706,6 +4131,7 @@ export const App: React.FC = () => {
               border: isOsnapActive ? '1px solid #10b981' : '1px solid #334155',
               backgroundColor: isOsnapActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(30, 41, 59, 0.8)',
               color: isOsnapActive ? '#6ee7b7' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
           >
             <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
@@ -3718,102 +4144,62 @@ export const App: React.FC = () => {
             }}
             title="Włącz / wyłącz inteligentne śledzenie kątowe i kierunków (równoległe i prostopadłe)"
             style={{
-              display: 'flex',
+              height: '28px',
+              display: 'inline-flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '5px',
-              padding: '5px 10px',
+              padding: '0 10px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: 600,
               cursor: 'pointer',
-              border: '1px solid #334155',
+              border: isDirectionSnappingActive ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid #334155',
               backgroundColor: isDirectionSnappingActive ? 'rgba(99, 102, 241, 0.25)' : 'rgba(30, 41, 59, 0.8)',
               color: isDirectionSnappingActive ? '#a5b4fc' : '#94a3b8',
+              transition: 'all 0.15s ease',
             }}
           >
             <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#94a3b8'} />
             <span>Śledzenie</span>
-          </button>
-
-
-
-          <button
-            onClick={() => {
-              setViewRotationMode((prev) => !prev);
-            }}
-            title="Ustaw obrót widoku względem odcinka"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '5px 10px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: '1px solid #334155',
-              backgroundColor: viewRotationMode ? 'rgba(59, 130, 246, 0.25)' : 'rgba(30, 41, 59, 0.8)',
-              color: viewRotationMode ? '#bfdbfe' : '#f8fafc',
-            }}
-          >
-            <RotateCw size={13} />
-            <span>Obrót widoku</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setViewRotationDeg((prev) => {
-                if (Math.abs(prev) < 0.001) {
-                  return savedViewRotationDeg;
-                }
-                setSavedViewRotationDeg(prev);
-                return 0;
-              });
-            }}
-            title={
-              Math.abs(viewRotationDeg) < 0.001
-                ? 'Przełącz na zapisaną orientację układu'
-                : 'Wróć do domyślnej orientacji układu (0°)'
-            }
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '5px 10px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: Math.abs(viewRotationDeg) > 0.001 ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid #334155',
-              backgroundColor: Math.abs(viewRotationDeg) > 0.001 ? 'rgba(56, 189, 248, 0.15)' : 'rgba(30, 41, 59, 0.8)',
-              color: Math.abs(viewRotationDeg) > 0.001 ? '#38bdf8' : '#f8fafc',
-            }}
-          >
-            <RotateCcw size={13} />
-            <span>{Math.abs(viewRotationDeg) < 0.001 ? 'Orientacja ustawiona' : 'Orientacja domyślna'}</span>
           </button>
         </div>
 
         {/* Legend & Stats Overlay at Bottom-Left */}
         <div className="cad-legend-bottom" style={{ gap: '12px', alignItems: 'center' }}>
           <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '11px' }}>LEGENDA:</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>§ 12:</span>
-            <span style={{ color: '#10b981', fontWeight: 800, fontSize: '12px' }} title="§ 12 Zgodne">✓</span>
-            <span style={{ color: '#f43f5e', fontWeight: 800, fontSize: '12px' }} title="§ 12 Niezgodne">✗</span>
-          </div>
-          <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>§ 56:</span>
-            <div style={{ display: 'flex', height: '6px', width: '70px', borderRadius: '3px', overflow: 'hidden' }}>
-              <span style={{ flex: 1, backgroundColor: '#3b0764' }} title="0h" />
-              <span style={{ flex: 1, backgroundColor: '#7e22ce' }} title="1.0h" />
-              <span style={{ flex: 1, backgroundColor: '#c026d3' }} title="2.0h" />
-              <span style={{ flex: 1, backgroundColor: '#ea580c' }} title="3.0h (Zgodne)" />
-              <span style={{ flex: 1, backgroundColor: '#fb923c' }} title="4.0h+" />
+
+          {/* § 12 — tylko gdy włączone */}
+          {showShadowingLines && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>§ 12:</span>
+                <span style={{ color: '#10b981', fontWeight: 800, fontSize: '12px' }} title="§ 12 Zgodne">✓</span>
+                <span style={{ color: '#f43f5e', fontWeight: 800, fontSize: '12px' }} title="§ 12 Niezgodne">✗</span>
+              </div>
+              {showSunlightLines && <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />}
+            </>
+          )}
+
+          {/* § 56 — tylko gdy włączone */}
+          {showSunlightLines && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>§ 56:</span>
+              <div style={{ display: 'flex', height: '6px', width: '70px', borderRadius: '3px', overflow: 'hidden' }}>
+                <span style={{ flex: 1, backgroundColor: '#3b0764' }} title="0h" />
+                <span style={{ flex: 1, backgroundColor: '#7e22ce' }} title="1.0h" />
+                <span style={{ flex: 1, backgroundColor: '#c026d3' }} title="2.0h" />
+                <span style={{ flex: 1, backgroundColor: '#ea580c' }} title="3.0h (Zgodne)" />
+                <span style={{ flex: 1, backgroundColor: '#fb923c' }} title="4.0h+" />
+              </div>
+              <span style={{ fontSize: '10px', color: '#cbd5e1' }}>0h &rarr; 4h+</span>
             </div>
-            <span style={{ fontSize: '10px', color: '#cbd5e1' }}>0h &rarr; 4h+</span>
-          </div>
+          )}
+
+          {/* Gdy żadna analiza nie jest włączona */}
+          {!showShadowingLines && !showSunlightLines && (
+            <span style={{ fontSize: '10px', color: '#475569', fontStyle: 'italic' }}>Brak aktywnych analiz</span>
+          )}
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
@@ -3878,7 +4264,7 @@ export const App: React.FC = () => {
               fontSize: '10px',
               fontFamily: 'monospace',
             }}
-            title={`Czas pełnego przeliczenia metod analitycznych w bieżącym cyklu:\n• Liczba zbadanych punktów: ${totalPoints.toLocaleString()} (${(totalPoints / 1000).toFixed(2)}k pkt)\n• § 12 (Przesłanianie) łącznie: ${totalShadowingMs.toFixed(2)} ms (śr. ${avgShadowingMs.toFixed(3)} ms/pkt)\n• § 56 (Nasłonecznienie) łącznie: ${totalSunlightMs.toFixed(2)} ms (śr. ${avgSunlightMs.toFixed(3)} ms/pkt)\n• Obrys i koperta cienia (§ 56): ${shadowEnvelopeMs.toFixed(2)} ms\n• Całkowity czas cyklu: ${totalAnalysisMs.toFixed(2)} ms`}
+            title={`Czas pełnego przeliczenia metod analitycznych w bieżącym cyklu:\n• Liczba zbadanych punktów: ${totalPoints.toLocaleString()} (${(totalPoints / 1000).toFixed(2)}k pkt)\n• § 12 (Przesłanianie) łącznie: ${totalShadowingMs.toFixed(2)} ms (śr. ${avgShadowingMs.toFixed(3)} ms/pkt)\n• § 56 (Nasłonecznienie) łącznie: ${totalSunlightMs.toFixed(2)} ms (śr. ${avgSunlightMs.toFixed(3)} ms/pkt)\n• Zakres cienia (geometria): ${shadowEnvelopeMs.toFixed(2)} ms\n• Całkowity czas cyklu: ${totalAnalysisMs.toFixed(2)} ms`}
           >
             <Timer size={11} color="#94a3b8" />
             <span style={{ color: '#93c5fd', fontWeight: 600 }}>
@@ -3886,14 +4272,30 @@ export const App: React.FC = () => {
                 ? `${(totalPoints / 1000).toFixed(1)}k pkt`
                 : `${totalPoints} pkt`}
             </span>
-            <span style={{ color: '#475569' }}>|</span>
-            <span style={{ color: '#34d399', fontWeight: 600 }}>
-              §12: {totalShadowingMs < 0.1 && totalShadowingMs > 0 ? '<0.1' : totalShadowingMs.toFixed(1)}ms
-            </span>
-            <span style={{ color: '#475569' }}>|</span>
-            <span style={{ color: '#fbbf24', fontWeight: 600 }}>
-              §56: {totalSunlightMs < 0.1 && totalSunlightMs > 0 ? '<0.1' : totalSunlightMs.toFixed(1)}ms
-            </span>
+            {showShadowingLines && (
+              <>
+                <span style={{ color: '#475569' }}>|</span>
+                <span style={{ color: '#34d399', fontWeight: 600 }}>
+                  §12: {totalShadowingMs < 0.1 && totalShadowingMs > 0 ? '<0.1' : totalShadowingMs.toFixed(1)}ms
+                </span>
+              </>
+            )}
+            {showSunlightLines && (
+              <>
+                <span style={{ color: '#475569' }}>|</span>
+                <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+                  §56: {totalSunlightMs < 0.1 && totalSunlightMs > 0 ? '<0.1' : totalSunlightMs.toFixed(1)}ms
+                </span>
+              </>
+            )}
+            {showShadowRange && (
+              <>
+                <span style={{ color: '#475569' }}>|</span>
+                <span style={{ color: '#a5b4fc', fontWeight: 600 }}>
+                  Cień: {shadowEnvelopeMs < 0.1 && shadowEnvelopeMs > 0 ? '<0.1' : shadowEnvelopeMs.toFixed(1)}ms
+                </span>
+              </>
+            )}
             <span style={{ color: '#475569' }}>|</span>
             <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
               Cykl: {totalAnalysisMs < 0.1 && totalAnalysisMs > 0 ? '<0.1' : totalAnalysisMs.toFixed(1)}ms
@@ -3954,6 +4356,8 @@ export const App: React.FC = () => {
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
             showShadowRange={showShadowRange}
+            showShadowFill={showShadowFill}
+            isInteracting={isInteracting}
             shadowAnalysis={shadowAnalysis}
             sunlightMethod={sunlightMethod}
 

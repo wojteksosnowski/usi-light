@@ -43,6 +43,8 @@ export interface CadCanvasProps {
   showShadowingLines: boolean;
   showSunlightLines: boolean;
   showShadowRange?: boolean;
+  showShadowFill?: boolean;
+  isInteracting?: boolean;
   shadowAnalysis?: import('../../types/geometry').ShadowAnalysisResult;
   sunlightMethod?: 'raycasting' | 'segments';
 

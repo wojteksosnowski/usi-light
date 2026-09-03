@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Point2D, PinnedFacadePoint, AnalysisPointResult } from '../types/geometry';
 import { isPointInPolygon, computeCombinedShadowEnvelope, adjustEdgeLength } from '../utils/math2d';
+import { computeHourlyShadowsLive } from '../utils/math2d/shadowEnvelope';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
@@ -46,6 +47,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   showShadowingLines,
   showSunlightLines,
   showShadowRange = false,
+  showShadowFill = false,
+  isInteracting = false,
   shadowAnalysis,
   sunlightMethod = 'raycasting',
   latitude = 52.23,
@@ -536,6 +539,30 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     return computeCombinedShadowEnvelope(visibleBuildings, latitude, equinoxDate, longitude);
   }, [visibleBuildings, showShadowRange, shadowAnalysis, latitude, equinoxDate, longitude]);
 
+  // Obliczenia cienia live (synchroniczne) podczas przeciągania obiektów
+  const liveShadowResult = useMemo(() => {
+    if (!showShadowRange || !isInteracting) return null;
+    return computeHourlyShadowsLive(buildings, latitude, longitude, equinoxDate, 0.5, sunlightMethod);
+  }, [showShadowRange, isInteracting, buildings, latitude, longitude, equinoxDate, sunlightMethod]);
+
+  // Cienie godzinowe / kroki cienia: podczas ruchu live (krok 0.5h), po zatrzymaniu z workera (krok 0.25h)
+  const hourlyShadowsToRender = useMemo(() => {
+    if (!showShadowRange) return [];
+    if (isInteracting && liveShadowResult) {
+      return liveShadowResult.hourlyShadows;
+    }
+    return shadowAnalysis?.hourlyShadows ?? [];
+  }, [showShadowRange, isInteracting, liveShadowResult, shadowAnalysis]);
+
+  // Obwiednia maksymalna (envelope): generowana bezpośrednio z sumy obrysów live podczas ruchu oraz z workera po zatrzymaniu
+  const shadowRangeLoopsToRender = useMemo(() => {
+    if (!showShadowRange) return [];
+    if (isInteracting && liveShadowResult) {
+      return liveShadowResult.envelopeLoops;
+    }
+    return shadowRangeLoops;
+  }, [showShadowRange, isInteracting, liveShadowResult, shadowRangeLoops]);
+
 
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
@@ -668,7 +695,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     // 1. Grid & Background
     renderCadGrid(renderContext, rotationHover, viewRotationMode, buildings, showSatelliteLayer);
 
-    // 2. Analytical Color Ribbons (§ 12 & § 56)
+    // 2. Shadow Range § 12 (drawn OVER satellite and grid, but UNDER buildings and analysis bands)
+    renderShadowRange(renderContext, shadowRangeLoopsToRender, showShadowRange, showShadowFill, hourlyShadowsToRender);
+
+    // 3. Analytical Color Ribbons (§ 12 & § 56)
     renderAnalysisBands(
       renderContext,
       buildings,
@@ -678,7 +708,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       layerSettings
     );
 
-    // 3. Buildings Base & Outlines
+    // 4. Buildings Base & Outlines
     renderBuildings(
       renderContext,
       buildings,
@@ -702,9 +732,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       drawingMode === 'vertexEdit',
       drawingMode === 'rotate'
     );
-
-    // 4. Shadow Range § 12 (only for visible tested buildings)
-    renderShadowRange(renderContext, shadowRangeLoops, showShadowRange, shadowAnalysis?.hourlyShadows);
 
     // 5. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
     const pointsToVisualize = (pinnedPointResults && pinnedPointResults.length > 0)
@@ -777,7 +804,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     analysisResults,
     layerSettings,
     shadowRangeLoops,
+    shadowRangeLoopsToRender,
+    hourlyShadowsToRender,
     shadowAnalysis,
+    showShadowFill,
+    isInteracting,
     worldToScreen,
     screenToWorld,
     visibleBuildings,

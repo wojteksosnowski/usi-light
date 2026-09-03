@@ -571,6 +571,135 @@ export class LinijkaSolarSystem implements ISolarHourSystem {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOBALNY LOOKUP TABLE (LUT) DLA SŁOŃCA I CIENIA (Astro + Linijka Słońca)
+// ─────────────────────────────────────────────────────────────────────────────
 
+export interface SolarMethodLUTData {
+  azimuthDeg: number;
+  elevationDeg: number;
+  sunDir: Vector2DLike;        // Wektor kierunku światła 2D w CAD (w stronę sceny od słońca): (sin(az), cos(az))
+  unitShadowVec: Vector2DLike; // Wektor cienia dla jednostkowej wysokości H=1: (-sin(az)/tan(elev), -cos(az)/tan(elev))
+}
 
+export interface SolarLUTEntry {
+  hourFraction: number;
+  offsetFromNoon: number;
+  astro: SolarMethodLUTData;
+  linijka: SolarMethodLUTData;
+}
 
+export class GlobalSolarLUT {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly equinoxDate: 'spring' | 'autumn';
+  readonly astroSystem: AstroSolarSystem;
+  readonly linijkaSystem: LinijkaSolarSystem;
+
+  // Mapa offset z zaokrągleniem do 3 miejsc po przecinku -> SolarLUTEntry
+  private readonly offsetMap: Map<number, SolarLUTEntry> = new Map();
+
+  constructor(
+    latitude: number,
+    longitude: number,
+    equinoxDate: 'spring' | 'autumn' = 'spring'
+  ) {
+    this.latitude = latitude;
+    this.longitude = longitude;
+    this.equinoxDate = equinoxDate;
+    this.astroSystem = new AstroSolarSystem(latitude, longitude, equinoxDate);
+    this.linijkaSystem = new LinijkaSolarSystem(latitude, longitude, equinoxDate);
+
+    this.precomputeCommonOffsets();
+  }
+
+  private precomputeCommonOffsets(): void {
+    // Prekomputacja dla standardowych kroków godzinowych od -5h do +5h co 0.05h (3 minuty)
+    for (let o = -5.0; o <= 5.0001; o += 0.05) {
+      const offsetKey = Math.round(o * 1000) / 1000;
+      this.getEntryForOffset(offsetKey);
+    }
+  }
+
+  getEntryForOffset(offsetFromNoon: number): SolarLUTEntry {
+    const key = Math.round(offsetFromNoon * 1000) / 1000;
+    const existing = this.offsetMap.get(key);
+    if (existing) return existing;
+
+    // 1. Astro
+    const astroHour = this.astroSystem.solarNoonDecimal + key;
+    const astroAz = this.astroSystem.getAzimuthForHour(astroHour);
+    const astroElev = this.astroSystem.getElevationForAzimuth(astroAz);
+    const astroData = this.buildMethodData(astroAz, astroElev);
+
+    // 2. Linijka
+    const linijkaHour = this.linijkaSystem.solarNoonDecimal + key;
+    const linijkaAz = this.linijkaSystem.getAzimuthForHour(linijkaHour);
+    const linijkaElev = this.linijkaSystem.getElevationForAzimuth(linijkaAz);
+    const linijkaData = this.buildMethodData(linijkaAz, linijkaElev);
+
+    const entry: SolarLUTEntry = {
+      hourFraction: astroHour,
+      offsetFromNoon: key,
+      astro: astroData,
+      linijka: linijkaData,
+    };
+
+    this.offsetMap.set(key, entry);
+    return entry;
+  }
+
+  getMethodData(offsetFromNoon: number, method: 'raycasting' | 'segments' | 'astro' | 'linijka'): SolarMethodLUTData {
+    const entry = this.getEntryForOffset(offsetFromNoon);
+    return (method === 'segments' || method === 'linijka') ? entry.linijka : entry.astro;
+  }
+
+  private buildMethodData(azimuthDeg: number, elevationDeg: number): SolarMethodLUTData {
+    const azRad = azimuthDeg * DEG2RAD;
+    const elevRad = elevationDeg * DEG2RAD;
+
+    // Wektor padania światła w płaszczyźnie 2D (+Y Północ, +X Wschód):
+    const sunDir: Vector2DLike = {
+      x: Math.sin(azRad),
+      y: Math.cos(azRad),
+    };
+
+    // Wektor cienia rzucanego na ziemię dla jednostkowej wysokości H=1:
+    let unitShadowVec: Vector2DLike = { x: 0, y: 0 };
+    if (elevationDeg > 0.001) {
+      const tanElev = Math.tan(elevRad);
+      if (tanElev > 1e-4) {
+        const shadowLength = 1.0 / tanElev;
+        unitShadowVec = {
+          x: -Math.sin(azRad) * shadowLength,
+          y: -Math.cos(azRad) * shadowLength,
+        };
+      }
+    }
+
+    return {
+      azimuthDeg,
+      elevationDeg,
+      sunDir,
+      unitShadowVec,
+    };
+  }
+}
+
+// Globalny podręczny cache instancji GlobalSolarLUT dla danej lokalizacji
+const globalSolarLUTCache = new Map<string, GlobalSolarLUT>();
+
+export function getGlobalSolarLUT(
+  latitude: number,
+  longitude: number,
+  equinoxDate: 'spring' | 'autumn' = 'spring'
+): GlobalSolarLUT {
+  const key = `${latitude.toFixed(4)}|${longitude.toFixed(4)}|${equinoxDate}`;
+  let lut = globalSolarLUTCache.get(key);
+  if (!lut) {
+    lut = new GlobalSolarLUT(latitude, longitude, equinoxDate);
+    if (globalSolarLUTCache.size > 20) globalSolarLUTCache.clear();
+    globalSolarLUTCache.set(key, lut);
+  }
+  return lut;
+}

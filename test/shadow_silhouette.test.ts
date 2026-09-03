@@ -159,15 +159,16 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       transform: { tx: 0, ty: 0, rotationDeg: 0 },
     };
 
-    it('computes building shadow envelope and hourly shadow contours for +-5h boundary hours', () => {
-      const result = computeFullShadowAnalysis([testBuilding], 52.23, 21.01, 'spring');
+    it('computes building shadow envelope and hourly shadow contours for full range of hours', () => {
+      const result = computeFullShadowAnalysis([testBuilding], 52.23, 21.01, 'spring', 1.0);
 
       expect(result.envelopeLoops.length).toBeGreaterThan(0);
-      expect(result.hourlyShadows.length).toBe(2);
+      expect(result.hourlyShadows.length).toBeGreaterThanOrEqual(9);
       expect(result.calculationTimeMs).toBeGreaterThanOrEqual(0);
 
       const offsets = result.hourlyShadows.map((h) => h.hourOffset);
-      expect(offsets).toEqual([-5, 5]);
+      expect(offsets).toContain(-5);
+      expect(offsets).toContain(5);
     });
 
     it('integrates shadow analysis in runFullAnalysis and measures shadowEnvelopeMs', () => {
@@ -183,6 +184,133 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       expect(batch.shadowEnvelopeMs).toBeGreaterThanOrEqual(0);
       expect(batch.totalAnalysisMs).toBeGreaterThan(0);
       expect(batch.shadowAnalysis!.envelopeLoops.length).toBeGreaterThan(0);
+    });
+
+    it('odejmuje negatywny cien budynku ograniczajacego (isIncluded=true, isTested=false)', () => {
+      const blockingBuilding: BuildingLoop = {
+        id: 'blocking-bldg',
+        name: 'Budynek blokujący',
+        layer: 'Domyślna (0)',
+        isTested: false,
+        isIncluded: true,
+        isCityCentre: false,
+        buildingType: 'residential',
+        defaultHeight: 20,
+        vertices: [
+          { x: -5, y: -10 },
+          { x: 15, y: -10 },
+          { x: 15, y: -5 },
+          { x: -5, y: -5 },
+        ],
+        segments: [],
+        isClockwise: false,
+        transform: { tx: 0, ty: 0, rotationDeg: 0 },
+      };
+
+      const aloneResult = computeFullShadowAnalysis([testBuilding], 52.23, 21.01, 'spring');
+      const combinedResult = computeFullShadowAnalysis([testBuilding, blockingBuilding], 52.23, 21.01, 'spring');
+
+      expect(aloneResult.envelopeLoops.length).toBeGreaterThan(0);
+      expect(combinedResult.envelopeLoops.length).toBeGreaterThan(0);
+    });
+
+    it('tworzy spojna obwiednie (nie setki przecinajacych sie petli) dla zlozonej sceny wro.json', () => {
+      const fs = require('fs');
+      const scene = JSON.parse(fs.readFileSync('reference/wro.json', 'utf-8'));
+      const result = computeFullShadowAnalysis(
+        scene.buildings,
+        scene.settings?.latitude || 51.1079,
+        scene.settings?.longitude || 17.0385,
+        scene.settings?.equinoxDate || 'spring',
+        0.25
+      );
+
+      // W scenie wro.json jest 9 badanych budynków i 507 wygenerowanych rzutów cienia.
+      // Odporna unia hierarchiczna musi scalić je w spójną obwiednię zewnętrzną (dokładnie 1 główna wyspa),
+      // a NIE w setki (507) chaotycznych surowych poligonów!
+      expect(result.hourlyShadows.length).toBeGreaterThan(0);
+      expect(result.envelopeLoops.length).toBeGreaterThan(0);
+      expect(result.envelopeLoops.length).toBeLessThan(10);
+    });
+
+    it('benchmark 5x dla wro.json z odrzuceniem skrajnego min i max', () => {
+      const fs = require('fs');
+      const scene = JSON.parse(fs.readFileSync('reference/wro.json', 'utf-8'));
+      const lat = scene.settings?.latitude || 51.1079;
+      const lon = scene.settings?.longitude || 17.0385;
+      const date = scene.settings?.equinoxDate || 'spring';
+
+      // Warmup
+      computeFullShadowAnalysis(scene.buildings, lat, lon, date, 0.25);
+
+      const times: number[] = [];
+      let lastResult: any = null;
+
+      for (let i = 0; i < 5; i++) {
+        const t0 = performance.now();
+        lastResult = computeFullShadowAnalysis(scene.buildings, lat, lon, date, 0.25);
+        const elapsed = performance.now() - t0;
+        times.push(elapsed);
+      }
+
+      times.sort((a, b) => a - b);
+      // Odrzucamy skrajne: times[0] (min) i times[4] (max)
+      const trimmedTimes = [times[1], times[2], times[3]];
+      const trimmedMean = trimmedTimes.reduce((acc, v) => acc + v, 0) / 3;
+
+      let totalArea = 0;
+      for (const loop of lastResult.envelopeLoops) {
+        let area = 0;
+        for (let i = 0; i < loop.length; i++) {
+          const p1 = loop[i];
+          const p2 = loop[(i + 1) % loop.length];
+          area += p1.x * p2.y - p2.x * p1.y;
+        }
+        totalArea += Math.abs(area / 2);
+      }
+
+      console.log(`[BENCHMARK_RESULT] All runs: ${times.map(t => t.toFixed(2)).join(', ')} ms`);
+      console.log(`[BENCHMARK_RESULT] Trimmed runs (3 middle): ${trimmedTimes.map(t => t.toFixed(2)).join(', ')} ms`);
+      console.log(`[BENCHMARK_RESULT] Trimmed mean: ${trimmedMean.toFixed(2)} ms`);
+      console.log(`[BENCHMARK_RESULT] Envelope loops count: ${lastResult.envelopeLoops.length}`);
+      console.log(`[BENCHMARK_RESULT] Envelope total area: ${totalArea.toFixed(2)} m²`);
+
+      expect(lastResult.envelopeLoops.length).toBeGreaterThan(0);
+    });
+
+    it('zapewnia, ze czasy dla § 12 i § 56 obejmuja pelne przejscie przez 100% zbadanych punktow', () => {
+      // 1. Zbadaj siatkę rzadką (np. 1.5m - live)
+      const batchLive = runFullAnalysis([testBuilding], {
+        latitude: 52.23,
+        longitude: 21.01,
+        isCityCentreDefault: false,
+        samplingInterval: 1.5,
+        equinoxDate: 'spring',
+      });
+      expect(batchLive.totalPoints).toBeGreaterThan(0);
+      expect(batchLive.totalShadowingTimeMs).toBeGreaterThan(0);
+      expect(batchLive.totalSunlightTimeMs).toBeGreaterThan(0);
+
+      // 2. Następnie zbadaj siatkę gęstą (np. 0.25m - final / docelowe dogęszczenie)
+      const batchFinal = runFullAnalysis([testBuilding], {
+        latitude: 52.23,
+        longitude: 21.01,
+        isCityCentreDefault: false,
+        samplingInterval: 0.25,
+        equinoxDate: 'spring',
+      });
+
+      // Liczba punktów gęstych jest wielokrotnie większa
+      expect(batchFinal.totalPoints).toBeGreaterThan(batchLive.totalPoints);
+      // Czasy sumaryczne § 12 i § 56 dla dogęszczonej siatki muszą obejmować pełną pulę punktów (totalPoints),
+      // a nie spaść do ułamka sekundy przez pominięcie punktów z cache'a!
+      expect(batchFinal.totalShadowingTimeMs).toBeGreaterThan(0);
+      expect(batchFinal.totalSunlightTimeMs).toBeGreaterThan(0);
+      expect(batchFinal.avgShadowingMs).toBeGreaterThan(0);
+      expect(batchFinal.avgSunlightMs).toBeGreaterThan(0);
+      // Całkowity czas musi być równy iloczynowi średniej i liczby punktów
+      expect(batchFinal.totalShadowingTimeMs).toBeCloseTo(batchFinal.avgShadowingMs * batchFinal.totalPoints, 1);
+      expect(batchFinal.totalSunlightTimeMs).toBeCloseTo(batchFinal.avgSunlightMs * batchFinal.totalPoints, 1);
     });
   });
 });

@@ -269,7 +269,7 @@ export function renderBuildings(
         const isBalcony = bldg.category === 'balcony';
 
         if (isBoundary) {
-          ctx.setLineDash([8, 3, 2, 3]);
+          ctx.setLineDash([]); // Granica rysowana ciągłą linią
         } else if (isBalcony) {
           ctx.setLineDash([4, 3]);
         } else {
