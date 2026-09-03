@@ -12,6 +12,9 @@ import { renderSunlightVisualization } from './cad/renderers/sunlightRenderer';
 import { renderShadowingVisualization } from './cad/renderers/shadowingRenderer';
 import { renderDimensions } from './cad/renderers/dimensionsRenderer';
 import { renderDrawingToolPreview } from './cad/renderers/drawingToolRenderer';
+import { renderSatelliteMap } from './cad/renderers/satelliteMapRenderer';
+import { GoogleTileManager } from '../utils/googleTileManager';
+import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { calculateDirectionSnap } from '../utils/directionSnapping';
 import {
   CachedLineEquation,
@@ -86,10 +89,39 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   isOsnapActive = true,
   onToggleOsnap,
   dominantDirections = [],
+  showSatelliteLayer = false,
+  satelliteOpacity = 0.65,
+  googleMapsApiKey = '',
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Menedżer kafelków satelitarnych Google Maps
+  const [tileRenderTick, setTileRenderTick] = useState<number>(0);
+  const tileManagerRef = useRef<GoogleTileManager | null>(null);
+
+  useEffect(() => {
+    const effectiveKey = googleMapsApiKey || APP_CONFIG.googleMaps.apiKey;
+    if (!tileManagerRef.current) {
+      tileManagerRef.current = new GoogleTileManager(effectiveKey, () => {
+        setTileRenderTick((t) => t + 1);
+      });
+    } else {
+      tileManagerRef.current.setApiKey(effectiveKey);
+    }
+  }, [googleMapsApiKey]);
+
+  // Detekcja układu współrzędnych sceny CAD
+  const crsInfo = useMemo<CrsDetectionResult>(() => {
+    const allPts: Point2D[] = [];
+    for (const b of buildings) {
+      if (Array.isArray(b.vertices)) {
+        for (const v of b.vertices) allPts.push(v);
+      }
+    }
+    return detectCoordinateSystem(allPts);
+  }, [buildings]);
 
   // Drawing state
   const [drawingVertices, setDrawingVertices] = useState<Point2D[]>([]);
@@ -615,8 +647,26 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       sunlightMethod,
     };
 
+    // 0. Podkład satelitarny Google Maps (ABSOLUTNIE NA SAMYM SPODZIE)
+    // Rygorystyczna zasada: gdy showSatelliteLayer === false, nie wywołujemy renderera
+    // ani nie odpytujemy API (zero zapytań HTTP/transferu danych).
+    if (showSatelliteLayer && tileManagerRef.current) {
+      // Wyczyść tło płótna przed nałożeniem kafelków
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, width, height);
+
+      renderSatelliteMap({
+        rc: renderContext,
+        tileManager: tileManagerRef.current,
+        crsInfo,
+        projectCenterLatLon: { lat: latitude, lon: longitude },
+        opacity: satelliteOpacity,
+      });
+    }
+
     // 1. Grid & Background
-    renderCadGrid(renderContext, rotationHover, viewRotationMode, buildings);
+    renderCadGrid(renderContext, rotationHover, viewRotationMode, buildings, showSatelliteLayer);
 
     // 2. Analytical Color Ribbons (§ 12 & § 56)
     renderAnalysisBands(
@@ -731,6 +781,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     worldToScreen,
     screenToWorld,
     visibleBuildings,
+    showSatelliteLayer,
+    satelliteOpacity,
+    tileRenderTick,
+    crsInfo,
   ]);
 
   // 2. Overlay Render Loop (Kursor, OSNAP, OTRACK, Rubberband, Narzędzia Rysowania) - natychmiastowe 60/120 FPS

@@ -5,6 +5,7 @@ import {
   isPolygonCCW,
 } from '../utils/math2d';
 import { computeLineEquation } from './segmentStatistics';
+import { CrsDetectionResult, detectCoordinateSystem } from './geoTransform';
 
 interface DxfEntity {
   type: string;
@@ -26,6 +27,7 @@ export interface DxfUnitInfo {
 export interface DxfParseResult {
   buildings: BuildingLoop[];
   unitInfo: DxfUnitInfo;
+  crs?: CrsDetectionResult;
 }
 
 /**
@@ -77,6 +79,19 @@ export function resolveDxfScale(
       : insunitsRaw !== undefined && insunitsRaw !== null
       ? parseInt(String(insunitsRaw), 10)
       : undefined;
+
+  // Geodetic coordinate check: in Polish coordinate systems (PL-1992, PL-2000), coordinates are 100,000 to 9,000,000 meters!
+  // Geodetic map DXFs (often exported from GIS/QGIS with default AutoCAD templates having INSUNITS=1/inches)
+  // are strictly in METERS, never in inches.
+  if (maxCoord >= 100_000 && maxCoord <= 9_000_000) {
+    return {
+      unit: 'auto',
+      scale: 1.0,
+      unitName: 'Metry [m] (Układ geodezyjny)',
+      source: 'Auto-detekcja (współrzędne państwowe geodezyjne w metrach)',
+      insunits: insunits || 0,
+    };
+  }
 
   if (insunits !== undefined && !isNaN(insunits) && insunits > 0) {
     switch (insunits) {
@@ -212,97 +227,175 @@ export function parseDxfWithMetadata(
     }
   }
 
+  // Wzbogacenie parsera o bezpośrednią ekstrakcję encji HATCH (częstych w mapach geodezyjnych)
+  const rawEntities: { type: string; layer: string; vertices: Point2D[] }[] = [];
+
+  // 1. Zwykłe encje z dxf-parser (LWPOLYLINE, POLYLINE)
+  for (const entity of parsed.entities) {
+    if (!entity) continue;
+    if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
+      if (Array.isArray(entity.vertices) && entity.vertices.length >= 3) {
+        const valid = entity.vertices.filter(
+          (v: any) => v && Number.isFinite(v.x) && Number.isFinite(v.y)
+        );
+        if (valid.length >= 3) {
+          rawEntities.push({
+            type: entity.type,
+            layer: entity.layer || '0',
+            vertices: valid.map((v: any) => ({ x: v.x, y: v.y })),
+          });
+        }
+      }
+    }
+  }
+
+  // 2. Bezpośrednia ekstrakcja encji HATCH z pliku DXF
+  const lines = dxfText.split(/\r?\n/).map((l) => l.trim());
+  let inEntitiesSection = false;
+  let currentHatch: { type: string; layer: string; vertices: Point2D[]; _curX?: number } | null = null;
+
+  for (let i = 0; i < lines.length - 1; i += 2) {
+    const code = parseInt(lines[i], 10);
+    const val = lines[i + 1];
+
+    if (code === 2 && val === 'ENTITIES') {
+      inEntitiesSection = true;
+      continue;
+    }
+    if (code === 0 && val === 'ENDSEC' && inEntitiesSection) {
+      if (currentHatch && currentHatch.vertices.length >= 3) {
+        rawEntities.push({ type: 'HATCH', layer: currentHatch.layer, vertices: currentHatch.vertices });
+      }
+      inEntitiesSection = false;
+      break;
+    }
+
+    if (inEntitiesSection) {
+      if (code === 0) {
+        if (currentHatch && currentHatch.vertices.length >= 3) {
+          rawEntities.push({ type: 'HATCH', layer: currentHatch.layer, vertices: currentHatch.vertices });
+          currentHatch = null;
+        }
+        if (val === 'HATCH') {
+          currentHatch = { type: 'HATCH', layer: '0', vertices: [] };
+        }
+      } else if (currentHatch) {
+        if (code === 8) {
+          currentHatch.layer = val;
+        } else if (code === 10) {
+          currentHatch._curX = parseFloat(val);
+        } else if (code === 20 && currentHatch._curX !== undefined) {
+          const y = parseFloat(val);
+          const x = currentHatch._curX;
+          delete currentHatch._curX;
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            // W HATCH punkt (0,0) w nagłówku to elevation/origin point
+            // Odrzucamy (0,0) gdy rzeczywiste współrzędne pętli są różne od zera
+            if (x !== 0 || y !== 0) {
+              currentHatch.vertices.push({ x, y });
+            }
+          }
+        }
+      }
+    }
+  }
+  if (currentHatch && currentHatch.vertices.length >= 3) {
+    rawEntities.push({ type: 'HATCH', layer: currentHatch.layer, vertices: currentHatch.vertices });
+  }
+
+  // Oblicz maxCoord również uwzględniając HATCH
+  for (const ent of rawEntities) {
+    for (const v of ent.vertices) {
+      if (Math.abs(v.x) > maxCoord) maxCoord = Math.abs(v.x);
+      if (Math.abs(v.y) > maxCoord) maxCoord = Math.abs(v.y);
+    }
+  }
+
   const unitInfo = resolveDxfScale(parsed.header, maxCoord, unitOption);
   const scaleUnit = unitInfo.scale || 1.0;
 
   const loops: BuildingLoop[] = [];
   let buildingCount = 1;
 
-  for (const entity of parsed.entities) {
-    if (!entity) continue;
-    // Process LWPOLYLINE and POLYLINE
-    if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
-      if (Array.isArray(entity.vertices) && entity.vertices.length >= 3) {
-        const validVertices = entity.vertices.filter(
-          (v: any) => v && Number.isFinite(v.x) && Number.isFinite(v.y)
-        );
-        if (validVertices.length < 3) continue;
+  for (const entity of rawEntities) {
+    const rawPoints: Point2D[] = entity.vertices.map((v) => ({
+      x: v.x * scaleUnit,
+      y: v.y * scaleUnit,
+    }));
 
-        const rawPoints: Point2D[] = validVertices.map((v: any) => ({
-          x: v.x * scaleUnit,
-          y: v.y * scaleUnit,
-        }));
-
-        // Remove closing duplicate vertex if present
-        const pFirst = rawPoints[0];
-        const pLast = rawPoints[rawPoints.length - 1];
-        if (
-          rawPoints.length > 3 &&
-          Math.hypot(pFirst.x - pLast.x, pFirst.y - pLast.y) < 1e-4
-        ) {
-          rawPoints.pop();
-        }
-
-        if (rawPoints.length < 3) continue;
-
-        const isCCW = isPolygonCCW(rawPoints);
-        const segments: FacadeSegment[] = [];
-
-        for (let i = 0; i < rawPoints.length; i++) {
-          const p1 = rawPoints[i];
-          const p2 = rawPoints[(i + 1) % rawPoints.length];
-          const normal = calculateOutwardNormal(p1, p2, isCCW);
-          const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-
-          segments.push({
-            id: `bldg-${buildingCount}-seg-${i + 1}`,
-            p1,
-            p2,
-            normal,
-            length: len,
-            angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
-            hTop: 15.0, // Default 15m
-            hWindowBottom: 0.85, // Default 0.85m
-            isCityCentre: false,
-            buildingType: 'residential',
-            lineEquation: computeLineEquation(p1, p2, normal),
-          });
-        }
-
-        const layerName = entity.layer || '0';
-        const isTestedDefault = buildingCount === 1;
-
-        loops.push({
-          id: `bldg-${buildingCount}`,
-          name: `Budynek ${buildingCount} (${layerName})`,
-          layer: layerName,
-          isTested: isTestedDefault,
-          isCityCentre: false,
-          buildingType: 'residential',
-          category: 'building',
-          firstFloorHeight: 3.5,
-          typicalFloorHeight: 2.875,
-          storeysCount: 5,
-          defaultHeight: 15.0,
-          hWindowBottom: 0.85,
-          vertices: rawPoints,
-          segments,
-          isClockwise: !isCCW,
-          transform: {
-            tx: 0,
-            ty: 0,
-            rotationDeg: 0,
-          },
-        });
-
-        buildingCount++;
-      }
+    // Usuń powtórzony ostatni wierzchołek zamykający
+    const pFirst = rawPoints[0];
+    const pLast = rawPoints[rawPoints.length - 1];
+    if (
+      rawPoints.length > 3 &&
+      Math.hypot(pFirst.x - pLast.x, pFirst.y - pLast.y) < 1e-4
+    ) {
+      rawPoints.pop();
     }
+
+    if (rawPoints.length < 3) continue;
+
+    const isCCW = isPolygonCCW(rawPoints);
+    const segments: FacadeSegment[] = [];
+
+    for (let i = 0; i < rawPoints.length; i++) {
+      const p1 = rawPoints[i];
+      const p2 = rawPoints[(i + 1) % rawPoints.length];
+      const normal = calculateOutwardNormal(p1, p2, isCCW);
+      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+      segments.push({
+        id: `bldg-${buildingCount}-seg-${i + 1}`,
+        p1,
+        p2,
+        normal,
+        length: len,
+        angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
+        hTop: 15.0, // Default 15m
+        hWindowBottom: 0.85, // Default 0.85m
+        isCityCentre: false,
+        buildingType: 'residential',
+        lineEquation: computeLineEquation(p1, p2, normal),
+      });
+    }
+
+    const layerName = entity.layer || '0';
+    const isTestedDefault = buildingCount === 1;
+
+    loops.push({
+      id: `bldg-${buildingCount}`,
+      name: `Budynek ${buildingCount} (${layerName})`,
+      layer: layerName,
+      isTested: isTestedDefault,
+      isCityCentre: false,
+      buildingType: 'residential',
+      category: 'building',
+      firstFloorHeight: 3.5,
+      typicalFloorHeight: 2.875,
+      storeysCount: 5,
+      defaultHeight: 15.0,
+      hWindowBottom: 0.85,
+      vertices: rawPoints,
+      segments,
+      isClockwise: !isCCW,
+      transform: {
+        tx: 0,
+        ty: 0,
+        rotationDeg: 0,
+      },
+    });
+
+    buildingCount++;
   }
+
+  // Wykryj układ geodezyjny na podstawie zaimportowanych wierzchołków
+  const allVertices: Point2D[] = loops.flatMap((l) => l.vertices);
+  const crs = detectCoordinateSystem(allVertices);
 
   return {
     buildings: loops,
     unitInfo,
+    crs,
   };
 }
 

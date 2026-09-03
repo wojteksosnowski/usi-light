@@ -119,6 +119,12 @@ export const APP_CONFIG = {
     minSegmentLengthMeters: 0.2, // Minimalna długość ściany w metrach
     highlightColor: '#f59e0b', // Kolor aktywnego koszyka kątowego w UI
   },
+
+  // Warstwa analityczna podkładu satelitarnego
+  googleMaps: {
+    apiKey: 'AIzaSyC6fe9THidhFMg1TT0OcIPJ_vRCUWFfra4',
+    defaultOpacity: 0.65,
+  },
 } as const;
 
 

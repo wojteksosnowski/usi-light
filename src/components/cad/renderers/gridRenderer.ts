@@ -13,14 +13,17 @@ export function renderCadGrid(
     targetPoint?: { x: number; y: number };
   } | null,
   viewRotationMode: boolean,
-  buildings: any[]
+  buildings: any[],
+  hasSatelliteBackground: boolean = false
 ) {
   const { ctx, width, height, viewState, screenToWorld, worldToScreen, viewRotationDeg } = rc;
 
-  // 1. Clean background
+  // 1. Clean background (solid dark slate if no satellite background, otherwise transparent/semi-dark)
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#020617';
-  ctx.fillRect(0, 0, width, height);
+  if (!hasSatelliteBackground) {
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, width, height);
+  }
 
   // 2. Compute true world bounds of the screen viewport (all 4 corners for rotation support)
   const c1 = screenToWorld(0, 0);

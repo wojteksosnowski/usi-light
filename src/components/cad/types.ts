@@ -88,6 +88,9 @@ export interface CadCanvasProps {
   isOsnapActive?: boolean;
   onToggleOsnap?: () => void;
   dominantDirections?: DominantDirection[];
+  showSatelliteLayer?: boolean;
+  satelliteOpacity?: number;
+  googleMapsApiKey?: string;
 }
 
 

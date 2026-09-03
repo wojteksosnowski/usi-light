@@ -85,6 +85,7 @@ import {
   Compass,
   Magnet,
   Combine,
+  Globe,
 } from 'lucide-react';
 
 
@@ -247,6 +248,10 @@ export const App: React.FC = () => {
   const [showShadowingLines, setShowShadowingLines] = useState<boolean>(true);
   const [showSunlightLines, setShowSunlightLines] = useState<boolean>(true);
   const [showShadowRange, setShowShadowRange] = useState<boolean>(true);
+
+  // Podkład satelitarny Google Maps
+  const [showSatelliteLayer, setShowSatelliteLayer] = useState<boolean>(false);
+  const [satelliteOpacity, setSatelliteOpacity] = useState<number>(0.65);
 
   // Metoda obliczania nasłonecznienia § 56
   const [sunlightMethod, setSunlightMethod] = useState<'raycasting' | 'segments'>('raycasting');
@@ -1790,6 +1795,68 @@ export const App: React.FC = () => {
                       </div>
                       <span style={{ fontSize: '10px', fontWeight: 700 }}>{showShadowRange ? 'WŁ' : 'WYŁ'}</span>
                     </button>
+
+                    {/* Podkład satelitarny Google Maps */}
+                    <div
+                      style={{
+                        marginTop: '4px',
+                        padding: '8px 10px',
+                        borderRadius: '10px',
+                        backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+                        border: showSatelliteLayer ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid #1e293b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setShowSatelliteLayer(!showSatelliteLayer)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: 'none',
+                          border: 'none',
+                          color: '#f8fafc',
+                          cursor: 'pointer',
+                          padding: 0,
+                          width: '100%',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Globe size={14} color={showSatelliteLayer ? '#38bdf8' : '#64748b'} />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny Google</span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            color: showSatelliteLayer ? '#38bdf8' : '#64748b',
+                          }}
+                        >
+                          {showSatelliteLayer ? 'WŁ' : 'WYŁ'}
+                        </span>
+                      </button>
+
+                      {showSatelliteLayer && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '4px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
+                            <span>Krycie podkładu:</span>
+                            <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(satelliteOpacity * 100)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="1.0"
+                            step="0.05"
+                            value={satelliteOpacity}
+                            onChange={(e) => setSatelliteOpacity(parseFloat(e.target.value))}
+                            style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3532,6 +3599,26 @@ export const App: React.FC = () => {
           >
             Zakres cienia
           </button>
+          <button
+            onClick={() => setShowSatelliteLayer(!showSatelliteLayer)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 9px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+              color: showSatelliteLayer ? '#38bdf8' : '#94a3b8',
+            }}
+            title="Włącz / wyłącz podkład z mapy satelitarnej Google Maps pod sceną CAD"
+          >
+            <Globe size={13} />
+            <span>Satelita</span>
+          </button>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
@@ -3904,6 +3991,8 @@ export const App: React.FC = () => {
             isOsnapActive={isOsnapActive}
             onToggleOsnap={handleToggleOsnap}
             dominantDirections={segmentStats.dominantDirections}
+            showSatelliteLayer={showSatelliteLayer}
+            satelliteOpacity={satelliteOpacity}
           />
 
         </div>
