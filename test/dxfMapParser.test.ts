@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseDxfWithMetadata } from './dxfParser';
+import { parseDxfWithMetadata } from '../src/utils/dxfParser';
 
 describe('dxfParser - mapa.dxf', () => {
   it('parses reference/mapa.dxf extracting 11 buildings and detecting PL-1992', () => {
-    const filePath = path.resolve(__dirname, '../../reference/mapa.dxf');
+    const filePath = path.resolve(__dirname, '../reference/mapa.dxf');
     if (!fs.existsSync(filePath)) return;
 
     const content = fs.readFileSync(filePath, 'utf-8');

@@ -24,6 +24,8 @@ import {
 import {
   runFullAnalysis,
   prefilterObstacleSegments,
+  prefilterShadowingObstacles,
+  prefilterSunlightObstacles,
   analyzeShadowingAtPoint,
   analyzeSunlightAtPoint,
   analyzeSunlightAtPointSegments,
@@ -404,25 +406,26 @@ export const App: React.FC = () => {
         y: seg.p1.y + r * (seg.p2.y - seg.p1.y),
       };
 
-      const prefilteredObstacles = prefilterObstacleSegments(exactPoint, seg, effectiveBuildings, bldg.id);
+      const prefilteredShadowing = prefilterShadowingObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
+      const prefilteredSunlight = prefilterSunlightObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
 
       const shadowRes = analyzeShadowingAtPoint(
         exactPoint, seg, r, effectiveBuildings, bldg.id,
         currentAccuracyOptions.angleStepDeg,
-        prefilteredObstacles
+        prefilteredShadowing
       );
 
       const sunRes =
         sunlightMethod === 'segments'
           ? analyzeSunlightAtPointSegments(
               exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
-              prefilteredObstacles
+              prefilteredSunlight
             )
           : analyzeSunlightAtPoint(
               exactPoint, seg, r, effectiveBuildings, bldg.id, settings,
               currentAccuracyOptions.sunlightStepMinutes,
               undefined,
-              prefilteredObstacles
+              prefilteredSunlight
             );
 
       return {
