@@ -1,21 +1,20 @@
-import { Point2D } from '../types/geometry';
+import { Point2D } from '../../types/geometry';
 import {
   CachedLineEquation,
   createCachedLineEquation,
   projectPointToLine,
   normalizeAnglePi,
   angleDiffPi,
-} from './lineBufferEngine';
+} from '../../utils/lineBufferEngine';
 
 /**
  * Wykrywa równoległość i kolinearność przy transformacji krawędzi lub obiektu
- * (Priorytet 6: Parallel Snap & Collinear Lock)
  */
 export function evaluateCollinearAndParallelLock(
   draggedEdge: CachedLineEquation,
   referenceBuffer: CachedLineEquation[],
   angleToleranceRad = (0.5 * Math.PI) / 180,
-  collinearDistThreshold = 0.25 // np. 25 cm w świecie CAD
+  collinearDistThreshold = 0.25
 ): {
   isParallel: boolean;
   isCollinear: boolean;
@@ -130,7 +129,6 @@ export function evaluateBuildingDragMultiSnap(
     maxY: bMaxY + pad,
   };
 
-  // Krawędzie referencyjne przecinające AABB przemieszczanej bryły (dla V2V, V2E, E2V)
   const nearbyRefBuffer = otherBuffer.filter((e) => {
     const eMinX = Math.min(e.p1.x, e.p2.x);
     const eMaxX = Math.max(e.p1.x, e.p2.x);
@@ -139,9 +137,7 @@ export function evaluateBuildingDragMultiSnap(
     return eMaxX >= aabb.minX && eMinX <= aabb.maxX && eMaxY >= aabb.minY && eMinY <= aabb.maxY;
   });
 
-  // -------------------------------------------------------------------------
-  // 1. Punkt do Punktu (Vertex-to-Vertex / Corner Lock) - Najwyższy priorytet
-  // -------------------------------------------------------------------------
+  // 1. Punkt do Punktu (Vertex-to-Vertex / Corner Lock)
   let bestV2V: BuildingDragSnapResult | null = null;
   let minV2VDist = distanceThresholdMeters;
 
@@ -170,9 +166,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestV2V;
   }
 
-  // -------------------------------------------------------------------------
   // 2. Punkt do Krawędzi (Vertex-to-Edge)
-  // -------------------------------------------------------------------------
   let bestV2E: BuildingDragSnapResult | null = null;
   let minV2EDist = distanceThresholdMeters;
 
@@ -199,10 +193,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestV2E;
   }
 
-  // -------------------------------------------------------------------------
   // 3. Krawędź przesuwanego obiektu do Punktu referencyjnego (Edge-to-Vertex)
-  // Wykorzystuje standardowe rzutowanie analityczne z lineBufferEngine
-  // -------------------------------------------------------------------------
   const n = movingVertices.length;
   let bestE2V: BuildingDragSnapResult | null = null;
   let minE2VDist = distanceThresholdMeters;
@@ -237,9 +228,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestE2V;
   }
 
-  // -------------------------------------------------------------------------
   // 4. Krawędź do Krawędzi / Przedłużenie Kolinearne (Collinear Extension Tracking)
-  // -------------------------------------------------------------------------
   let bestCollinear: BuildingDragSnapResult | null = null;
   let minCollinearDist = distanceThresholdMeters;
 

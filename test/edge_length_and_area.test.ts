@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computePolygonArea, adjustEdgeLength, computeBuildingsUnionArea } from '../src/utils/math2d';
+import { computePolygonArea, adjustEdgeLength, computeBuildingsUnionArea } from '@/utils/math2d';
 import { Point2D } from '../src/types/geometry';
 
 describe('Polygon Area and Edge Length Adjustment', () => {

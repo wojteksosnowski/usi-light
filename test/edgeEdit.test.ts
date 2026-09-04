@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { offsetPolygonEdge, updateBuildingWithNewVertices } from '../src/utils/math2d';
+import { offsetPolygonEdge, updateBuildingWithNewVertices } from '@/utils/math2d';
 import { createSampleBuildings } from '../src/utils/dxfParser';
 import { Point2D } from '../src/types/geometry';
 

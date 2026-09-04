@@ -4,7 +4,7 @@ import {
   computeBuildingShadowEnvelope,
   getShadowOffsetVector,
   isPolygonConvex,
-} from '../src/utils/math2d';
+} from '@/utils/math2d';
 import { calculateSolarPosition } from '../src/utils/solar';
 import { BuildingLoop } from '../src/types/geometry';
 

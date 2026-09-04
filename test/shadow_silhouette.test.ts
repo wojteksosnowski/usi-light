@@ -4,7 +4,7 @@ import {
   extractSilhouetteEdges,
   computeFastShadowPolygon,
   computeFullShadowAnalysis,
-} from '../src/utils/math2d';
+} from '@/utils/math2d';
 import { BuildingLoop, Point2D } from '../src/types/geometry';
 import { runFullAnalysis } from '../src/engine/analysisEngine';
 

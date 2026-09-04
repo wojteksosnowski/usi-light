@@ -91,7 +91,8 @@ export function renderBuildings(
   liveFacadeSnap?: { point: { x: number; y: number }; buildingId: string; segmentId: string; ratio: number } | null,
   facadePointMode?: boolean,
   isVertexEditMode?: boolean,
-  isRotateMode?: boolean
+  isRotateMode?: boolean,
+  selectedBuildingIds: string[] = []
 ) {
 
   const { ctx, worldToScreen, screenToWorld, width, height, viewState, viewRotationDeg } = rc;
@@ -141,7 +142,7 @@ export function renderBuildings(
 
     const isGhosted = lyrSetting.isGhosted === true;
     const isLocked = lyrSetting.isLocked === true;
-    const isSelected = bldg.id === selectedBuildingId;
+    const isSelected = bldg.id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(bldg.id));
     const isTested = bldg.isTested;
     const isIncluded = bldg.isIncluded !== false;
 
@@ -246,7 +247,7 @@ export function renderBuildings(
 
     const isGhosted = lyrSetting.isGhosted === true;
     const isLocked = lyrSetting.isLocked === true;
-    const isSelected = bldg.id === selectedBuildingId;
+    const isSelected = bldg.id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(bldg.id));
     const isTested = bldg.isTested;
     const isIncluded = bldg.isIncluded !== false;
 

@@ -1,5 +1,5 @@
 import { BuildingLoop, FacadeSegment, LineEquation2D, Point2D } from '../types/geometry';
-import { calculateOutwardNormal, isPolygonCCW } from './math2d';
+import { calculateOutwardNormal, isPolygonCCW } from '@/utils/math2d';
 
 /**
  * Computes general (Ax + By + C = 0) and slope-intercept (y = ax + b) line equations for a segment.

@@ -3,7 +3,7 @@ import {
   computeLinearDimension,
   computeAngularDimension,
   closestPointOnSegment,
-} from '../src/utils/math2d';
+} from '@/utils/math2d';
 import { Point2D } from '../src/types/geometry';
 
 describe('Dimension Tools (Wymiar)', () => {

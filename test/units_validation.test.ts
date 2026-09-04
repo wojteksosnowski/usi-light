@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createSampleBuildings } from '../src/utils/dxfParser';
 import { analyzeShadowingAtPoint } from '../src/engine/analysisEngine';
-import { raySegmentIntersection } from '../src/utils/math2d';
+import { raySegmentIntersection } from '@/utils/math2d';
 
 describe('Verification of Geometry Units and Heights Scale', () => {
   it('confirms that distances in plan (X, Y) and heights (Z/H) are strictly in meters', () => {

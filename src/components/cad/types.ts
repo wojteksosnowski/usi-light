@@ -33,8 +33,10 @@ export interface CadRenderContext {
 export interface CadCanvasProps {
   buildings: BuildingLoop[];
   selectedBuildingId: string | null;
-  onSelectBuilding: (id: string | null) => void;
+  selectedBuildingIds?: string[];
+  onSelectBuilding: (id: string | null, isMultiSelect?: boolean) => void;
   onBuildingMove: (id: string, dx: number, dy: number) => void;
+  onBuildingsMove?: (ids: string[], dx: number, dy: number) => void;
   analysisResults: AnalysisPointResult[];
   selectedPointResult: AnalysisPointResult | null;
   activePointMode?: 'shadowing' | 'sunlight';

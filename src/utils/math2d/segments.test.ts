@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { raySegmentIntersection, raySegmentDistance2D } from './math2d';
-import { Point2D, Vector2D } from '../types/geometry';
+import { raySegmentIntersection, raySegmentDistance2D } from './segments';
+import { Point2D, Vector2D } from '../../types/geometry';
 
 describe('raySegmentDistance2D vs raySegmentIntersection equivalence', () => {
   it('produces identical intersection distances on a fixed set of edge cases', () => {

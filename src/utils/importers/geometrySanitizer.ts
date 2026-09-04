@@ -1,5 +1,5 @@
 import { Point2D, FacadeSegment } from '../../types/geometry';
-import { isPolygonCCW, calculateOutwardNormal } from '../math2d';
+import { isPolygonCCW, calculateOutwardNormal } from '@/utils/math2d';
 import { computeLineEquation } from '../segmentStatistics';
 
 export interface SanitizePolygonOptions {

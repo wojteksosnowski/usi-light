@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { booleanUnionBuildings } from './math2d';
-import { BuildingLoop } from '../types/geometry';
+import { booleanUnionBuildings } from './polygons';
+import { BuildingLoop } from '../../types/geometry';
 
 describe('booleanUnionBuildings', () => {
   const createTestBuilding = (id: string, vertices: { x: number; y: number }[], height = 10): BuildingLoop => ({

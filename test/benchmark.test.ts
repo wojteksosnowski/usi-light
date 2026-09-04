@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import { createSampleBuildings } from '../src/utils/dxfParser';
-import { sampleSegmentPoints } from '../src/utils/math2d';
+import { sampleSegmentPoints } from '@/utils/math2d';
 import { analyzeShadowingAtPoint, analyzeSunlightAtPoint, analyzeSunlightAtPointSegments } from '../src/engine/analysisEngine';
 import { ProjectSettings } from '../src/types/geometry';
 

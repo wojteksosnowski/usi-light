@@ -3,7 +3,7 @@ import { BuildingLoop, FacadeSegment, Point2D } from '../types/geometry';
 import {
   calculateOutwardNormal,
   isPolygonCCW,
-} from '../utils/math2d';
+} from '@/utils/math2d';
 import { computeLineEquation } from './segmentStatistics';
 import { CrsDetectionResult, detectCoordinateSystem } from './geoTransform';
 

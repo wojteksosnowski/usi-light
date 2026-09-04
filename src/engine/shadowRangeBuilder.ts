@@ -1,7 +1,7 @@
 // src/engine/shadowRangeBuilder.ts
 import { ShadowRangeLut, ShadowVectorRay } from './shadowRangeLut';
 import polygonClipping from 'polygon-clipping';
-import { isPolygonConvex, computeConvexHull } from '../utils/math2d/polygons';
+import { isPolygonConvex, computeConvexHull } from '@/utils/math2d/polygons';
 
 export interface Point2D {
   x: number;

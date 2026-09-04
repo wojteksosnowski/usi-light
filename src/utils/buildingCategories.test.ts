@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuildingLoop } from '../types/geometry';
 import { analyzeSegmentsStatistics } from './segmentStatistics';
-import { computeDistancesToBoundaries, computeCombinedShadowEnvelope } from './math2d';
+import { computeDistancesToBoundaries, computeCombinedShadowEnvelope } from '@/utils/math2d';
 import { analyzeShadowingAtPoint, prefilterObstacleSegments } from '../engine/analysisEngine';
 import { createBuildingFromVertices } from './dxfParser';
 

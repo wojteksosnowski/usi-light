@@ -1,7 +1,6 @@
-import React from 'react';
 import { Point2D, BuildingLoop, CadLayerSettings } from '../../../types/geometry';
 import { ViewportState, CadRenderContext } from '../types';
-import { SnapCoordinator, SnapResult } from '../../../utils/snapping';
+import { SnapCoordinator, SnapResult } from '../../../engine/snapping';
 
 export interface ToolActionDispatchers {
   onSelectBuilding: (id: string | null) => void;

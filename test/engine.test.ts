@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateSignedArea, isPolygonCCW, calculateOutwardNormal, computeBuildingShadowEnvelope, computeCombinedShadowEnvelope } from '../src/utils/math2d';
+import { calculateSignedArea, isPolygonCCW, calculateOutwardNormal, computeBuildingShadowEnvelope, computeCombinedShadowEnvelope } from '@/utils/math2d';
 import { calculateSolarPosition } from '../src/utils/solar';
 import { analyzeShadowingAtPoint, runFullAnalysis } from '../src/engine/analysisEngine';
 import { createSampleBuildings, resolveDxfScale } from '../src/utils/dxfParser';

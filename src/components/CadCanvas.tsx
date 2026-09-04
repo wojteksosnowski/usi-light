@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Point2D, PinnedFacadePoint, AnalysisPointResult } from '../types/geometry';
-import { isPointInPolygon, computeCombinedShadowEnvelope, adjustEdgeLength } from '../utils/math2d';
-import { computeHourlyShadowsLive } from '../utils/math2d/shadowEnvelope';
+import { isPointInPolygon, computeCombinedShadowEnvelope, adjustEdgeLength } from '@/utils/math2d';
+import { computeHourlyShadowsLive } from '@/utils/math2d/shadowEnvelope';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
@@ -26,19 +26,22 @@ import {
 import {
   AnchorPoint,
   OsnapSnapResult,
-  evaluateOsnapSnap,
-  evaluateCollinearAndParallelLock,
   BuildingDragSnapResult,
+  SnapCoordinator,
+  evaluateOsnapSnapWithCoordinator,
+  evaluateCollinearAndParallelLock,
   evaluateBuildingDragMultiSnap,
-} from '../utils/cadOsnapEngine';
+} from '../engine/snapping';
 import { APP_CONFIG } from '../config/appConfig';
 
 
 export const CadCanvas: React.FC<CadCanvasProps> = ({
   buildings,
   selectedBuildingId,
+  selectedBuildingIds = [],
   onSelectBuilding,
   onBuildingMove,
+  onBuildingsMove,
   analysisResults,
   selectedPointResult,
   activePointMode = 'shadowing',
@@ -132,6 +135,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   const [activeDirectionSnap, setActiveDirectionSnap] = useState<import('../utils/directionSnapping').DirectionSnapResult | null>(null);
 
   // Advanced OSNAP & OTRACK state
+  const snapCoordinatorRef = useRef<SnapCoordinator>(new SnapCoordinator());
   const [activeOsnapSnap, setActiveOsnapSnap] = useState<OsnapSnapResult | null>(null);
   const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | null>(null);
   const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
@@ -730,7 +734,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       liveFacadeSnap,
       facadePointMode,
       drawingMode === 'vertexEdit',
-      drawingMode === 'rotate'
+      drawingMode === 'rotate',
+      selectedBuildingIds
     );
 
     // 5. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
@@ -770,6 +775,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   }, [
     buildings,
     selectedBuildingId,
+    selectedBuildingIds,
     hoveredBuildingId,
     hoveredEdge,
     selectedPointResult,
@@ -1173,7 +1179,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       const hits = getHoverCandidates({ x: world.wx, y: world.wy });
       if (hits.length > 0) {
         const nextId = hits[hoveredBuildingIndex % hits.length];
-        onSelectBuilding(nextId);
+        onSelectBuilding(nextId, e.shiftKey);
 
         const clickedBldg = buildings.find((b) => b.id === nextId);
         const lyr = clickedBldg?.layer || 'Domyślna (0)';
@@ -1351,10 +1357,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           let osnap: OsnapSnapResult | null = null;
 
           if (isOsnapActive) {
-            osnap = evaluateOsnapSnap({
+            osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
               mouseWorld: targetPt,
               lineBuffer,
-              acquiredPoints: acquiredAnchors,
               worldToScreen,
               screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
               excludeBuildingId: selBldg.id,
@@ -1484,10 +1489,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       if (isDraggingPivot) {
         let pivotPt: Point2D = { x: world.wx, y: world.wy };
         if (isOsnapActive) {
-          const osnap = evaluateOsnapSnap({
+          const osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
             mouseWorld: pivotPt,
             lineBuffer,
-            acquiredPoints: isDirectionSnappingActive ? acquiredAnchors : [],
             worldToScreen,
             screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
             excludeBuildingId: undefined, // Pozwala przyciągać punkt obrotu do narożników samego obracanego budynku
@@ -1510,10 +1514,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         let snapInfo: { angleDeg: number; isCardinal?: boolean; label?: string } | null = null;
 
         if (isOsnapActive) {
-          const osnap = evaluateOsnapSnap({
+          const osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
             mouseWorld: currWorldPos,
             lineBuffer,
-            acquiredPoints: acquiredAnchors,
             worldToScreen,
             screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
             excludeBuildingId: selectedBuildingId,
@@ -1662,10 +1665,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       let osnap: OsnapSnapResult | null = null;
 
       if (isOsnapActive) {
-        osnap = evaluateOsnapSnap({
+        osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
           mouseWorld: mousePos,
           lineBuffer,
-          acquiredPoints: acquiredAnchors,
           worldToScreen,
           screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
           previousSnapResult: activeOsnapSnap,
@@ -1873,17 +1875,19 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         panY: prev.panY + dy,
       }));
       setDragStart({ x: sx, y: sy });
-    } else if (isDraggingBuilding && selectedBuildingId) {
+    } else if (isDraggingBuilding && (selectedBuildingId || selectedBuildingIds.length > 0)) {
       let dwx = world.wx - dragStart.x;
       let dwy = world.wy - dragStart.y;
 
-      if (isOsnapActive) {
-        const movingBldg = buildings.find((b) => b.id === selectedBuildingId);
+      const primaryId = selectedBuildingId || selectedBuildingIds[0];
+
+      if (isOsnapActive && primaryId) {
+        const movingBldg = buildings.find((b) => b.id === primaryId);
         if (movingBldg && movingBldg.vertices && movingBldg.vertices.length >= 2) {
           const tentVerts = movingBldg.vertices.map((v) => ({ x: v.x + dwx, y: v.y + dwy }));
           const dragSnap = evaluateBuildingDragMultiSnap({
             movingVertices: tentVerts,
-            movingBuildingId: selectedBuildingId,
+            movingBuildingId: primaryId,
             referenceBuffer: lineBuffer,
             distanceThresholdMeters: APP_CONFIG.osnap.collinearDistanceToleranceMeters,
             angleToleranceRad: (APP_CONFIG.osnap.parallelAngleToleranceDeg * Math.PI) / 180,
@@ -1901,7 +1905,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         if (activeBuildingDragSnap) setActiveBuildingDragSnap(null);
       }
 
-      onBuildingMove(selectedBuildingId, dwx, dwy);
+      if (selectedBuildingIds.length > 1 && onBuildingsMove) {
+        onBuildingsMove(selectedBuildingIds, dwx, dwy);
+      } else if (primaryId) {
+        onBuildingMove(primaryId, dwx, dwy);
+      }
       setDragStart({ x: world.wx, y: world.wy });
     }
   };

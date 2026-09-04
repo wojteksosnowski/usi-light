@@ -1,7 +1,7 @@
 import { CadRenderContext } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { DirectionSnapResult } from '../../../utils/directionSnapping';
-import { OsnapSnapResult, AnchorPoint, BuildingDragSnapResult } from '../../../utils/cadOsnapEngine';
+import { OsnapSnapResult, AnchorPoint, BuildingDragSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
 
 export interface AcquiringState {

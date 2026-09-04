@@ -1,5 +1,5 @@
 import { CadRenderContext } from '../types';
-import { computeLinearDimension, computeAngularDimension } from '../../../utils/math2d';
+import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
 
 export function renderDimensions(
   rc: CadRenderContext,

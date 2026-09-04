@@ -20,7 +20,7 @@ import {
   clipSegmentToCircle,
   isDirectionInSegmentCone,
   computeFullShadowAnalysis,
-} from '../utils/math2d';
+} from '@/utils/math2d';
 
 
 import {

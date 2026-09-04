@@ -209,6 +209,22 @@ html, body, #root {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
 }
 
+.cad-toolbar {
+  position: absolute;
+  top: 68px;
+  left: 16px;
+  z-index: 20;
+  background-color: rgba(11, 19, 41, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
 .cad-legend-bottom {
   position: absolute;
   bottom: 16px;
