@@ -1,14 +1,8 @@
 import { CadRenderContext } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { DirectionSnapResult } from '../../../utils/directionSnapping';
-import { OsnapSnapResult, AnchorPoint, BuildingDragSnapResult } from '../../../engine/snapping';
+import { OsnapSnapResult, BuildingDragSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
-
-export interface AcquiringState {
-  point: Point2D;
-  progress: number; // 0 to 1
-  label?: string;
-}
 
 /**
  * Renders CAD OSNAP glyphs, Target Snap Halo, and OTRACK guidelines
@@ -17,7 +11,6 @@ export function renderDrawingToolPreview(
   rc: CadRenderContext,
   drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union',
   drawingVertices: Point2D[],
-
   currentMouseWorld: Point2D | null,
   selectedBuilding?: BuildingLoop | null,
   hoveredVertexIndex?: number | null,
@@ -26,8 +19,6 @@ export function renderDrawingToolPreview(
   directionSnapResult?: DirectionSnapResult | null,
   selectedVertexIndex?: number | null,
   osnapSnapResult?: OsnapSnapResult | null,
-  acquiredAnchors?: AnchorPoint[],
-  acquiringState?: AcquiringState | null,
   buildingDragSnap?: BuildingDragSnapResult | null
 ) {
   const { ctx, worldToScreen } = rc;
@@ -98,75 +89,33 @@ export function renderDrawingToolPreview(
     ctx.restore();
   }
 
-  // 1. Render Acquired OTRACK Anchors (K1, K2)
-  if (acquiredAnchors && acquiredAnchors.length > 0) {
-    ctx.save();
-    for (let i = 0; i < acquiredAnchors.length; i++) {
-      const anchor = acquiredAnchors[i];
-      const s = worldToScreen(anchor.point.x, anchor.point.y);
-      if (!Number.isFinite(s.sx) || !Number.isFinite(s.sy)) continue;
-
-      // Outer glowing ring
-      ctx.beginPath();
-      ctx.arc(s.sx, s.sy, 7, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
-      ctx.fill();
-      ctx.strokeStyle = APP_CONFIG.osnap?.otrackAnchorColor || '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Plus mark
-      ctx.beginPath();
-      ctx.moveTo(s.sx - 4.5, s.sy);
-      ctx.lineTo(s.sx + 4.5, s.sy);
-      ctx.moveTo(s.sx, s.sy - 4.5);
-      ctx.lineTo(s.sx + 4.5, s.sy);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Small badge K1 / K2
-      const label = `K${i + 1}`;
-      ctx.font = 'bold 9px monospace';
-      ctx.fillStyle = APP_CONFIG.osnap?.otrackAnchorColor || '#f59e0b';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(label, s.sx, s.sy - 8);
-    }
-    ctx.restore();
-  }
-
-  // 2. Render Hover Acquisition Progress Ring (Hover timer 300 ms)
-  if (acquiringState && acquiringState.progress > 0 && acquiringState.progress < 1) {
-    const s = worldToScreen(acquiringState.point.x, acquiringState.point.y);
-    if (Number.isFinite(s.sx) && Number.isFinite(s.sy)) {
-      ctx.save();
-      const r = 9;
-      // Background ring track
-      ctx.beginPath();
-      ctx.arc(s.sx, s.sy, r, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(245, 158, 11, 0.3)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Progress arc
-      const startAngle = -Math.PI / 2;
-      const endAngle = startAngle + acquiringState.progress * Math.PI * 2;
-      ctx.beginPath();
-      ctx.arc(s.sx, s.sy, r, startAngle, endAngle);
-      ctx.strokeStyle = APP_CONFIG.osnap?.otrackAnchorColor || '#f59e0b';
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  // 3. Render Advanced OSNAP / OTRACK Snap Result (Priority 1..6)
+  // 1. Render Advanced OSNAP / OTRACK Snap Result (Priority 1..6)
   if (osnapSnapResult) {
     const pSnap = worldToScreen(osnapSnapResult.snappedPoint.x, osnapSnapResult.snappedPoint.y);
 
     if (Number.isFinite(pSnap.sx) && Number.isFinite(pSnap.sy)) {
       ctx.save();
+
+      // Highlight reference edge if available
+      if (osnapSnapResult.cachedEdge) {
+        const ce1 = worldToScreen(osnapSnapResult.cachedEdge.p1.x, osnapSnapResult.cachedEdge.p1.y);
+        const ce2 = worldToScreen(osnapSnapResult.cachedEdge.p2.x, osnapSnapResult.cachedEdge.p2.y);
+        if (Number.isFinite(ce1.sx) && Number.isFinite(ce2.sx)) {
+          ctx.beginPath();
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+          ctx.lineWidth = 5;
+          ctx.moveTo(ce1.sx, ce1.sy);
+          ctx.lineTo(ce2.sx, ce2.sy);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2.2;
+          ctx.moveTo(ce1.sx, ce1.sy);
+          ctx.lineTo(ce2.sx, ce2.sy);
+          ctx.stroke();
+        }
+      }
 
       // Target Snap Halo & Magnet Elastic Line connecting mouse to snappedPoint
       if (currentMouseWorld) {
@@ -356,6 +305,32 @@ export function renderDrawingToolPreview(
 
     if (Number.isFinite(p1.sx) && Number.isFinite(p2.sx) && Number.isFinite(pSnap.sx)) {
       ctx.save();
+
+      // Highlight reference edge if available
+      if (directionSnapResult.sourceSegment) {
+        const ss1 = worldToScreen(directionSnapResult.sourceSegment.p1.x, directionSnapResult.sourceSegment.p1.y);
+        const ss2 = worldToScreen(directionSnapResult.sourceSegment.p2.x, directionSnapResult.sourceSegment.p2.y);
+        if (Number.isFinite(ss1.sx) && Number.isFinite(ss2.sx)) {
+          // Halo glow
+          ctx.beginPath();
+          ctx.strokeStyle = directionSnapResult.relationType === 'perpendicular'
+            ? 'rgba(56, 189, 248, 0.45)'
+            : 'rgba(99, 102, 241, 0.4)';
+          ctx.lineWidth = 6;
+          ctx.moveTo(ss1.sx, ss1.sy);
+          ctx.lineTo(ss2.sx, ss2.sy);
+          ctx.stroke();
+
+          // Crisp inner highlight line
+          ctx.beginPath();
+          ctx.strokeStyle = directionSnapResult.relationType === 'perpendicular' ? '#38bdf8' : '#818cf8';
+          ctx.lineWidth = 2.5;
+          ctx.moveTo(ss1.sx, ss1.sy);
+          ctx.lineTo(ss2.sx, ss2.sy);
+          ctx.stroke();
+        }
+      }
+
       const isStatistical = directionSnapResult.relationType === 'dominant' || directionSnapResult.isStatistical === true;
       const guideColor = isStatistical
         ? (APP_CONFIG.directionSnapping.statisticalGuideColor || '#f59e0b')

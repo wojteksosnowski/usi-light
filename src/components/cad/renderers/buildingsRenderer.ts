@@ -23,6 +23,69 @@ interface BuildingCachedGeometry {
 
 const buildingGeoCache = new WeakMap<object, BuildingCachedGeometry>();
 
+/**
+ * Renders Lucide-style Lock icon on canvas
+ */
+function drawLucideLockIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string = '#fbbf24') {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Body: rounded rect (width 10, height 7)
+  const w = 10;
+  const h = 7;
+  const rx = cx - w / 2;
+  const ry = cy - 0.5;
+  ctx.beginPath();
+  ctx.roundRect(rx, ry, w, h, 2);
+  ctx.stroke();
+
+  // Shackle: arch
+  ctx.beginPath();
+  ctx.arc(cx, cy - 1, 3.2, Math.PI, 0, false);
+  ctx.lineTo(cx + 3.2, cy - 0.5);
+  ctx.moveTo(cx - 3.2, cy - 1);
+  ctx.lineTo(cx - 3.2, cy - 0.5);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/**
+ * Renders Lucide-style Ghost icon on canvas
+ */
+function drawLucideGhostIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string = '#c084fc') {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Head and wavy body (width 10, height 11)
+  const r = 4.5;
+  const topY = cy - 2;
+  ctx.beginPath();
+  ctx.arc(cx, topY, r, Math.PI, 0, false);
+  ctx.lineTo(cx + r, cy + 4.5);
+  ctx.lineTo(cx + 2.25, cy + 2.5);
+  ctx.lineTo(cx, cy + 4.5);
+  ctx.lineTo(cx - 2.25, cy + 2.5);
+  ctx.lineTo(cx - r, cy + 4.5);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Eyes
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx - 1.8, cy - 2, 0.8, 0, Math.PI * 2);
+  ctx.arc(cx + 1.8, cy - 2, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return null;
   const cached = buildingGeoCache.get(bldg);
@@ -405,31 +468,39 @@ export function renderBuildings(
       const cy = geo.centerY;
       const { sx: csx, sy: csy } = worldToScreen(cx, cy);
 
-        if (Number.isFinite(csx) && Number.isFinite(csy)) {
-          const isBoundary = bldg.category === 'boundary';
-          const isBalcony = bldg.category === 'balcony';
+      const screenBldgW = (geo.maxX - geo.minX) * viewState.scale;
+      const screenBldgH = (geo.maxY - geo.minY) * viewState.scale;
 
-          if (isBoundary) {
-            // Stylizowana etykieta geodezyjna działki
-            const plotName = bldg.plotNumber ? `Dz. ${bldg.plotNumber}` : (bldg.name || 'Działka');
-            // Oblicz pole działki
-            let bndArea = 0;
-            for (let i = 0; i < bldg.vertices.length; i++) {
-              const pA = bldg.vertices[i];
-              const pB = bldg.vertices[(i + 1) % bldg.vertices.length];
-              bndArea += pA.x * pB.y - pB.x * pA.y;
-            }
-            bndArea = Math.abs(bndArea) / 2;
-            const areaText = `${bndArea.toFixed(1)} m²`;
+      if (Number.isFinite(csx) && Number.isFinite(csy)) {
+        const isBoundary = bldg.category === 'boundary';
+        const isBalcony = bldg.category === 'balcony';
 
-            ctx.font = 'bold 12px Inter, sans-serif';
-            const nameW = ctx.measureText(plotName).width;
-            ctx.font = '10px Inter, monospace';
-            const areaW = ctx.measureText(areaText).width;
+        if (isBoundary) {
+          // Oblicz pole działki
+          let bndArea = 0;
+          for (let i = 0; i < bldg.vertices.length; i++) {
+            const pA = bldg.vertices[i];
+            const pB = bldg.vertices[(i + 1) % bldg.vertices.length];
+            bndArea += pA.x * pB.y - pB.x * pA.y;
+          }
+          bndArea = Math.abs(bndArea) / 2;
+          const areaText = `${Math.round(bndArea)} m²`;
 
-            const cardW = Math.max(nameW, areaW) + 20;
-            const cardH = 34;
+          const hasPlotNumber = !!(bldg.plotNumber && bldg.plotNumber.trim());
+          const plotName = hasPlotNumber
+            ? (bldg.plotNumber!.startsWith('Dz.') ? bldg.plotNumber! : `Dz. ${bldg.plotNumber}`)
+            : '';
 
+          ctx.font = hasPlotNumber ? 'bold 12px Inter, sans-serif' : 'bold 11px Inter, monospace';
+          const nameW = hasPlotNumber ? ctx.measureText(plotName).width : 0;
+          ctx.font = '10px Inter, monospace';
+          const areaW = ctx.measureText(areaText).width;
+
+          const cardW = hasPlotNumber ? Math.max(nameW, areaW) + 20 : areaW + 16;
+          const cardH = hasPlotNumber ? 34 : 22;
+
+          // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
+          if (cardW <= screenBldgW && cardH <= screenBldgH) {
             ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
             ctx.strokeStyle = isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.5)';
             ctx.lineWidth = isSelected ? 1.5 : 1;
@@ -438,27 +509,40 @@ export function renderBuildings(
             ctx.fill();
             ctx.stroke();
 
-            // Numer działki
-            ctx.fillStyle = '#fca5a5';
-            ctx.font = 'bold 12px Inter, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(plotName, csx, csy - 6);
+            if (hasPlotNumber) {
+              // Numer działki
+              ctx.fillStyle = '#fca5a5';
+              ctx.font = 'bold 12px Inter, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(plotName, csx, csy - 6);
 
-            // Powierzchnia działki
-            ctx.fillStyle = '#cbd5e1';
-            ctx.font = '10px Inter, monospace';
-            ctx.fillText(areaText, csx, csy + 8);
-          } else if (isBalcony) {
-            const lockTag = isLocked ? ' 🔒' : '';
-            const ghostTag = isGhosted ? ' 👻' : '';
-            const balconyText = `Balkon ${bldg.defaultHeight}m${lockTag}${ghostTag}`;
+              // Powierzchnia działki
+              ctx.fillStyle = '#cbd5e1';
+              ctx.font = '10px Inter, monospace';
+              ctx.fillText(areaText, csx, csy + 8);
+            } else {
+              // Tylko powierzchnia
+              ctx.fillStyle = '#fca5a5';
+              ctx.font = 'bold 11px Inter, monospace';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(areaText, csx, csy);
+            }
+          }
+        } else if (isBalcony) {
+          const balconyText = `Balkon ${bldg.defaultHeight}m`;
 
-            ctx.font = 'bold 11px Inter, sans-serif';
-            const textW = ctx.measureText(balconyText).width;
-            const cardW = textW + 16;
-            const cardH = 22;
+          ctx.font = 'bold 11px Inter, sans-serif';
+          const textW = ctx.measureText(balconyText).width;
+          const iconCount = (isLocked ? 1 : 0) + (isGhosted ? 1 : 0);
+          const iconsW = iconCount * 14;
+          const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
+          const cardW = contentW + 16;
+          const cardH = 22;
 
+          // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
+          if (cardW <= screenBldgW && cardH <= screenBldgH) {
             ctx.fillStyle = 'rgba(11, 19, 41, 0.9)';
             ctx.strokeStyle = isSelected ? '#c084fc' : 'rgba(192, 132, 252, 0.5)';
             ctx.lineWidth = 1;
@@ -467,38 +551,54 @@ export function renderBuildings(
             ctx.fill();
             ctx.stroke();
 
+            const startX = csx - contentW / 2;
             ctx.fillStyle = '#d8b4fe';
-            ctx.textAlign = 'center';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(balconyText, csx, csy);
-          } else {
-            const lockTag = isLocked ? ' 🔒' : '';
-            const ghostTag = isGhosted ? ' 👻' : '';
-            const heightText = `${bldg.defaultHeight}m${lockTag}${ghostTag}`;
+            ctx.fillText(balconyText, startX, csy);
 
-            ctx.font = 'bold 13px Inter, sans-serif';
-            const textW = ctx.measureText(heightText).width;
-
-            // Status dots configuration: [included, tested, cityCentre, childcare]
-            const isIncluded = bldg.isIncluded !== false;
-            const isChildcare = bldg.buildingType === 'childcare' || bldg.segments.some((s: any) => s.buildingType === 'childcare');
-            const isCityCentre = bldg.isCityCentre || bldg.segments.some((s: any) => s.isCityCentre);
-
-            const dots: { color: string; active: boolean }[] = [
-              { color: '#10b981', active: isIncluded },
-              { color: '#6366f1', active: isTested },
-              { color: '#f59e0b', active: isCityCentre },
-            ];
-            if (isChildcare) {
-              dots.push({ color: '#c084fc', active: true });
+            let curIconX = startX + textW + 8;
+            if (isLocked) {
+              drawLucideLockIcon(ctx, curIconX, csy, '#fbbf24');
+              curIconX += 13;
             }
+            if (isGhosted) {
+              drawLucideGhostIcon(ctx, curIconX, csy, '#c084fc');
+            }
+          }
+        } else {
+          const heightText = `${bldg.defaultHeight}m`;
 
-            const dotRadius = 2.5;
-            const dotSpacing = 7;
-            const totalDotsW = (dots.length - 1) * dotSpacing;
-            const cardW = Math.max(textW + 16, totalDotsW + 18, 38);
-            const cardH = 30;
+          // Powiększony opis wysokości budynku o 20% (13px -> 16px)
+          ctx.font = 'bold 16px Inter, sans-serif';
+          const textW = ctx.measureText(heightText).width;
+          const iconCount = (isLocked ? 1 : 0) + (isGhosted ? 1 : 0);
+          const iconsW = iconCount * 14;
+          const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
 
+          // Kolorowe wskaźniki statusu [included: zielony, tested: indygo, cityCentre: pomarańczowy, childcare: fioletowy]
+          const isIncluded = bldg.isIncluded !== false;
+          const isChildcare = bldg.buildingType === 'childcare' || (Array.isArray(bldg.segments) && bldg.segments.some((s: any) => s.buildingType === 'childcare'));
+          const isCityCentre = bldg.isCityCentre || (Array.isArray(bldg.segments) && bldg.segments.some((s: any) => s.isCityCentre));
+
+          const dots: { color: string; active: boolean }[] = [
+            { color: '#10b981', active: isIncluded },
+            { color: '#6366f1', active: isTested },
+            { color: '#f59e0b', active: isCityCentre },
+          ];
+          if (isChildcare) {
+            dots.push({ color: '#c084fc', active: true });
+          }
+
+          const dotRadius = 2.5;
+          const dotSpacing = 7;
+          const totalDotsW = (dots.length - 1) * dotSpacing;
+          const cardW = Math.max(contentW + 16, totalDotsW + 18, 42);
+          const cardH = 34;
+
+          // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
+          if (cardW <= screenBldgW && cardH <= screenBldgH) {
             ctx.fillStyle = 'rgba(11, 19, 41, 0.9)';
             ctx.strokeStyle = isTested ? 'rgba(99, 102, 241, 0.6)' : 'rgba(100, 116, 139, 0.4)';
             ctx.lineWidth = 1;
@@ -507,16 +607,27 @@ export function renderBuildings(
             ctx.fill();
             ctx.stroke();
 
-            // Height text (larger, bold)
+            // Renderuj powiększony tekst wysokości
+            const startX = csx - contentW / 2;
             ctx.fillStyle = isTested ? '#93c5fd' : '#f8fafc';
-            ctx.font = 'bold 13px Inter, sans-serif';
-            ctx.textAlign = 'center';
+            ctx.font = 'bold 16px Inter, sans-serif';
+            ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(heightText, csx, csy - 5);
+            ctx.fillText(heightText, startX, csy - 6);
 
-            // Row of status dots under height
+            // Renderuj wektorowe ikony kłódki / ducha
+            let curIconX = startX + textW + 8;
+            if (isLocked) {
+              drawLucideLockIcon(ctx, curIconX, csy - 6, '#fbbf24');
+              curIconX += 13;
+            }
+            if (isGhosted) {
+              drawLucideGhostIcon(ctx, curIconX, csy - 6, '#c084fc');
+            }
+
+            // Rząd kolorowych kropek statusu pod wysokością
             const startDotX = csx - totalDotsW / 2;
-            const dotY = csy + 7;
+            const dotY = csy + 8;
 
             for (let dIdx = 0; dIdx < dots.length; dIdx++) {
               const d = dots[dIdx];
@@ -528,6 +639,7 @@ export function renderBuildings(
             }
           }
         }
+      }
     }
     ctx.restore();
   }

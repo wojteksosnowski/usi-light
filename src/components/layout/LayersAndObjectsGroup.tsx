@@ -271,18 +271,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
                       >
                         {lyr.count} ob.
                       </span>
-                      <span
-                        style={{
-                          fontSize: '10px',
-                          color: '#38bdf8',
-                          backgroundColor: 'rgba(14, 165, 233, 0.12)',
-                          padding: '1px 5px',
-                          borderRadius: '4px',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {lyr.area.toFixed(1)} m²
-                      </span>
                     </div>
                   </div>
 
@@ -410,7 +398,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 >
                   <span style={{ color: '#94a3b8' }}>Powierzchnia warstwy:</span>
                   <span style={{ color: '#38bdf8', fontWeight: 700, fontFamily: 'monospace' }}>
-                    {computeBuildingsUnionArea(layerBuildings).toFixed(2)} m²
+                    {Math.round(computeBuildingsUnionArea(layerBuildings))} m²
                   </span>
                 </div>
 
@@ -818,115 +806,115 @@ export const LayersAndObjectsGroup: React.FC = () => {
           {selectedBuilding && selectedBuilding.category !== 'boundary' && (() => {
             const pz = selectedBuildingArea;
             const n = selectedBuilding.storeysCount || (selectedBuilding.defaultHeight > (selectedBuilding.firstFloorHeight ?? 3.0) ? 1 + Math.max(1, Math.round((selectedBuilding.defaultHeight - (selectedBuilding.firstFloorHeight ?? 3.0)) / (selectedBuilding.typicalFloorHeight ?? 3.0))) : 1);
-            const pc = pz * n;
-            const vol = pz * selectedBuilding.defaultHeight;
-            const pum = pc * 0.70;
+              const pc = pz * n;
+              const vol = pz * selectedBuilding.defaultHeight;
+              const pum = pc * 0.70;
 
-            return (
-              <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <div style={{ fontWeight: 700, color: '#e0e7ff', marginBottom: '2px', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Wybrany: {selectedBuilding.name}</span>
-                  <span style={{ color: '#38bdf8' }}>{n} kond.</span>
+              return (
+                <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ fontWeight: 700, color: '#e0e7ff', marginBottom: '2px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Wybrany: {selectedBuilding.name}</span>
+                    <span style={{ color: '#38bdf8' }}>{n} kond.</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Powierzchnia zabudowy (Pz):</span>
+                    <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{Math.round(pz)} m²</b>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Powierzchnia całkowita (Pc):</span>
+                    <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{Math.round(pc)} m²</b>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Kubatura brutto (V):</span>
+                    <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{Math.round(vol)} m³</b>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Szacowany PUM (~70%):</span>
+                    <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{Math.round(pum)} m²</b>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Powierzchnia zabudowy (Pz):</span>
-                  <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{pz.toFixed(1)} m²</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Powierzchnia całkowita (Pc):</span>
-                  <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{pc.toFixed(1)} m²</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Kubatura brutto (V):</span>
-                  <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{vol.toFixed(1)} m³</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Szacowany PUM (~70%):</span>
-                  <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{pum.toFixed(1)} m²</b>
-                </div>
+              );
+            })()}
+
+            {/* Sekcja Podsumowania Budynków Projektowanych */}
+            <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ fontWeight: 700, color: '#a5b4fc', marginBottom: '2px' }}>
+                Łącznie obiekty badane ({testedBuildingsSummary.count} szt.)
               </div>
-            );
-          })()}
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#94a3b8' }}>Łączna pow. zabudowy (Pz):</span>
+                <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPz)} m²</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#94a3b8' }}>Łączna pow. całkowita (Pc):</span>
+                <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPc)} m²</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#94a3b8' }}>Łączna kubatura (V):</span>
+                <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalVolume)} m³</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#94a3b8' }}>Łączny szacowany PUM:</span>
+                <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.estimatedPUM)} m²</b>
+              </div>
+            </div>
 
-          {/* Sekcja Podsumowania Budynków Projektowanych */}
-          <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div style={{ fontWeight: 700, color: '#a5b4fc', marginBottom: '2px' }}>
-              Łącznie obiekty badane ({testedBuildingsSummary.count} szt.)
+            {/* Sekcja Działek i Wskaźników Urbanistycznych */}
+            <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: '2px' }}>
+                Działki ewidencyjne ({boundaryObjects.length} szt.
+                {testedBoundaryObjects.length > 0 ? `, w tym ${testedBoundaryObjects.length} badane` : ''})
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#94a3b8' }}>Pow. działki badanej (Pdz):</span>
+                <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>
+                  {totalBoundaryArea > 0 ? `${Math.round(totalBoundaryArea)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak zdefiniowanych działek'}
+                </b>
+              </div>
+              {totalBoundaryArea > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Wskaźnik pow. zabudowy:</span>
+                    <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%</b>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#94a3b8' }}>Wskaźnik intensywności:</span>
+                    <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityRatio.toFixed(2)}</b>
+                  </div>
+                </>
+              )}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#94a3b8' }}>Łączna pow. zabudowy (Pz):</span>
-              <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{testedBuildingsSummary.totalPz.toFixed(1)} m²</b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#94a3b8' }}>Łączna pow. całkowita (Pc):</span>
-              <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{testedBuildingsSummary.totalPc.toFixed(1)} m²</b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#94a3b8' }}>Łączna kubatura (V):</span>
-              <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{testedBuildingsSummary.totalVolume.toFixed(1)} m³</b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#94a3b8' }}>Łączny szacowany PUM:</span>
-              <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{testedBuildingsSummary.estimatedPUM.toFixed(1)} m²</b>
-            </div>
-          </div>
 
-          {/* Sekcja Działek i Wskaźników Urbanistycznych */}
-          <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: '2px' }}>
-              Działki ewidencyjne ({boundaryObjects.length} szt.
-              {testedBoundaryObjects.length > 0 ? `, w tym ${testedBoundaryObjects.length} badane` : ''})
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#94a3b8' }}>Pow. działki badanej (Pdz):</span>
-              <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>
-                {totalBoundaryArea > 0 ? `${totalBoundaryArea.toFixed(1)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak zdefiniowanych działek'}
-              </b>
-            </div>
-            {totalBoundaryArea > 0 && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Wskaźnik pow. zabudowy:</span>
-                  <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Wskaźnik intensywności:</span>
-                  <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityRatio.toFixed(2)}</b>
-                </div>
-              </>
-            )}
-          </div>
+            <button
+              type="button"
+              onClick={() => {
+                const lines: string[] = [
+                  '=== ZESTAWIENIE POWIERZCHNI I KUBATURY ===',
+                  `Projektowane budynki: ${testedBuildingsSummary.count}`,
+                  `Powierzchnia zabudowy (Pz): ${Math.round(testedBuildingsSummary.totalPz)} m²`,
+                  `Powierzchnia całkowita (Pc): ${Math.round(testedBuildingsSummary.totalPc)} m²`,
+                  `Kubatura brutto (V): ${Math.round(testedBuildingsSummary.totalVolume)} m³`,
+                  `Szacowany PUM (~70%): ${Math.round(testedBuildingsSummary.estimatedPUM)} m²`,
+                ];
 
-          <button
-            type="button"
-            onClick={() => {
-              const lines: string[] = [
-                '=== ZESTAWIENIE POWIERZCHNI I KUBATURY ===',
-                `Projektowane budynki: ${testedBuildingsSummary.count}`,
-                `Powierzchnia zabudowy (Pz): ${testedBuildingsSummary.totalPz.toFixed(1)} m²`,
-                `Powierzchnia całkowita (Pc): ${testedBuildingsSummary.totalPc.toFixed(1)} m²`,
-                `Kubatura brutto (V): ${testedBuildingsSummary.totalVolume.toFixed(1)} m³`,
-                `Szacowany PUM (~70%): ${testedBuildingsSummary.estimatedPUM.toFixed(1)} m²`,
-              ];
+                if (totalBoundaryArea > 0) {
+                  lines.push(
+                    `Powierzchnia działki (Pdz): ${Math.round(totalBoundaryArea)} m²`,
+                    `Wskaźnik powierzchni zabudowy: ${testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%`,
+                    `Wskaźnik intensywności zabudowy: ${testedBuildingsSummary.intensityRatio.toFixed(2)}`
+                  );
+                }
 
-              if (totalBoundaryArea > 0) {
-                lines.push(
-                  `Powierzchnia działki (Pdz): ${totalBoundaryArea.toFixed(1)} m²`,
-                  `Wskaźnik powierzchni zabudowy: ${testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%`,
-                  `Wskaźnik intensywności zabudowy: ${testedBuildingsSummary.intensityRatio.toFixed(2)}`
-                );
-              }
-
-              navigator.clipboard.writeText(lines.join('\n')).then(() => {
-                showCopiedToast('Skopiowano zestawienie do schowka!');
-              }).catch(() => {
-                showCopiedToast('Nie udało się skopiować.');
-              });
-            }}
-            className="btn-tile active-indigo"
-            style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px', marginTop: '2px' }}
-            title="Skopiuj zestawienie danych powierzchniowych i kubaturowych do schowka"
-          >
+                navigator.clipboard.writeText(lines.join('\n')).then(() => {
+                  showCopiedToast('Skopiowano zestawienie do schowka!');
+                }).catch(() => {
+                  showCopiedToast('Nie udało się skopiować.');
+                });
+              }}
+              className="btn-tile active-indigo"
+              style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px', marginTop: '2px' }}
+              title="Skopiuj zestawienie danych powierzchniowych i kubaturowych do schowka"
+            >
             <Copy size={13} />
             <span style={{ fontWeight: 600 }}>Kopiuj do schowka</span>
           </button>

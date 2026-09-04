@@ -24,7 +24,6 @@ import {
   createCachedLineEquation,
 } from '../utils/lineBufferEngine';
 import {
-  AnchorPoint,
   OsnapSnapResult,
   BuildingDragSnapResult,
   SnapCoordinator,
@@ -140,16 +139,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | null>(null);
   const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
   const [hoveredRotateVertexIndex, setHoveredRotateVertexIndex] = useState<number | null>(null);
-  const [acquiredAnchors, setAcquiredAnchors] = useState<AnchorPoint[]>([]);
-  const [acquiringState, setAcquiringState] = useState<{ point: Point2D; progress: number; label?: string } | null>(null);
-  const hoverCandidateRef = useRef<{
-    point: Point2D;
-    id: string;
-    buildingId?: string;
-    edgeAngle?: number;
-    type: 'vertex' | 'midpoint';
-    startTime: number;
-  } | null>(null);
 
   // Vertex edit state
   const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
@@ -237,46 +226,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     return flattenLineBuffer(map);
   }, [buildings, layerSettings]);
 
-  // Obsługa skrótów klawiszowych OTRACK (Escape = wyczyść punkty, Shift = natychmiastowe nabycie/usunięcie)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (acquiredAnchors.length > 0) {
-          setAcquiredAnchors([]);
-          setActiveOsnapSnap(null);
-          setAcquiringState(null);
-        }
-      } else if (e.key === 'Shift') {
-        if (hoverCandidateRef.current) {
-          const cand = hoverCandidateRef.current;
-          const existingIdx = acquiredAnchors.findIndex(
-            (a) => Math.hypot(a.point.x - cand.point.x, a.point.y - cand.point.y) < 1e-3
-          );
-          if (existingIdx >= 0) {
-            setAcquiredAnchors((prev) => prev.filter((_, idx) => idx !== existingIdx));
-          } else {
-            const newAnchor: AnchorPoint = {
-              id: cand.id,
-              point: cand.point,
-              sourceType: cand.type,
-              sourceBuildingId: cand.buildingId,
-              sourceEdgeAngle: cand.edgeAngle,
-              acquiredAt: Date.now(),
-            };
-            setAcquiredAnchors((prev) => {
-              const maxAnchors = APP_CONFIG.osnap?.maxAcquiredPoints || 2;
-              if (prev.length >= maxAnchors) return [...prev.slice(1), newAnchor];
-              return [...prev, newAnchor];
-            });
-          }
-          setAcquiringState(null);
-        }
-      }
-    };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [acquiredAnchors]);
 
 
   const handleDeleteSelectedVertex = useCallback(() => {
@@ -882,8 +832,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       activeDirectionSnap,
       selectedVertexIndex,
       activeOsnapSnap,
-      acquiredAnchors,
-      acquiringState,
       activeBuildingDragSnap
     );
   }, [
@@ -915,8 +863,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     activeDirectionSnap,
     selectedVertexIndex,
     activeOsnapSnap,
-    acquiredAnchors,
-    acquiringState,
     activeBuildingDragSnap,
   ]);
 
@@ -1257,97 +1203,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 0. OTRACK Hover acquisition calculation (when drawing or editing vertices)
-    if ((drawingMode !== 'none' || isEditMode) && isOsnapActive) {
-      let candidate: { point: Point2D; id: string; buildingId?: string; edgeAngle?: number; type: 'vertex' | 'midpoint' } | null = null;
-      let minCandidateDist: number = APP_CONFIG.osnap.snapRadiusPx;
 
-      for (const edge of lineBuffer) {
-        // Check vertices
-        for (let pIdx = 0; pIdx < 2; pIdx++) {
-          const pt = pIdx === 0 ? edge.p1 : edge.p2;
-          const s = worldToScreen(pt.x, pt.y);
-          const dist = Math.hypot(sx - s.sx, sy - s.sy);
-          if (dist <= minCandidateDist) {
-            minCandidateDist = dist;
-            candidate = {
-              point: pt,
-              id: `${edge.objectId}_v_${pt.x.toFixed(3)}_${pt.y.toFixed(3)}`,
-              buildingId: edge.objectId,
-              edgeAngle: edge.angle,
-              type: 'vertex',
-            };
-          }
-        }
-        // Check midpoint
-        const midX = (edge.p1.x + edge.p2.x) / 2;
-        const midY = (edge.p1.y + edge.p2.y) / 2;
-        const sm = worldToScreen(midX, midY);
-        const distM = Math.hypot(sx - sm.sx, sy - sm.sy);
-        if (distM <= minCandidateDist) {
-          minCandidateDist = distM;
-          candidate = {
-            point: { x: midX, y: midY },
-            id: `${edge.objectId}_mid_${edge.edgeIndex}`,
-            buildingId: edge.objectId,
-            edgeAngle: edge.angle,
-            type: 'midpoint',
-          };
-        }
-      }
-
-      const now = Date.now();
-      const delay = APP_CONFIG.osnap?.hoverAcquireDelayMs || 300;
-
-      if (candidate) {
-        if (
-          hoverCandidateRef.current &&
-          Math.hypot(hoverCandidateRef.current.point.x - candidate.point.x, hoverCandidateRef.current.point.y - candidate.point.y) < 1e-3
-        ) {
-          const elapsed = now - hoverCandidateRef.current.startTime;
-          const progress = Math.min(1, elapsed / delay);
-          setAcquiringState({ point: candidate.point, progress });
-
-          if (elapsed >= delay) {
-            const existingIdx = acquiredAnchors.findIndex(
-              (a) => Math.hypot(a.point.x - candidate!.point.x, a.point.y - candidate!.point.y) < 1e-3
-            );
-            if (existingIdx >= 0) {
-              setAcquiredAnchors((prev) => prev.filter((_, idx) => idx !== existingIdx));
-            } else {
-              const newAnchor: AnchorPoint = {
-                id: candidate.id,
-                point: candidate.point,
-                sourceType: candidate.type,
-                sourceBuildingId: candidate.buildingId,
-                sourceEdgeAngle: candidate.edgeAngle,
-                acquiredAt: now,
-              };
-              setAcquiredAnchors((prev) => {
-                const maxAnchors = APP_CONFIG.osnap?.maxAcquiredPoints || 2;
-                if (prev.length >= maxAnchors) return [...prev.slice(1), newAnchor];
-                return [...prev, newAnchor];
-              });
-            }
-            hoverCandidateRef.current.startTime = now + 999999;
-            setAcquiringState(null);
-          }
-        } else {
-          hoverCandidateRef.current = { ...candidate, startTime: now };
-          setAcquiringState({ point: candidate.point, progress: 0 });
-        }
-      } else {
-        if (hoverCandidateRef.current) {
-          hoverCandidateRef.current = null;
-          setAcquiringState(null);
-        }
-      }
-    } else {
-      if (hoverCandidateRef.current) {
-        hoverCandidateRef.current = null;
-        setAcquiringState(null);
-      }
-    }
 
     if (drawingMode === 'vertexEdit' && selectedBuildingId) {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
@@ -1961,7 +1817,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       setActiveBuildingDragSnap(null);
     }
     setActiveRotateAngleSnap(null);
-    setAcquiringState(null);
     setIsPanning(false);
 
     setIsDraggingBuilding(false);

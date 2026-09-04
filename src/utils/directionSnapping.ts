@@ -13,6 +13,7 @@ export interface DirectionSnapResult {
   distanceFromOrigin: number;
   diffAngleDeg: number;
   sourceLabel?: string;
+  sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number };
 }
 
 export interface CalculateDirectionSnapOptions {
@@ -60,6 +61,14 @@ export function angleDiff180(a1: number, a2: number): number {
   return diff;
 }
 
+export interface DirectionCandidate {
+  angleDeg: number;
+  relationType: 'parallel' | 'perpendicular' | 'dominant';
+  sourceLabel?: string;
+  priority: number;
+  sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number };
+}
+
 /**
  * Gathers candidate target direction axes (in degrees [0, 180)) with strict spatial and hierarchy prioritization:
  * 1. Active polyline segments (0° parallel and 90° exact perpendicular).
@@ -80,15 +89,16 @@ export function collectTargetDirections(
   selectedBuildingId?: string,
   excludeBuildingId?: string,
   excludeSegmentIndices?: number[]
-): { angleDeg: number; relationType: 'parallel' | 'perpendicular' | 'dominant'; sourceLabel?: string; priority: number }[] {
-  const candidates: { angleDeg: number; relationType: 'parallel' | 'perpendicular' | 'dominant'; sourceLabel?: string; priority: number }[] = [];
+): DirectionCandidate[] {
+  const candidates: DirectionCandidate[] = [];
   const seenAngles: number[] = [];
 
   const addCandidate = (
     angleDeg: number,
     relationType: 'parallel' | 'perpendicular' | 'dominant',
     sourceLabel?: string,
-    priority = 10
+    priority = 10,
+    sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number }
   ) => {
     const norm = normalizeAngle180(angleDeg);
     // Podwyższony próg deduplikacji z 1.2° do 3.0° dla eliminacji szumu mikro-odchyleń
@@ -97,7 +107,7 @@ export function collectTargetDirections(
       if (angleDiff180(sa, norm) < dedupThreshold) return;
     }
     seenAngles.push(norm);
-    candidates.push({ angleDeg: norm, relationType, sourceLabel, priority });
+    candidates.push({ angleDeg: norm, relationType, sourceLabel, priority, sourceSegment });
   };
 
   // 1. Dominant scene axes from statistics (Siatka główna) - NAJWYŻSZA WAGA DLA SPÓJNOŚCI PROJEKTU
@@ -146,13 +156,15 @@ export function collectTargetDirections(
         effectiveSegAngle,
         'parallel',
         isLastSeg ? 'Polilinia (Równoległy)' : `Polilinia (Równoległy do seg. ${segIdx})`,
-        basePri
+        basePri,
+        { p1: pA, p2: pB }
       );
       addCandidate(
         effectivePerpAngle,
         'perpendicular',
         isLastSeg ? 'Polilinia (Prostopadły 90°)' : `Polilinia (Prostopadły 90° do seg. ${segIdx})`,
-        basePri
+        basePri,
+        { p1: pA, p2: pB }
       );
     }
   }
@@ -182,15 +194,24 @@ export function collectTargetDirections(
           : rawSegAng;
 
         const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
-        addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4);
-        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 4);
+        const sourceSeg = { p1: seg.p1, p2: seg.p2, buildingId: bldg.id, edgeIndex: sIdx };
+        addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4, sourceSeg);
+        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 4, sourceSeg);
       }
     }
   }
 
   // 4. Pozostałe pobliskie budynki posortowane według odległości
   const maxSegments = APP_CONFIG.directionSnapping.maxNearbySegments;
-  const otherNearbySegs: { angleDeg: number; dist: number; buildingName: string }[] = [];
+  const otherNearbySegs: {
+    angleDeg: number;
+    dist: number;
+    buildingName: string;
+    seg: { p1: Point2D; p2: Point2D };
+    buildingId: string;
+    edgeIndex: number;
+    isCursorNearEdge: boolean;
+  }[] = [];
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false || bldg.category === 'boundary' || prioritizedBuildingIds.has(bldg.id) || !Array.isArray(bldg.segments)) continue;
@@ -199,25 +220,46 @@ export function collectTargetDirections(
       const seg = bldg.segments[sIdx];
       const midX = (seg.p1.x + seg.p2.x) / 2;
       const midY = (seg.p1.y + seg.p2.y) / 2;
+      const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
       const dist = Math.min(
         Math.hypot(origin.x - midX, origin.y - midY),
-        Math.hypot(currentMouse.x - midX, currentMouse.y - midY)
+        distToMid
       );
       const sdx = seg.p2.x - seg.p1.x;
       const sdy = seg.p2.y - seg.p1.y;
-      if (Math.hypot(sdx, sdy) >= 0.05) {
+      const segLen = Math.hypot(sdx, sdy);
+      if (segLen >= 0.05) {
         const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
         // Odrzuć jeśli to szum bliski dominującej siatki (różnica < 4.0°)
         if (isNearDominant(segAng)) continue;
-        otherNearbySegs.push({ angleDeg: segAng, dist, buildingName: bldg.name });
+
+        // Odległość prostopadła kursora do prostej krawędzi
+        const uX = sdx / segLen;
+        const uY = sdy / segLen;
+        const perpDist = Math.abs((currentMouse.x - seg.p1.x) * (-uY) + (currentMouse.y - seg.p1.y) * uX);
+        const isCursorNearEdge = perpDist <= 2.5 && distToMid <= segLen + 3.0;
+
+        otherNearbySegs.push({
+          angleDeg: segAng,
+          dist,
+          buildingName: bldg.name,
+          seg: { p1: seg.p1, p2: seg.p2 },
+          buildingId: bldg.id,
+          edgeIndex: sIdx,
+          isCursorNearEdge,
+        });
       }
     }
   }
 
   otherNearbySegs.sort((a, b) => a.dist - b.dist);
   for (const item of otherNearbySegs.slice(0, maxSegments)) {
-    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 6);
-    addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 6);
+    const sourceSeg = { p1: item.seg.p1, p2: item.seg.p2, buildingId: item.buildingId, edgeIndex: item.edgeIndex };
+    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 6, sourceSeg);
+    // Kąt prostopadły do odległych ścian uwzględniamy TYLKO wtedy, gdy kursor znajduje się blisko tej krawędzi/jej osi
+    if (item.isCursorNearEdge) {
+      addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 6, sourceSeg);
+    }
   }
 
   // 5. Domyślne osie kartezjańskie Ortho (0° / 90°)
@@ -326,6 +368,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         distanceFromOrigin: projectedDist,
         diffAngleDeg: diff,
         sourceLabel: cand.sourceLabel,
+        sourceSegment: cand.sourceSegment,
       };
     }
   }
