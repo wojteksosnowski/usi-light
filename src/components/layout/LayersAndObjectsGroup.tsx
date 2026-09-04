@@ -36,6 +36,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
   const updateLayerBuildings = useSceneStore((s) => s.updateLayerBuildings);
   const selectLayerBuildings = useSceneStore((s) => s.selectLayerBuildings);
   const updateSelectedBuilding = useSceneStore((s) => s.updateSelectedBuilding);
+  const rotateBuilding = useSceneStore((s) => s.rotateBuilding);
 
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
   const showCopiedToast = useUiStore((s) => s.showCopiedToast);
@@ -145,37 +146,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
   // Obrót obiektu wokół centroidu
   const handleBuildingRotate = (id: string, pivot: { x: number; y: number }, deltaAngleRad: number) => {
     setIsInteracting(true);
-    const cosA = Math.cos(deltaAngleRad);
-    const sinA = Math.sin(deltaAngleRad);
-    const deltaDeg = (deltaAngleRad * 180) / Math.PI;
-
-    setBuildings((prev) => {
-      const targetBldg = prev.find((b) => b.id === id);
-      const targetGroupId = targetBldg?.groupId;
-
-      return prev.map((bldg) => {
-        const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
-        if (!shouldRotate) return bldg;
-
-        const newVertices = bldg.vertices.map((v) => {
-          const rx = v.x - pivot.x;
-          const ry = v.y - pivot.y;
-          return {
-            x: pivot.x + rx * cosA - ry * sinA,
-            y: pivot.y + rx * sinA + ry * cosA,
-          };
-        });
-
-        const updatedTransform = {
-          ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
-          rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
-        };
-
-        const rebuilt = rebuildBuildingSegments(bldg, newVertices);
-        rebuilt.transform = updatedTransform;
-        return rebuilt;
-      });
-    });
+    rotateBuilding(id, pivot, deltaAngleRad);
   };
 
   const handleSetBuildingAbsoluteRotation = (buildingId: string, targetDeg: number) => {
@@ -612,6 +583,28 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     step="0.5"
                     value={selectedBuilding.defaultHeight}
                     onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
+                    style={{
+                      width: '80px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-light)',
+                      borderRadius: '8px',
+                      padding: '6px 8px',
+                      color: '#fff',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      textAlign: 'right',
+                    }}
+                  />
+                </div>
+
+                {/* Posadowienie / Rzędna dolnej krawędzi Hbase */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Posadowienie H_base (m)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={selectedBuilding.elevation ?? 0}
+                    onChange={(e) => updateSelectedBuilding({ elevation: parseFloat(e.target.value) || 0 })}
                     style={{
                       width: '80px',
                       backgroundColor: 'var(--bg-input)',

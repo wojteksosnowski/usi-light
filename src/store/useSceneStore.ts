@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import { BuildingLoop, CadLayerSettings, Point2D } from '../types/geometry';
+import { BuildingLoop, CadLayerSettings, Point2D, Modifier } from '../types/geometry';
 import { createSampleBuildings, createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
 import { offsetPolygonEdge, updateBuildingWithNewVertices, booleanUnionBuildings } from '@/utils/math2d';
+import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 
 export interface SavedSceneData {
   version: 1;
@@ -63,7 +64,15 @@ interface SceneState {
   moveBuilding: (id: string, dx: number, dy: number) => void;
   moveBuildings: (ids: string[], dx: number, dy: number) => void;
   moveBuildingEdge: (buildingId: string, edgeIndex: number, dx: number, dy: number) => void;
+  rotateBuilding: (id: string, pivot: Point2D, deltaAngleRad: number) => void;
   booleanUnion: (bldgIdA: string, bldgIdB: string) => { success: boolean; error?: string };
+
+  // Modifiers
+  addBuildingModifier: (buildingId: string, modifier: Modifier) => void;
+  updateBuildingModifier: (buildingId: string, modifierId: string, patch: Partial<Modifier>) => void;
+  removeBuildingModifier: (buildingId: string, modifierId: string) => void;
+  reorderBuildingModifiers: (buildingId: string, fromIndex: number, toIndex: number) => void;
+  toggleBuildingModifier: (buildingId: string, modifierId: string) => void;
 
   // Linking / Groups
   setIsLinkingMode: (isLinking: boolean) => void;
@@ -269,17 +278,28 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (
           fields.defaultHeight !== undefined ||
+          fields.elevation !== undefined ||
           fields.hWindowBottom !== undefined ||
           fields.isCityCentre !== undefined ||
           fields.category !== undefined
         ) {
+          const elev = updated.elevation ?? 0.0;
+          const hTop = elev + (updated.defaultHeight ?? 15);
           updated.segments = updated.segments.map((s) => ({
             ...s,
-            hTop: updated.defaultHeight ?? s.hTop,
+            hTop,
+            hBase: elev,
             hWindowBottom: fields.hWindowBottom ?? s.hWindowBottom,
             isCityCentre: fields.isCityCentre ?? s.isCityCentre,
           }));
         }
+
+        if (updated.modifiers && updated.modifiers.length > 0) {
+          const modRes = applyBuildingModifiers(updated);
+          updated.storyPolygons = modRes.storyPolygons;
+          updated.segments = modRes.segments;
+        }
+
         return updated;
       }),
     }));
@@ -294,7 +314,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       buildings: state.buildings.map((bldg) => {
         if (!targetIds.includes(bldg.id)) return bldg;
         const nextHeight = Math.max(0.5, Number((bldg.defaultHeight + deltaMeters).toFixed(2)));
-        return {
+        const updated = {
           ...bldg,
           defaultHeight: nextHeight,
           segments: bldg.segments.map((seg) => ({
@@ -302,6 +322,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             hTop: nextHeight,
           })),
         };
+        if (updated.modifiers && updated.modifiers.length > 0) {
+          const modRes = applyBuildingModifiers(updated);
+          updated.storyPolygons = modRes.storyPolygons;
+          updated.segments = modRes.segments;
+        }
+        return updated;
       }),
     }));
   },
@@ -310,7 +336,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((state) => ({
       buildings: state.buildings.map((bldg) => {
         if (bldg.id !== buildingId) return bldg;
-        return rebuildBuildingSegments(bldg, newVertices);
+        const rebuilt = rebuildBuildingSegments(bldg, newVertices);
+        if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+          const modRes = applyBuildingModifiers(rebuilt);
+          rebuilt.storyPolygons = modRes.storyPolygons;
+          rebuilt.segments = modRes.segments;
+        }
+        return rebuilt;
       }),
     }));
   },
@@ -326,6 +358,26 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           if (!shouldMove) return bldg;
 
           const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+          const newStoryPolygons = bldg.storyPolygons
+            ? bldg.storyPolygons.map((sf) => ({
+                ...sf,
+                polygon: sf.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+              }))
+            : undefined;
+
+          const withMoved = {
+            ...bldg,
+            vertices: newVertices,
+            storyPolygons: newStoryPolygons,
+          };
+
+          if (withMoved.modifiers && withMoved.modifiers.length > 0) {
+            const modRes = applyBuildingModifiers(withMoved);
+            withMoved.storyPolygons = modRes.storyPolygons;
+            withMoved.segments = modRes.segments;
+            return withMoved;
+          }
+
           const newSegments = bldg.segments.map((s) => ({
             ...s,
             p1: { x: s.p1.x + dx, y: s.p1.y + dy },
@@ -333,8 +385,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }));
 
           return {
-            ...bldg,
-            vertices: newVertices,
+            ...withMoved,
             segments: newSegments,
           };
         }),
@@ -359,6 +410,26 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           if (!shouldMove) return bldg;
 
           const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+          const newStoryPolygons = bldg.storyPolygons
+            ? bldg.storyPolygons.map((sf) => ({
+                ...sf,
+                polygon: sf.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+              }))
+            : undefined;
+
+          const withMoved = {
+            ...bldg,
+            vertices: newVertices,
+            storyPolygons: newStoryPolygons,
+          };
+
+          if (withMoved.modifiers && withMoved.modifiers.length > 0) {
+            const modRes = applyBuildingModifiers(withMoved);
+            withMoved.storyPolygons = modRes.storyPolygons;
+            withMoved.segments = modRes.segments;
+            return withMoved;
+          }
+
           const newSegments = bldg.segments.map((s) => ({
             ...s,
             p1: { x: s.p1.x + dx, y: s.p1.y + dy },
@@ -366,8 +437,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }));
 
           return {
-            ...bldg,
-            vertices: newVertices,
+            ...withMoved,
             segments: newSegments,
           };
         }),
@@ -380,9 +450,56 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       buildings: state.buildings.map((bldg) => {
         if (bldg.id !== buildingId) return bldg;
         const newVerts = offsetPolygonEdge(bldg.vertices, edgeIndex, { x: dx, y: dy });
-        return updateBuildingWithNewVertices(bldg, newVerts);
+        const updated = updateBuildingWithNewVertices(bldg, newVerts);
+        if (updated.modifiers && updated.modifiers.length > 0) {
+          const modRes = applyBuildingModifiers(updated);
+          updated.storyPolygons = modRes.storyPolygons;
+          updated.segments = modRes.segments;
+        }
+        return updated;
       }),
     }));
+  },
+
+  rotateBuilding: (id, pivot, deltaAngleRad) => {
+    const cosA = Math.cos(deltaAngleRad);
+    const sinA = Math.sin(deltaAngleRad);
+    const deltaDeg = (deltaAngleRad * 180) / Math.PI;
+
+    set((state) => {
+      const targetBldg = state.buildings.find((b) => b.id === id);
+      const targetGroupId = targetBldg?.groupId;
+
+      return {
+        buildings: state.buildings.map((bldg) => {
+          const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
+          if (!shouldRotate) return bldg;
+
+          const newVertices = bldg.vertices.map((v) => {
+            const rx = v.x - pivot.x;
+            const ry = v.y - pivot.y;
+            return {
+              x: pivot.x + rx * cosA - ry * sinA,
+              y: pivot.y + rx * sinA + ry * cosA,
+            };
+          });
+
+          const updatedTransform = {
+            ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
+            rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
+          };
+
+          const rebuilt = rebuildBuildingSegments(bldg, newVertices);
+          rebuilt.transform = updatedTransform;
+          if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+            const modRes = applyBuildingModifiers(rebuilt);
+            rebuilt.storyPolygons = modRes.storyPolygons;
+            rebuilt.segments = modRes.segments;
+          }
+          return rebuilt;
+        }),
+      };
+    });
   },
 
   booleanUnion: (bldgIdA, bldgIdB) => {
@@ -405,6 +522,95 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       return { success: true };
     }
     return { success: false, error: res.error || 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.' };
+  },
+
+  addBuildingModifier: (buildingId, modifier) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const currentMods = bldg.modifiers || [];
+        const newMods = [...currentMods, modifier];
+        const withMods = { ...bldg, modifiers: newMods };
+        const res = applyBuildingModifiers(withMods);
+        return {
+          ...withMods,
+          storyPolygons: res.storyPolygons,
+          segments: res.segments,
+        };
+      }),
+    }));
+  },
+
+  updateBuildingModifier: (buildingId, modifierId, patch) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const currentMods = bldg.modifiers || [];
+        const newMods = currentMods.map((m) => (m.id === modifierId ? { ...m, ...patch } : m));
+        const withMods = { ...bldg, modifiers: newMods };
+        const res = applyBuildingModifiers(withMods);
+        return {
+          ...withMods,
+          storyPolygons: res.storyPolygons,
+          segments: res.segments,
+        };
+      }),
+    }));
+  },
+
+  removeBuildingModifier: (buildingId, modifierId) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const currentMods = bldg.modifiers || [];
+        const newMods = currentMods.filter((m) => m.id !== modifierId);
+        const withMods = { ...bldg, modifiers: newMods };
+        const res = applyBuildingModifiers(withMods);
+        return {
+          ...withMods,
+          storyPolygons: res.storyPolygons,
+          segments: res.segments,
+        };
+      }),
+    }));
+  },
+
+  reorderBuildingModifiers: (buildingId, fromIndex, toIndex) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const currentMods = [...(bldg.modifiers || [])];
+        if (fromIndex < 0 || fromIndex >= currentMods.length || toIndex < 0 || toIndex >= currentMods.length) {
+          return bldg;
+        }
+        const [moved] = currentMods.splice(fromIndex, 1);
+        currentMods.splice(toIndex, 0, moved);
+        const withMods = { ...bldg, modifiers: currentMods };
+        const res = applyBuildingModifiers(withMods);
+        return {
+          ...withMods,
+          storyPolygons: res.storyPolygons,
+          segments: res.segments,
+        };
+      }),
+    }));
+  },
+
+  toggleBuildingModifier: (buildingId, modifierId) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const currentMods = bldg.modifiers || [];
+        const newMods = currentMods.map((m) => (m.id === modifierId ? { ...m, enabled: !m.enabled } : m));
+        const withMods = { ...bldg, modifiers: newMods };
+        const res = applyBuildingModifiers(withMods);
+        return {
+          ...withMods,
+          storyPolygons: res.storyPolygons,
+          segments: res.segments,
+        };
+      }),
+    }));
   },
 
   setIsLinkingMode: (isLinking) => set({ isLinkingMode: isLinking }),
@@ -524,12 +730,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const updated = { ...bldg, ...fields };
         if (
           fields.defaultHeight !== undefined ||
+          fields.elevation !== undefined ||
           fields.hWindowBottom !== undefined ||
           fields.isCityCentre !== undefined
         ) {
+          const elev = updated.elevation ?? 0.0;
+          const hTop = elev + (updated.defaultHeight ?? 15);
           updated.segments = updated.segments.map((seg) => ({
             ...seg,
-            hTop: fields.defaultHeight !== undefined ? fields.defaultHeight : seg.hTop,
+            hTop,
+            hBase: elev,
             hWindowBottom: fields.hWindowBottom !== undefined ? fields.hWindowBottom : seg.hWindowBottom,
             isCityCentre: fields.isCityCentre !== undefined ? fields.isCityCentre : seg.isCityCentre,
           }));

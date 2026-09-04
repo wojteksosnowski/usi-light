@@ -233,12 +233,6 @@ export function prefilterSunlightObstacles(
       const southLimit = point.y - deltaH * 1.5;
       if (seg.p1.y < southLimit && seg.p2.y < southLimit) continue;
 
-      // 3. Backface culling: normalna odcinka przeszkody musi być zwrócona w stronę punktu P
-      const dotExt =
-        (point.x - seg.p1.x) * seg.normal.x +
-        (point.y - seg.p1.y) * seg.normal.y;
-      if (dotExt <= 0) continue;
-
       // Wektory od punktu badanego do obu wierzchołków przeszkody
       const v1x = seg.p1.x - point.x;
       const v1y = seg.p1.y - point.y;
@@ -777,10 +771,6 @@ export function analyzeSunlightAtPoint(
     for (const cand of obstacleCandidates) {
       const seg = cand.seg;
 
-      // Quick backface check: skip obstacle segments whose outward normal points away from the ray
-      const dotNormal = sunDir.x * seg.normal.x + sunDir.y * seg.normal.y;
-      if (dotNormal >= -1e-4) continue;
-
       const hitDist = raySegmentDistance2D(
         point.x,
         point.y,
@@ -794,13 +784,16 @@ export function analyzeSunlightAtPoint(
 
       if (hitDist > 0.05 && hitDist < Infinity) {
         const deltaH = Math.max(0, seg.hTop);
-        const betaDeg = Math.atan2(deltaH, hitDist) * RAD2DEG;
+        const deltaHbase = Math.max(0, seg.hBase ?? 0.0);
+        const betaTopDeg = Math.atan2(deltaH, hitDist) * RAD2DEG;
+        const betaBaseDeg = Math.atan2(deltaHbase, hitDist) * RAD2DEG;
 
-        if (betaDeg > maxObstacleAngleDeg) {
-          maxObstacleAngleDeg = betaDeg;
+        if (betaTopDeg > maxObstacleAngleDeg) {
+          maxObstacleAngleDeg = betaTopDeg;
         }
 
-        if (slot.elevationDeg <= betaDeg) {
+        // Cień występuje, gdy promień słoneczny trafia w ścianę: betaBaseDeg <= elevationDeg <= betaTopDeg
+        if (slot.elevationDeg <= betaTopDeg && slot.elevationDeg >= betaBaseDeg) {
           isBlocked = true;
           blockingObstacleId = cand.bldgId;
           break;
@@ -939,24 +932,40 @@ export function analyzeSunlightAtPointSegments(
     // od orientacji fasady badanej — wynika to z geometrii metody Twarowskiego.
     if (seg.p1.y < point.y - deltaH * 1.5 && seg.p2.y < point.y - deltaH * 1.5) continue;
 
-    // L = H × tan(szerokość_geogr.) → zasięg graniczny cienia w równonoc (linia E-W)
-    const L = deltaH * k;
-    const yLine = point.y - L; // Pozioma linia E-W — zawsze geograficzne południe
+    // L_total = H_total × tan(lat), L_base = H_base × tan(lat)
+    const deltaHbase = Math.max(0, seg.hBase ?? 0.0);
+    const Ltotal = deltaH * k;
+    const Lbase = deltaHbase * k;
+
+    const yTotal = point.y - Ltotal; // Granica zewnętrzna cienia (najdalej na południe)
+    const yBase = point.y - Lbase;   // Granica wewnętrzna cienia (bliżej P, powyżej brak cienia)
 
     let p1 = { x: seg.p1.x, y: seg.p1.y };
     let p2 = { x: seg.p2.x, y: seg.p2.y };
 
-    // Krok 3/4 (Twarowski): oba wierzchołki na południe od linii L → brak cienia
-    if (p1.y < yLine && p2.y < yLine) continue;
+    // 1. Odrzucenie: oba wierzchołki na południe od linii Ltotal -> brak cienia
+    if (p1.y < yTotal && p2.y < yTotal) continue;
 
-    // Krok 5 (Twarowski): odcinek przecina linię L → zostawiamy część „na północ"
-    // (między yLine a P.y) czyli tę, która faktycznie rzuca cień na punkt P.
-    if (p1.y < yLine) {
-      const t = (yLine - p1.y) / (p2.y - p1.y);
-      p1 = { x: p1.x + t * (p2.x - p1.x), y: yLine };
-    } else if (p2.y < yLine) {
-      const t = (yLine - p1.y) / (p2.y - p1.y);
-      p2 = { x: p1.x + t * (p2.x - p1.x), y: yLine };
+    // 2. Przycięcie do linii Ltotal: odrzucamy część na południe od yTotal
+    if (p1.y < yTotal) {
+      const t = (yTotal - p1.y) / (p2.y - p1.y);
+      p1 = { x: p1.x + t * (p2.x - p1.x), y: yTotal };
+    } else if (p2.y < yTotal) {
+      const t = (yTotal - p1.y) / (p2.y - p1.y);
+      p2 = { x: p1.x + t * (p2.x - p1.x), y: yTotal };
+    }
+
+    // 3. Analiza względem linii Lbase:
+    // A) Jeśli oba wierzchołki leżą powyżej (na północ od) yBase -> promienie przechodzą pod ścianą, brak cienia
+    if (p1.y > yBase && p2.y > yBase) continue;
+
+    // B) Jeśli odcinek przecina yBase -> przycinamy część na północ od yBase (zachowujemy odcinek w [yTotal, yBase])
+    if (p1.y > yBase) {
+      const t = (yBase - p1.y) / (p2.y - p1.y);
+      p1 = { x: p1.x + t * (p2.x - p1.x), y: yBase };
+    } else if (p2.y > yBase) {
+      const t = (yBase - p1.y) / (p2.y - p1.y);
+      p2 = { x: p1.x + t * (p2.x - p1.x), y: yBase };
     }
 
     if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 0.05) continue;

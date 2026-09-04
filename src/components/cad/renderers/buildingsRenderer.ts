@@ -265,6 +265,37 @@ export function renderBuildings(
     }
     ctx.fill(geo.path);
 
+    // 1.1 Render 2.5D Story Polygons / Footprints (Warstwice kondygnacji uskokowych)
+    if (Array.isArray(bldg.storyPolygons) && bldg.storyPolygons.length > 1) {
+      for (const sf of bldg.storyPolygons) {
+        if (!sf.polygon || sf.polygon.length < 3) continue;
+        const poly = sf.polygon;
+        const isDifferentFromBase =
+          poly.length !== bldg.vertices.length ||
+          Math.hypot(poly[0].x - bldg.vertices[0].x, poly[0].y - bldg.vertices[0].y) > 0.01;
+
+        if (isDifferentFromBase) {
+          const storyPath = new Path2D();
+          storyPath.moveTo(poly[0].x, poly[0].y);
+          for (let i = 1; i < poly.length; i++) {
+            storyPath.lineTo(poly[i].x, poly[i].y);
+          }
+          storyPath.closePath();
+
+          ctx.fillStyle = isSelected
+            ? 'rgba(168, 85, 247, 0.12)'
+            : 'rgba(168, 85, 247, 0.06)';
+          ctx.fill(storyPath);
+
+          ctx.lineWidth = 1.2 / s;
+          ctx.strokeStyle = isSelected ? 'rgba(192, 132, 252, 0.85)' : 'rgba(168, 85, 247, 0.6)';
+          ctx.setLineDash([4 / s, 2 / s]);
+          ctx.stroke(storyPath);
+          ctx.setLineDash([]);
+        }
+      }
+    }
+
     // Linking mode highlight
     if (isLinkingMode && linkingSourceId && bldg.id !== linkingSourceId) {
       ctx.lineWidth = 3 / s;

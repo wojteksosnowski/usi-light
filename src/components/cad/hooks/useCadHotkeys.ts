@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Point2D } from '../../../types/geometry';
+import { useCadToolStore } from '../../../store';
 
 export function useCadHotkeys({
   drawingMode,
@@ -123,6 +124,7 @@ export function useCadHotkeys({
       }
 
       if (e.key === 'Escape') {
+        useCadToolStore.getState().setShowModifiersPanel(false);
         if (drawingMode !== 'none' || drawingVertices.length > 0) {
           setDrawingVertices([]);
           setCurrentMouseWorld(null);

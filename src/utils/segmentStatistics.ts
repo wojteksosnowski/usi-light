@@ -73,6 +73,9 @@ export function rebuildBuildingSegments(bldg: BuildingLoop, newVertices: Point2D
     const normal = calculateOutwardNormal(p1, p2, isCCW);
     const lineEq = computeLineEquation(p1, p2, normal);
 
+    const hBase = bldg.elevation ?? 0.0;
+    const hTop = hBase + bldg.defaultHeight;
+
     segments.push({
       id: `${bldg.id}-seg-${i + 1}`,
       p1: { x: p1.x, y: p1.y },
@@ -80,7 +83,8 @@ export function rebuildBuildingSegments(bldg: BuildingLoop, newVertices: Point2D
       normal,
       length: len,
       angleRad: Math.atan2(dy, dx),
-      hTop: bldg.defaultHeight,
+      hTop,
+      hBase,
       hWindowBottom: bldg.hWindowBottom || 0.85,
       isCityCentre: bldg.isCityCentre,
       buildingType: bldg.buildingType,

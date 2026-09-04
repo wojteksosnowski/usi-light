@@ -243,4 +243,44 @@ describe('Object Rotation Tool & Vertex Deletion', () => {
       expect(newSeg0AngleDeg).toBeCloseTo(45, 2);
     });
   });
+
+  describe('Full Building & Analysis Segments Rotation', () => {
+    it('updates building segments and normals correctly upon rotation', () => {
+      const initialVerts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+      const building = createBuildingFromVertices(initialVerts, 'Bldg Segments Test', 15.0);
+      // Segment 0: (0,0) -> (10,0), normal is (0, -1) in standard CCW outward normal
+      expect(building.segments[0].normal.x).toBeCloseTo(0, 4);
+      expect(building.segments[0].normal.y).toBeCloseTo(-1, 4);
+
+      // Rotate 90 deg counter-clockwise around origin (0,0)
+      const pivot = { x: 0, y: 0 };
+      const deltaAngleRad = Math.PI / 2;
+      const cosA = Math.cos(deltaAngleRad);
+      const sinA = Math.sin(deltaAngleRad);
+
+      const newVertices = building.vertices.map((v) => {
+        const rx = v.x - pivot.x;
+        const ry = v.y - pivot.y;
+        return {
+          x: pivot.x + rx * cosA - ry * sinA,
+          y: pivot.y + rx * sinA + ry * cosA,
+        };
+      });
+
+      const rotated = rebuildBuildingSegments(building, newVertices);
+
+      // Segment 0 is now (0,0) -> (0,10), outward normal should now point right (1, 0)
+      expect(rotated.segments[0].p1.x).toBeCloseTo(0, 4);
+      expect(rotated.segments[0].p1.y).toBeCloseTo(0, 4);
+      expect(rotated.segments[0].p2.x).toBeCloseTo(0, 4);
+      expect(rotated.segments[0].p2.y).toBeCloseTo(10, 4);
+      expect(rotated.segments[0].normal.x).toBeCloseTo(1, 4);
+      expect(rotated.segments[0].normal.y).toBeCloseTo(0, 4);
+    });
+  });
 });

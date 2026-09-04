@@ -16,6 +16,9 @@ import {
   Link,
   Link2,
   Unlink,
+  Layers,
+  Plus,
+  Sliders,
 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
@@ -31,7 +34,12 @@ export const ToolsGroup: React.FC = () => {
   const setIsLinkingMode = useSceneStore((s) => s.setIsLinkingMode);
   const setLinkingSourceId = useSceneStore((s) => s.setLinkingSourceId);
   const performUnlinkBuilding = useSceneStore((s) => s.performUnlinkBuilding);
+  const addBuildingModifier = useSceneStore((s) => s.addBuildingModifier);
+  const toggleBuildingModifier = useSceneStore((s) => s.toggleBuildingModifier);
+  const removeBuildingModifier = useSceneStore((s) => s.removeBuildingModifier);
 
+  const showModifiersPanel = useCadToolStore((s) => s.showModifiersPanel);
+  const setShowModifiersPanel = useCadToolStore((s) => s.setShowModifiersPanel);
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
   const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
@@ -615,6 +623,132 @@ export const ToolsGroup: React.FC = () => {
                   <span style={{ fontWeight: 600 }}>Połącz z innym obiektem</span>
                 </button>
               )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3.2 Kafel Modyfikatory 2.5D */}
+      <div className="ui-card">
+        <div className="ui-title">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>Modyfikatory</span>
+            {selectedBuilding && (
+              <span
+                style={{
+                  fontSize: '9.5px',
+                  padding: '1px 6px',
+                  borderRadius: '10px',
+                  backgroundColor:
+                    (selectedBuilding.modifiers?.length || 0) > 0
+                      ? 'rgba(168, 85, 247, 0.25)'
+                      : 'rgba(255, 255, 255, 0.08)',
+                  color: (selectedBuilding.modifiers?.length || 0) > 0 ? '#c084fc' : '#94a3b8',
+                  fontWeight: 700,
+                }}
+              >
+                {selectedBuilding.modifiers?.length || 0}
+              </span>
+            )}
+          </div>
+          <Layers size={14} color="#a855f7" />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {selectedBuilding ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newMod = {
+                      id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                      type: 'story_offset' as const,
+                      enabled: true,
+                      distance: -2.0,
+                      storiesCount: -1,
+                    };
+                    addBuildingModifier(selectedBuilding.id, newMod);
+                    setShowModifiersPanel(true);
+                  }}
+                  className="btn-tile active-indigo"
+                  style={{ justifyContent: 'center', gap: '5px', padding: '7px 6px', fontSize: '11px' }}
+                  title="Dodaj modyfikator uskoku kondygnacji"
+                >
+                  <Plus size={13} color="#c084fc" />
+                  <span style={{ fontWeight: 600 }}>+ Uskok</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowModifiersPanel((prev) => !prev)}
+                  className={`btn-tile ${showModifiersPanel ? 'active-indigo' : 'inactive'}`}
+                  style={{ justifyContent: 'center', gap: '5px', padding: '7px 6px', fontSize: '11px' }}
+                  title="Otwórz boczny panel modyfikatorów"
+                >
+                  <Sliders size={13} color={showModifiersPanel ? '#c084fc' : '#64748b'} />
+                  <span style={{ fontWeight: 600 }}>{showModifiersPanel ? 'Panel WŁ' : 'Inspektor'}</span>
+                </button>
+              </div>
+
+              {/* Quick list of modifiers */}
+              {selectedBuilding.modifiers && selectedBuilding.modifiers.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
+                  {selectedBuilding.modifiers.map((m, idx) => {
+                    const offMod = m as any;
+                    return (
+                      <div
+                        key={m.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          backgroundColor: m.enabled ? 'rgba(168, 85, 247, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+                          border: `1px solid ${m.enabled ? 'rgba(168, 85, 247, 0.35)' : 'rgba(255, 255, 255, 0.08)'}`,
+                          fontSize: '10.5px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={m.enabled}
+                            onChange={() => toggleBuildingModifier(selectedBuilding.id, m.id)}
+                            style={{ cursor: 'pointer', accentColor: '#a855f7' }}
+                          />
+                          <span style={{ color: m.enabled ? '#f3e8ff' : '#94a3b8', fontWeight: 600 }}>
+                            #{idx + 1} {offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`} (
+                            {offMod.storiesCount < 0 ? `${offMod.storiesCount} góra` : `+${offMod.storiesCount} dół`})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeBuildingModifier(selectedBuilding.id, m.id)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#fb7185',
+                            cursor: 'pointer',
+                            padding: '2px',
+                          }}
+                          title="Usuń modyfikator"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '4px 0' }}>
+                  Brak modyfikatorów na obiekcie.
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '6px 0' }}>
+              Zaznacz budynek na scenie, aby zarządzać modyfikatorami.
             </div>
           )}
         </div>

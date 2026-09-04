@@ -29,11 +29,15 @@ export interface FacadeSegment {
   length: number;
   angleRad: number; // Wall azimuth/angle in radians
   hTop: number; // Top shadowing edge elevation (m)
+  hBase?: number; // Bottom shadowing edge elevation / posadowienie (m, default 0.0)
   hWindowBottom: number; // Bottom edge of window elevation (default parapet e.g. 0.85m)
   isCityCentre: boolean;
   buildingType: BuildingType;
   lineEquation?: LineEquation2D;
 }
+
+export * from './modifiers';
+import { Modifier, StoryFootprint } from './modifiers';
 
 export type ObjectCategory = 'building' | 'boundary' | 'balcony';
 
@@ -42,9 +46,12 @@ export interface BuildingLoop {
   name: string;
   category?: ObjectCategory; // Domyślnie 'building' dla zachowania kompatybilności wstecznej
   plotNumber?: string; // Numer działki (np. "124/2") dla kategorii 'boundary'
+  elevation?: number; // Posadowienie / rzędna dolnej krawędzi (m, default 0.0)
   firstFloorHeight?: number; // Wysokość 1. kondygnacji (m) dla kategorii 'building'
   typicalFloorHeight?: number; // Wysokość kondygnacji typowej (m) dla kategorii 'building'
   storeysCount?: number; // Wyliczona lub zadana liczba kondygnacji dla 'building'
+  modifiers?: Modifier[]; // Stos modyfikatorów geometrycznych (np. uskok kondygnacji)
+  storyPolygons?: StoryFootprint[]; // Wyliczone obrysy warstw 2.5D dla rzutu CAD i cieni
   layer: string;
   isTested: boolean; // True for the building under analysis, false for existing/obstacles
   isIncluded?: boolean; // True (default) if included in calculations (as tested or obstacle); false to ignore

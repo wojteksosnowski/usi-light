@@ -348,16 +348,25 @@ export function computeFullShadowAnalysis(
       const isChildcare = bldg.segments.some((s) => s.buildingType === 'childcare');
       if (isChildcare && Math.abs(offset) > 4) continue;
 
-      const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
-      let poly = buildingFastShadowCache.get(fastKey);
-      if (!poly) {
-        poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
-        if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-        if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
-      }
+      if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
+        for (const sf of bldg.storyPolygons) {
+          if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0) {
+            const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop);
+            if (p.length >= 3) hourPolys.push(p);
+          }
+        }
+      } else {
+        const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+        let poly = buildingFastShadowCache.get(fastKey);
+        if (!poly) {
+          poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
+          if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
+          if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
+        }
 
-      if (poly.length >= 3) {
-        hourPolys.push(poly);
+        if (poly.length >= 3) {
+          hourPolys.push(poly);
+        }
       }
     }
 
@@ -394,15 +403,24 @@ export function computeFullShadowAnalysis(
             continue;
           }
 
-          const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
-          let poly = buildingFastShadowCache.get(fastKey);
-          if (!poly) {
-            poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
-            if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-            if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
-          }
-          if (poly.length >= 3) {
-            blockingHourPolys.push(poly);
+          if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
+            for (const sf of bldg.storyPolygons) {
+              if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0) {
+                const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop);
+                if (p.length >= 3) blockingHourPolys.push(p);
+              }
+            }
+          } else {
+            const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+            let poly = buildingFastShadowCache.get(fastKey);
+            if (!poly) {
+              poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
+              if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
+              if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
+            }
+            if (poly.length >= 3) {
+              blockingHourPolys.push(poly);
+            }
           }
         }
 

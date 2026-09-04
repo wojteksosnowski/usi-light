@@ -52,34 +52,8 @@ export function renderAnalysisBands(
     const segMap = pointsByBuilding.get(bldg.id);
     if (!segMap) continue;
 
-    const n = bldg.segments.length;
+    const n = bldg.segments?.length || 0;
     if (n < 3) continue;
-
-    // Pre-calculate inward (for § 12) and outward (for § 56) miter vertices at each corner V_i
-    // Vertex V_i is where segment (i - 1 + n) % n ends and segment i begins.
-    const inwardMiters: Point2D[] = [];
-    const outwardMiters: Point2D[] = [];
-
-    for (let i = 0; i < n; i++) {
-      const prevIdx = (i - 1 + n) % n;
-      const segPrev = bldg.segments[prevIdx];
-      const segCurr = bldg.segments[i];
-      const vi = segCurr.p1;
-
-      // Inward normals (pointing inside the building for § 12)
-      const nPrevIn = { x: -segPrev.normal.x, y: -segPrev.normal.y };
-      const nCurrIn = { x: -segCurr.normal.x, y: -segCurr.normal.y };
-
-      // Inward miter vertex
-      inwardMiters.push(computeMiterVertex(vi, nPrevIn, nCurrIn, bandWidthWorld));
-
-      // Outward normals (pointing outside the building for § 56)
-      const nPrevOut = segPrev.normal;
-      const nCurrOut = segCurr.normal;
-
-      // Outward miter vertex
-      outwardMiters.push(computeMiterVertex(vi, nPrevOut, nCurrOut, bandWidthWorld));
-    }
 
     // Render bands for each segment
     for (let sIdx = 0; sIdx < n; sIdx++) {
@@ -87,10 +61,47 @@ export function renderAnalysisBands(
       const points = segMap.get(seg.id);
       if (!points || points.length === 0) continue;
 
+      // Find geometrically connected prev and next segments in the same loop
+      const prevSeg = bldg.segments.find(
+        (s) => s.id !== seg.id && Math.hypot(s.p2.x - seg.p1.x, s.p2.y - seg.p1.y) < 0.05
+      );
+      const nextSeg = bldg.segments.find(
+        (s) => s.id !== seg.id && Math.hypot(s.p1.x - seg.p2.x, s.p1.y - seg.p2.y) < 0.05
+      );
+
+      // Inward miters (for § 12)
+      const normIn = { x: -seg.normal.x, y: -seg.normal.y };
+      const miterInStart = prevSeg
+        ? computeMiterVertex(
+            seg.p1,
+            { x: -prevSeg.normal.x, y: -prevSeg.normal.y },
+            normIn,
+            bandWidthWorld
+          )
+        : { x: seg.p1.x + normIn.x * bandWidthWorld, y: seg.p1.y + normIn.y * bandWidthWorld };
+
+      const miterInEnd = nextSeg
+        ? computeMiterVertex(
+            seg.p2,
+            normIn,
+            { x: -nextSeg.normal.x, y: -nextSeg.normal.y },
+            bandWidthWorld
+          )
+        : { x: seg.p2.x + normIn.x * bandWidthWorld, y: seg.p2.y + normIn.y * bandWidthWorld };
+
+      // Outward miters (for § 56)
+      const normOut = seg.normal;
+      const miterOutStart = prevSeg
+        ? computeMiterVertex(seg.p1, prevSeg.normal, normOut, bandWidthWorld)
+        : { x: seg.p1.x + normOut.x * bandWidthWorld, y: seg.p1.y + normOut.y * bandWidthWorld };
+
+      const miterOutEnd = nextSeg
+        ? computeMiterVertex(seg.p2, normOut, nextSeg.normal, bandWidthWorld)
+        : { x: seg.p2.x + normOut.x * bandWidthWorld, y: seg.p2.y + normOut.y * bandWidthWorld };
+
       // Sort points along segment by ratio
       points.sort((a, b) => a.shadowing.offsetRatio - b.shadowing.offsetRatio);
 
-      const nextIdx = (sIdx + 1) % n;
       const dx = seg.p2.x - seg.p1.x;
       const dy = seg.p2.y - seg.p1.y;
 
@@ -123,10 +134,6 @@ export function renderAnalysisBands(
           }
         }
 
-        const normIn = { x: -seg.normal.x, y: -seg.normal.y };
-        const miterStart = inwardMiters[sIdx];
-        const miterEnd = inwardMiters[nextIdx];
-
         for (const inter of intervals) {
           const color = inter.isCompliant
             ? shadowing.compliantColor(defaultAlpha)
@@ -142,8 +149,8 @@ export function renderAnalysisBands(
             inter.endRatio,
             normIn,
             bandWidthWorld,
-            miterStart,
-            miterEnd,
+            miterInStart,
+            miterInEnd,
             color
           );
         }
@@ -179,10 +186,6 @@ export function renderAnalysisBands(
           }
         }
 
-        const normOut = seg.normal;
-        const miterStart = outwardMiters[sIdx];
-        const miterEnd = outwardMiters[nextIdx];
-
         for (const inter of intervals) {
           renderMiteredQuad(
             ctx,
@@ -194,8 +197,8 @@ export function renderAnalysisBands(
             inter.endRatio,
             normOut,
             bandWidthWorld,
-            miterStart,
-            miterEnd,
+            miterOutStart,
+            miterOutEnd,
             inter.color
           );
         }

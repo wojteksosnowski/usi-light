@@ -134,6 +134,7 @@ export function sanitizePolygon(
       length: len,
       angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
       hTop: defaultHeight,
+      hBase: 0.0,
       hWindowBottom,
       isCityCentre,
       buildingType,

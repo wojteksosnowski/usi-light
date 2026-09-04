@@ -11,6 +11,7 @@ interface CadToolState {
   // Edge editing & facade point mode
   isEditMode: boolean;
   facadePointMode: boolean;
+  showModifiersPanel: boolean;
 
   // Snapping settings
   isDirectionSnappingActive: boolean;
@@ -37,6 +38,7 @@ interface CadToolState {
   setRotateInitialBuildingsSnapshot: (snapshot: any[] | null) => void;
   setIsEditMode: (active: boolean) => void;
   setFacadePointMode: (active: boolean) => void;
+  setShowModifiersPanel: (show: boolean | ((prev: boolean) => boolean)) => void;
 
   toggleOsnap: () => void;
   setIsOsnapActive: (active: boolean) => void;
@@ -71,6 +73,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   isEditMode: false,
   facadePointMode: false,
+  showModifiersPanel: false,
 
   isDirectionSnappingActive: APP_CONFIG.directionSnapping.enabledDefault,
   isOsnapActive: APP_CONFIG.osnap?.enabledDefault ?? true,
@@ -92,6 +95,10 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   setRotateInitialBuildingsSnapshot: (snapshot) => set({ rotateInitialBuildingsSnapshot: snapshot }),
   setIsEditMode: (active) => set({ isEditMode: active }),
   setFacadePointMode: (active) => set({ facadePointMode: active }),
+  setShowModifiersPanel: (show) =>
+    set((state) => ({
+      showModifiersPanel: typeof show === 'function' ? show(state.showModifiersPanel) : show,
+    })),
 
   toggleOsnap: () => set((state) => ({ isOsnapActive: !state.isOsnapActive })),
   setIsOsnapActive: (active) => set({ isOsnapActive: active }),

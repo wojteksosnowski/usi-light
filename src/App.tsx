@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
+import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiersPanel';
 import { CompassRose } from './components/cad/CompassRose';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
@@ -41,6 +42,7 @@ export const App: React.FC = () => {
   const moveBuilding = useSceneStore((s) => s.moveBuilding);
   const moveBuildings = useSceneStore((s) => s.moveBuildings);
   const moveBuildingEdge = useSceneStore((s) => s.moveBuildingEdge);
+  const rotateBuilding = useSceneStore((s) => s.rotateBuilding);
   const updateBuildingVertices = useSceneStore((s) => s.updateBuildingVertices);
   const booleanUnion = useSceneStore((s) => s.booleanUnion);
   const layerSettings = useSceneStore((s) => s.layerSettings);
@@ -64,6 +66,8 @@ export const App: React.FC = () => {
   const setIsEditMode = useCadToolStore((s) => s.setIsEditMode);
   const facadePointMode = useCadToolStore((s) => s.facadePointMode);
   const setFacadePointMode = useCadToolStore((s) => s.setFacadePointMode);
+  const showModifiersPanel = useCadToolStore((s) => s.showModifiersPanel);
+  const setShowModifiersPanel = useCadToolStore((s) => s.setShowModifiersPanel);
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const setIsOsnapActive = useCadToolStore((s) => s.setIsOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
@@ -473,41 +477,9 @@ export const App: React.FC = () => {
   const handleBuildingRotate = useCallback(
     (id: string, pivot: Point2D, deltaAngleRad: number) => {
       setIsInteracting(true);
-      const cosA = Math.cos(deltaAngleRad);
-      const sinA = Math.sin(deltaAngleRad);
-      const deltaDeg = (deltaAngleRad * 180) / Math.PI;
-
-      setBuildings((prev) => {
-        const targetBldg = prev.find((b) => b.id === id);
-        const targetGroupId = targetBldg?.groupId;
-
-        return prev.map((bldg) => {
-          const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
-          if (!shouldRotate) return bldg;
-
-          const newVertices = bldg.vertices.map((v) => {
-            const rx = v.x - pivot.x;
-            const ry = v.y - pivot.y;
-            return {
-              x: pivot.x + rx * cosA - ry * sinA,
-              y: pivot.y + rx * sinA + ry * cosA,
-            };
-          });
-
-          const updatedTransform = {
-            ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
-            rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
-          };
-
-          return {
-            ...bldg,
-            vertices: newVertices,
-            transform: updatedTransform,
-          };
-        });
-      });
+      rotateBuilding(id, pivot, deltaAngleRad);
     },
-    [setIsInteracting, setBuildings]
+    [setIsInteracting, rotateBuilding]
   );
 
   const handleBooleanUnion = useCallback(
@@ -633,6 +605,11 @@ export const App: React.FC = () => {
             useSolarAnalysisStore.getState().clearPinnedPoints();
           }}
         />
+
+        {/* Floating Building Modifiers Panel */}
+        {showModifiersPanel && selectedBuildingId && !activePointResult && (
+          <BuildingModifiersPanel onClose={() => setShowModifiersPanel(false)} />
+        )}
 
         {/* Rotatable Compass Rose (Bottom-Right) */}
         <CompassRose
