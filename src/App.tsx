@@ -550,9 +550,24 @@ export const App: React.FC = () => {
             onBuildingMove={moveBuilding}
             onBuildingsMove={moveBuildings}
             analysisResults={analysisResults}
-            selectedPointResult={selectedPointResult}
+            pinnedPoints={pinnedPoints}
+            pinnedPointResults={pinnedPointResults}
+            activePinnedPointId={activePinnedPointId}
+            onSelectPinnedPoint={(id) => setActivePinnedPointId(id)}
+            onAddPinnedPoint={addPinnedPoint}
+            onDeletePinnedPoint={deletePinnedPoint}
+            onUpdatePinnedPoint={updatePinnedPoint}
+            selectedPointResult={activePointResult}
+            onSelectPointResult={(res) => {
+              if (!res) {
+                setActivePinnedPointId(null);
+                setSelectedPointResult(null);
+              } else {
+                setActivePinnedPointId(res.id);
+                setSelectedPointResult(res);
+              }
+            }}
             activePointMode={activePointMode}
-            onSelectPointResult={setSelectedPointResult}
             showNormals={showNormals}
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
