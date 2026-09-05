@@ -45,6 +45,7 @@ export interface CadCanvasProps {
   showNormals: boolean;
   showShadowingLines: boolean;
   showSunlightLines: boolean;
+  showAnalysisPoints?: boolean;
   showShadowRange?: boolean;
   showShadowFill?: boolean;
   isInteracting?: boolean;

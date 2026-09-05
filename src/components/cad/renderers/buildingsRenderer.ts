@@ -230,7 +230,8 @@ export function renderBuildings(
   facadePointMode?: boolean,
   isVertexEditMode?: boolean,
   isRotateMode?: boolean,
-  selectedBuildingIds: string[] = []
+  selectedBuildingIds: string[] = [],
+  showAnalysisPoints: boolean = true
 ) {
 
   const { ctx, worldToScreen, screenToWorld, width, height, viewState, viewRotationDeg } = rc;
@@ -960,7 +961,7 @@ export function renderBuildings(
   });
 
   // 4. Render All Pinned Analysis Points (P1, P2, P3)
-  if (pinnedPointResults && pinnedPointResults.length > 0) {
+  if (showAnalysisPoints && pinnedPointResults && pinnedPointResults.length > 0) {
     pinnedPointResults.forEach((ptRes, pIdx) => {
       if (!ptRes || !ptRes.point) return;
       const { point } = ptRes;
@@ -1007,7 +1008,7 @@ export function renderBuildings(
 
       ctx.restore();
     });
-  } else if (selectedPointResult) {
+  } else if (showAnalysisPoints && selectedPointResult) {
     const { point } = selectedPointResult;
     const { sx, sy } = worldToScreen(point.x, point.y);
 

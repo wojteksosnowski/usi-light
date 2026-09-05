@@ -100,6 +100,7 @@ export interface ExtractStateOptions {
   showNormals?: boolean;
   showShadowingLines?: boolean;
   showSunlightLines?: boolean;
+  showAnalysisPoints?: boolean;
   showShadowRange?: boolean;
   showShadowFill?: boolean;
   showSatelliteLayer?: boolean;
@@ -138,6 +139,7 @@ export function createSharedPayloadFromState(options: ExtractStateOptions): Shar
       showNormals: options.showNormals,
       showShadowingLines: options.showShadowingLines,
       showSunlightLines: options.showSunlightLines,
+      showAnalysisPoints: options.showAnalysisPoints,
       showShadowRange: options.showShadowRange,
       showShadowFill: options.showShadowFill,
       showSatelliteLayer: options.showSatelliteLayer,

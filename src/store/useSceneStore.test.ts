@@ -109,5 +109,27 @@ describe('useSceneStore', () => {
     expect(movedSweep?.sweepPath?.[0]).toEqual({ x: 5, y: 10 });
     expect(movedSweep?.sweepPath?.[1]).toEqual({ x: 35, y: 10 });
   });
+
+  it('moveBuildingEdge modifies polygon vertices correctly without breaking geometry', () => {
+    const bldg = {
+      ...createBuildingFromVertices([
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ], 'Bldg 1', 10),
+      id: 'bldg-1',
+    };
+
+    useSceneStore.getState().setBuildings([bldg]);
+    // Move edge index 1 (right edge from (10,0) to (10,10)) by dx=5, dy=0
+    useSceneStore.getState().moveBuildingEdge('bldg-1', 1, 5, 0);
+
+    const updated = useSceneStore.getState().buildings.find((b) => b.id === 'bldg-1');
+    expect(updated).toBeDefined();
+    expect(updated?.vertices.length).toBe(4);
+    expect(updated?.segments.length).toBe(4);
+  });
 });
+
 

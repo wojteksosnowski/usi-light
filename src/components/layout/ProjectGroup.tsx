@@ -54,6 +54,8 @@ export const ProjectGroup: React.FC = () => {
   const setShowShadowingLines = useSolarAnalysisStore((s) => s.setShowShadowingLines);
   const showSunlightLines = useSolarAnalysisStore((s) => s.showSunlightLines);
   const setShowSunlightLines = useSolarAnalysisStore((s) => s.setShowSunlightLines);
+  const showAnalysisPoints = useSolarAnalysisStore((s) => s.showAnalysisPoints);
+  const setShowAnalysisPoints = useSolarAnalysisStore((s) => s.setShowAnalysisPoints);
   const showNormals = useSolarAnalysisStore((s) => s.showNormals);
   const setShowNormals = useSolarAnalysisStore((s) => s.setShowNormals);
   const showShadowRange = useSolarAnalysisStore((s) => s.showShadowRange);
@@ -804,7 +806,75 @@ export const ProjectGroup: React.FC = () => {
             )}
           </div>
 
-          {/* 3. Wektory normalne fasad (w sidebarze) */}
+          {/* 3. Punkty (Fasada & Plac zabaw) */}
+          <div
+            style={{
+              padding: '8px 10px',
+              borderRadius: '10px',
+              backgroundColor: showAnalysisPoints ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+              border: showAnalysisPoints ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid #1e293b',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowAnalysisPoints((prev) => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'none',
+                border: 'none',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                padding: 0,
+                width: '100%',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: showAnalysisPoints ? '#38bdf8' : '#64748b',
+                    boxShadow: showAnalysisPoints ? '0 0 8px rgba(56, 189, 248, 0.6)' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Punkty (Fasada & Plac zabaw)</span>
+              </div>
+              <div
+                style={{
+                  width: '28px',
+                  height: '16px',
+                  borderRadius: '999px',
+                  backgroundColor: showAnalysisPoints ? '#0284c7' : '#334155',
+                  position: 'relative',
+                  transition: 'background-color 0.2s ease',
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ffffff',
+                    position: 'absolute',
+                    top: '2px',
+                    left: showAnalysisPoints ? '14px' : '2px',
+                    transition: 'left 0.2s ease',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                  }}
+                />
+              </div>
+            </button>
+          </div>
+
+          {/* 4. Wektory normalne fasad (w sidebarze) */}
           <div
             style={{
               padding: '8px 10px',

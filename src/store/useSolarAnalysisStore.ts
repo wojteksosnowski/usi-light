@@ -28,6 +28,7 @@ interface SolarAnalysisState {
   showNormals: boolean;
   showShadowingLines: boolean;
   showSunlightLines: boolean;
+  showAnalysisPoints: boolean;
   showShadowRange: boolean;
   showShadowFill: boolean;
   showSatelliteLayer: boolean;
@@ -55,6 +56,7 @@ interface SolarAnalysisState {
   setShowNormals: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowShadowingLines: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowSunlightLines: (show: boolean | ((prev: boolean) => boolean)) => void;
+  setShowAnalysisPoints: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowShadowRange: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowShadowFill: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowSatelliteLayer: (show: boolean | ((prev: boolean) => boolean)) => void;
@@ -91,6 +93,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   showNormals: false,
   showShadowingLines: true,
   showSunlightLines: true,
+  showAnalysisPoints: true,
   showShadowRange: true,
   showShadowFill: false,
   showSatelliteLayer: true,
@@ -144,6 +147,11 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   setShowSunlightLines: (updater) =>
     set((state) => ({
       showSunlightLines: typeof updater === 'function' ? updater(state.showSunlightLines) : updater,
+    })),
+
+  setShowAnalysisPoints: (updater) =>
+    set((state) => ({
+      showAnalysisPoints: typeof updater === 'function' ? updater(state.showAnalysisPoints) : updater,
     })),
 
   setShowShadowRange: (updater) =>

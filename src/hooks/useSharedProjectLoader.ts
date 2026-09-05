@@ -30,9 +30,10 @@ export function useSharedProjectLoader() {
   const setSelectedCity = useSolarAnalysisStore((s) => s.setSelectedCity);
   const setMapsInput = useSolarAnalysisStore((s) => s.setMapsInput);
   const setShowNormals = useSolarAnalysisStore((s) => s.setShowNormals);
-  const setShowShadowingLines = useSolarAnalysisStore((s) => s.showShadowingLines);
-  const setShowSunlightLines = useSolarAnalysisStore((s) => s.showSunlightLines);
-  const setShowShadowRange = useSolarAnalysisStore((s) => s.showShadowRange);
+  const setShowShadowingLines = useSolarAnalysisStore((s) => s.setShowShadowingLines);
+  const setShowSunlightLines = useSolarAnalysisStore((s) => s.setShowSunlightLines);
+  const setShowAnalysisPoints = useSolarAnalysisStore((s) => s.setShowAnalysisPoints);
+  const setShowShadowRange = useSolarAnalysisStore((s) => s.setShowShadowRange);
   const setShowShadowFill = useSolarAnalysisStore((s) => s.setShowShadowFill);
   const setShowSatelliteLayer = useSolarAnalysisStore((s) => s.setShowSatelliteLayer);
   const setSatelliteOpacity = useSolarAnalysisStore((s) => s.setSatelliteOpacity);
@@ -126,6 +127,9 @@ export function useSharedProjectLoader() {
           if (payload.solar.selectedCity) setSelectedCity(payload.solar.selectedCity);
           if (payload.solar.mapsInput !== undefined) setMapsInput(payload.solar.mapsInput);
           if (payload.solar.showNormals !== undefined) setShowNormals(payload.solar.showNormals);
+          if (payload.solar.showShadowingLines !== undefined) setShowShadowingLines(payload.solar.showShadowingLines);
+          if (payload.solar.showSunlightLines !== undefined) setShowSunlightLines(payload.solar.showSunlightLines);
+          if (payload.solar.showAnalysisPoints !== undefined) setShowAnalysisPoints(payload.solar.showAnalysisPoints);
           if (payload.solar.sunlightMethod) setSunlightMethod(payload.solar.sunlightMethod);
           if (payload.solar.activePointMode) setActivePointMode(payload.solar.activePointMode);
           if (payload.solar.showShadowFill !== undefined) setShowShadowFill(payload.solar.showShadowFill);

@@ -24,6 +24,8 @@ export const CadTopHud: React.FC = () => {
   const setShowShadowingLines = useSolarAnalysisStore((s) => s.setShowShadowingLines);
   const showSunlightLines = useSolarAnalysisStore((s) => s.showSunlightLines);
   const setShowSunlightLines = useSolarAnalysisStore((s) => s.setShowSunlightLines);
+  const showAnalysisPoints = useSolarAnalysisStore((s) => s.showAnalysisPoints);
+  const setShowAnalysisPoints = useSolarAnalysisStore((s) => s.setShowAnalysisPoints);
   const showShadowRange = useSolarAnalysisStore((s) => s.showShadowRange);
   const setShowShadowRange = useSolarAnalysisStore((s) => s.setShowShadowRange);
   const showSatelliteLayer = useSolarAnalysisStore((s) => s.showSatelliteLayer);
@@ -124,6 +126,27 @@ export const CadTopHud: React.FC = () => {
         }}
       >
         § 56
+      </button>
+      <button
+        onClick={() => setShowAnalysisPoints((prev) => !prev)}
+        style={{
+          height: '28px',
+          padding: '0 9px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: 'none',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: showAnalysisPoints ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+          color: showAnalysisPoints ? '#38bdf8' : '#94a3b8',
+          transition: 'all 0.15s ease',
+        }}
+        title="Włącz / wyłącz punkty kontrolne na fasadzie oraz nasłonecznienie placu zabaw"
+      >
+        Punkty
       </button>
       <button
         onClick={() => setShowShadowRange((prev) => !prev)}

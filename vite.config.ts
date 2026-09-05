@@ -76,7 +76,7 @@ export default defineConfig(({ mode }) => {
         },
       },
     ],
-    base: './', // Ścieżki względne umożliwiające hosting w podkatalogu i osadzenie w iframe
+    base: '/', // Bezwzględna ścieżka główna dla obsługi routingu SPA (np. /p/:id)
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -89,6 +89,29 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/three') || id.includes('@react-three')) {
+              return 'vendor-three';
+            }
+            if (id.includes('node_modules/jspdf')) {
+              return 'vendor-pdf';
+            }
+            if (id.includes('node_modules/polygon-clipping') || id.includes('node_modules/rbush')) {
+              return 'vendor-geo';
+            }
+            if (
+              id.includes('node_modules/react/') ||
+              id.includes('node_modules/react-dom/') ||
+              id.includes('node_modules/zustand/')
+            ) {
+              return 'vendor-react';
+            }
+          },
+        },
+      },
     },
   };
 });

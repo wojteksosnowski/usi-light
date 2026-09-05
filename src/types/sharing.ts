@@ -29,6 +29,7 @@ export interface SharedProjectPayload {
     showNormals?: boolean;
     showShadowingLines?: boolean;
     showSunlightLines?: boolean;
+    showAnalysisPoints?: boolean;
     showShadowRange?: boolean;
     showShadowFill?: boolean;
     showSatelliteLayer?: boolean;

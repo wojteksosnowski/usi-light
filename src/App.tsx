@@ -108,6 +108,7 @@ export const App: React.FC = () => {
   const showNormals = useSolarAnalysisStore((s) => s.showNormals);
   const showShadowingLines = useSolarAnalysisStore((s) => s.showShadowingLines);
   const showSunlightLines = useSolarAnalysisStore((s) => s.showSunlightLines);
+  const showAnalysisPoints = useSolarAnalysisStore((s) => s.showAnalysisPoints);
   const showShadowRange = useSolarAnalysisStore((s) => s.showShadowRange);
   const showShadowFill = useSolarAnalysisStore((s) => s.showShadowFill);
   const showSatelliteLayer = useSolarAnalysisStore((s) => s.showSatelliteLayer);
@@ -623,6 +624,7 @@ export const App: React.FC = () => {
             showNormals={showNormals}
             showShadowingLines={showShadowingLines}
             showSunlightLines={showSunlightLines}
+            showAnalysisPoints={showAnalysisPoints}
             showShadowRange={showShadowRange}
             showShadowFill={showShadowFill}
             isInteracting={isInteracting}
