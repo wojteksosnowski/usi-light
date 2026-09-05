@@ -356,4 +356,101 @@ describe('Direction Snapping & Math2D Angular Utilities', () => {
     expect(snap?.intersectedSegment).toBeDefined();
     expect(snap?.intersectedSegment?.buildingId).toBe('bldg-target-edge');
   });
+
+  it('snaps accurately to guide intersecting area / boundary edge (Guide ✕ Edge)', () => {
+    const boundaryArea = createBuildingFromVertices(
+      [{ x: 25, y: -10 }, { x: 35, y: -10 }, { x: 35, y: 20 }, { x: 25, y: 20 }],
+      'Działka 124/2',
+      0,
+      false,
+      'boundary'
+    );
+    boundaryArea.id = 'bnd-target-edge';
+
+    const origin = { x: 0, y: 10 };
+    const mouse = { x: 24.8, y: 10.1 };
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      buildings: [boundaryArea],
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(25, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(10, 2);
+    expect(snap?.intersectedSegment).toBeDefined();
+    expect(snap?.intersectedSegment?.buildingId).toBe('bnd-target-edge');
+  });
+
+  it('tracks parallel and perpendicular directions from nearby boundary objects', () => {
+    const boundaryArea = createBuildingFromVertices(
+      [{ x: 10, y: 10 }, { x: 20, y: 20 }, { x: 15, y: 25 }, { x: 5, y: 15 }],
+      'Działka 45',
+      0,
+      false,
+      'boundary'
+    );
+    boundaryArea.id = 'bnd-skewed';
+
+    const origin = { x: 0, y: 0 };
+    // Edge (10,10)->(20,20) has angle 45 deg
+    const mouse = { x: 10, y: 10.1 }; // close to 45 deg ray from (0,0)
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      buildings: [boundaryArea],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.guideAngleDeg).toBeCloseTo(45, 1);
+  });
+
+  it('snaps accurately to guide intersecting buffer modifier edge (Guide ✕ Buffer Edge)', () => {
+    const boundaryArea = createBuildingFromVertices(
+      [{ x: 30, y: -10 }, { x: 40, y: -10 }, { x: 40, y: 20 }, { x: 30, y: 20 }],
+      'Działka 124/2',
+      0,
+      false,
+      'boundary'
+    );
+    boundaryArea.id = 'bnd-with-buffer';
+    // Add 4.0m buffer polygon (e.g. x shifted by -4 to x=26)
+    boundaryArea.zonePolygons = [
+      {
+        id: 'zone-1',
+        distance: 4.0,
+        polygon: [
+          { x: 26, y: -14 },
+          { x: 44, y: -14 },
+          { x: 44, y: 24 },
+          { x: 26, y: 24 },
+        ],
+      },
+    ];
+
+    const origin = { x: 0, y: 5 };
+    const mouse = { x: 25.8, y: 5.1 }; // close to buffer left edge x=26, y=5
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      buildings: [boundaryArea],
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(26, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(5, 2);
+    expect(snap?.intersectedSegment).toBeDefined();
+    expect(snap?.intersectedSegment?.buildingId).toBe('bnd-with-buffer_zone_0');
+    expect(snap?.sourceLabel).toContain('Bufor');
+  });
 });

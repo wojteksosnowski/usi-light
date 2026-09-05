@@ -162,7 +162,8 @@ export function collectTargetDirections(
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
-      bldg.zonePolygons.forEach((zf) => {
+      const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+      bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
         const nZ = zf.polygon.length;
         for (let i = 0; i < nZ; i++) {
@@ -175,9 +176,9 @@ export function collectTargetDirections(
             const segAng = isNearDominant(rawSegAng) && domPair
               ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
               : rawSegAng;
-            const sourceSeg = { p1, p2, buildingId: bldg.id };
-            addCandidate(segAng, 'parallel', `Strefa (${bldg.name}) (Równoległy)`, 4, sourceSeg);
-            addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `Strefa (${bldg.name}) (Prostopadły 90°)`, 4, sourceSeg);
+            const sourceSeg = { p1, p2, buildingId: `${bldg.id}_zone_${zIdx}`, edgeIndex: i };
+            addCandidate(segAng, 'parallel', `Bufor (${displayName}) (Równoległy)`, 4, sourceSeg);
+            addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `Bufor (${displayName}) (Prostopadły 90°)`, 4, sourceSeg);
           }
         }
       });
@@ -196,33 +197,67 @@ export function collectTargetDirections(
   }[] = [];
 
   for (const bldg of buildings) {
-    if (bldg.isIncluded === false || bldg.category === 'boundary' || prioritizedBuildingIds.has(bldg.id) || !Array.isArray(bldg.segments)) continue;
-    for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
-      if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
-      const seg = bldg.segments[sIdx];
-      const midX = (seg.p1.x + seg.p2.x) / 2;
-      const midY = (seg.p1.y + seg.p2.y) / 2;
-      const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
-      const dist = Math.min(
-        Math.hypot(origin.x - midX, origin.y - midY),
-        distToMid
-      );
-      const sdx = seg.p2.x - seg.p1.x;
-      const sdy = seg.p2.y - seg.p1.y;
-      const segLen = Math.hypot(sdx, sdy);
-      if (segLen >= 0.05) {
-        const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-        if (isNearDominant(segAng)) continue;
+    if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id)) continue;
+    const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+    if (Array.isArray(bldg.segments)) {
+      for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
+        if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+        const seg = bldg.segments[sIdx];
+        const midX = (seg.p1.x + seg.p2.x) / 2;
+        const midY = (seg.p1.y + seg.p2.y) / 2;
+        const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
+        const dist = Math.min(
+          Math.hypot(origin.x - midX, origin.y - midY),
+          distToMid
+        );
+        const sdx = seg.p2.x - seg.p1.x;
+        const sdy = seg.p2.y - seg.p1.y;
+        const segLen = Math.hypot(sdx, sdy);
+        if (segLen >= 0.05) {
+          const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+          if (isNearDominant(segAng)) continue;
 
-        otherNearbySegs.push({
-          angleDeg: segAng,
-          dist,
-          buildingName: bldg.name,
-          seg: { p1: seg.p1, p2: seg.p2 },
-          buildingId: bldg.id,
-          edgeIndex: sIdx,
-        });
+          otherNearbySegs.push({
+            angleDeg: segAng,
+            dist,
+            buildingName: displayName,
+            seg: { p1: seg.p1, p2: seg.p2 },
+            buildingId: bldg.id,
+            edgeIndex: sIdx,
+          });
+        }
       }
+    }
+
+    if (Array.isArray(bldg.zonePolygons)) {
+      bldg.zonePolygons.forEach((zf, zIdx) => {
+        if (!zf.polygon || zf.polygon.length < 2) return;
+        const nZ = zf.polygon.length;
+        for (let i = 0; i < nZ; i++) {
+          const p1 = zf.polygon[i];
+          const p2 = zf.polygon[(i + 1) % nZ];
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
+          const dist = Math.min(Math.hypot(origin.x - midX, origin.y - midY), distToMid);
+          const sdx = p2.x - p1.x;
+          const sdy = p2.y - p1.y;
+          const segLen = Math.hypot(sdx, sdy);
+          if (segLen >= 0.05) {
+            const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+            if (isNearDominant(segAng)) continue;
+
+            otherNearbySegs.push({
+              angleDeg: segAng,
+              dist,
+              buildingName: `Bufor (${displayName})`,
+              seg: { p1, p2 },
+              buildingId: `${bldg.id}_zone_${zIdx}`,
+              edgeIndex: i,
+            });
+          }
+        }
+      });
     }
   }
 
@@ -399,7 +434,8 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
   }
 
   for (const bldg of buildings) {
-    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (bldg.isIncluded === false) continue;
+    const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
         if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
@@ -409,10 +445,30 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
           p2: seg.p2,
           buildingId: bldg.id,
           edgeIndex: sIdx,
-          buildingName: bldg.name,
-          label: bldg.name,
+          buildingName: displayName,
+          label: displayName,
         });
       }
+    }
+
+    if (Array.isArray(bldg.zonePolygons)) {
+      bldg.zonePolygons.forEach((zf, zIdx) => {
+        if (!zf.polygon || zf.polygon.length < 2) return;
+        const nZ = zf.polygon.length;
+        for (let i = 0; i < nZ; i++) {
+          const p1 = zf.polygon[i];
+          const p2 = zf.polygon[(i + 1) % nZ];
+          if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 0.05) continue;
+          intersectableSegments.push({
+            p1,
+            p2,
+            buildingId: `${bldg.id}_zone_${zIdx}`,
+            edgeIndex: i,
+            buildingName: `Bufor (${displayName})`,
+            label: `Bufor (${displayName})`,
+          });
+        }
+      });
     }
   }
 
