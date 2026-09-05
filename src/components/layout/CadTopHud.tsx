@@ -8,12 +8,14 @@ import {
   Magnet,
   Compass,
   Globe,
+  Share2,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 
 export const CadTopHud: React.FC = () => {
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
+  const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
 
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
   const settings = useSolarAnalysisStore((s) => s.settings);
@@ -313,6 +315,32 @@ export const CadTopHud: React.FC = () => {
       >
         <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#94a3b8'} />
         <span>Śledzenie</span>
+      </button>
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+      <button
+        onClick={() => setShareModalOpen(true)}
+        title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
+        style={{
+          height: '28px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '5px',
+          padding: '0 10px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: '1px solid rgba(99, 102, 241, 0.4)',
+          backgroundColor: 'rgba(99, 102, 241, 0.2)',
+          color: '#c7d2fe',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <Share2 size={13} color="#a5b4fc" />
+        <span>Udostępnij</span>
       </button>
     </div>
   );

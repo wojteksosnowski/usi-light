@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import { Analytics } from '@vercel/analytics/react';
+import { CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiersPanel';
 import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
+import { ShareProjectModal } from './components/common/ShareProjectModal';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
 import { CadToolBar } from './components/layout/CadToolBar';
@@ -13,9 +15,11 @@ import {
   useSceneStore,
   useCadToolStore,
   useSolarAnalysisStore,
+  useUiStore,
   SavedSceneData,
 } from './store';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
+import { useSharedProjectLoader } from './hooks/useSharedProjectLoader';
 import {
   AnalysisAccuracyOptions,
   analyzeShadowingAtPoint,
@@ -123,6 +127,13 @@ export const App: React.FC = () => {
   const deletePinnedPoint = useSolarAnalysisStore((s) => s.deletePinnedPoint);
   const updatePinnedPoint = useSolarAnalysisStore((s) => s.updatePinnedPoint);
   const setAnalysisOutput = useSolarAnalysisStore((s) => s.setAnalysisOutput);
+
+  // UI Store & Sharing
+  const isShareModalOpen = useUiStore((s) => s.isShareModalOpen);
+  const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
+
+  // Shared Project Loader (auto-hydrates state if /p/:id is detected)
+  const { loadStatus, dismissStatus } = useSharedProjectLoader();
 
   const sceneHydratedRef = useRef(false);
 
@@ -716,6 +727,67 @@ export const App: React.FC = () => {
             });
           }}
         />
+
+        {/* Shared Project Toast Notification */}
+        {loadStatus.status !== 'idle' && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '16px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 100,
+              backgroundColor: 'rgba(11, 19, 41, 0.95)',
+              backdropFilter: 'blur(16px)',
+              border: `1px solid ${
+                loadStatus.status === 'error'
+                  ? 'var(--accent-rose)'
+                  : loadStatus.status === 'success'
+                  ? 'var(--accent-emerald)'
+                  : 'var(--accent-indigo)'
+              }`,
+              borderRadius: '12px',
+              padding: '8px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6)',
+              fontSize: '12px',
+              color: 'var(--text-primary)',
+            }}
+          >
+            {loadStatus.status === 'loading' && (
+              <Loader2 size={16} color="var(--accent-indigo)" style={{ animation: 'spin 1s linear infinite' }} />
+            )}
+            {loadStatus.status === 'success' && (
+              <CheckCircle2 size={16} color="var(--accent-emerald)" />
+            )}
+            {loadStatus.status === 'error' && (
+              <AlertCircle size={16} color="var(--accent-rose)" />
+            )}
+            <span>{loadStatus.message}</span>
+            {loadStatus.status !== 'loading' && (
+              <button
+                onClick={dismissStatus}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+                title="Zamknij"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Share Project Modal */}
+        <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setShareModalOpen(false)} />
       </main>
     </div>
   );

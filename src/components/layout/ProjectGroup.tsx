@@ -7,11 +7,13 @@ import {
   Download,
   Sliders,
   Globe,
+  Share2,
 } from 'lucide-react';
 import {
   useSceneStore,
   useSolarAnalysisStore,
   useCadToolStore,
+  useUiStore,
   POLISH_CITIES,
 } from '../../store';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
@@ -87,6 +89,7 @@ export const ProjectGroup: React.FC = () => {
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
   const triggerFit = useCadToolStore((s) => s.triggerFit);
+  const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
 
   const handleMapsInputChange = (val: string) => {
     setMapsInput(val);
@@ -399,6 +402,26 @@ export const ProjectGroup: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Główny przycisk udostępniania projektu */}
+      <button
+        type="button"
+        onClick={() => setShareModalOpen(true)}
+        className="btn-primary"
+        style={{
+          padding: '9px 12px',
+          fontSize: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          cursor: 'pointer',
+        }}
+        title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
+      >
+        <Share2 size={15} />
+        <span>Udostępnij projekt</span>
+      </button>
 
       {/* Przyciski importu i eksportu sceny/DXF - leżą obok siebie (Grid 3-kolumnowy) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>

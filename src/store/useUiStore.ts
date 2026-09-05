@@ -4,18 +4,21 @@ interface UiState {
   isSidebarOpen: boolean;
   openSidebarGroup: 'project' | 'layers' | 'tools' | null;
   copiedToast: string | null;
+  isShareModalOpen: boolean;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   setOpenSidebarGroup: (group: 'project' | 'layers' | 'tools' | null) => void;
   toggleSidebarGroup: (group: 'project' | 'layers' | 'tools') => void;
   showCopiedToast: (msg: string) => void;
+  setShareModalOpen: (open: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   isSidebarOpen: true,
   openSidebarGroup: 'project',
   copiedToast: null,
+  isShareModalOpen: false,
 
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
@@ -32,4 +35,6 @@ export const useUiStore = create<UiState>((set) => ({
       set((state) => (state.copiedToast === msg ? { copiedToast: null } : state));
     }, 2500);
   },
+
+  setShareModalOpen: (open) => set({ isShareModalOpen: open }),
 }));
