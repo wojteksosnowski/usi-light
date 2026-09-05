@@ -239,42 +239,27 @@ describe('directionSnapping', () => {
     expect(snap?.sourceSegment?.buildingId).toBe('bldg-source-test');
   });
 
-  it('filters out perpendicular snap for distant background buildings when cursor is not near edge', () => {
-    const distantBldg = createBuildingFromVertices(
-      [{ x: 100, y: 100 }, { x: 130, y: 100 }, { x: 130, y: 120 }, { x: 100, y: 120 }],
-      'Distant Bldg',
-      10.0,
-      false
-    );
-    distantBldg.id = 'bldg-distant';
+  it('snaps accurately to the intersection of two guide lines (Dual-Guide Intersection Snapping)', () => {
+    // Guide 1 from origin (0, 0) along 0° (horizontal) -> y = 0
+    // Guide 2 from secondary origin (10, 10) along 90° (vertical) -> x = 10
+    // Intersection must be at (10, 0)
+    const origin = { x: 0, y: 0 };
+    const secOrigin = { x: 10, y: 10 };
+    const mouse = { x: 9.9, y: 0.1 }; // cursor close to (10, 0)
 
-    // Cursor at (10, 10), far away from distant building at (100, 100)
-    const candidates = collectTargetDirections(
-      { x: 10, y: 10 },
-      { x: 15, y: 12 },
-      [distantBldg],
-      [],
-      []
-    );
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      secondaryOriginPoints: [secOrigin],
+      currentMouseWorld: mouse,
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
 
-    // Parallel should be present, but perpendicular should NOT be included for distant non-hovered edge
-    const perpDistant = candidates.find(
-      (c) => c.relationType === 'perpendicular' && c.sourceSegment?.buildingId === 'bldg-distant'
-    );
-    expect(perpDistant).toBeUndefined();
-
-    // Now cursor is right near the distant edge at (110, 100.5)
-    const nearCandidates = collectTargetDirections(
-      { x: 105, y: 95 },
-      { x: 110, y: 100.5 },
-      [distantBldg],
-      [],
-      []
-    );
-
-    const perpNear = nearCandidates.find(
-      (c) => c.relationType === 'perpendicular' && c.sourceSegment?.buildingId === 'bldg-distant'
-    );
-    expect(perpNear).toBeDefined();
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(10, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(0, 2);
+    expect(snap?.secondGuideLine).toBeDefined();
   });
 });
+

@@ -152,8 +152,16 @@ function drawLucideGhostIcon(ctx: CanvasRenderingContext2D, cx: number, cy: numb
 }
 
 function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
-  if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return null;
-  const cached = buildingGeoCache.get(bldg);
+  // If building has storyPolygons (e.g. from modifiers like bay_window), use storyPolygons[0] for base interior rendering
+  const activeVertices =
+    Array.isArray(bldg.storyPolygons) && bldg.storyPolygons.length > 0 && bldg.storyPolygons[0].polygon?.length >= 3
+      ? bldg.storyPolygons[0].polygon
+      : bldg.vertices;
+
+  if (!activeVertices || !Array.isArray(activeVertices) || activeVertices.length < 3) return null;
+
+  const cacheKey = bldg;
+  const cached = buildingGeoCache.get(cacheKey);
   if (cached) return cached;
 
   const path = new Path2D();
@@ -165,8 +173,8 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   let sumY = 0;
   let validCount = 0;
 
-  for (let i = 0; i < bldg.vertices.length; i++) {
-    const v = bldg.vertices[i];
+  for (let i = 0; i < activeVertices.length; i++) {
+    const v = activeVertices[i];
     if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y)) continue;
     if (validCount === 0) {
       path.moveTo(v.x, v.y);
@@ -185,7 +193,7 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
 
   if (validCount < 3) return null;
 
-  const interior = getPolygonInteriorPoint(bldg.vertices);
+  const interior = getPolygonInteriorPoint(activeVertices);
 
   const res: BuildingCachedGeometry = {
     path,
@@ -196,7 +204,7 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
     centerX: interior.x,
     centerY: interior.y,
   };
-  buildingGeoCache.set(bldg, res);
+  buildingGeoCache.set(cacheKey, res);
   return res;
 }
 
@@ -488,12 +496,19 @@ export function renderBuildings(
         const bldgMaxH = bldg.defaultHeight || 0;
         const segHTop = seg.hTop ?? bldgMaxH;
 
-        // 1. Sprawdzenie uskoku w ramach tego samego budynku
-        const isIntraBldgOccluded = seg.hTop !== undefined && bldgMaxH > 0 && seg.hTop < bldgMaxH - 0.01;
-
-        // 2. Zbierz wielokąty wyższych budynków
+        // Zbierz wielokąty wszystkich wyższych kondygnacji (tego samego lub innych budynków)
         const higherPolys: any[] = [];
         if (!isBoundary && !isPlayground) {
+          // A. Wyższe kondygnacje tego samego budynku (np. nadwieszenia, wykusze powyżej)
+          if (Array.isArray(bldg.storyPolygons)) {
+            for (const sf of bldg.storyPolygons) {
+              if (sf.hTop > segHTop + 0.05 && Array.isArray(sf.polygon) && sf.polygon.length >= 3) {
+                higherPolys.push(sf.polygon);
+              }
+            }
+          }
+
+          // B. Inne wyższe budynki w scenie
           for (const otherBldg of buildings) {
             if (otherBldg.id === bldg.id || otherBldg.category === 'boundary') continue;
             const otherH = otherBldg.defaultHeight || 0;
@@ -557,15 +572,13 @@ export function renderBuildings(
           const { sx: px2, sy: py2 } = worldToScreen(part.p2.x, part.p2.y);
           if (!Number.isFinite(px1) || !Number.isFinite(py1) || !Number.isFinite(px2) || !Number.isFinite(py2)) continue;
 
-          const partOccluded = isIntraBldgOccluded || part.isOccluded;
-
           ctx.beginPath();
           ctx.moveTo(px1, py1);
           ctx.lineTo(px2, py2);
 
           if (isPlayground || isBoundary) {
             ctx.setLineDash([]);
-          } else if (isBalcony || partOccluded) {
+          } else if (isBalcony || part.isOccluded) {
             ctx.setLineDash([4, 3]);
           } else {
             ctx.setLineDash([]);

@@ -234,6 +234,41 @@ describe('modifierPipeline', () => {
     expect(endPoints[0].x).toBeCloseTo(6, 2);
     expect(endPoints[1].x).toBeCloseTo(10, 2);
   });
+
+  it('supports multiple modifiers of the same type (e.g. 2 bay windows on different edges)', () => {
+    const bldgWith2Bays: BuildingLoop = {
+      ...baseBuilding,
+      modifiers: [
+        {
+          id: 'bay-1',
+          type: 'bay_window',
+          enabled: true,
+          width: 4.0,
+          projection: 1.5,
+          storiesCount: 0,
+          edgeIndex: 0,
+          sideAngle: 90,
+          positionRatio: 0.5,
+        },
+        {
+          id: 'bay-2',
+          type: 'bay_window',
+          enabled: true,
+          width: 3.0,
+          projection: 1.0,
+          storiesCount: 0,
+          edgeIndex: 2, // on opposite edge (10,10)->(0,10)
+          sideAngle: 45,
+          positionRatio: 0.5,
+        },
+      ],
+    };
+
+    const res = applyBuildingModifiers(bldgWith2Bays);
+    expect(res.storyPolygons.length).toBe(5);
+    // Story 0 should have both bay windows applied
+    expect(res.storyPolygons[0].polygon.length).toBe(12);
+  });
 });
 
 

@@ -1351,51 +1351,49 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               setActiveDirectionSnap(null);
             } else {
               setActiveOsnapSnap(null);
-              // Dla Wstęgi nie generujemy kierunków śledzenia podczas profilowania węzłów osi
-              if (isDirectionSnappingActive && !isSweep) {
+              if (isDirectionSnappingActive) {
                 const n = verts.length;
-                const prevIdx = (draggedVertexIndex - 1 + n) % n;
-                const nextIdx = (draggedVertexIndex + 1) % n;
+                let prevV: Point2D | null = null;
+                let nextV: Point2D | null = null;
+                let firstV: Point2D | null = null;
 
-                const prevV = prevIdx >= 0 && prevIdx < n ? verts[prevIdx] : null;
-                const nextV = nextIdx >= 0 && nextIdx < n ? verts[nextIdx] : null;
-
-                const snapPrev = prevV
-                  ? calculateDirectionSnap({
-                      currentMouseWorld: targetPt,
-                      originPoint: prevV,
-                      buildings,
-                      dominantDirections,
-                      polylineVertices: [prevV],
-                      worldToScreen,
-                      hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
-                      excludeBuildingId: selBldg.id,
-                    })
-                  : null;
-
-                const snapNext = nextV
-                  ? calculateDirectionSnap({
-                      currentMouseWorld: targetPt,
-                      originPoint: nextV,
-                      buildings,
-                      dominantDirections,
-                      polylineVertices: [nextV],
-                      worldToScreen,
-                      hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
-                      excludeBuildingId: selBldg.id,
-                    })
-                  : null;
-
-                let chosenSnap: import('../utils/directionSnapping').DirectionSnapResult | null = null;
-                if (snapPrev && snapNext) {
-                  chosenSnap = snapPrev.diffAngleDeg <= snapNext.diffAngleDeg ? snapPrev : snapNext;
+                if (isSweep) {
+                  // For open polyline / sweep:
+                  if (draggedVertexIndex > 0) prevV = verts[draggedVertexIndex - 1];
+                  if (draggedVertexIndex < n - 1) nextV = verts[draggedVertexIndex + 1];
+                  if (draggedVertexIndex !== 0) firstV = verts[0];
                 } else {
-                  chosenSnap = snapPrev || snapNext || null;
+                  // For closed polygon:
+                  const prevIdx = (draggedVertexIndex - 1 + n) % n;
+                  const nextIdx = (draggedVertexIndex + 1) % n;
+                  prevV = verts[prevIdx] || null;
+                  nextV = verts[nextIdx] || null;
+                  firstV = verts[0] || null;
                 }
 
-                if (chosenSnap) {
-                  targetPt = chosenSnap.snappedPoint;
-                  setActiveDirectionSnap(chosenSnap);
+                const primaryOrigin = prevV || nextV || firstV;
+                const secondaryOrigins: Point2D[] = [];
+                if (nextV && nextV !== primaryOrigin) secondaryOrigins.push(nextV);
+                if (firstV && firstV !== primaryOrigin && firstV !== nextV) secondaryOrigins.push(firstV);
+                if (prevV && prevV !== primaryOrigin && !secondaryOrigins.includes(prevV)) secondaryOrigins.push(prevV);
+
+                const snap = primaryOrigin
+                  ? calculateDirectionSnap({
+                      currentMouseWorld: targetPt,
+                      originPoint: primaryOrigin,
+                      secondaryOriginPoints: secondaryOrigins,
+                      buildings,
+                      dominantDirections,
+                      polylineVertices: verts,
+                      worldToScreen,
+                      hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                      excludeBuildingId: selBldg.id,
+                    })
+                  : null;
+
+                if (snap) {
+                  targetPt = snap.snappedPoint;
+                  setActiveDirectionSnap(snap);
                 } else {
                   setActiveDirectionSnap(null);
                 }
@@ -1700,9 +1698,16 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           }
 
           if (origin) {
+            const secondaryOrigins: Point2D[] = [];
+            if (drawingVertices.length > 1) {
+              // Add first vertex as secondary reference to easily snap perpendicular/intersection back to start
+              secondaryOrigins.push(drawingVertices[0]);
+            }
+
             const snap = calculateDirectionSnap({
               currentMouseWorld: mousePos,
               originPoint: origin,
+              secondaryOriginPoints: secondaryOrigins,
               buildings,
               dominantDirections,
               polylineVertices: (drawingMode === 'polyline' || drawingMode === 'sweep') ? drawingVertices : [],

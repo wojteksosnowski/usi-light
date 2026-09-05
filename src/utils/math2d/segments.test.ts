@@ -187,6 +187,46 @@ describe('raySegmentDistance2D vs raySegmentIntersection equivalence', () => {
       // [25..30] visible
       expect(parts[4].isOccluded).toBe(false);
     });
+
+    it('5. Negative setback (penthouse recess): base edge outside recessed penthouse is NOT occluded', () => {
+      // Base square: [0..10] x [0..10], height 12.5m
+      // Base edge: (0, 0) -> (10, 0)
+      const baseEdgeP1: Point2D = { x: 0, y: 0 };
+      const baseEdgeP2: Point2D = { x: 10, y: 0 };
+
+      // Penthouse (recessed -2m to inside): [2..8] x [2..8], height 15.0m
+      const penthousePoly: Point2D[] = [
+        { x: 2, y: 2 },
+        { x: 8, y: 2 },
+        { x: 8, y: 8 },
+        { x: 2, y: 8 },
+      ];
+
+      // Base edge is outside the penthouse polygon, so it is fully visible from above!
+      const parts = splitSegmentByOccludingPolygons(baseEdgeP1, baseEdgeP2, [penthousePoly], isInsideSquare);
+      expect(parts.length).toBe(1);
+      expect(parts[0].isOccluded).toBe(false);
+    });
+
+    it('6. Positive setback (cantilever / arcade): base edge under upper cantilever IS occluded', () => {
+      // Ground floor arcade (recessed inside): (2, 2) -> (8, 2)
+      const arcadeP1: Point2D = { x: 2, y: 2 };
+      const arcadeP2: Point2D = { x: 8, y: 2 };
+
+      // Upper cantilever floor (larger): [0..10] x [0..10], height 15.0m
+      const upperFloorPoly: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      // Arcade edge is inside the upper floor polygon, so it is occluded from above!
+      const parts = splitSegmentByOccludingPolygons(arcadeP1, arcadeP2, [upperFloorPoly], isInsideSquare);
+      expect(parts.length).toBe(1);
+      expect(parts[0].isOccluded).toBe(true);
+    });
   });
 });
+
 

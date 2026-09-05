@@ -172,10 +172,11 @@ Aplikacja implementuje dwa niezależne, weryfikowane wzajemnie silniki obliczeni
   * Obrót zaznaczonego budynku wokół środka ciężkości (lub wybranego pivotu) z precyzyjnym kątem w stopniach.
 * **Narzędzie Równoległego Przesuwania Krawędzi (Edge Parallel Edit / Stretch):**
   * Kliknięcie krawędzi budynku i przeciąganie wzdłuż jej normalnej w celu zmiany szerokości/głębokości traktu budynku bez deformacji pozostałych kątów.
-* **Stos Modyfikatorów 2.5D (Niedestrukcyjne Modelowanie):**
-  * **Uskok kondygnacji (`story_offset`):** odsuwanie rzutu wybranych kondygnacji (poddasza wycofane, podcienia parteru) z automatyczną generacją segmentów pośrednich.
+* **Stos Modyfikatorów 2.5D (Niedestrukcyjne Modelowanie Wielokrotne):**
+  * **Obsługa wielu modyfikatorów tego samego typu:** możliwość nakładania dowolnej liczby wykuszów (`bay_window`), uskoków (`story_offset`) czy stref (`zone_offset`) na pojedynczym obiekcie z zachowaniem kolejności w stosie modyfikatorów.
+  * **Uskok kondygnacji (`story_offset`):** odsuwanie rzutu wybranych kondygnacji (poddasza wycofane, podcienia parteru) z automatyczną generacją segmentów pośrednich i poprawnym cullingiem krawędzi.
   * **Strefa (`zone_offset`):** generowanie stref buforowych o dodatnim (na zewnątrz) lub ujemnym (do wnętrza) offsecie.
-  * **Wykusz (`bay_window`):** parametryczne modelowanie wykuszy elewacyjnych ze zmiennym kątem ścian bocznych (90°, 60°, 45°, 30°), regulowaną szerokością, wysunięciem, pozycją wzdłuż ściany i wyborem kondygnacji.
+  * **Wykusz (`bay_window`):** parametryczne modelowanie wykuszy elewacyjnych ze zmiennym kątem ścian bocznych (90°, 60°, 45°, 30°), regulowaną szerokością, wysunięciem, pozycją wzdłuż ściany i wyborem kondygnacji, ze spójnym wypełnieniem poligonu bryły.
 * **Analityczne Przesłanianie Krawędzi (Occlusion & Stacking):**
   * Automatyczny podział krawędzi na punkty przecięcia z wyższymi budynkami i rysowanie odcinków zakrytych linią przerywaną `[4, 3]`.
 * **Grupowanie i Łączenie Obiektów (Link / Group Buildings):**
@@ -198,7 +199,7 @@ Aplikacja implementuje dwa niezależne, weryfikowane wzajemnie silniki obliczeni
 * **Modalny Inspektor Punktu (Point Inspector Modal):**
   * Pełna diagnoza wybranego punktu pomiarowego.
   * **Dla § 12 (Przesłanianie):** Diagram kołowy (wachlarz) z podziałem na sektory wolne, zasłonięte i tolerowane, zestawienie odległości rzeczywistych i wymaganych $D_{req}$.
-  * **Dla § 56 (Nasłonecznienie):** Oś czasu minuta po minucie, azymuty i elewacje słońca, wskazanie przeszkód blokujących promienie oraz zestawienie godzinowe.
+  * **Dla § 56 (Nasłonecznienie):** Oś czasu minuta po minucie, azymuty i elewacje słońca, wskazanie przeszkód blokujących promienie oraz zestawienie godzinowych.
 
 ---
 
@@ -208,8 +209,10 @@ Aplikacja implementuje dwa niezależne, weryfikowane wzajemnie silniki obliczeni
   * Możliwość kliknięcia w kierunki kardynalne (N, S, E, W) lub obrót widoku CAD.
 * **Obrót Widoku Projektowego (View Rotation / Orient to Facade):**
   * Obracanie całego rzutu CAD pod dowolnym kątem lub automatyczne wyrównanie rzutu do lica wybranej ściany (klawisze `[` / `]`, reset `0`).
-* **Przyciąganie i Precyzja (Snapping Engine):**
-  * Przyciąganie do wierzchołków (*Vertex Snap*), krawędzi (*Edge Snap*) oraz siatki modułowej (*Grid Snap*).
+* **Przyciąganie i Precyzja (Snapping Engine & OTRACK):**
+  * **Przyciąganie OSNAP:** wierzchołki (*Vertex Snap*), środki krawędzi (*Midpoint Snap*), rzut prostopadły i krawędzie (*Edge Snap*), siatka modułowa (*Grid Snap*).
+  * **Śledzenie kątowe i kierunkowe (Direction Snapping):** natychmiastowe chwytanie relacji 0° (równoległość) i 90° (prostopadłość) względem sąsiadujących krawędzi oraz pierwszego wierzchołka zarówno podczas rysowania, jak i edycji/przeciągania wierzchołków polilinii, wstęg (sweep) i poligonów.
+  * **Dual-Guide Intersection Snapping:** automatyczne dociąganie do punktu przecięcia dwóch aktywnych linii pomocniczych (np. z wierzchołka poprzedniego i następnego lub pierwszego) z graficznym wskaźnikiem przecięcia CAD `✕`.
   * Blokada osi ortogonalnych (klawisz `Shift` wymuszający idealny ruch wzdłuż osi X/Y).
   * Zoom kółkiem myszy w punkcie kursora, przesuwanie widoku środkowym/prawym przyciskiem myszy lub spacją, funkcja *Dopasuj do widoku (Fit View)*.
 

@@ -334,8 +334,28 @@ export function renderDrawingToolPreview(
         }
       }
 
+      // Render Second Guide Line if this is an intersection of two guides
+      if (directionSnapResult.secondGuideLine) {
+        const sg = directionSnapResult.secondGuideLine;
+        const sp1 = worldToScreen(sg.p1.x, sg.p1.y);
+        const sp2 = worldToScreen(sg.p2.x, sg.p2.y);
+        if (Number.isFinite(sp1.sx) && Number.isFinite(sp2.sx)) {
+          ctx.beginPath();
+          ctx.strokeStyle = '#c084fc';
+          ctx.lineWidth = APP_CONFIG.directionSnapping.guideLineWidth || 1.6;
+          ctx.setLineDash([6, 4]);
+          ctx.moveTo(sp1.sx, sp1.sy);
+          ctx.lineTo(sp2.sx, sp2.sy);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+
+      const isIntersection = directionSnapResult.relationType === 'guide_intersection';
       const isStatistical = directionSnapResult.relationType === 'dominant' || directionSnapResult.isStatistical === true;
-      const guideColor = isStatistical
+      const guideColor = isIntersection
+        ? '#c084fc'
+        : isStatistical
         ? (APP_CONFIG.directionSnapping.statisticalGuideColor || '#f59e0b')
         : (APP_CONFIG.directionSnapping.edgeGuideColor || '#38bdf8');
       const guideDash = isStatistical
@@ -351,24 +371,47 @@ export function renderDrawingToolPreview(
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.beginPath();
-      ctx.arc(pSnap.sx, pSnap.sy, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = guideColor;
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      if (isIntersection) {
+        // Intersection Glyphs (Hourglass / Crossed Rings)
+        ctx.beginPath();
+        ctx.arc(pSnap.sx, pSnap.sy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(192, 132, 252, 0.35)';
+        ctx.fill();
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-      const relationLabel =
-        directionSnapResult.relationType === 'perpendicular'
-          ? '⟂ 90° (Prostopadły do ściany)'
-          : directionSnapResult.relationType === 'parallel'
-          ? '∥ (Równoległy do ściany)'
-          : '📊 (Siatka statystyczna)';
+        ctx.beginPath();
+        ctx.moveTo(pSnap.sx - 4, pSnap.sy - 4);
+        ctx.lineTo(pSnap.sx + 4, pSnap.sy + 4);
+        ctx.moveTo(pSnap.sx + 4, pSnap.sy - 4);
+        ctx.lineTo(pSnap.sx - 4, pSnap.sy + 4);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(pSnap.sx, pSnap.sy, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = guideColor;
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      const relationLabel = isIntersection
+        ? '✕ Przecięcie 2 prowadnic'
+        : directionSnapResult.relationType === 'perpendicular'
+        ? '⟂ 90° (Prostopadły do ściany)'
+        : directionSnapResult.relationType === 'parallel'
+        ? '∥ (Równoległy do ściany)'
+        : '📊 (Siatka statystyczna)';
 
       const distLabel = `${directionSnapResult.distanceFromOrigin.toFixed(2)} m`;
       const angleLabel = `${directionSnapResult.guideAngleDeg.toFixed(1)}°`;
-      const badgeText = `${relationLabel} | ${angleLabel} | ${distLabel}`;
+      const badgeText = isIntersection
+        ? `✕ Przecięcie osi (${directionSnapResult.guideAngleDeg.toFixed(1)}° ✕ ${directionSnapResult.secondGuideLine?.angleDeg?.toFixed(1) || ''}°)`
+        : `${relationLabel} | ${angleLabel} | ${distLabel}`;
 
       ctx.font = 'bold 10px Inter, sans-serif';
       const tw = ctx.measureText(badgeText).width;
@@ -383,7 +426,7 @@ export function renderDrawingToolPreview(
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = isStatistical ? '#fef3c7' : '#e0f2fe';
+      ctx.fillStyle = isIntersection ? '#f3e8ff' : isStatistical ? '#fef3c7' : '#e0f2fe';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(badgeText, bx + 6, by);

@@ -277,17 +277,14 @@ export const CadToolBar: React.FC = () => {
               }}
               onClick={() => {
                 if (!isStoryEligible) return;
-                const hasExisting = selectedBuilding.modifiers && selectedBuilding.modifiers.some((m) => m.type === 'story_offset');
-                if (!hasExisting) {
-                  const newMod = {
-                    id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                    type: 'story_offset' as const,
-                    enabled: true,
-                    distance: -2.0,
-                    storiesCount: -1,
-                  };
-                  addBuildingModifier(selectedBuilding.id, newMod);
-                }
+                const newMod = {
+                  id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'story_offset' as const,
+                  enabled: true,
+                  distance: -2.0,
+                  storiesCount: -1,
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
                 setShowModifiersPanel(true);
               }}
               title={
@@ -312,18 +309,15 @@ export const CadToolBar: React.FC = () => {
               }}
               onClick={() => {
                 if (!isEligible) return;
-                const hasExisting = selectedBuilding.modifiers && selectedBuilding.modifiers.some((m) => m.type === 'zone_offset');
-                if (!hasExisting) {
-                  const newMod = {
-                    id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                    type: 'zone_offset' as const,
-                    enabled: true,
-                    distance: 4.0,
-                    areaType: 'plot' as const,
-                    name: 'Strefa buforowa',
-                  };
-                  addBuildingModifier(selectedBuilding.id, newMod);
-                }
+                const newMod = {
+                  id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'zone_offset' as const,
+                  enabled: true,
+                  distance: 4.0,
+                  areaType: 'plot' as const,
+                  name: 'Strefa buforowa',
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
                 setShowModifiersPanel(true);
               }}
               title={
@@ -346,18 +340,15 @@ export const CadToolBar: React.FC = () => {
               }}
               onClick={() => {
                 if (!isEligible) return;
-                const hasExisting = selectedBuilding.modifiers && selectedBuilding.modifiers.some((m) => m.type === 'bay_window');
-                if (!hasExisting) {
-                  const newMod = {
-                    id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                    type: 'bay_window' as const,
-                    enabled: true,
-                    width: 4.0,
-                    projection: 1.5,
-                    storiesCount: 0,
-                  };
-                  addBuildingModifier(selectedBuilding.id, newMod);
-                }
+                const newMod = {
+                  id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'bay_window' as const,
+                  enabled: true,
+                  width: 4.0,
+                  projection: 1.5,
+                  storiesCount: 0,
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
                 setShowModifiersPanel(true);
               }}
               title={
