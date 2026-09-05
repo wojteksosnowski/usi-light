@@ -2,7 +2,7 @@ import { CadRenderContext } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { generateSweepPolygon, SweepAlignment } from '../../../utils/math2d';
 import { DirectionSnapResult } from '../../../utils/directionSnapping';
-import { OsnapSnapResult, BuildingDragSnapResult } from '../../../engine/snapping';
+import { OsnapSnapResult, BuildingDragSnapResult, EdgeDragSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
 
 /**
@@ -20,7 +20,7 @@ export function renderDrawingToolPreview(
   directionSnapResult?: DirectionSnapResult | null,
   selectedVertexIndex?: number | null,
   osnapSnapResult?: OsnapSnapResult | null,
-  buildingDragSnap?: BuildingDragSnapResult | null,
+  buildingDragSnap?: BuildingDragSnapResult | EdgeDragSnapResult | null,
   sweepWidth: number = 5.0,
   sweepAlignment: SweepAlignment = 'center'
 ) {
@@ -40,6 +40,22 @@ export function renderDrawingToolPreview(
         ctx.setLineDash([6, 4]);
         ctx.moveTo(g1.sx, g1.sy);
         ctx.lineTo(g2.sx, g2.sy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Second Collinear Extension Guideline (Dual-Collinear Lock)
+    if ('secondGuideline' in buildingDragSnap && buildingDragSnap.secondGuideline) {
+      const sg1 = worldToScreen(buildingDragSnap.secondGuideline.p1.x, buildingDragSnap.secondGuideline.p1.y);
+      const sg2 = worldToScreen(buildingDragSnap.secondGuideline.p2.x, buildingDragSnap.secondGuideline.p2.y);
+      if (Number.isFinite(sg1.sx) && Number.isFinite(sg2.sx)) {
+        ctx.beginPath();
+        ctx.strokeStyle = APP_CONFIG.osnap?.collinearColor || '#a855f7';
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([6, 4]);
+        ctx.moveTo(sg1.sx, sg1.sy);
+        ctx.lineTo(sg2.sx, sg2.sy);
         ctx.stroke();
         ctx.setLineDash([]);
       }

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Point2D, PinnedFacadePoint, AnalysisPointResult } from '../types/geometry';
-import { isPointInPolygon, computeCombinedShadowEnvelope, adjustEdgeLength } from '@/utils/math2d';
+import { isPointInPolygon, computeCombinedShadowEnvelope, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW } from '@/utils/math2d';
 import { computeHourlyShadowsLive } from '@/utils/math2d/shadowEnvelope';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
@@ -18,7 +18,7 @@ import { renderSatelliteMap } from './cad/renderers/satelliteMapRenderer';
 import { renderPlaygroundSunlightVisualizations } from './cad/renderers/playgroundRenderer';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
-import { calculateDirectionSnap } from '../utils/directionSnapping';
+import { calculateDirectionSnap, DirectionSnapResult } from '../utils/directionSnapping';
 import {
   CachedLineEquation,
   buildLineBufferFromBuildings,
@@ -28,10 +28,12 @@ import {
 import {
   OsnapSnapResult,
   BuildingDragSnapResult,
+  EdgeDragSnapResult,
   SnapCoordinator,
   evaluateOsnapSnapWithCoordinator,
   evaluateCollinearAndParallelLock,
   evaluateBuildingDragMultiSnap,
+  evaluateEdgeDragSnap,
 } from '../engine/snapping';
 import { APP_CONFIG } from '../config/appConfig';
 
@@ -141,7 +143,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   // Advanced OSNAP & OTRACK state
   const snapCoordinatorRef = useRef<SnapCoordinator>(new SnapCoordinator());
   const [activeOsnapSnap, setActiveOsnapSnap] = useState<OsnapSnapResult | null>(null);
-  const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | null>(null);
+  const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | EdgeDragSnapResult | null>(null);
   const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
   const [hoveredRotateVertexIndex, setHoveredRotateVertexIndex] = useState<number | null>(null);
 
@@ -1345,61 +1347,130 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               });
             }
 
-            if (osnap) {
+            const n = verts.length;
+            let prevV: Point2D | null = null;
+            let nextV: Point2D | null = null;
+            let firstV: Point2D | null = null;
+            const staticSegments: { p1: Point2D; p2: Point2D; label?: string }[] = [];
+
+            if (isSweep) {
+              // For open polyline / sweep:
+              if (draggedVertexIndex > 0) prevV = verts[draggedVertexIndex - 1];
+              if (draggedVertexIndex < n - 1) nextV = verts[draggedVertexIndex + 1];
+              if (draggedVertexIndex !== 0) firstV = verts[0];
+
+              // Add incoming static segment before prevV
+              if (draggedVertexIndex >= 2) {
+                staticSegments.push({
+                  p1: verts[draggedVertexIndex - 2],
+                  p2: verts[draggedVertexIndex - 1],
+                  label: 'Poprzedni odcinek (Równoległy)',
+                });
+              }
+              // Add outgoing static segment after nextV
+              if (draggedVertexIndex <= n - 3) {
+                staticSegments.push({
+                  p1: verts[draggedVertexIndex + 1],
+                  p2: verts[draggedVertexIndex + 2],
+                  label: 'Kolejny odcinek (Równoległy)',
+                });
+              }
+              // Add all other static segments
+              for (let i = 0; i < n - 1; i++) {
+                if (i !== draggedVertexIndex - 1 && i !== draggedVertexIndex && i !== draggedVertexIndex - 2 && i !== draggedVertexIndex + 1) {
+                  staticSegments.push({
+                    p1: verts[i],
+                    p2: verts[i + 1],
+                    label: `Odcinek ${i + 1} (Równoległy)`,
+                  });
+                }
+              }
+            } else {
+              // For closed polygon:
+              const prevIdx = (draggedVertexIndex - 1 + n) % n;
+              const nextIdx = (draggedVertexIndex + 1) % n;
+              prevV = verts[prevIdx] || null;
+              nextV = verts[nextIdx] || null;
+              firstV = verts[0] || null;
+
+              // Incoming static edge before prevV:
+              if (n >= 4) {
+                const prevPrevIdx = (draggedVertexIndex - 2 + n) % n;
+                staticSegments.push({
+                  p1: verts[prevPrevIdx],
+                  p2: verts[prevIdx],
+                  label: 'Poprzednia ściana (Równoległy)',
+                });
+                const nextNextIdx = (draggedVertexIndex + 2) % n;
+                staticSegments.push({
+                  p1: verts[nextIdx],
+                  p2: verts[nextNextIdx],
+                  label: 'Kolejna ściana (Równoległy)',
+                });
+              }
+
+              // All other static edges:
+              for (let i = 0; i < n; i++) {
+                const incomingIdx = (draggedVertexIndex - 1 + n) % n;
+                const outgoingIdx = draggedVertexIndex;
+                const prevIncomingIdx = (draggedVertexIndex - 2 + n) % n;
+                const nextOutgoingIdx = (draggedVertexIndex + 1) % n;
+                if (i !== incomingIdx && i !== outgoingIdx && i !== prevIncomingIdx && i !== nextOutgoingIdx) {
+                  staticSegments.push({
+                    p1: verts[i],
+                    p2: verts[(i + 1) % n],
+                    label: `Ściana ${i + 1} (Równoległy)`,
+                  });
+                }
+              }
+            }
+
+            const primaryOrigin = prevV || nextV || firstV;
+            const secondaryOrigins: Point2D[] = [];
+            if (nextV && nextV !== primaryOrigin) secondaryOrigins.push(nextV);
+            if (firstV && firstV !== primaryOrigin && firstV !== nextV) secondaryOrigins.push(firstV);
+            if (prevV && prevV !== primaryOrigin && !secondaryOrigins.includes(prevV)) secondaryOrigins.push(prevV);
+
+            let dirSnap: DirectionSnapResult | null = null;
+            if (isDirectionSnappingActive && primaryOrigin && !(e.ctrlKey || e.metaKey)) {
+              dirSnap = calculateDirectionSnap({
+                currentMouseWorld: targetPt,
+                originPoint: primaryOrigin,
+                secondaryOriginPoints: secondaryOrigins,
+                buildings,
+                dominantDirections,
+                polylineVertices: [], // Nie przekazujemy dynamicznych ruchomych wierzchołków
+                staticReferenceSegments: staticSegments,
+                worldToScreen,
+                hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                excludeBuildingId: selBldg.id,
+              });
+            }
+
+            // Hierarchia priorytetów:
+            // 1. Endpoint / Midpoint OSNAP (narożnik/środek)
+            // 2. Przecięcie 2 prowadnic (Dual-guide intersection)
+            // 3. Pojedyncza prowadnica kątowa
+            // 4. Dociągnięcie do krawędzi (nearest edge)
+            if (osnap && (osnap.type === 'endpoint' || osnap.type === 'midpoint')) {
+              targetPt = osnap.snappedPoint;
+              setActiveOsnapSnap(osnap);
+              setActiveDirectionSnap(null);
+            } else if (dirSnap && dirSnap.relationType === 'guide_intersection') {
+              targetPt = dirSnap.snappedPoint;
+              setActiveDirectionSnap(dirSnap);
+              setActiveOsnapSnap(null);
+            } else if (dirSnap) {
+              targetPt = dirSnap.snappedPoint;
+              setActiveDirectionSnap(dirSnap);
+              setActiveOsnapSnap(null);
+            } else if (osnap) {
               targetPt = osnap.snappedPoint;
               setActiveOsnapSnap(osnap);
               setActiveDirectionSnap(null);
             } else {
               setActiveOsnapSnap(null);
-              if (isDirectionSnappingActive) {
-                const n = verts.length;
-                let prevV: Point2D | null = null;
-                let nextV: Point2D | null = null;
-                let firstV: Point2D | null = null;
-
-                if (isSweep) {
-                  // For open polyline / sweep:
-                  if (draggedVertexIndex > 0) prevV = verts[draggedVertexIndex - 1];
-                  if (draggedVertexIndex < n - 1) nextV = verts[draggedVertexIndex + 1];
-                  if (draggedVertexIndex !== 0) firstV = verts[0];
-                } else {
-                  // For closed polygon:
-                  const prevIdx = (draggedVertexIndex - 1 + n) % n;
-                  const nextIdx = (draggedVertexIndex + 1) % n;
-                  prevV = verts[prevIdx] || null;
-                  nextV = verts[nextIdx] || null;
-                  firstV = verts[0] || null;
-                }
-
-                const primaryOrigin = prevV || nextV || firstV;
-                const secondaryOrigins: Point2D[] = [];
-                if (nextV && nextV !== primaryOrigin) secondaryOrigins.push(nextV);
-                if (firstV && firstV !== primaryOrigin && firstV !== nextV) secondaryOrigins.push(firstV);
-                if (prevV && prevV !== primaryOrigin && !secondaryOrigins.includes(prevV)) secondaryOrigins.push(prevV);
-
-                const snap = primaryOrigin
-                  ? calculateDirectionSnap({
-                      currentMouseWorld: targetPt,
-                      originPoint: primaryOrigin,
-                      secondaryOriginPoints: secondaryOrigins,
-                      buildings,
-                      dominantDirections,
-                      polylineVertices: verts,
-                      worldToScreen,
-                      hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
-                      excludeBuildingId: selBldg.id,
-                    })
-                  : null;
-
-                if (snap) {
-                  targetPt = snap.snappedPoint;
-                  setActiveDirectionSnap(snap);
-                } else {
-                  setActiveDirectionSnap(null);
-                }
-              } else {
-                setActiveDirectionSnap(null);
-              }
+              setActiveDirectionSnap(null);
             }
 
             if (e.ctrlKey || e.metaKey) {
@@ -1683,50 +1754,63 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         });
       }
 
-      if (osnap) {
+      let dirSnap: DirectionSnapResult | null = null;
+      if (isDirectionSnappingActive) {
+        let origin: Point2D | null = null;
+        if (drawingMode === 'rectangle' && drawingVertices.length === 1) {
+          origin = drawingVertices[0];
+        } else if ((drawingMode === 'polyline' || drawingMode === 'sweep') && drawingVertices.length > 0) {
+          origin = drawingVertices[drawingVertices.length - 1];
+        }
+
+        if (origin) {
+          const secondaryOrigins: Point2D[] = [];
+          if (drawingVertices.length > 1) {
+            // Add first vertex and previous vertices as secondary references
+            secondaryOrigins.push(drawingVertices[0]);
+            for (let vIdx = 1; vIdx < drawingVertices.length - 1; vIdx++) {
+              secondaryOrigins.push(drawingVertices[vIdx]);
+            }
+          }
+
+          dirSnap = calculateDirectionSnap({
+            currentMouseWorld: mousePos,
+            originPoint: origin,
+            secondaryOriginPoints: secondaryOrigins,
+            buildings,
+            dominantDirections,
+            polylineVertices: (drawingMode === 'polyline' || drawingMode === 'sweep') ? drawingVertices : [],
+            worldToScreen,
+            hoveredBuildingId: hoveredBldgId,
+            selectedBuildingId: selectedBuildingId ?? undefined,
+          });
+        }
+      }
+
+      // Hierarchia priorytetów:
+      // 1. Endpoint / Midpoint OSNAP
+      // 2. Przecięcie 2 prowadnic
+      // 3. Pojedyncza prowadnica kątowa
+      // 4. Nearest edge OSNAP
+      if (osnap && (osnap.type === 'endpoint' || osnap.type === 'midpoint')) {
+        mousePos = osnap.snappedPoint;
+        setActiveOsnapSnap(osnap);
+        setActiveDirectionSnap(null);
+      } else if (dirSnap && dirSnap.relationType === 'guide_intersection') {
+        mousePos = dirSnap.snappedPoint;
+        setActiveDirectionSnap(dirSnap);
+        setActiveOsnapSnap(null);
+      } else if (dirSnap) {
+        mousePos = dirSnap.snappedPoint;
+        setActiveDirectionSnap(dirSnap);
+        setActiveOsnapSnap(null);
+      } else if (osnap) {
         mousePos = osnap.snappedPoint;
         setActiveOsnapSnap(osnap);
         setActiveDirectionSnap(null);
       } else {
         setActiveOsnapSnap(null);
-        if (isDirectionSnappingActive) {
-          let origin: Point2D | null = null;
-          if (drawingMode === 'rectangle' && drawingVertices.length === 1) {
-            origin = drawingVertices[0];
-          } else if ((drawingMode === 'polyline' || drawingMode === 'sweep') && drawingVertices.length > 0) {
-            origin = drawingVertices[drawingVertices.length - 1];
-          }
-
-          if (origin) {
-            const secondaryOrigins: Point2D[] = [];
-            if (drawingVertices.length > 1) {
-              // Add first vertex as secondary reference to easily snap perpendicular/intersection back to start
-              secondaryOrigins.push(drawingVertices[0]);
-            }
-
-            const snap = calculateDirectionSnap({
-              currentMouseWorld: mousePos,
-              originPoint: origin,
-              secondaryOriginPoints: secondaryOrigins,
-              buildings,
-              dominantDirections,
-              polylineVertices: (drawingMode === 'polyline' || drawingMode === 'sweep') ? drawingVertices : [],
-              worldToScreen,
-              hoveredBuildingId: hoveredBldgId,
-              selectedBuildingId: selectedBuildingId ?? undefined,
-            });
-            if (snap) {
-              mousePos = snap.snappedPoint;
-              setActiveDirectionSnap(snap);
-            } else {
-              setActiveDirectionSnap(null);
-            }
-          } else {
-            setActiveDirectionSnap(null);
-          }
-        } else {
-          setActiveDirectionSnap(null);
-        }
+        setActiveDirectionSnap(null);
       }
 
       setCurrentMouseWorld(mousePos);
@@ -1888,6 +1972,44 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         dwx = Math.round(dwx * 10) / 10;
         dwy = Math.round(dwy * 10) / 10;
       }
+
+      if (isOsnapActive && !(e.ctrlKey || e.metaKey)) {
+        const bldg = buildings.find((b) => b.id === draggingEdge.buildingId);
+        if (bldg) {
+          const isSweep = Array.isArray(bldg.sweepPath) && bldg.sweepPath.length >= 2;
+          const pts = isSweep ? bldg.sweepPath! : bldg.vertices;
+          const numEdges = isSweep ? pts.length - 1 : pts.length;
+          if (pts && draggingEdge.edgeIndex >= 0 && draggingEdge.edgeIndex < numEdges) {
+            const p1 = pts[draggingEdge.edgeIndex];
+            const p2 = isSweep ? pts[draggingEdge.edgeIndex + 1] : pts[(draggingEdge.edgeIndex + 1) % pts.length];
+            const isCCW = isSweep ? true : isPolygonCCW(pts);
+            const normal = calculateOutwardNormal(p1, p2, isCCW);
+
+            const edgeSnap = evaluateEdgeDragSnap({
+              edgeP1: p1,
+              edgeP2: p2,
+              normal,
+              buildingId: bldg.id,
+              edgeIndex: draggingEdge.edgeIndex,
+              tentativeDelta: { dx: dwx, dy: dwy },
+              referenceBuffer: lineBuffer,
+              distanceThresholdMeters: APP_CONFIG.osnap.collinearDistanceToleranceMeters,
+              angleToleranceRad: (APP_CONFIG.osnap.parallelAngleToleranceDeg * Math.PI) / 180,
+            });
+
+            if (edgeSnap) {
+              dwx = edgeSnap.deltaOffset.dx;
+              dwy = edgeSnap.deltaOffset.dy;
+              setActiveBuildingDragSnap(edgeSnap);
+            } else {
+              setActiveBuildingDragSnap(null);
+            }
+          }
+        }
+      } else {
+        if (activeBuildingDragSnap) setActiveBuildingDragSnap(null);
+      }
+
       onBuildingEdgeMove?.(draggingEdge.buildingId, draggingEdge.edgeIndex, dwx, dwy);
       setDragStart({ x: world.wx, y: world.wy });
       return;

@@ -261,5 +261,33 @@ describe('directionSnapping', () => {
     expect(snap?.snappedPoint.y).toBeCloseTo(0, 2);
     expect(snap?.secondGuideLine).toBeDefined();
   });
+
+  it('uses staticReferenceSegments without creating moving oblique axes', () => {
+    const origin = { x: 0, y: 0 };
+    const mouse = { x: 7, y: 8 }; // arbitrary position
+    const staticSegs = [
+      { p1: { x: 0, y: 0 }, p2: { x: 10, y: 0 }, label: 'Dolna krawędź' },
+      { p1: { x: 10, y: 0 }, p2: { x: 10, y: 10 }, label: 'Prawa krawędź' },
+    ];
+
+    const candidates = collectTargetDirections(
+      origin,
+      mouse,
+      [],
+      [],
+      [], // polylineVertices empty
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      staticSegs
+    );
+
+    const angles = candidates.map((c) => Math.round(c.angleDeg));
+    expect(angles).toContain(0);
+    expect(angles).toContain(90);
+    // Should NOT contain oblique angle atan2(8, 7) ≈ 48.8°
+    expect(angles).not.toContain(49);
+  });
 });
 

@@ -24,6 +24,7 @@ export interface CalculateDirectionSnapOptions {
   buildings?: BuildingLoop[];
   dominantDirections?: DominantDirection[];
   polylineVertices?: Point2D[];
+  staticReferenceSegments?: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[];
   worldToScreen?: (wx: number, wy: number) => { sx: number; sy: number };
   angleToleranceDeg?: number;
   screenSnapThresholdPx?: number;
@@ -104,10 +105,11 @@ export function lineIntersection2D(
 /**
  * Gathers candidate target direction axes (in degrees [0, 180)) with strict spatial and hierarchy prioritization:
  * 1. Active polyline segments (0° parallel and 90° exact perpendicular).
- * 2. Currently hovered / intersected building walls and selected building static walls.
- * 3. Nearest neighbouring building walls (sorted by spatial proximity).
- * 4. Dominant orthogonal axes from global facade statistics (theta and theta + 90°).
- * 5. Default Cartesian Ortho axes (0° / 90°).
+ * 2. Static reference segments (e.g. from currently edited polygon/sweep).
+ * 3. Currently hovered / intersected building walls and selected building static walls.
+ * 4. Nearest neighbouring building walls (sorted by spatial proximity).
+ * 5. Dominant orthogonal axes from global facade statistics (theta and theta + 90°).
+ * 6. Default Cartesian Ortho axes (0° / 90°).
  */
 export function collectTargetDirections(
   origin: Point2D,
@@ -118,7 +120,8 @@ export function collectTargetDirections(
   hoveredBuildingId?: string,
   selectedBuildingId?: string,
   excludeBuildingId?: string,
-  excludeSegmentIndices?: number[]
+  excludeSegmentIndices?: number[],
+  staticReferenceSegments: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[] = []
 ): DirectionCandidate[] {
   const candidates: DirectionCandidate[] = [];
   const seenAngles: number[] = [];
@@ -191,6 +194,24 @@ export function collectTargetDirections(
         basePri,
         { p1: pA, p2: pB }
       );
+    }
+  }
+
+  // 2. Static reference segments (np. pozostałe stałe krawędzie edytowanego wielokąta/wstęgi)
+  if (Array.isArray(staticReferenceSegments) && staticReferenceSegments.length > 0) {
+    for (const refSeg of staticReferenceSegments) {
+      const sdx = refSeg.p2.x - refSeg.p1.x;
+      const sdy = refSeg.p2.y - refSeg.p1.y;
+      if (Math.hypot(sdx, sdy) >= 0.05) {
+        const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+        const segAng = isNearDominant(rawSegAng) && domPair
+          ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
+          : rawSegAng;
+        const sLabel = refSeg.label || 'Krawędź (Równoległy)';
+        const pLabel = refSeg.label ? refSeg.label.replace('Równoległy', 'Prostopadły 90°') : 'Krawędź (Prostopadły 90°)';
+        addCandidate(segAng, 'parallel', sLabel, 3, refSeg);
+        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', pLabel, 3, refSeg);
+      }
     }
   }
 
@@ -316,6 +337,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     buildings = [],
     dominantDirections = [],
     polylineVertices = [],
+    staticReferenceSegments = [],
     worldToScreen,
     angleToleranceDeg = APP_CONFIG.directionSnapping.angleToleranceDeg,
     screenSnapThresholdPx = APP_CONFIG.directionSnapping.screenSnapThresholdPx,
@@ -348,13 +370,17 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     hoveredBuildingId,
     selectedBuildingId,
     excludeBuildingId,
-    excludeSegmentIndices
+    excludeSegmentIndices,
+    staticReferenceSegments
   );
 
   const guideHalfLength = APP_CONFIG.directionSnapping.guideLineLengthMeters;
 
   // 1. Sprawdzenie przecięcia dwóch prowadnic (Dual-Guide Intersection Snapping)
   if (secondaryOriginPoints && secondaryOriginPoints.length > 0) {
+    let bestIntersection: DirectionSnapResult | null = null;
+    let bestIntScore = 999999;
+
     for (const secOrigin of secondaryOriginPoints) {
       if (Math.hypot(secOrigin.x - originPoint.x, secOrigin.y - originPoint.y) < 0.05) continue;
 
@@ -367,23 +393,30 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         hoveredBuildingId,
         selectedBuildingId,
         excludeBuildingId,
-        excludeSegmentIndices
+        excludeSegmentIndices,
+        staticReferenceSegments
       );
 
       for (const cand1 of primaryCandidates) {
         const rad1 = (cand1.angleDeg * Math.PI) / 180;
         for (const cand2 of secCandidates) {
+          // Odrzucamy proste prawie równoległe (kąt < 10° lub > 170°)
+          const aDiff = angleDiff180(cand1.angleDeg, cand2.angleDeg);
+          if (aDiff < 10 || aDiff > 170) continue;
+
           const rad2 = (cand2.angleDeg * Math.PI) / 180;
           const intPt = lineIntersection2D(originPoint, rad1, secOrigin, rad2);
           if (!intPt) continue;
 
           // Odległość punktu przecięcia od kursora
           const intDist = Math.hypot(currentMouseWorld.x - intPt.x, currentMouseWorld.y - intPt.y);
+          let screenDistPx = intDist * 25; // fallback gdy brak worldToScreen
           let matchScreen = true;
+
           if (worldToScreen) {
             const sMouse = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
             const sInt = worldToScreen(intPt.x, intPt.y);
-            const screenDistPx = Math.hypot(sMouse.sx - sInt.sx, sMouse.sy - sInt.sy);
+            screenDistPx = Math.hypot(sMouse.sx - sInt.sx, sMouse.sy - sInt.sy);
             if (screenDistPx > (screenSnapThresholdPx || 14) * 1.5) {
               matchScreen = false;
             }
@@ -392,36 +425,44 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
           }
 
           if (matchScreen) {
-            const cos1 = Math.cos(rad1);
-            const sin1 = Math.sin(rad1);
-            const cos2 = Math.cos(rad2);
-            const sin2 = Math.sin(rad2);
+            const score = screenDistPx + (cand1.priority + cand2.priority) * 0.4;
+            if (score < bestIntScore) {
+              bestIntScore = score;
+              const cos1 = Math.cos(rad1);
+              const sin1 = Math.sin(rad1);
+              const cos2 = Math.cos(rad2);
+              const sin2 = Math.sin(rad2);
 
-            return {
-              snappedPoint: intPt,
-              originPoint: { x: originPoint.x, y: originPoint.y },
-              guideAngleDeg: cand1.angleDeg,
-              relationType: 'guide_intersection',
-              isStatistical: false,
-              guideLine: {
-                p1: { x: originPoint.x - guideHalfLength * cos1, y: originPoint.y - guideHalfLength * sin1 },
-                p2: { x: originPoint.x + guideHalfLength * cos1, y: originPoint.y + guideHalfLength * sin1 },
-              },
-              secondGuideLine: {
-                originPoint: secOrigin,
-                angleDeg: cand2.angleDeg,
-                label: cand2.sourceLabel,
-                p1: { x: secOrigin.x - guideHalfLength * cos2, y: secOrigin.y - guideHalfLength * sin2 },
-                p2: { x: secOrigin.x + guideHalfLength * cos2, y: secOrigin.y + guideHalfLength * sin2 },
-              },
-              distanceFromOrigin: Math.hypot(intPt.x - originPoint.x, intPt.y - originPoint.y),
-              diffAngleDeg: 0,
-              sourceLabel: `Przecięcie prowadnic (${cand1.sourceLabel || ''} ✕ ${cand2.sourceLabel || ''})`,
-              sourceSegment: cand1.sourceSegment,
-            };
+              bestIntersection = {
+                snappedPoint: intPt,
+                originPoint: { x: originPoint.x, y: originPoint.y },
+                guideAngleDeg: cand1.angleDeg,
+                relationType: 'guide_intersection',
+                isStatistical: false,
+                guideLine: {
+                  p1: { x: originPoint.x - guideHalfLength * cos1, y: originPoint.y - guideHalfLength * sin1 },
+                  p2: { x: originPoint.x + guideHalfLength * cos1, y: originPoint.y + guideHalfLength * sin1 },
+                },
+                secondGuideLine: {
+                  originPoint: secOrigin,
+                  angleDeg: cand2.angleDeg,
+                  label: cand2.sourceLabel,
+                  p1: { x: secOrigin.x - guideHalfLength * cos2, y: secOrigin.y - guideHalfLength * sin2 },
+                  p2: { x: secOrigin.x + guideHalfLength * cos2, y: secOrigin.y + guideHalfLength * sin2 },
+                },
+                distanceFromOrigin: Math.hypot(intPt.x - originPoint.x, intPt.y - originPoint.y),
+                diffAngleDeg: 0,
+                sourceLabel: `Przecięcie prowadnic (${cand1.sourceLabel || `${cand1.angleDeg.toFixed(1)}°`} ✕ ${cand2.sourceLabel || `${cand2.angleDeg.toFixed(1)}°`})`,
+                sourceSegment: cand1.sourceSegment,
+              };
+            }
           }
         }
       }
+    }
+
+    if (bestIntersection) {
+      return bestIntersection;
     }
   }
 
