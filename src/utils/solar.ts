@@ -258,8 +258,8 @@ export class AstroSolarSystem implements ISolarHourSystem {
   }
 
   /**
-   * Zwraca linie pełnych godzin zegarowych (czasu lokalnego) w oknie analizy [-5h, +5h]
-   * oraz wyróżnioną linię momentu astronomicznego górowania słońca (solar noon, 180°).
+   * Zwraca linie godzinowe w krokach +-1h od godziny zegarowej górowania słońca (solar noon)
+   * w oknie analizy [-5h, +5h].
    */
   getHourLines(startOffset: number = -5, endOffset: number = 5, stepHours: number = 1): HourLine2D[] {
     const key = `${startOffset}_${endOffset}_${stepHours}`;
@@ -268,21 +268,26 @@ export class AstroSolarSystem implements ISolarHourSystem {
     }
 
     const lines: HourLine2D[] = [];
-    const minHour = Math.max(5, Math.floor(this.solarNoonDecimal + startOffset));
-    const maxHour = Math.min(19, Math.ceil(this.solarNoonDecimal + endOffset));
 
-    // 1. Dodanie pełnych godzin zegarowych (np. 07:00, 08:00, ..., 12:00, ..., 17:00)
-    for (let h = minHour; h <= maxHour; h += stepHours) {
+    for (let offset = startOffset; offset <= endOffset + 1e-4; offset += stepHours) {
+      const hDec = this.solarNoonDecimal + offset;
       const pos = calculateSolarPosition(
         this.latitude,
         this.longitude,
         this.month,
         this.day,
-        h,
+        hDec,
         this.tzOffset
       );
 
-      const timeStr = `${String(h).padStart(2, '0')}:00`;
+      let hInt = Math.floor(hDec);
+      let mInt = Math.round((hDec - hInt) * 60);
+      if (mInt >= 60) {
+        hInt += 1;
+        mInt = 0;
+      }
+      const timeStr = `${String(hInt).padStart(2, '0')}:${String(mInt).padStart(2, '0')}`;
+
       const azRad = pos.azimuthDeg * DEG2RAD;
       const dir: Vector2DLike = {
         x: Math.sin(azRad),
@@ -290,14 +295,17 @@ export class AstroSolarSystem implements ISolarHourSystem {
       };
 
       const lineEq = createLineEquationFromAzimuth(pos.azimuthDeg);
-      const diffFromNoon = Math.round((h - this.solarNoonDecimal) * 10) / 10;
-      const offsetSign = diffFromNoon > 0 ? `+${diffFromNoon}h` : `${diffFromNoon}h`;
+      const roundedOffset = Math.round(offset * 100) / 100;
+      const offsetSign = roundedOffset > 0 ? `+${roundedOffset}h` : `${roundedOffset}h`;
+      const offsetLabel = Math.abs(roundedOffset) < 1e-3
+        ? `${timeStr} (Górowanie)`
+        : `${timeStr} (${offsetSign})`;
 
       lines.push({
-        hourFraction: h,
+        hourFraction: hDec,
         timeStr,
-        offsetHours: diffFromNoon,
-        offsetLabel: `${timeStr} (${offsetSign})`,
+        offsetHours: roundedOffset,
+        offsetLabel,
         azimuthDeg: pos.azimuthDeg,
         elevationDeg: pos.elevationDeg,
         dir,
@@ -305,28 +313,6 @@ export class AstroSolarSystem implements ISolarHourSystem {
       });
     }
 
-    // 2. Dodanie linii dokładnego górowania słońca (solar noon, azymut 180.0° S)
-    const noonPos = calculateSolarPosition(
-      this.latitude,
-      this.longitude,
-      this.month,
-      this.day,
-      this.solarNoonDecimal,
-      this.tzOffset
-    );
-    const noonAzRad = noonPos.azimuthDeg * DEG2RAD;
-    lines.push({
-      hourFraction: this.solarNoonDecimal,
-      timeStr: this.solarNoonTime,
-      offsetHours: 0,
-      offsetLabel: `${this.solarNoonTime} (Górowanie 180°)`,
-      azimuthDeg: noonPos.azimuthDeg,
-      elevationDeg: noonPos.elevationDeg,
-      dir: { x: Math.sin(noonAzRad), y: Math.cos(noonAzRad) },
-      lineEq: createLineEquationFromAzimuth(noonPos.azimuthDeg),
-    });
-
-    // Sortowanie po godzinie
     lines.sort((a, b) => a.hourFraction - b.hourFraction);
 
     this.cachedHourLines = lines;

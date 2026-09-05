@@ -453,4 +453,36 @@ describe('Direction Snapping & Math2D Angular Utilities', () => {
     expect(snap?.intersectedSegment?.buildingId).toBe('bnd-with-buffer_zone_0');
     expect(snap?.sourceLabel).toContain('Bufor');
   });
+
+  it('does not produce self-intersections (Guide ✕ Edge) with own edges when dragging a vertex of a single building', () => {
+    const bldg = createBuildingFromVertices(
+      [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+      'Single Building',
+      15.0,
+      true
+    );
+    bldg.id = 'single-bldg';
+
+    // Dragging vertex 1 (10, 0). Primary origin is vertex 0 (0, 0), secondary is vertex 2 (10, 10).
+    const origin = { x: 0, y: 0 };
+    const mouse = { x: 8.5, y: 3.5 };
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      buildings: [bldg],
+      excludeBuildingId: 'single-bldg',
+      staticReferenceSegments: [
+        { p1: { x: 10, y: 10 }, p2: { x: 0, y: 10 }, label: 'Ściana 3 (Równoległy)' },
+        { p1: { x: 0, y: 10 }, p2: { x: 0, y: 0 }, label: 'Ściana 4 (Równoległy)' },
+      ],
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    // There are NO other buildings in the scene, so no Guide x Edge intersection should ever be generated
+    if (snap) {
+      expect(snap.relationType).not.toBe('guide_intersection');
+    }
+  });
 });

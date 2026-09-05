@@ -1,10 +1,26 @@
 import { CadRenderContext } from '../types';
-import { calculateSolarPosition, AstroSolarSystem, LinijkaSolarSystem } from '../../../utils/solar';
+import { AstroSolarSystem, LinijkaSolarSystem } from '../../../utils/solar';
 import { APP_CONFIG } from '../../../config/appConfig';
 
 // Purple-to-Orange sunlight color scale in 30-minute steps from APP_CONFIG
 export const getSunlightColor = (hours: number, alpha: number = APP_CONFIG.analysisBands.defaultAlpha) => {
   return APP_CONFIG.analysisBands.sunlight.getColor(hours, alpha);
+};
+
+const formatHoursAndMinutes = (hours: number): string => {
+  const totalM = Math.round(hours * 60);
+  const h = Math.floor(totalM / 60);
+  const m = totalM % 60;
+  return `${h}:${String(m).padStart(2, '0')}`;
+};
+
+const formatLinijkaOffsetHM = (offsetHours: number): string => {
+  const totalM = Math.round(offsetHours * 60);
+  const sign = totalM > 0 ? '+' : (totalM < 0 ? '-' : '');
+  const absM = Math.abs(totalM);
+  const h = Math.floor(absM / 60);
+  const m = absM % 60;
+  return `${sign}${h}:${String(m).padStart(2, '0')}`;
 };
 
 export function renderSunlightVisualization(
@@ -36,78 +52,9 @@ export function renderSunlightVisualization(
   // Normalna fasady w stopniach (matematycznych, CCW od wschodu)
   const normalWorldDeg = (Math.atan2(selectedPointResult.normal.y, selectedPointResult.normal.x) * 180) / Math.PI;
   if (!Number.isFinite(normalWorldDeg)) return;
-  const sectors = shadowing?.sectors ?? [];
-
-  const getRayDist = (azimuthDeg: number): number => {
-    const mathDeg = ((90 - azimuthDeg) % 360 + 360) % 360;
-    const relDeg = ((mathDeg - normalWorldDeg) % 360 + 360) % 360;
-
-    for (let sIdx = 0; sIdx < sectors.length; sIdx++) {
-      const sec = sectors[sIdx];
-      const startRel = ((sec.startAngleDeg % 360) + 360) % 360;
-      const span = sec.spanDeg ?? 0;
-      const delta = ((relDeg - startRel) % 360 + 360) % 360;
-      if (delta > span + 0.01) continue;
-
-      if (sec.isFree) {
-        const prevReq = sIdx > 0 ? (sectors[sIdx - 1].requiredDistance ?? 0) : 0;
-        const nextReq = sIdx < sectors.length - 1 ? (sectors[sIdx + 1].requiredDistance ?? 0) : 0;
-        const boundingReq = Math.max(sec.requiredDistance ?? 0, prevReq, nextReq);
-        return boundingReq > 0 ? Math.min(boundingReq, maxAllowedReq) : shadowLengthH;
-      } else {
-        const req = sec.requiredDistance ?? 0;
-        return Math.min(req > 0 ? req : maxAllowedReq, maxAllowedReq);
-      }
-    }
-    return shadowLengthH;
-  };
-
-  const validSlots = slots.filter(
-    (s: any) => s.isSunAboveHorizon && s.elevationDeg > 0.5 && s.isAngleAbove12Deg
-  );
-
-  ctx.save();
-
   const normalMathRad = (normalWorldDeg * Math.PI) / 180;
-  const rayLen = Math.max(shadowLengthH * 1.5, 20.0);
+  const normalAzimuth = ((Math.atan2(selectedPointResult.normal.x, selectedPointResult.normal.y) * 180 / Math.PI + 360) % 360);
 
-  // 1. Rysowanie linii granicznych 12° od lica badanego odcinka (±78° od normalnej)
-  const angleLim1 = normalMathRad + (78 * Math.PI) / 180;
-  const limP1 = {
-    wx: point.x + Math.cos(angleLim1) * rayLen,
-    wy: point.y + Math.sin(angleLim1) * rayLen,
-  };
-  const limS1 = worldToScreen(limP1.wx, limP1.wy);
-
-  const angleLim2 = normalMathRad - (78 * Math.PI) / 180;
-  const limP2 = {
-    wx: point.x + Math.cos(angleLim2) * rayLen,
-    wy: point.y + Math.sin(angleLim2) * rayLen,
-  };
-  const limS2 = worldToScreen(limP2.wx, limP2.wy);
-
-  ctx.beginPath();
-  ctx.setLineDash([5, 4]);
-  ctx.strokeStyle = '#eab308';
-  ctx.lineWidth = 2.0;
-
-  ctx.moveTo(px, py);
-  ctx.lineTo(limS1.sx, limS1.sy);
-
-  ctx.moveTo(px, py);
-  ctx.lineTo(limS2.sx, limS2.sy);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Etykiety 12°
-  ctx.font = 'bold 10px sans-serif';
-  ctx.fillStyle = '#eab308';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText('12° od lica', limS1.sx, limS1.sy - 4);
-  ctx.fillText('12° od lica', limS2.sx, limS2.sy - 4);
-
-  // 2. Rysowanie promieni kolejnych pełnych godzin słonecznych (-5h do +5h) ze struktur HourLine2D
   const isLinijkaMethod =
     rc.sunlightMethod === 'segments' || (sunlight.sectors !== undefined && rc.sunlightMethod !== 'raycasting');
   const lat = latitude ?? 52.2297;
@@ -118,67 +65,31 @@ export function renderSunlightVisualization(
     ? new LinijkaSolarSystem(lat, lon, eqDate)
     : new AstroSolarSystem(lat, lon, eqDate);
 
-  const noonHourDec = hourSystem.solarNoonDecimal;
-
-  // Pobranie prekomputowanych i zapisanych linii godzinowych dla aktywnego systemu (-5h do +5h od górowania)
-  const hourLines = hourSystem.getHourLines(-5, 5, 1);
-
-  ctx.save();
-  ctx.font = 'bold 10px monospace';
-  ctx.fillStyle = '#f8fafc';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  for (const line of hourLines) {
-    if (line.elevationDeg <= 0) continue;
-
-    const azMathRad = ((90 - line.azimuthDeg + 360) % 360) * (Math.PI / 180);
-    const dirX = Math.cos(azMathRad);
-    const dirY = Math.sin(azMathRad);
-
-    const dot = selectedPointResult.normal.x * dirX + selectedPointResult.normal.y * dirY;
-    if (dot < -0.05) continue;
-
-    const hp = {
-      wx: point.x + dirX * rayLen,
-      wy: point.y + dirY * rayLen,
-    };
-    const hsScreen = worldToScreen(hp.wx, hp.wy);
-
-    const isNoonRay = line.offsetHours === 0;
-    ctx.beginPath();
-    ctx.setLineDash(isNoonRay ? [] : [3, 4]);
-    ctx.lineWidth = isNoonRay ? 2.0 : 1.2;
-    ctx.strokeStyle = isNoonRay
-      ? (isLinijkaMethod ? '#818cf8' : '#fbbf24')
-      : (isLinijkaMethod ? 'rgba(165, 180, 252, 0.7)' : 'rgba(252, 211, 77, 0.65)');
-
-    ctx.moveTo(px, py);
-    ctx.lineTo(hsScreen.sx, hsScreen.sy);
-    ctx.stroke();
-
-    const label = line.offsetLabel;
-    ctx.fillText(label, hsScreen.sx, hsScreen.sy);
-  }
-  ctx.restore();
-
   const calcRulerEndpoint = (dirX: number, dirY: number, d: number) => {
     // Podstawa trójkąta Linijki Słońca leży zawsze na poziomej linii E-W: Y = point.y - d
-    // gdzie d = H / tan(phi). Wektor promienia (dirX, dirY) przecina prostą Y = point.y - d:
+    // Wektor promienia (dirX, dirY) przecina prostą Y = point.y - d:
     if (dirY < -1e-5) {
       const t = -d / dirY;
       return { wx: point.x + dirX * t, wy: point.y - d };
     } else {
-      // Dla promieni bliskich poziomu
       return { wx: point.x + dirX * (d * 5.0), wy: point.y - d };
     }
   };
 
-  // 3. Rysowanie sektorów / wachlarza światła
-  if (isLinijkaMethod && sunlight.sectors && sunlight.sectors.length > 0) {
-    const directSectors = sunlight.sectors.filter((s: any) => s.isDirectSunlight && s.spanDeg > 0.05);
+  const directSectors = isLinijkaMethod && sunlight.sectors
+    ? sunlight.sectors.filter((s: any) => s.isDirectSunlight && s.spanDeg > 0.05)
+    : [];
 
-    for (const sec of directSectors) {
+  const validSlots = slots.filter(
+    (s: any) => s.isSunAboveHorizon && s.elevationDeg > 0.5 && s.isAngleAbove12Deg
+  );
+
+  ctx.save();
+
+  // 1. Rysowanie sektorów / wachlarza światła
+  if (isLinijkaMethod && directSectors.length > 0) {
+    for (let sIdx = 0; sIdx < directSectors.length; sIdx++) {
+      const sec = directSectors[sIdx];
       const az1MathRad = ((90 - sec.startAzimuthDeg + 360) % 360) * (Math.PI / 180);
       const dirX1 = Math.cos(az1MathRad);
       const dirY1 = Math.sin(az1MathRad);
@@ -187,7 +98,10 @@ export function renderSunlightVisualization(
       const dirX2 = Math.cos(az2MathRad);
       const dirY2 = Math.sin(az2MathRad);
 
-      const dist = shadowLengthH;
+      // Indywidualna odległość podstawy dla tego konkretnego sektora z obiektów klipujących
+      const dist = (sec.requiredDistance && sec.requiredDistance > 0)
+        ? sec.requiredDistance
+        : shadowLengthH;
 
       const p1 = calcRulerEndpoint(dirX1, dirY1, dist);
       const s1 = worldToScreen(p1.wx, p1.wy);
@@ -199,6 +113,7 @@ export function renderSunlightVisualization(
       const strokeCol = getSunlightColor(sunlight.totalHours, 0.85);
       const solidCol = getSunlightColor(sunlight.totalHours, 1.0);
 
+      // Wypełnienie trójkąta sektora
       ctx.beginPath();
       ctx.moveTo(px, py);
       ctx.lineTo(s1.sx, s1.sy);
@@ -210,7 +125,7 @@ export function renderSunlightVisualization(
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // Pozioma podstawa E-W
+      // Pozioma podstawa E-W wskazująca krawędź przesłaniającą
       ctx.beginPath();
       ctx.moveTo(s1.sx, s1.sy);
       ctx.lineTo(s2.sx, s2.sy);
@@ -218,14 +133,70 @@ export function renderSunlightVisualization(
       ctx.lineWidth = 2.5;
       ctx.stroke();
 
+      // Obliczenie etykiet czasowych dla końców podstawy sektora
+      let startLabel = '';
+      let endLabel = '';
+      if (isLinijkaMethod) {
+        const h1 = hourSystem.getHourForAzimuth(sec.startAzimuthDeg);
+        const h2 = hourSystem.getHourForAzimuth(sec.endAzimuthDeg);
+        startLabel = formatLinijkaOffsetHM(h1 - 12.0);
+        endLabel = formatLinijkaOffsetHM(h2 - 12.0);
+      } else {
+        startLabel = sec.startTimeStr ?? '';
+        endLabel = sec.endTimeStr ?? '';
+      }
+
+      // Etykiety powiększone o 50% (13.5px monospace, badge height ~22px)
+      ctx.font = 'bold 13.5px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Etykieta przy punkcie s1 (początek podstawy)
+      if (startLabel) {
+        const tw1 = ctx.measureText(startLabel).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.strokeStyle = solidCol;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.roundRect(s1.sx - tw1 / 2 - 6, s1.sy + 5, tw1 + 12, 22, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(startLabel, s1.sx, s1.sy + 16);
+      }
+
+      // Etykieta przy punkcie s2 (koniec podstawy)
+      if (endLabel) {
+        const tw2 = ctx.measureText(endLabel).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.strokeStyle = solidCol;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.roundRect(s2.sx - tw2 / 2 - 6, s2.sy + 5, tw2 + 12, 22, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(endLabel, s2.sx, s2.sy + 16);
+      }
+
+      // Środek podstawy: wyłącznie czas trwania sektora w formacie "H:MM" (np. "2:17")
       const midSx = (s1.sx + s2.sx) / 2;
       const midSy = (s1.sy + s2.sy) / 2;
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = '#f8fafc';
-      const timeLabel = sec.startTimeStr && sec.endTimeStr ? `${sec.startTimeStr}–${sec.endTimeStr} ` : '';
-      ctx.fillText(`${timeLabel}(${sec.hours.toFixed(2)}h, ${sec.spanDeg.toFixed(1)}°)`, midSx, midSy + 6);
+      const durationText = formatHoursAndMinutes(sec.hours);
+
+      const twMid = ctx.measureText(durationText).width;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+      ctx.strokeStyle = strokeCol;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(midSx - twMid / 2 - 7, midSy + 5, twMid + 14, 22, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = solidCol;
+      ctx.fillText(durationText, midSx, midSy + 16);
     }
   } else if (!isLinijkaMethod && validSlots.length >= 2) {
     const fillCol = getSunlightColor(sunlight.totalHours, 0.32);
@@ -246,7 +217,7 @@ export function renderSunlightVisualization(
       const dirX = Math.cos(azMathRad);
       const dirY = Math.sin(azMathRad);
 
-      const dist = getRayDist(s.azimuthDeg);
+      const dist = shadowLengthH;
 
       if (dirY >= -1e-6) continue;
       const t = -dist / dirY;
@@ -291,31 +262,195 @@ export function renderSunlightVisualization(
           ctx.strokeStyle = solidCol;
           ctx.lineWidth = 2;
           ctx.stroke();
+
+          // Etykiety czasowe przy końcach dla metody Astro powiększone o 50%
+          const startSlot = slotCoords[groupStart];
+          const endSlot = slotCoords[endIdx];
+
+          ctx.font = 'bold 13.5px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          if (startSlot?.time) {
+            const tw1 = ctx.measureText(startSlot.time).width;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+            ctx.strokeStyle = solidCol;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.roundRect(startSlot.sx - tw1 / 2 - 6, startSlot.sy + 5, tw1 + 12, 22, 5);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillText(startSlot.time, startSlot.sx, startSlot.sy + 16);
+          }
+
+          if (endSlot?.time) {
+            const tw2 = ctx.measureText(endSlot.time).width;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+            ctx.strokeStyle = solidCol;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.roundRect(endSlot.sx - tw2 / 2 - 6, endSlot.sy + 5, tw2 + 12, 22, 5);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillText(endSlot.time, endSlot.sx, endSlot.sy + 16);
+          }
         }
         groupStart = -1;
       }
     }
   }
 
-  // 4. Badge tytułowy metody
-  const badgeY = py - 24;
+  // 2. Rysowanie promieni godzinowych (-5h do +5h) wyłącznie wewnątrz sektorów i bez opisów
+  const hourLines = hourSystem.getHourLines(-5, 5, 1);
+
+  for (const line of hourLines) {
+    if (line.elevationDeg <= 0) continue;
+
+    const azMathRad = ((90 - line.azimuthDeg + 360) % 360) * (Math.PI / 180);
+    const dirX = Math.cos(azMathRad);
+    const dirY = Math.sin(azMathRad);
+
+    const dot = selectedPointResult.normal.x * dirX + selectedPointResult.normal.y * dirY;
+    if (dot < -0.05) continue;
+
+    // Sprawdzenie, czy promień leży wewnątrz któregoś z aktywnych bezpośrednich sektorów nasłonecznienia
+    let sectorDist = shadowLengthH;
+    let isInsideDirectSector = false;
+
+    if (isLinijkaMethod && directSectors.length > 0) {
+      for (let sIdx = 0; sIdx < directSectors.length; sIdx++) {
+        const sec = directSectors[sIdx];
+        if (line.azimuthDeg >= sec.startAzimuthDeg - 0.05 && line.azimuthDeg <= sec.endAzimuthDeg + 0.05) {
+          isInsideDirectSector = true;
+          sectorDist = (sec.requiredDistance && sec.requiredDistance > 0) ? sec.requiredDistance : shadowLengthH;
+          break;
+        }
+      }
+    } else if (!isLinijkaMethod) {
+      const match = validSlots.find(
+        (s: any) => Math.abs(s.azimuthDeg - line.azimuthDeg) < 3.0 && s.isDirectSunlight
+      );
+      if (match) {
+        isInsideDirectSector = true;
+      }
+    }
+
+    if (!isInsideDirectSector) continue;
+
+    // Wyznaczenie punktu końcowego promienia na poziomej linii podstawy sektora
+    const ep = calcRulerEndpoint(dirX, dirY, sectorDist);
+    const hsScreen = worldToScreen(ep.wx, ep.wy);
+
+    const isNoonRay = line.offsetHours === 0;
+    ctx.beginPath();
+    ctx.setLineDash(isNoonRay ? [] : [3, 4]);
+    ctx.lineWidth = isNoonRay ? 2.0 : 1.2;
+    ctx.strokeStyle = isNoonRay
+      ? (isLinijkaMethod ? '#818cf8' : '#fbbf24')
+      : (isLinijkaMethod ? 'rgba(165, 180, 252, 0.7)' : 'rgba(252, 211, 77, 0.65)');
+
+    ctx.moveTo(px, py);
+    ctx.lineTo(hsScreen.sx, hsScreen.sy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 3. Niewielki łuk 12° pomiędzy fasadą a krawędzią sektora w miejscu obcięcia
+  const azSolarMin = hourSystem.getAzimuthForHour(hourSystem.solarNoonDecimal - 5.0);
+  const azSolarMax = hourSystem.getAzimuthForHour(hourSystem.solarNoonDecimal + 5.0);
+  const az12Morning = normalAzimuth - 78.0;
+  const az12Afternoon = normalAzimuth + 78.0;
+
+  const draw12DegArc = (startMathRad: number, endMathRad: number) => {
+    const arcRadiusMeters = 2.0;
+    const steps = 10;
+    const stepDelta = (endMathRad - startMathRad) / steps;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 1.5;
+
+    for (let i = 0; i <= steps; i++) {
+      const ang = startMathRad + i * stepDelta;
+      const wx = point.x + Math.cos(ang) * arcRadiusMeters;
+      const wy = point.y + Math.sin(ang) * arcRadiusMeters;
+      const sc = worldToScreen(wx, wy);
+      if (i === 0) {
+        ctx.moveTo(sc.sx, sc.sy);
+      } else {
+        ctx.lineTo(sc.sx, sc.sy);
+      }
+    }
+    ctx.stroke();
+
+    // Mała linia graniczna 12°
+    const limWx = point.x + Math.cos(startMathRad) * (arcRadiusMeters * 1.35);
+    const limWy = point.y + Math.sin(startMathRad) * (arcRadiusMeters * 1.35);
+    const limSc = worldToScreen(limWx, limWy);
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(limSc.sx, limSc.sy);
+    ctx.stroke();
+
+    // Etykieta 12°
+    const midAng = (startMathRad + endMathRad) / 2;
+    const lblWx = point.x + Math.cos(midAng) * (arcRadiusMeters * 1.4);
+    const lblWy = point.y + Math.sin(midAng) * (arcRadiusMeters * 1.4);
+    const lblSc = worldToScreen(lblWx, lblWy);
+
+    ctx.font = 'bold 9px monospace';
+    ctx.fillStyle = '#f59e0b';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('12°', lblSc.sx, lblSc.sy);
+
+    ctx.restore();
+  };
+
+  // Sprawdzenie strony porannej (wschód / lewa strona)
+  if (az12Morning > azSolarMin + 0.5) {
+    const isMorningCutoff = directSectors.some(
+      (sec: any) => Math.abs(sec.startAzimuthDeg - az12Morning) < 1.0
+    );
+    if (isMorningCutoff) {
+      // Łuk od promienia 12° (+78° od normalnej) do lica fasady (+90° od normalnej)
+      draw12DegArc(normalMathRad + (78 * Math.PI) / 180, normalMathRad + (90 * Math.PI) / 180);
+    }
+  }
+
+  // Sprawdzenie strony popołudniowej (zachód / prawa strona)
+  if (az12Afternoon < azSolarMax - 0.5) {
+    const isAfternoonCutoff = directSectors.some(
+      (sec: any) => Math.abs(sec.endAzimuthDeg - az12Afternoon) < 1.0
+    );
+    if (isAfternoonCutoff) {
+      // Łuk od promienia 12° (-78° od normalnej) do lica fasady (-90° od normalnej)
+      draw12DegArc(normalMathRad - (78 * Math.PI) / 180, normalMathRad - (90 * Math.PI) / 180);
+    }
+  }
+
+  // 4. Etykieta nad punktem wstawienia fasady: sam łączny czas w formacie "H:MM" (np. "2:17")
+  const badgeY = py - 20;
   const solidCol = getSunlightColor(sunlight.totalHours, 1.0);
-  const labelPrefix = selectedPointResult.label ? `${selectedPointResult.label}: ` : '';
-  const titleText = isLinijkaMethod
-    ? `${labelPrefix}Linijka Słońca (H=${heightH.toFixed(0)}m, ${sunlight.totalHours.toFixed(2)}h)`
-    : `${labelPrefix}Metoda Astro (H=${heightH.toFixed(0)}m, ${sunlight.totalHours.toFixed(2)}h)`;
-  ctx.font = 'bold 11px sans-serif';
+  const titleText = formatHoursAndMinutes(sunlight.totalHours);
+
+  ctx.font = 'bold 12.5px monospace';
   const tw = ctx.measureText(titleText).width;
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
   ctx.strokeStyle = solidCol;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.roundRect(px - tw / 2 - 8, badgeY - 8, tw + 16, 20, 6);
+  ctx.roundRect(px - tw / 2 - 8, badgeY - 10, tw + 16, 20, 5);
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = solidCol;
+  ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(titleText, px, badgeY + 2);
+  ctx.fillText(titleText, px, badgeY);
 
   ctx.restore();
 }
+

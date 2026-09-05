@@ -369,9 +369,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const rebuilt = rebuildBuildingSegments(bldg, newVertices);
         if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
           const modRes = applyBuildingModifiers(rebuilt);
-          rebuilt.storyPolygons = modRes.storyPolygons;
-          rebuilt.zonePolygons = modRes.zonePolygons;
+          rebuilt.storyPolygons = modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined;
+          rebuilt.zonePolygons = modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined;
           rebuilt.segments = modRes.segments;
+        } else {
+          rebuilt.storyPolygons = undefined;
+          rebuilt.zonePolygons = undefined;
         }
         return rebuilt;
       }),
@@ -393,9 +396,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
         if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
           const modRes = applyBuildingModifiers(rebuilt);
-          rebuilt.storyPolygons = modRes.storyPolygons;
-          rebuilt.zonePolygons = modRes.zonePolygons;
+          rebuilt.storyPolygons = modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined;
+          rebuilt.zonePolygons = modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined;
           rebuilt.segments = modRes.segments;
+        } else {
+          rebuilt.storyPolygons = undefined;
+          rebuilt.zonePolygons = undefined;
         }
         return rebuilt;
       }),
@@ -639,8 +645,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const res = applyBuildingModifiers(withMods);
         return {
           ...withMods,
-          storyPolygons: res.storyPolygons,
-          zonePolygons: res.zonePolygons,
+          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
+          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
           segments: res.segments,
         };
       }),
@@ -657,8 +663,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const res = applyBuildingModifiers(withMods);
         return {
           ...withMods,
-          storyPolygons: res.storyPolygons,
-          zonePolygons: res.zonePolygons,
+          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
+          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
           segments: res.segments,
         };
       }),
@@ -672,11 +678,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const currentMods = bldg.modifiers || [];
         const newMods = currentMods.filter((m) => m.id !== modifierId);
         const withMods = { ...bldg, modifiers: newMods };
+        if (newMods.length === 0) {
+          const rebuilt = rebuildBuildingSegments(withMods, withMods.vertices);
+          return {
+            ...rebuilt,
+            storyPolygons: undefined,
+            zonePolygons: undefined,
+          };
+        }
         const res = applyBuildingModifiers(withMods);
         return {
           ...withMods,
-          storyPolygons: res.storyPolygons,
-          zonePolygons: res.zonePolygons,
+          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
+          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
           segments: res.segments,
         };
       }),
@@ -697,8 +711,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const res = applyBuildingModifiers(withMods);
         return {
           ...withMods,
-          storyPolygons: res.storyPolygons,
-          zonePolygons: res.zonePolygons,
+          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
+          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
           segments: res.segments,
         };
       }),
@@ -715,8 +729,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const res = applyBuildingModifiers(withMods);
         return {
           ...withMods,
-          storyPolygons: res.storyPolygons,
-          zonePolygons: res.zonePolygons,
+          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
+          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
           segments: res.segments,
         };
       }),

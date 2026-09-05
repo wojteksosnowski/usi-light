@@ -1180,6 +1180,15 @@ export function useCanvasInteraction({
             setDragVertexPreviewPt(targetPt);
             if (dragVertexContextRef.current) {
               dragVertexContextRef.current.currentTargetPt = targetPt;
+              const dragCtx = dragVertexContextRef.current;
+              const currVerts = dragCtx.initialVertices.map((v, idx) =>
+                idx === dragCtx.vertexIndex ? targetPt : v
+              );
+              if (dragCtx.isSweep) {
+                onUpdateBuildingSweepPath?.(dragCtx.buildingId, currVerts);
+              } else {
+                onUpdateBuildingVertices?.(dragCtx.buildingId, currVerts);
+              }
             }
             return;
           }

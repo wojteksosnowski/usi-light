@@ -3,7 +3,7 @@ import { BayWindowModifier, Modifier, StoryFootprint, StoryOffsetModifier, ZoneF
 import { miterOffsetPolygon } from '../../utils/math2d/miterOffset';
 import { isPolygonCCW } from '../../utils/math2d/polygons';
 import { calculateOutwardNormal } from '../../utils/math2d/vec2';
-import { computeLineEquation } from '../../utils/segmentStatistics';
+import { computeLineEquation, rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors } from '../../utils/buildingFloorCalculator';
 
 export interface ModifierPipelineResult {
@@ -137,7 +137,6 @@ export function generateBayWindowPolygon(
   return result;
 }
 
-
 /**
  * Oblicza liczbę kondygnacji oraz wysokości spodu i wierzchu dla każdej kondygnacji
  */
@@ -166,10 +165,47 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     return { storyPolygons: [], zonePolygons: [], segments: building.segments || [] };
   }
 
+  const activeModifiers = (building.modifiers || []).filter((m) => m.enabled);
+
+  // 1. Obiekty typu Obszar (boundary) nie posiadają kondygnacji 3D
+  if (building.category === 'boundary') {
+    const zoneFootprints: ZoneFootprint[] = [];
+    for (const modifier of activeModifiers) {
+      if (modifier.type === 'zone_offset') {
+        const zoneMod = modifier as ZoneOffsetModifier;
+        const poly = generateZonePolygon(baseVertices, zoneMod.distance);
+        if (poly && poly.length >= 3) {
+          zoneFootprints.push({
+            id: zoneMod.id,
+            areaType: zoneMod.areaType || building.areaType || 'plot',
+            distance: zoneMod.distance,
+            polygon: poly,
+          });
+        }
+      }
+    }
+    const rebuilt = rebuildBuildingSegments(building, baseVertices);
+    return {
+      storyPolygons: [],
+      zonePolygons: zoneFootprints,
+      segments: rebuilt.segments,
+    };
+  }
+
+  // 2. Budynki bez aktywnych modyfikatorów
+  if (activeModifiers.length === 0) {
+    const rebuilt = rebuildBuildingSegments(building, baseVertices);
+    return {
+      storyPolygons: [],
+      zonePolygons: [],
+      segments: rebuilt.segments,
+    };
+  }
+
   const heightIntervals = computeStoryHeightIntervals(building);
   const K = heightIntervals.length;
 
-  // 1. Inicjalizacja obrysów kondygnacji
+  // Inicjalizacja obrysów kondygnacji
   const storyFootprints: StoryFootprint[] = heightIntervals.map((interval, idx) => ({
     storyIndex: idx,
     hBottom: interval.hBottom,
@@ -177,7 +213,6 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     polygon: baseVertices.map((p) => ({ ...p })),
   }));
 
-  const activeModifiers = (building.modifiers || []).filter((m) => m.enabled);
   const zoneFootprints: ZoneFootprint[] = [];
 
   // 2. Aplikacja modyfikatorów

@@ -85,10 +85,10 @@ describe('ISolarHourSystem Implementations (Astro vs Linijka Słońca)', () => {
       expect(astro.solarNoonDecimal).toBeLessThan(12.5);
     });
 
-    it('generates clock hour lines in analysis window plus solar noon line', () => {
+    it('generates hour lines in analysis window in +-1h steps from solar noon', () => {
       const lines = astro.getHourLines(-5, 5, 1);
-      // Contains clock hours (07:00 ... 17:00) + exact solar noon line (11:38)
-      expect(lines.length).toBeGreaterThanOrEqual(11);
+      // Contains 11 hour lines (-5h, -4h, ..., 0h, ..., +5h from solar noon)
+      expect(lines.length).toBe(11);
 
       // Verify solar noon line exists and has az = 180°
       const noonLine = lines.find((l) => Math.abs(l.hourFraction - astro.solarNoonDecimal) < 1e-3);
@@ -96,10 +96,13 @@ describe('ISolarHourSystem Implementations (Astro vs Linijka Słońca)', () => {
       expect(noonLine?.offsetHours).toBe(0);
       expect(noonLine?.azimuthDeg).toBeCloseTo(180.0, 2);
 
-      // Verify 12:00 clock hour has az > 180° in Warsaw (due to lon 21°E > 15°E)
-      const line12 = lines.find((l) => l.timeStr === '12:00');
-      expect(line12).toBeDefined();
-      expect(line12?.azimuthDeg).toBeGreaterThan(185.0); // ~186.9° in Warsaw
+      // Verify -1h and +1h lines
+      const lineMinus1 = lines.find((l) => l.offsetHours === -1);
+      const linePlus1 = lines.find((l) => l.offsetHours === 1);
+      expect(lineMinus1).toBeDefined();
+      expect(linePlus1).toBeDefined();
+      expect(lineMinus1!.azimuthDeg).toBeLessThan(180.0);
+      expect(linePlus1!.azimuthDeg).toBeGreaterThan(180.0);
     });
 
     it('performs accurate roundtrip hour -> azimuth -> hour via binary search', () => {

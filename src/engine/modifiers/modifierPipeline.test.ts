@@ -36,13 +36,41 @@ describe('modifierPipeline', () => {
     expect(intervals[4]).toEqual({ hBottom: 12.5, hTop: 15.0 });
   });
 
-  it('without modifiers: generates 4 merged facade segments spanning 0 to 15m', () => {
+  it('without modifiers: generates 4 merged facade segments spanning 0 to 15m and empty storyPolygons', () => {
     const res = applyBuildingModifiers(baseBuilding);
-    expect(res.storyPolygons.length).toBe(5);
+    expect(res.storyPolygons.length).toBe(0);
     expect(res.segments.length).toBe(4);
     for (const seg of res.segments) {
       expect(seg.hBase).toBe(0);
       expect(seg.hTop).toBe(15.0);
+    }
+  });
+
+  it('for category: boundary with zone_offset modifier: generates zonePolygons, NO storyPolygons and ground segments (hTop = 0)', () => {
+    const boundaryBuilding: BuildingLoop = {
+      ...baseBuilding,
+      id: 'bnd-1',
+      category: 'boundary',
+      defaultHeight: 0,
+      modifiers: [
+        {
+          id: 'mod-zone-bnd',
+          type: 'zone_offset',
+          enabled: true,
+          distance: 4.0,
+          areaType: 'plot',
+        },
+      ],
+    };
+
+    const res = applyBuildingModifiers(boundaryBuilding);
+    expect(res.storyPolygons.length).toBe(0);
+    expect(res.zonePolygons.length).toBe(1);
+    expect(res.zonePolygons[0].polygon.length).toBe(4);
+    expect(res.segments.length).toBe(4);
+    for (const seg of res.segments) {
+      expect(seg.hBase).toBe(0);
+      expect(seg.hTop).toBe(0);
     }
   });
 

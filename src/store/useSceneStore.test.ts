@@ -130,6 +130,43 @@ describe('useSceneStore', () => {
     expect(updated?.vertices.length).toBe(4);
     expect(updated?.segments.length).toBe(4);
   });
+
+  it('moveBuildingEdge with bay_window modifier updates geometry, modifiers and segments correctly', () => {
+    const baseBldg = {
+      ...createBuildingFromVertices([
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 20 },
+        { x: 0, y: 20 },
+      ], 'Bldg with Bay Window', 15),
+      id: 'bldg-bay',
+      modifiers: [
+        {
+          id: 'mod-bay-1',
+          type: 'bay_window' as const,
+          name: 'Wykusz Krawędź 0',
+          enabled: true,
+          edgeIndex: 0,
+          width: 6,
+          projection: 2,
+          storiesCount: 0,
+        },
+      ],
+    };
+
+    useSceneStore.getState().setBuildings([baseBldg]);
+    // Move edge 2 (top edge from (20,20) to (0,20)) by dx=0, dy=5
+    useSceneStore.getState().moveBuildingEdge('bldg-bay', 2, 0, 5);
+
+    const updated = useSceneStore.getState().buildings.find((b) => b.id === 'bldg-bay');
+    expect(updated).toBeDefined();
+    expect(updated?.vertices.length).toBe(4);
+    // Base vertices top edge moved from y=20 to y=25
+    expect(updated?.vertices[2].y).toBe(25);
+    expect(updated?.vertices[3].y).toBe(25);
+    // Modifier segments should be regenerated and have > 4 segments
+    expect(updated?.segments.length).toBeGreaterThan(4);
+  });
 });
 
 

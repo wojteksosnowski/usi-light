@@ -1,5 +1,6 @@
 import { CadRenderContext } from '../types';
-import { getPolygonInteriorPoint, isPointInPolygon, splitSegmentByOccludingPolygons } from '@/utils/math2d';
+import { Point2D } from '../../../types/geometry';
+import { getPolygonInteriorPoint, isPointInPolygon, splitSegmentByOccludingPolygons, distancePointToSegment } from '@/utils/math2d';
 
 export interface EditingEdgeLengthState {
   buildingId: string;
@@ -154,7 +155,10 @@ function drawLucideGhostIcon(ctx: CanvasRenderingContext2D, cx: number, cy: numb
 function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   // If building has storyPolygons (e.g. from modifiers like bay_window), use storyPolygons[0] for base interior rendering
   const activeVertices =
-    Array.isArray(bldg.storyPolygons) && bldg.storyPolygons.length > 0 && bldg.storyPolygons[0].polygon?.length >= 3
+    bldg.category !== 'boundary' &&
+    Array.isArray(bldg.storyPolygons) &&
+    bldg.storyPolygons.length > 0 &&
+    bldg.storyPolygons[0].polygon?.length >= 3
       ? bldg.storyPolygons[0].polygon
       : bldg.vertices;
 
@@ -479,10 +483,39 @@ export function renderBuildings(
     }
 
     if (Array.isArray(bldg.segments)) {
+      // Base edge endpoints if building has base vertices and hoveredEdge is active
+      const hasBaseVerts = Array.isArray(bldg.vertices) && bldg.vertices.length >= 3;
+      let baseHoverP1: Point2D | null = null;
+      let baseHoverP2: Point2D | null = null;
+      if (
+        !isSweep &&
+        (isEditMode || isSelected) &&
+        hoveredEdge &&
+        hoveredEdge.buildingId === bldg.id &&
+        hasBaseVerts &&
+        hoveredEdge.edgeIndex >= 0 &&
+        hoveredEdge.edgeIndex < bldg.vertices.length
+      ) {
+        baseHoverP1 = bldg.vertices[hoveredEdge.edgeIndex];
+        baseHoverP2 = bldg.vertices[(hoveredEdge.edgeIndex + 1) % bldg.vertices.length];
+      }
+
       for (let eIdx = 0; eIdx < bldg.segments.length; eIdx++) {
         const seg = bldg.segments[eIdx];
         if (!seg || !seg.p1 || !seg.p2 || !Number.isFinite(seg.p1.x) || !Number.isFinite(seg.p1.y) || !Number.isFinite(seg.p2.x) || !Number.isFinite(seg.p2.y)) continue;
-        const isEdgeHovered = !isSweep && (isEditMode || isSelected) && hoveredEdge?.buildingId === bldg.id && hoveredEdge?.edgeIndex === eIdx;
+        
+        let isEdgeHovered = false;
+        if (baseHoverP1 && baseHoverP2) {
+          if (bldg.segments.length === bldg.vertices.length) {
+            isEdgeHovered = hoveredEdge?.edgeIndex === eIdx;
+          } else {
+            // Check if segment is collinear and lies on or belongs to the base edge
+            const d1 = distancePointToSegment(seg.p1, baseHoverP1, baseHoverP2);
+            const d2 = distancePointToSegment(seg.p2, baseHoverP1, baseHoverP2);
+            isEdgeHovered = d1 < 0.05 && d2 < 0.05;
+          }
+        }
+
         const { sx: x1, sy: y1 } = worldToScreen(seg.p1.x, seg.p1.y);
         const { sx: x2, sy: y2 } = worldToScreen(seg.p2.x, seg.p2.y);
         if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;

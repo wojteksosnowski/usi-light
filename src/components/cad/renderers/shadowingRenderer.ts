@@ -119,7 +119,8 @@ export function renderShadowingVisualization(
     ctx.stroke();
 
     // 4. Sector Angle Label placed above the arc edge and rotated 90 deg left around center
-    {
+    // Nie pokazuj etykiety dla czerwonego (zablokowanego) sektora
+    if (isFree || isTolerated) {
       let midRad = (startRad + endRad) / 2;
       if (Math.abs(endRad - startRad) > Math.PI) {
         midRad += Math.PI;
@@ -127,10 +128,10 @@ export function renderShadowingVisualization(
 
       const viewRotRad = (viewRotationDeg * Math.PI) / 180;
       const screenMidRad = midRad + viewRotRad;
-      // Position label slightly above the arc edge on screen (radius + 12px)
+      // Position label slightly above the arc edge on screen (radius + 14px)
       const labelScreen = {
-        sx: px + Math.cos(screenMidRad) * (radius * viewState.scale + 12),
-        sy: py - Math.sin(screenMidRad) * (radius * viewState.scale + 12),
+        sx: px + Math.cos(screenMidRad) * (radius * viewState.scale + 14),
+        sy: py - Math.sin(screenMidRad) * (radius * viewState.scale + 14),
       };
 
       // Rotate 90 degrees to the left around its center (tangent to the arc)
@@ -141,18 +142,18 @@ export function renderShadowingVisualization(
       ctx.resetTransform();
       ctx.translate(labelScreen.sx, labelScreen.sy);
       ctx.rotate(labelAngle);
-      ctx.font = 'bold 9.5px monospace';
+      ctx.font = 'bold 13.5px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      const angleText = `${spanDeg.toFixed(1)}°`;
+      const angleText = `${Math.round(spanDeg)}°`;
       const textWidth = ctx.measureText(angleText).width;
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
       ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.roundRect(-textWidth / 2 - 4, -8, textWidth + 8, 16, 3.5);
+      ctx.roundRect(-textWidth / 2 - 6, -11, textWidth + 12, 22, 5);
       ctx.fill();
       ctx.stroke();
 

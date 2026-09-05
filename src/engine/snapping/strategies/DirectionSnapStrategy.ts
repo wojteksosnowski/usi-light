@@ -141,6 +141,7 @@ export function collectTargetDirections(
 
   const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false);
   for (const bldg of prioBuildings) {
+    if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
         if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
@@ -162,6 +163,7 @@ export function collectTargetDirections(
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
+      if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
       const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
       bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
@@ -198,6 +200,7 @@ export function collectTargetDirections(
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id)) continue;
+    if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
@@ -230,6 +233,7 @@ export function collectTargetDirections(
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
+      if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
       bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
         const nZ = zf.polygon.length;
@@ -421,20 +425,9 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     label?: string;
   }[] = [];
 
-  if (Array.isArray(staticReferenceSegments)) {
-    for (const sSeg of staticReferenceSegments) {
-      intersectableSegments.push({
-        p1: sSeg.p1,
-        p2: sSeg.p2,
-        buildingId: sSeg.buildingId,
-        edgeIndex: sSeg.edgeIndex,
-        label: sSeg.label || 'Krawędź obiektu',
-      });
-    }
-  }
-
   for (const bldg of buildings) {
     if (bldg.isIncluded === false) continue;
+    if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
@@ -452,6 +445,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
+      if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
       bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
         const nZ = zf.polygon.length;

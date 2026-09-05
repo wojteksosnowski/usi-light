@@ -129,7 +129,16 @@ export function prefilterShadowingCandidatesForSegment(
     }
 
     for (const seg of bldg.segments) {
-      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+      if (bldg.id === targetBuildingId) {
+        if (seg.id === segment.id) continue;
+        // Odrzuć ściany własnego budynku leżące w tej samej płaszczyźnie (np. wyższe/niższe kondygnacje tej samej elewacji)
+        const dotNormal = segment.normal.x * seg.normal.x + segment.normal.y * seg.normal.y;
+        if (dotNormal > 0.99) {
+          const d1 = Math.abs((seg.p1.x - segment.p1.x) * segment.normal.x + (seg.p1.y - segment.p1.y) * segment.normal.y);
+          const d2 = Math.abs((seg.p2.x - segment.p1.x) * segment.normal.x + (seg.p2.y - segment.p1.y) * segment.normal.y);
+          if (d1 < 0.05 && d2 < 0.05) continue;
+        }
+      }
       if (seg.hTop <= pointBaseH) continue;
 
       const oMinX = Math.min(seg.p1.x, seg.p2.x);
@@ -247,7 +256,16 @@ export function prefilterSunlightCandidatesForSegment(
     }
 
     for (const seg of bldg.segments) {
-      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+      if (bldg.id === targetBuildingId) {
+        if (seg.id === segment.id) continue;
+        // Odrzuć ściany własnego budynku leżące w tej samej płaszczyźnie (np. wyższe/niższe kondygnacje tej samej elewacji)
+        const dotNormal = segment.normal.x * seg.normal.x + segment.normal.y * seg.normal.y;
+        if (dotNormal > 0.99) {
+          const d1 = Math.abs((seg.p1.x - segment.p1.x) * segment.normal.x + (seg.p1.y - segment.p1.y) * segment.normal.y);
+          const d2 = Math.abs((seg.p2.x - segment.p1.x) * segment.normal.x + (seg.p2.y - segment.p1.y) * segment.normal.y);
+          if (d1 < 0.05 && d2 < 0.05) continue;
+        }
+      }
 
       const deltaH = Math.max(0, seg.hTop - pointBaseH);
       if (deltaH <= 0) continue;
@@ -980,6 +998,7 @@ export function analyzeSunlightAtPointSegments(
     startAz: number;
     endAz: number;
     bldgId: string;
+    reqDistance: number;
   }
   const rawBlocked: BlockedInterval[] = [];
 
@@ -1090,23 +1109,24 @@ export function analyzeSunlightAtPointSegments(
     // Zbieramy SUROWE przedziały bez obcinania do azActiveMin/azActiveMax.
     for (const [bStart, bEnd] of intervals) {
       if (bEnd > bStart + 0.01) {
-        rawBlocked.push({ startAz: bStart, endAz: bEnd, bldgId });
+        rawBlocked.push({ startAz: bStart, endAz: bEnd, bldgId, reqDistance: Ltotal });
       }
     }
   }
 
   // 3. Scalanie przedziałów cienia
   rawBlocked.sort((a, b) => a.startAz - b.startAz);
-  const mergedBlocked: { startAz: number; endAz: number }[] = [];
+  const mergedBlocked: { startAz: number; endAz: number; reqDistance: number }[] = [];
   for (const b of rawBlocked) {
     if (mergedBlocked.length === 0) {
-      mergedBlocked.push({ startAz: b.startAz, endAz: b.endAz });
+      mergedBlocked.push({ startAz: b.startAz, endAz: b.endAz, reqDistance: b.reqDistance });
     } else {
       const last = mergedBlocked[mergedBlocked.length - 1];
       if (b.startAz <= last.endAz + 0.05) {
         last.endAz = Math.max(last.endAz, b.endAz);
+        last.reqDistance = Math.max(last.reqDistance, b.reqDistance);
       } else {
-        mergedBlocked.push({ startAz: b.startAz, endAz: b.endAz });
+        mergedBlocked.push({ startAz: b.startAz, endAz: b.endAz, reqDistance: b.reqDistance });
       }
     }
   }
@@ -1118,7 +1138,7 @@ export function analyzeSunlightAtPointSegments(
 
   const isFastLutSupported = typeof (sys as any).getHourForAzimuthFast === 'function';
 
-  function addFreeSector(startAz: number, endAz: number) {
+  function addFreeSector(startAz: number, endAz: number, prevBlockedIdx: number, nextBlockedIdx: number) {
     const rawH1 = isFastLutSupported
       ? (sys as any).getHourForAzimuthFast(startAz)
       : sys.getHourForAzimuth(startAz);
@@ -1142,11 +1162,20 @@ export function analyzeSunlightAtPointSegments(
       m2Int = 0;
     }
 
+    const prevReq = prevBlockedIdx >= 0 && prevBlockedIdx < mergedBlocked.length
+      ? mergedBlocked[prevBlockedIdx].reqDistance
+      : 0;
+    const nextReq = nextBlockedIdx >= 0 && nextBlockedIdx < mergedBlocked.length
+      ? mergedBlocked[nextBlockedIdx].reqDistance
+      : 0;
+    const boundingReq = Math.max(prevReq, nextReq);
+
     sectors.push({
       startAzimuthDeg: startAz,
       endAzimuthDeg: endAz,
       spanDeg: Math.abs(endAz - startAz),
       isDirectSunlight: true,
+      requiredDistance: boundingReq > 0 ? boundingReq : undefined,
       startTimeStr: `${String(h1Int).padStart(2, '0')}:${String(m1Int).padStart(2, '0')}`,
       endTimeStr: `${String(h2Int).padStart(2, '0')}:${String(m2Int).padStart(2, '0')}`,
       hours: secHours,
@@ -1154,17 +1183,18 @@ export function analyzeSunlightAtPointSegments(
     totalHours += secHours;
   }
 
-  for (const b of mergedBlocked) {
+  for (let bIdx = 0; bIdx < mergedBlocked.length; bIdx++) {
+    const b = mergedBlocked[bIdx];
     if (cursor >= azActiveMax) break;
     const gapEnd = Math.min(b.startAz, azActiveMax);
     if (gapEnd > cursor + 0.01) {
-      addFreeSector(cursor, gapEnd);
+      addFreeSector(cursor, gapEnd, bIdx - 1, bIdx);
     }
     cursor = Math.max(cursor, b.endAz);
   }
 
   if (cursor < azActiveMax - 0.01) {
-    addFreeSector(cursor, azActiveMax);
+    addFreeSector(cursor, azActiveMax, mergedBlocked.length - 1, -1);
   }
 
   // Dokładne zaokrąglenie do pełnych minut, z uwzględnieniem tolerancji numerycznej O(1) dla pełnego okna
