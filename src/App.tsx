@@ -167,10 +167,10 @@ export const App: React.FC = () => {
   const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
     switch (accuracyStage) {
       case 'live':
-        return { samplingInterval: 1.5, angleStepDeg: 1.5, sunlightStepMinutes: 15 };
+        return { samplingInterval: 1.5, angleStepDeg: 1.5, sunlightStepMinutes: 15, shadowStepHours: 1.0 };
       case 'final':
       default:
-        return { samplingInterval: 0.25, angleStepDeg: 0.5, sunlightStepMinutes: 5 };
+        return { samplingInterval: 0.25, angleStepDeg: 0.5, sunlightStepMinutes: 5, shadowStepHours: 0.25 };
     }
   }, [accuracyStage]);
 

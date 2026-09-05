@@ -7,11 +7,21 @@ import {
   EdgeSnapStrategy,
   DirectionSnapStrategy,
   GridSnapStrategy,
+  calculateDirectionSnap,
+  collectTargetDirections,
   evaluateBuildingDragMultiSnap,
   evaluateCollinearAndParallelLock,
 } from '../src/engine/snapping';
 import { BuildingLoop, Point2D } from '../src/types/geometry';
 import { createCachedLineEquation } from '../src/utils/lineBufferEngine';
+import {
+  normalizeAngle180,
+  normalizeAngle360,
+  angleDiff180,
+  lineIntersection2D,
+  lineSegmentIntersection2D,
+} from '../src/utils/math2d';
+import { createBuildingFromVertices } from '../src/utils/dxfParser';
 
 describe('SnapCoordinator & Strategies Pipeline', () => {
   const coordinator = new SnapCoordinator();
@@ -66,7 +76,6 @@ describe('SnapCoordinator & Strategies Pipeline', () => {
   });
 
   it('detects MidpointSnap correctly when hovering near the center of an edge', () => {
-    // Center of edge (0,0)->(10,0) is (5, 0)
     const mouse: Point2D = { x: 5.05, y: 0.05 };
     const ctx: SnapContext = {
       mouseWorld: mouse,
@@ -88,7 +97,6 @@ describe('SnapCoordinator & Strategies Pipeline', () => {
   });
 
   it('detects EdgeSnap (nearest) when cursor is on edge away from vertices and midpoint', () => {
-    // Point on edge at x=2.5, y=0.05 (away from 0, 5, 10)
     const mouse: Point2D = { x: 2.5, y: 0.05 };
     const ctx: SnapContext = {
       mouseWorld: mouse,
@@ -232,5 +240,120 @@ describe('SnapCoordinator & Strategies Pipeline', () => {
     expect(snap?.relation).toBe('vertex_to_vertex');
     expect(snap?.deltaX).toBeCloseTo(-0.05);
     expect(snap?.deltaY).toBeCloseTo(-0.02);
+  });
+});
+
+describe('Direction Snapping & Math2D Angular Utilities', () => {
+  it('correctly normalizes angles and calculates differences in 180 deg axis', () => {
+    expect(normalizeAngle180(0)).toBe(0);
+    expect(normalizeAngle180(180)).toBe(0);
+    expect(normalizeAngle180(270)).toBe(90);
+    expect(normalizeAngle180(-45)).toBe(135);
+
+    expect(normalizeAngle360(-10)).toBe(350);
+    expect(normalizeAngle360(370)).toBe(10);
+
+    expect(angleDiff180(0, 5)).toBe(5);
+    expect(angleDiff180(179, 1)).toBe(2);
+    expect(angleDiff180(45, 135)).toBe(90);
+  });
+
+  it('collects orthogonal axes from polyline vertices', () => {
+    const polyline = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    ];
+    const candidates = collectTargetDirections({ x: 10, y: 0 }, { x: 10, y: 5 }, [], [], polyline);
+    const angles = candidates.map((c) => Math.round(c.angleDeg));
+
+    expect(angles).toContain(0);
+    expect(angles).toContain(90);
+  });
+
+  it('snaps mouse position to horizontal axis (0 deg / parallel)', () => {
+    const origin = { x: 0, y: 0 };
+    const mouse = { x: 10, y: 0.3 };
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 4.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.guideAngleDeg).toBe(0);
+    expect(snap?.snappedPoint.x).toBeCloseTo(10, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(0, 2);
+  });
+
+  it('snaps mouse position to perpendicular (90 deg) relative to last polyline segment', () => {
+    const polyline = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    ];
+    const origin = { x: 10, y: 0 };
+    const mouse = { x: 10.2, y: 8 };
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      polylineVertices: polyline,
+      angleToleranceDeg: 4.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.guideAngleDeg).toBe(90);
+    expect(snap?.snappedPoint.x).toBeCloseTo(10, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(8, 2);
+    expect(snap?.relationType).toBe('perpendicular');
+  });
+
+  it('snaps accurately to dual-guide intersection', () => {
+    const origin = { x: 0, y: 0 };
+    const secOrigin = { x: 10, y: 10 };
+    const mouse = { x: 9.9, y: 0.1 };
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      secondaryOriginPoints: [secOrigin],
+      currentMouseWorld: mouse,
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(10, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(0, 2);
+    expect(snap?.secondGuideLine).toBeDefined();
+  });
+
+  it('snaps accurately to guide intersecting building edge (Guide ✕ Edge)', () => {
+    const bldg = createBuildingFromVertices(
+      [{ x: 20, y: -10 }, { x: 30, y: -10 }, { x: 30, y: 20 }, { x: 20, y: 20 }],
+      'Obstacle Bldg',
+      15.0,
+      false
+    );
+    bldg.id = 'bldg-target-edge';
+
+    const origin = { x: 0, y: 5 };
+    const mouse = { x: 19.8, y: 5.1 };
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      buildings: [bldg],
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(20, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(5, 2);
+    expect(snap?.intersectedSegment).toBeDefined();
+    expect(snap?.intersectedSegment?.buildingId).toBe('bldg-target-edge');
   });
 });

@@ -1,8 +1,11 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType } from '../../../types/geometry';
-import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW } from '@/utils/math2d';
+import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180 } from '@/utils/math2d';
 import { useUiStore } from '../../../store/useUiStore';
-import { calculateDirectionSnap, DirectionSnapResult, normalizeAngle180, angleDiff180 } from '../../../utils/directionSnapping';
+import {
+  calculateDirectionSnap,
+  DirectionSnapResult,
+} from '../../../engine/snapping';
 import {
   CachedLineEquation,
   buildLineBufferFromBuildings,

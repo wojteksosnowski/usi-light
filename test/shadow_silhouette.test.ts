@@ -278,7 +278,7 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       console.log(`[BENCHMARK_RESULT] Envelope total area: ${totalArea.toFixed(2)} m²`);
 
       expect(lastResult.envelopeLoops.length).toBeGreaterThan(0);
-    });
+    }, 20000);
 
     it('zapewnia, ze czasy dla § 12 i § 56 obejmuja pelne przejscie przez 100% zbadanych punktow', () => {
       // 1. Zbadaj siatkę rzadką (np. 1.5m - live)

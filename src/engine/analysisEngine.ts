@@ -95,13 +95,108 @@ function getBuildingAABB(bldg: BuildingLoop): BuildingAABB | null {
 }
 
 /**
- * PRE-FILTR ODCINKÓW DLA § 12 (Przesłanianie).
- * 
- * Filtruje odcinki sceny w oparciu o:
- * 1. Zasięg przestrzenny AABB o promieniu maxReach = 35.0m (lub 17.5m w śródmieściu),
- *    zgodnie z maksymalną wymaganą odległością przesłaniania w § 12 WT.
- * 2. Backface culling: odrzucenie odcinków odwróconych „plecami” do punktu P.
- * 3. Kąty graniczne ±12° od lica (stożek widzenia ±78° od normalnej).
+ * PRE-FILTR KANDYDATÓW DLA ODCINKA FASADY DLA § 12 (Przesłanianie).
+ * Wylicza przeszkody mogące potencjalnie przesłaniać DOWOLNY punkt na danym odcinku fasady.
+ */
+export function prefilterShadowingCandidatesForSegment(
+  segment: FacadeSegment,
+  allBuildings: BuildingLoop[],
+  targetBuildingId: string
+): PrefilteredObstacle[] {
+  const segMinX = Math.min(segment.p1.x, segment.p2.x);
+  const segMaxX = Math.max(segment.p1.x, segment.p2.x);
+  const segMinY = Math.min(segment.p1.y, segment.p2.y);
+  const segMaxY = Math.max(segment.p1.y, segment.p2.y);
+  const pointBaseH = segment.hBase ?? 0.0;
+
+  const candidates: PrefilteredObstacle[] = [];
+
+  for (const bldg of allBuildings) {
+    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+
+    // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż maxReach od odcinka
+    const aabb = getBuildingAABB(bldg);
+    const maxReach = bldg.isCityCentre ? 17.5 : 35.0;
+    if (aabb) {
+      if (
+        segMaxX < aabb.minX - maxReach ||
+        segMinX > aabb.maxX + maxReach ||
+        segMaxY < aabb.minY - maxReach ||
+        segMinY > aabb.maxY + maxReach
+      ) {
+        continue;
+      }
+    }
+
+    for (const seg of bldg.segments) {
+      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+      if (seg.hTop <= pointBaseH) continue;
+
+      const oMinX = Math.min(seg.p1.x, seg.p2.x);
+      const oMaxX = Math.max(seg.p1.x, seg.p2.x);
+      const oMinY = Math.min(seg.p1.y, seg.p2.y);
+      const oMaxY = Math.max(seg.p1.y, seg.p2.y);
+
+      if (
+        segMaxX < oMinX - maxReach ||
+        segMinX > oMaxX + maxReach ||
+        segMaxY < oMinY - maxReach ||
+        segMinY > oMaxY + maxReach
+      ) {
+        continue;
+      }
+
+      candidates.push({ seg, bldgId: bldg.id });
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Filtruje prefiltrowane przeszkody § 12 dla konkretnego punktu P (backface culling + stożek widzenia fasady).
+ */
+export function filterPointShadowingFromCandidates(
+  point: Point2D,
+  candidates: PrefilteredObstacle[],
+  n1: Point2D,
+  n2: Point2D
+): PrefilteredObstacle[] {
+  const filtered: PrefilteredObstacle[] = [];
+  const len = candidates.length;
+  for (let i = 0; i < len; i++) {
+    const item = candidates[i];
+    const seg = item.seg;
+
+    // Backface culling: normalna odcinka przeszkody musi być zwrócona w stronę punktu P
+    const dotExt =
+      (point.x - seg.p1.x) * seg.normal.x +
+      (point.y - seg.p1.y) * seg.normal.y;
+    if (dotExt <= 0) continue;
+
+    // Wektory od punktu badanego do obu wierzchołków przeszkody
+    const v1x = seg.p1.x - point.x;
+    const v1y = seg.p1.y - point.y;
+    const v2x = seg.p2.x - point.x;
+    const v2y = seg.p2.y - point.y;
+
+    // Krok 1 & 2: Prosta +12° od lica (+78° od normalnej)
+    const d1_p1 = v1x * n1.x + v1y * n1.y;
+    const d1_p2 = v2x * n1.x + v2y * n1.y;
+    if (d1_p1 < -0.01 && d1_p2 < -0.01) continue;
+
+    // Krok 3 & 4: Prosta -12° od lica (-78° od normalnej)
+    const d2_p1 = v1x * n2.x + v1y * n2.y;
+    const d2_p2 = v2x * n2.x + v2y * n2.y;
+    if (d2_p1 < -0.01 && d2_p2 < -0.01) continue;
+
+    filtered.push(item);
+  }
+  return filtered;
+}
+
+/**
+ * PRE-FILTR ODCINKÓW DLA § 12 (Przesłanianie) dla pojedynczego punktu.
  */
 export function prefilterShadowingObstacles(
   point: Point2D,
@@ -111,83 +206,118 @@ export function prefilterShadowingObstacles(
 ): PrefilteredObstacle[] {
   const normal = segment.normal;
   const normalAngleRad = Math.atan2(normal.y, normal.x);
-
-  // Kąty prostych granicznych ±12° od lica (±78° od normalnej)
   const a1 = normalAngleRad + 78.0 * DEG2RAD;
   const a2 = normalAngleRad - 78.0 * DEG2RAD;
-
-  // Wektory normalne skierowane w stronę normalnej fasady (do wnętrza stożka widzenia ±78°)
   const n1 = { x: Math.sin(a1), y: -Math.cos(a1) };
   const n2 = { x: -Math.sin(a2), y: Math.cos(a2) };
 
-  const filtered: PrefilteredObstacle[] = [];
+  const candidates = prefilterShadowingCandidatesForSegment(segment, allBuildings, targetBuildingId);
+  return filterPointShadowingFromCandidates(point, candidates, n1, n2);
+}
+
+/**
+ * PRE-FILTR KANDYDATÓW DLA ODCINKA FASADY DLA § 56 (Nasłonecznienie).
+ */
+export function prefilterSunlightCandidatesForSegment(
+  segment: FacadeSegment,
+  allBuildings: BuildingLoop[],
+  targetBuildingId: string
+): PrefilteredObstacle[] {
+  const segMinX = Math.min(segment.p1.x, segment.p2.x);
+  const segMaxX = Math.max(segment.p1.x, segment.p2.x);
+  const segMinY = Math.min(segment.p1.y, segment.p2.y);
+  const pointBaseH = segment.hBase ?? 0.0;
+
+  const candidates: PrefilteredObstacle[] = [];
 
   for (const bldg of allBuildings) {
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
-    // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż 35m od punktu P (§ 12)
     const aabb = getBuildingAABB(bldg);
-    if (aabb) {
-      const maxReach = bldg.isCityCentre ? 17.5 : 35.0;
-      if (
-        point.x < aabb.minX - maxReach ||
-        point.x > aabb.maxX + maxReach ||
-        point.y < aabb.minY - maxReach ||
-        point.y > aabb.maxY + maxReach
-      ) {
+    const bldgH = Math.max(0, bldg.defaultHeight ?? 15);
+    if (aabb && bldgH > 0) {
+      const maxL = bldgH * 5.0;
+      if (segMaxX < aabb.minX - maxL || segMinX > aabb.maxX + maxL) {
+        continue;
+      }
+      const maxSouthL = bldgH * 1.5;
+      if (aabb.maxY < segMinY - maxSouthL) {
         continue;
       }
     }
 
-    const pointBaseH = segment.hBase ?? 0.0;
-
     for (const seg of bldg.segments) {
-      // Pomiń sam badany odcinek
       if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
 
-      // Jeśli przeszkoda w całości leży poniżej poziomu posadowienia fasady badanej, nie przesłania
-      if (seg.hTop <= pointBaseH) continue;
+      const deltaH = Math.max(0, seg.hTop - pointBaseH);
+      if (deltaH <= 0) continue;
 
-      // Backface culling: normalna odcinka przeszkody musi być zwrócona w stronę punktu P
-      const dotExt =
-        (point.x - seg.p1.x) * seg.normal.x +
-        (point.y - seg.p1.y) * seg.normal.y;
-      if (dotExt <= 0) continue;
+      const latReach = deltaH * 5.0;
+      const oMinX = Math.min(seg.p1.x, seg.p2.x);
+      const oMaxX = Math.max(seg.p1.x, seg.p2.x);
+      if (segMaxX < oMinX - latReach || segMinX > oMaxX + latReach) continue;
 
-      // Wektory od punktu badanego do obu wierzchołków przeszkody
-      const v1x = seg.p1.x - point.x;
-      const v1y = seg.p1.y - point.y;
-      const v2x = seg.p2.x - point.x;
-      const v2y = seg.p2.y - point.y;
+      const southLimit = segMinY - deltaH * 1.5;
+      const oMaxY = Math.max(seg.p1.y, seg.p2.y);
+      if (oMaxY < southLimit) continue;
 
-      // Krok 1 & 2: Prosta +12° od lica (+78° od normalnej)
-      const d1_p1 = v1x * n1.x + v1y * n1.y;
-      const d1_p2 = v2x * n1.x + v2y * n1.y;
-      if (d1_p1 < -0.01 && d1_p2 < -0.01) continue;
-
-      // Krok 3 & 4: Prosta -12° od lica (-78° od normalnej)
-      const d2_p1 = v1x * n2.x + v1y * n2.y;
-      const d2_p2 = v2x * n2.x + v2y * n2.y;
-      if (d2_p1 < -0.01 && d2_p2 < -0.01) continue;
-
-      filtered.push({ seg, bldgId: bldg.id });
+      candidates.push({ seg, bldgId: bldg.id });
     }
   }
 
+  return candidates;
+}
+
+/**
+ * Filtruje prefiltrowane przeszkody § 56 dla konkretnego punktu P (korytarz boczny, E-W + stożek widzenia fasady).
+ */
+export function filterPointSunlightFromCandidates(
+  point: Point2D,
+  candidates: PrefilteredObstacle[],
+  pointBaseH: number,
+  n1: Point2D,
+  n2: Point2D
+): PrefilteredObstacle[] {
+  const filtered: PrefilteredObstacle[] = [];
+  const len = candidates.length;
+  for (let i = 0; i < len; i++) {
+    const item = candidates[i];
+    const seg = item.seg;
+    const deltaH = Math.max(0, seg.hTop - pointBaseH);
+    if (deltaH <= 0) continue;
+
+    // 1. Filtr boczny N-S: L = H * 5
+    const latReach = deltaH * 5.0;
+    if (seg.p1.x < point.x - latReach && seg.p2.x < point.x - latReach) continue;
+    if (seg.p1.x > point.x + latReach && seg.p2.x > point.x + latReach) continue;
+
+    // 2. Filtr poziomy E-W: L = H * 1.5 na południe od punktu P
+    const southLimit = point.y - deltaH * 1.5;
+    if (seg.p1.y < southLimit && seg.p2.y < southLimit) continue;
+
+    // Wektory od punktu badanego do obu wierzchołków przeszkody
+    const v1x = seg.p1.x - point.x;
+    const v1y = seg.p1.y - point.y;
+    const v2x = seg.p2.x - point.x;
+    const v2y = seg.p2.y - point.y;
+
+    // 4. Krok 1 & 2: Prosta +12° od lica (+78° od normalnej)
+    const d1_p1 = v1x * n1.x + v1y * n1.y;
+    const d1_p2 = v2x * n1.x + v2y * n1.y;
+    if (d1_p1 < -0.01 && d1_p2 < -0.01) continue;
+
+    // Krok 3 & 4: Prosta -12° od lica (-78° od normalnej)
+    const d2_p1 = v1x * n2.x + v1y * n2.y;
+    const d2_p2 = v2x * n2.x + v2y * n2.y;
+    if (d2_p1 < -0.01 && d2_p2 < -0.01) continue;
+
+    filtered.push(item);
+  }
   return filtered;
 }
 
 /**
- * PRE-FILTR ODCINKÓW DLA § 56 (Nasłonecznienie - Linijka Słońca & Astro).
- * 
- * Wykorzystuje wyłącznie szybką algebrę liniową O(1) bez trygonometrii:
- * 1. Korytarz boczny N-S: odrzuca przeszkody leżące w całości na zewnątrz linii pionowych
- *    odsuniętych na lewo i prawo od punktu badanego o L = H * 5 (L_boczne).
- * 2. Linia pozioma E-W (południowa): odrzuca przeszkody leżące w całości na południe od
- *    poziomej linii odsuniętej o L = H * 1.5 od punktu badanego (maksymalny zasięg cienia
- *    w równonoc dla szerokości geograficznej Polski).
- * 3. Backface culling: odrzucenie ścian odwróconych od punktu P.
- * 4. Kąty graniczne ±12° od lica badanego odcinka (stożek widzenia fasady).
+ * PRE-FILTR ODCINKÓW DLA § 56 (Nasłonecznienie - Linijka Słońca & Astro) dla pojedynczego punktu.
  */
 export function prefilterSunlightObstacles(
   point: Point2D,
@@ -197,75 +327,13 @@ export function prefilterSunlightObstacles(
 ): PrefilteredObstacle[] {
   const normal = segment.normal;
   const normalAngleRad = Math.atan2(normal.y, normal.x);
-
-  // Kąty prostych granicznych ±12° od lica (±78° od normalnej)
   const a1 = normalAngleRad + 78.0 * DEG2RAD;
   const a2 = normalAngleRad - 78.0 * DEG2RAD;
-
-  // Wektory normalne skierowane do wnętrza stożka widzenia ±78°
   const n1 = { x: Math.sin(a1), y: -Math.cos(a1) };
   const n2 = { x: -Math.sin(a2), y: Math.cos(a2) };
 
-  const filtered: PrefilteredObstacle[] = [];
-
-  for (const bldg of allBuildings) {
-    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
-
-    // Szybkie odrzucenie AABB z korytarzem bazującym na wysokości budynku H
-    const aabb = getBuildingAABB(bldg);
-    const bldgH = Math.max(0, bldg.defaultHeight ?? 15);
-    if (aabb && bldgH > 0) {
-      const maxL = bldgH * 5.0;
-      // Jeśli cały budynek jest na zewnątrz korytarza bocznego L = H * 5:
-      if (point.x < aabb.minX - maxL || point.x > aabb.maxX + maxL) {
-        continue;
-      }
-      // Jeśli cały budynek jest na południe od linii L = H * 1.5:
-      const maxSouthL = bldgH * 1.5;
-      if (aabb.maxY < point.y - maxSouthL) {
-        continue;
-      }
-    }
-
-    for (const seg of bldg.segments) {
-      // Pomiń sam badany odcinek
-      if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
-
-      // Wysokość przeszkody względem poziomu posadowienia fasady badanej (segment.hBase)
-      const pointBaseH = segment.hBase ?? 0.0;
-      const deltaH = Math.max(0, seg.hTop - pointBaseH);
-      if (deltaH <= 0) continue;
-
-      // 1. Filtr boczny N-S: L = H * 5 (odrzucenie odcinków leżących w całości poza korytarzem)
-      const latReach = deltaH * 5.0;
-      if (seg.p1.x < point.x - latReach && seg.p2.x < point.x - latReach) continue;
-      if (seg.p1.x > point.x + latReach && seg.p2.x > point.x + latReach) continue;
-
-      // 2. Filtr poziomy E-W: L = H * 1.5 na południe od punktu P
-      const southLimit = point.y - deltaH * 1.5;
-      if (seg.p1.y < southLimit && seg.p2.y < southLimit) continue;
-
-      // Wektory od punktu badanego do obu wierzchołków przeszkody
-      const v1x = seg.p1.x - point.x;
-      const v1y = seg.p1.y - point.y;
-      const v2x = seg.p2.x - point.x;
-      const v2y = seg.p2.y - point.y;
-
-      // 4. Krok 1 & 2: Prosta +12° od lica (+78° od normalnej)
-      const d1_p1 = v1x * n1.x + v1y * n1.y;
-      const d1_p2 = v2x * n1.x + v2y * n1.y;
-      if (d1_p1 < -0.01 && d1_p2 < -0.01) continue;
-
-      // Krok 3 & 4: Prosta -12° od lica (-78° od normalnej)
-      const d2_p1 = v1x * n2.x + v1y * n2.y;
-      const d2_p2 = v2x * n2.x + v2y * n2.y;
-      if (d2_p1 < -0.01 && d2_p2 < -0.01) continue;
-
-      filtered.push({ seg, bldgId: bldg.id });
-    }
-  }
-
-  return filtered;
+  const candidates = prefilterSunlightCandidatesForSegment(segment, allBuildings, targetBuildingId);
+  return filterPointSunlightFromCandidates(point, candidates, segment.hBase ?? 0.0, n1, n2);
 }
 
 /**
@@ -1131,6 +1199,8 @@ export interface AnalysisAccuracyOptions {
   samplingInterval?: number; // Distance between test points along facade (e.g. 1.5m live -> 0.25m final)
   angleStepDeg?: number; // Angular ray resolution (e.g. 2.0 deg live -> 0.5 deg final)
   sunlightStepMinutes?: number; // Solar timeline resolution (e.g. 15 min live -> 5 min final)
+  shadowStepHours?: number; // Shadow envelope step resolution (e.g. 1.0h live -> 0.25h final)
+  debugBenchmark?: boolean; // When true, runs reference Astro method in Linijka mode for profiling
 }
 
 export interface AnalysisBatchOutput {
@@ -1146,27 +1216,6 @@ export interface AnalysisBatchOutput {
   totalPoints: number;
 }
 
-
-const analysisPointCache = new Map<string, AnalysisPointResult>();
-
-const sameAnalysisResult = (a: AnalysisPointResult, b: AnalysisPointResult): boolean =>
-  a.buildingId === b.buildingId &&
-  a.segmentId === b.segmentId &&
-  a.normal.x === b.normal.x &&
-  a.normal.y === b.normal.y &&
-  a.shadowing.isCompliant === b.shadowing.isCompliant &&
-  a.shadowing.maxContinuousFreeSpanDeg === b.shadowing.maxContinuousFreeSpanDeg &&
-  a.shadowing.totalFreeSpanDeg === b.shadowing.totalFreeSpanDeg &&
-  a.sunlight.isCompliant === b.sunlight.isCompliant &&
-  a.sunlight.totalMinutes === b.sunlight.totalMinutes &&
-  a.sunlight.totalHours === b.sunlight.totalHours;
-
-const makePointCacheKey = (
-  cacheKey: string,
-  buildingId: string,
-  segmentId: string,
-  ratio: number
-) => `${cacheKey}|${buildingId}|${segmentId}|${ratio.toFixed(6)}`;
 
 /**
  * Runs full batch analysis on all facade segments of tested building(s).
@@ -1206,41 +1255,11 @@ export function runFullAnalysis(
     };
   }
 
-  if (analysisPointCache.size > 15000) {
-    analysisPointCache.clear();
-  }
-
   const results: AnalysisPointResult[] = [];
   const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary');
   const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
   const angleStep = options?.angleStepDeg ?? 0.5;
   const sunlightStep = options?.sunlightStepMinutes ?? 5;
-  const cacheKey = JSON.stringify({
-    buildings: buildings.map((b) => ({
-      id: b.id,
-      h: b.defaultHeight,
-      tested: b.isTested,
-      included: b.isIncluded !== false,
-      city: b.isCityCentre,
-      type: b.buildingType,
-      layer: b.layer,
-      vertices: b.vertices.map((v) => [Number(v.x.toFixed(4)), Number(v.y.toFixed(4))]),
-    })),
-    settings: {
-      latitude: Number(settings.latitude.toFixed(4)),
-      longitude: Number(settings.longitude.toFixed(4)),
-      city: settings.isCityCentreDefault,
-      sampling: interval,
-      equinox: settings.equinoxDate,
-    },
-    options: {
-      angleStep,
-      sunlightStep,
-      sunlightMethod,
-      isShadowingEnabled,
-      isSunlightEnabled,
-    },
-  });
 
   // Precompute solar trajectories and 10h window lines once for standard residential and childcare segments
   const astroSystem = isSunlightEnabled ? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
@@ -1260,17 +1279,18 @@ export function runFullAnalysis(
     ? precomputeSolarWindow(settings, true, activeHourSystem)
     : null;
 
-  // Trajektorie referencyjne (Astro) dla benchmarku w trybie Linijki Słońca
-  const refStandardTrajectory = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
+  // Trajektorie referencyjne (Astro) tylko gdy jawnie zażądano profilowania (options?.debugBenchmark)
+  const isDebugBenchmark = Boolean(options?.debugBenchmark);
+  const refStandardTrajectory = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, false, astroSystem)
     : null;
-  const refChildcareTrajectory = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
+  const refChildcareTrajectory = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, true, astroSystem)
     : null;
-  const refStandardWindow = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
+  const refStandardWindow = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? precomputeSolarWindow(settings, false, astroSystem)
     : null;
-  const refChildcareWindow = (isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
+  const refChildcareWindow = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? precomputeSolarWindow(settings, true, astroSystem)
     : null;
 
@@ -1287,7 +1307,9 @@ export function runFullAnalysis(
   if (isShadowingEnabled || isSunlightEnabled) {
     const batchBuildingMap = new Map<string, BuildingLoop>(buildings.map((b) => [b.id, b]));
 
+    const tLoop0 = performance.now();
     for (const bldg of testedBuildings) {
+      const tBldg0 = performance.now();
       for (const seg of bldg.segments) {
         const isChildcare = seg.buildingType === 'childcare';
         const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
@@ -1295,46 +1317,29 @@ export function runFullAnalysis(
         const windowInfo = isChildcare ? childcareWindow : standardWindow;
         const refTrajectory = isChildcare ? refChildcareTrajectory : refStandardTrajectory;
         const refWindowInfo = isChildcare ? refChildcareWindow : refStandardWindow;
-        const sampleKeys = sampled.map((sample) =>
-          makePointCacheKey(cacheKey, bldg.id, seg.id, sample.ratio)
-        );
-        const sampleResults: Array<AnalysisPointResult | null> = new Array(sampled.length).fill(null);
+
+        // Wstępne wyliczenie wektorów stożka widzenia i kandydatów przeszkód dla CAŁEGO odcinka fasady
+        const normalAngleRad = Math.atan2(seg.normal.y, seg.normal.x);
+        const a1 = normalAngleRad + 78.0 * DEG2RAD;
+        const a2 = normalAngleRad - 78.0 * DEG2RAD;
+        const n1 = { x: Math.sin(a1), y: -Math.cos(a1) };
+        const n2 = { x: -Math.sin(a2), y: Math.cos(a2) };
+        const pointBaseH = seg.hBase ?? 0.0;
+
+        const shadowingCandidates = isShadowingEnabled
+          ? prefilterShadowingCandidatesForSegment(seg, buildings, bldg.id)
+          : null;
+        const sunlightCandidates = isSunlightEnabled
+          ? prefilterSunlightCandidatesForSegment(seg, buildings, bldg.id)
+          : null;
 
         for (let i = 0; i < sampled.length; i++) {
-          const cached = analysisPointCache.get(sampleKeys[i]);
-          if (cached) {
-            sampleResults[i] = cached;
-          }
-        }
-
-        for (let i = 0; i < sampled.length; i++) {
-          if (sampleResults[i]) continue;
-
-          const leftKnown = i > 0 ? sampleResults[i - 1] : null;
-          let rightKnownIndex = -1;
-          for (let k = i + 1; k < sampled.length; k++) {
-            if (sampleResults[k]) {
-              rightKnownIndex = k;
-              break;
-            }
-          }
-          const rightKnown = rightKnownIndex >= 0 ? sampleResults[rightKnownIndex] : null;
-
-          if (leftKnown && rightKnown && sameAnalysisResult(leftKnown, rightKnown)) {
-            for (let j = i; j < rightKnownIndex; j++) {
-              sampleResults[j] = leftKnown;
-              analysisPointCache.set(sampleKeys[j], leftKnown);
-            }
-            i = rightKnownIndex - 1;
-            continue;
-          }
-
           const sample = sampled[i];
 
           let shadowing: ShadowingResult;
           let pointShadowMs = 0;
           if (isShadowingEnabled) {
-            const prefilteredShadowing = prefilterShadowingObstacles(sample.point, seg, buildings, bldg.id);
+            const prefilteredShadowing = filterPointShadowingFromCandidates(sample.point, shadowingCandidates!, n1, n2);
             const tShadow0 = performance.now();
             shadowing = analyzeShadowingAtPoint(
               sample.point, seg, sample.ratio, buildings, bldg.id, angleStep, prefilteredShadowing, batchBuildingMap
@@ -1357,7 +1362,7 @@ export function runFullAnalysis(
           let sunlight: SunlightResult;
           let pointSunlightMs = 0;
           if (isSunlightEnabled) {
-            const prefilteredSunlight = prefilterSunlightObstacles(sample.point, seg, buildings, bldg.id);
+            const prefilteredSunlight = filterPointSunlightFromCandidates(sample.point, sunlightCandidates!, pointBaseH, n1, n2);
             const tSun0 = performance.now();
             sunlight =
               sunlightMethod === 'segments'
@@ -1371,7 +1376,7 @@ export function runFullAnalysis(
             totalSunlightTimeMs += pointSunlightMs;
 
             let sunlightRay = sunlight;
-            if (sunlightMethod === 'segments' && refTrajectory && refWindowInfo && astroSystem) {
+            if (isDebugBenchmark && sunlightMethod === 'segments' && refTrajectory && refWindowInfo && astroSystem) {
               const tSunSeg0 = performance.now();
               sunlightRay = analyzeSunlightAtPoint(
                 sample.point, seg, sample.ratio, buildings, bldg.id, settings, sunlightStep, refTrajectory, prefilteredSunlight, refWindowInfo || undefined, astroSystem
@@ -1409,54 +1414,15 @@ export function runFullAnalysis(
             evalShadowMs: pointShadowMs,
             evalSunlightMs: pointSunlightMs,
           };
-          sampleResults[i] = result;
-          analysisPointCache.set(sampleKeys[i], result);
-        }
-        for (const res of sampleResults) {
-          if (!res) continue;
           pointCount++;
-          results.push(res);
+          results.push(result);
         }
       }
     }
   }
 
-  // Obliczenie sumarycznych czasów § 12 i § 56 obejmujących WSZYSTKIE punkty zbadanej siatki
-  let allPointsShadowingTimeMs = 0;
-  let allPointsSunlightTimeMs = 0;
-  if (pointCount > 0) {
-    let measuredShadowCount = 0;
-    let measuredSunlightCount = 0;
-    for (const res of results) {
-      const customRes = res as AnalysisPointResult & { evalShadowMs?: number; evalSunlightMs?: number };
-      if (customRes.evalShadowMs !== undefined && customRes.evalShadowMs > 0) {
-        allPointsShadowingTimeMs += customRes.evalShadowMs;
-        measuredShadowCount++;
-      }
-      if (customRes.evalSunlightMs !== undefined && customRes.evalSunlightMs > 0) {
-        allPointsSunlightTimeMs += customRes.evalSunlightMs;
-        measuredSunlightCount++;
-      }
-    }
-    // Jeśli część punktów była zinterpolowana (nie mierzona bezpośrednio),
-    // ekstrapolujemy średni koszt na wszystkie punkty fasady, aby reprezentować pełen koszt analizy 100% punktów
-    if (measuredShadowCount > 0 && measuredShadowCount < pointCount && isShadowingEnabled) {
-      const avgPointShadowMs = allPointsShadowingTimeMs / measuredShadowCount;
-      allPointsShadowingTimeMs = avgPointShadowMs * pointCount;
-    } else if (allPointsShadowingTimeMs === 0 && isShadowingEnabled && totalShadowingTimeMs > 0) {
-      allPointsShadowingTimeMs = totalShadowingTimeMs;
-    }
-
-    if (measuredSunlightCount > 0 && measuredSunlightCount < pointCount && isSunlightEnabled) {
-      const avgPointSunlightMs = allPointsSunlightTimeMs / measuredSunlightCount;
-      allPointsSunlightTimeMs = avgPointSunlightMs * pointCount;
-    } else if (allPointsSunlightTimeMs === 0 && isSunlightEnabled && totalSunlightTimeMs > 0) {
-      allPointsSunlightTimeMs = totalSunlightTimeMs;
-    }
-  }
-
-  const finalShadowingTimeMs = isShadowingEnabled ? Math.max(totalShadowingTimeMs, allPointsShadowingTimeMs) : 0;
-  const finalSunlightTimeMs = isSunlightEnabled ? Math.max(totalSunlightTimeMs, allPointsSunlightTimeMs) : 0;
+  const finalShadowingTimeMs = isShadowingEnabled ? totalShadowingTimeMs : 0;
+  const finalSunlightTimeMs = isSunlightEnabled ? totalSunlightTimeMs : 0;
 
   const avgShadowingMs   = pointCount > 0 && isShadowingEnabled ? finalShadowingTimeMs  / pointCount : 0;
   const avgSunlightMs    = pointCount > 0 && isSunlightEnabled  ? finalSunlightTimeMs   / pointCount : 0;
@@ -1465,12 +1431,13 @@ export function runFullAnalysis(
   // ── Analiza obrysu cienia rzucanego (Silhouette Edges + Koperta + Godziny 0, +-1h..+-5h) ──
   let shadowAnalysis = { hourlyShadows: [] as any[], envelopeLoops: [] as any[], calculationTimeMs: 0 };
   if (isShadowRangeEnabled) {
+    const shadowStep = options?.shadowStepHours ?? 0.25;
     shadowAnalysis = computeFullShadowAnalysis(
       buildings,
       settings.latitude,
       settings.longitude,
       settings.equinoxDate,
-      0.25,
+      shadowStep,
       sunlightMethod
     );
   }
@@ -1478,8 +1445,8 @@ export function runFullAnalysis(
 
   const totalAnalysisMs = performance.now() - analysisStart;
 
-  // ── Log benchmark do DevTools Console (tylko gdy Metoda Linijki Słońca aktywna) ──
-  if (isSunlightEnabled && sunlightMethod === 'segments' && pointCount > 0) {
+  // ── Log benchmark do DevTools Console (tylko gdy włączono debugBenchmark) ──
+  if (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && pointCount > 0) {
     console.groupCollapsed(
       `%c§56 Benchmark [Metoda Linijki Słońca aktywna] — ${pointCount} pkt`,
       'color:#f59e0b;font-weight:bold'

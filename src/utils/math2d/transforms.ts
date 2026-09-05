@@ -187,3 +187,105 @@ export function adjustEdgeLength(
 
   return result;
 }
+
+/**
+ * Normalizes an angle in degrees to [0, 360)
+ */
+export function normalizeAngle360(angleDeg: number): number {
+  let a = angleDeg % 360;
+  if (a < 0) a += 360;
+  return a;
+}
+
+/**
+ * Normalizes an axial direction angle in degrees to [0, 180)
+ */
+export function normalizeAngle180(angleDeg: number): number {
+  let a = angleDeg % 180;
+  if (a < 0) a += 180;
+  return a;
+}
+
+/**
+ * Computes angular difference between two directions in [0, 180)
+ */
+export function angleDiff180(a1: number, a2: number): number {
+  const norm1 = normalizeAngle180(a1);
+  const norm2 = normalizeAngle180(a2);
+  let diff = Math.abs(norm1 - norm2);
+  if (diff > 90) diff = 180 - diff;
+  return diff;
+}
+
+/**
+ * Helper to compute intersection point of two 2D lines defined by (p1, dir1) and (p2, dir2).
+ */
+export function lineIntersection2D(
+  p1: Point2D,
+  angleRad1: number,
+  p2: Point2D,
+  angleRad2: number
+): Point2D | null {
+  const cos1 = Math.cos(angleRad1);
+  const sin1 = Math.sin(angleRad1);
+  const cos2 = Math.cos(angleRad2);
+  const sin2 = Math.sin(angleRad2);
+
+  // Determinant
+  const det = cos1 * sin2 - sin1 * cos2;
+  if (Math.abs(det) < 1e-4) {
+    return null; // Lines are parallel or coincident
+  }
+
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+
+  const t1 = (dx * sin2 - dy * cos2) / det;
+  return {
+    x: p1.x + t1 * cos1,
+    y: p1.y + t1 * sin1,
+  };
+}
+
+/**
+ * Helper to compute intersection point of a 2D line (pOrigin, angleRad) and a segment [segP1, segP2].
+ */
+export function lineSegmentIntersection2D(
+  pOrigin: Point2D,
+  angleRad: number,
+  segP1: Point2D,
+  segP2: Point2D
+): { point: Point2D; t: number; s: number } | null {
+  const cosA = Math.cos(angleRad);
+  const sinA = Math.sin(angleRad);
+  const vx = segP2.x - segP1.x;
+  const vy = segP2.y - segP1.y;
+
+  // Determinant
+  const det = sinA * vx - cosA * vy;
+  if (Math.abs(det) < 1e-4) {
+    return null; // Line and segment are parallel
+  }
+
+  const dx = segP1.x - pOrigin.x;
+  const dy = segP1.y - pOrigin.y;
+
+  // s: parameter along segment segP1 -> segP2
+  const s = (cosA * dy - sinA * dx) / det;
+  if (s < -0.01 || s > 1.01) {
+    return null;
+  }
+
+  // t: parameter along line from pOrigin
+  const t = (dx * vy - dy * vx) / det;
+
+  const clampedS = Math.max(0, Math.min(1, s));
+  return {
+    point: {
+      x: segP1.x + clampedS * vx,
+      y: segP1.y + clampedS * vy,
+    },
+    t,
+    s: clampedS,
+  };
+}

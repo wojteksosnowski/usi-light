@@ -1,8 +1,7 @@
 import { CadRenderContext } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { generateSweepPolygon, SweepAlignment } from '../../../utils/math2d';
-import { DirectionSnapResult } from '../../../utils/directionSnapping';
-import { OsnapSnapResult, BuildingDragSnapResult, EdgeDragSnapResult } from '../../../engine/snapping';
+import { OsnapSnapResult, BuildingDragSnapResult, EdgeDragSnapResult, DirectionSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
 
 /**

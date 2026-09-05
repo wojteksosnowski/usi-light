@@ -1,7 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { BuildingLoop, ProjectSettings } from '../types/geometry';
-import { runFullAnalysis, AnalysisAccuracyOptions, AnalysisBatchOutput, EnabledAnalyses } from '../engine/analysisEngine';
+import { AnalysisAccuracyOptions, AnalysisBatchOutput, EnabledAnalyses } from '../engine/analysisEngine';
+import { defaultSolarAnalysisEngine } from '../engine/solar';
 import { AnalysisWorkerRequest, AnalysisWorkerResponse } from '../engine/analysis.worker';
+
+const EMPTY_ANALYSIS_OUTPUT: AnalysisBatchOutput = {
+  results: [],
+  avgShadowingMs: 0,
+  avgSunlightMs: 0,
+  avgSunlightSegMs: 0,
+  totalShadowingTimeMs: 0,
+  totalSunlightTimeMs: 0,
+  shadowEnvelopeMs: 0,
+  shadowAnalysis: { hourlyShadows: [], envelopeLoops: [], calculationTimeMs: 0 },
+  totalAnalysisMs: 0,
+  totalPoints: 0,
+};
 
 export function useAnalysisWorker(
   buildings: BuildingLoop[],
@@ -11,9 +25,10 @@ export function useAnalysisWorker(
   isLiveInteraction: boolean = false,
   enabledAnalyses?: EnabledAnalyses
 ) {
-  // Initial immediate synchronous calculation for immediate initial mount
+  // Non-blocking initial state: immediate mount without freezing UI thread, computation delegated to Web Worker
   const [analysisOutput, setAnalysisOutput] = useState<AnalysisBatchOutput>(() => {
-    return runFullAnalysis(buildings, settings, options, sunlightMethod, enabledAnalyses);
+    // If scene is tiny (<5 buildings and <50 segments), sync calculate is fine, but for any scene, empty state + instant worker dispatch guarantees 0ms frame lag
+    return EMPTY_ANALYSIS_OUTPUT;
   });
 
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
@@ -115,7 +130,7 @@ export function useAnalysisWorker(
         }
       } else {
         // Fallback to sync if worker is unavailable
-        const output = runFullAnalysis(bldgs, st, opt, method, analyses);
+        const output = defaultSolarAnalysisEngine.runFullAnalysis(bldgs, st, opt, method, analyses);
         if (isMountedRef.current) {
           setAnalysisOutput(output);
           setIsCalculating(false);

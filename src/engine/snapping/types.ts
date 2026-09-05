@@ -125,3 +125,44 @@ export interface OsnapSnapResult {
   parallelAngleDeg?: number;
   collinearDistance?: number;
 }
+
+export interface DirectionSnapResult {
+  snappedPoint: Point2D;
+  originPoint: Point2D;
+  guideAngleDeg: number;
+  relationType: 'parallel' | 'perpendicular' | 'dominant' | 'guide_intersection';
+  isStatistical?: boolean; // true dla siatek głównych i statystycznych, false dla konkretnych krawędzi
+  guideLine: { p1: Point2D; p2: Point2D };
+  secondGuideLine?: { p1: Point2D; p2: Point2D; originPoint?: Point2D; angleDeg?: number; label?: string };
+  intersectedSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number; buildingName?: string };
+  distanceFromOrigin: number;
+  diffAngleDeg: number;
+  sourceLabel?: string;
+  sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number };
+}
+
+export interface CalculateDirectionSnapOptions {
+  currentMouseWorld: Point2D;
+  originPoint: Point2D;
+  secondaryOriginPoints?: Point2D[];
+  buildings?: BuildingLoop[];
+  dominantDirections?: DominantDirection[];
+  polylineVertices?: Point2D[];
+  staticReferenceSegments?: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[];
+  worldToScreen?: (wx: number, wy: number) => { sx: number; sy: number };
+  angleToleranceDeg?: number;
+  screenSnapThresholdPx?: number;
+  minDistanceMeters?: number;
+  hoveredBuildingId?: string;
+  selectedBuildingId?: string;
+  excludeBuildingId?: string;
+  excludeSegmentIndices?: number[];
+}
+
+export interface DirectionCandidate {
+  angleDeg: number;
+  relationType: 'parallel' | 'perpendicular' | 'dominant';
+  sourceLabel?: string;
+  priority: number;
+  sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number };
+}
