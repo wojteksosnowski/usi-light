@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Layers,
   Building,
@@ -11,6 +11,11 @@ import {
   FileSpreadsheet,
   Copy,
   CheckSquare,
+  ChevronDown,
+  ChevronRight,
+  Sun,
+  Trees,
+  Sliders,
 } from 'lucide-react';
 import { useSceneStore, useSolarAnalysisStore, useCadToolStore, useUiStore } from '../../store';
 import {
@@ -20,6 +25,9 @@ import {
   computePolygonIntersectionWithBoundaries,
 } from '@/utils/math2d';
 import { rebuildBuildingSegments } from '../../utils/segmentStatistics';
+import { calculateBuildingFloors, toRomanNumeral } from '../../utils/buildingFloorCalculator';
+import { analyzePlaygroundSunlight } from '../../engine/analysisEngine';
+import { computePlaygroundApartmentCapacity } from '../../utils/playgroundUtils';
 
 export const LayersAndObjectsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -27,6 +35,9 @@ export const LayersAndObjectsGroup: React.FC = () => {
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
   const selectedBuildingIds = useSceneStore((s) => s.selectedBuildingIds);
   const setSelectedBuildingId = useSceneStore((s) => s.setSelectedBuildingId);
+  const setSelectedBuildingIds = useSceneStore((s) => s.setSelectedBuildingIds);
+  const selectBuilding = useSceneStore((s) => s.selectBuilding);
+  const updateBuilding = useSceneStore((s) => s.updateBuilding);
   const layerSettings = useSceneStore((s) => s.layerSettings);
   const selectedLayerName = useSceneStore((s) => s.selectedLayerName);
   const setSelectedLayerName = useSceneStore((s) => s.setSelectedLayerName);
@@ -38,9 +49,21 @@ export const LayersAndObjectsGroup: React.FC = () => {
   const updateSelectedBuilding = useSceneStore((s) => s.updateSelectedBuilding);
   const rotateBuilding = useSceneStore((s) => s.rotateBuilding);
 
+  const settings = useSolarAnalysisStore((s) => s.settings);
+  const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
+
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
   const showCopiedToast = useUiStore((s) => s.showCopiedToast);
   const copiedToast = useUiStore((s) => s.copiedToast);
+
+  const [collapsedTreeGroups, setCollapsedTreeGroups] = useState<Record<string, boolean>>({});
+
+  const toggleTreeGroup = (groupKey: string) => {
+    setCollapsedTreeGroups((prev) => ({
+      ...prev,
+      [groupKey]: !prev[groupKey],
+    }));
+  };
 
   // Active building object
   const selectedBuilding = useMemo(() => {
@@ -74,11 +97,65 @@ export const LayersAndObjectsGroup: React.FC = () => {
     }));
   }, [buildings]);
 
-  // Działki (boundary)
+  // Działki (boundary, wykluczając place zabaw)
   const boundaryObjects = useMemo(() => {
     return buildings.filter(
-      (b) => b.category === 'boundary' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
+      (b) => b.category === 'boundary' && b.areaType !== 'playground' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
     );
+  }, [buildings]);
+
+  // Obliczenia nasłonecznienia placu zabaw wg § 33 ust. 3 WT
+  const playgroundAnalysis = useMemo(() => {
+    if (
+      !selectedBuilding ||
+      selectedBuilding.category !== 'boundary' ||
+      selectedBuilding.areaType !== 'playground' ||
+      !selectedBuilding.isTested ||
+      !selectedBuilding.vertices ||
+      selectedBuilding.vertices.length < 3
+    ) {
+      return null;
+    }
+    return analyzePlaygroundSunlight(selectedBuilding, buildings, settings, sunlightMethod);
+  }, [selectedBuilding, buildings, settings, sunlightMethod]);
+
+  // Grupowanie obiektów do drzewa projektu
+  const objectTree = useMemo(() => {
+    const buildingList = buildings.filter((b) => b.category !== 'boundary' && b.category !== 'balcony');
+    const areaList = buildings.filter((b) => b.category === 'boundary');
+    const balconyList = buildings.filter((b) => b.category === 'balcony');
+
+    // Podgrupy budynków wg H i posadowienia (elevation)
+    const buildingSubgroupsMap = new Map<string, { height: number; elevation: number; items: typeof buildings }>();
+    buildingList.forEach((b) => {
+      const h = b.defaultHeight || 15.0;
+      const elev = b.elevation ?? 0.0;
+      const key = `H_${h}_E_${elev}`;
+      const existing = buildingSubgroupsMap.get(key) || { height: h, elevation: elev, items: [] };
+      existing.items.push(b);
+      buildingSubgroupsMap.set(key, existing);
+    });
+
+    const buildingSubgroups = Array.from(buildingSubgroupsMap.entries()).map(([key, group]) => ({
+      key,
+      height: group.height,
+      elevation: group.elevation,
+      label: `H = ${group.height}m, posad. ${group.elevation}m`,
+      items: group.items,
+    }));
+
+    // Podgrupy obszarów: Działki vs Place zabaw
+    const plotList = areaList.filter((b) => b.areaType !== 'playground');
+    const playgroundList = areaList.filter((b) => b.areaType === 'playground');
+
+    return {
+      buildingList,
+      buildingSubgroups,
+      areaList,
+      plotList,
+      playgroundList,
+      balconyList,
+    };
   }, [buildings]);
 
   // Działki z włączonym "Obiekt badany (isTested)" dla kalkulacji wskaźników
@@ -355,24 +432,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   borderTop: '1px dashed var(--border-light)',
                 }}
               >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 8px',
-                    backgroundColor: 'rgba(15, 23, 42, 0.5)',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-light)',
-                    fontSize: '11px',
-                  }}
-                >
-                  <span style={{ color: '#94a3b8' }}>Powierzchnia warstwy:</span>
-                  <span style={{ color: '#38bdf8', fontWeight: 700, fontFamily: 'monospace' }}>
-                    {Math.round(computeBuildingsUnionArea(layerBuildings))} m²
-                  </span>
-                </div>
-
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                   <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
                     Wysokość H dla warstwy (m)
@@ -400,15 +459,26 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   />
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
                   <button
                     type="button"
                     onClick={() => updateLayerBuildings(selectedLayerName, { isIncluded: !allIncluded })}
                     className={`btn-tile ${allIncluded ? 'active-emerald' : someIncluded ? 'active-amber' : 'inactive'}`}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      padding: '6px 4px',
+                      textAlign: 'center',
+                      minHeight: '48px',
+                    }}
+                    title="Uwzględnij w kalkulacji (wszystkie obiekty na warstwie)"
                   >
-                    <span>Uwzględnij w kalkulacji</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                      {allIncluded ? 'TAK (Wszystkie)' : someIncluded ? 'CZĘŚCIOWO' : 'NIE'}
+                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Uwzględnij w kalkulacji</span>
+                    <span style={{ fontSize: '9.5px', fontWeight: 700 }}>
+                      {allIncluded ? 'TAK' : someIncluded ? 'CZĘŚĆ' : 'NIE'}
                     </span>
                   </button>
 
@@ -416,10 +486,21 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     type="button"
                     onClick={() => updateLayerBuildings(selectedLayerName, { isTested: !allTested })}
                     className={`btn-tile ${allTested ? 'active-indigo' : someTested ? 'active-amber' : 'inactive'}`}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      padding: '6px 4px',
+                      textAlign: 'center',
+                      minHeight: '48px',
+                    }}
+                    title="Obiekt badany / Projektowany (wszystkie obiekty na warstwie)"
                   >
-                    <span>Obiekt badany (Projektowany)</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                      {allTested ? 'TAK (Wszystkie)' : someTested ? 'CZĘŚCIOWO' : 'NIE'}
+                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Obiekt badany</span>
+                    <span style={{ fontSize: '9.5px', fontWeight: 700 }}>
+                      {allTested ? 'TAK' : someTested ? 'CZĘŚĆ' : 'NIE'}
                     </span>
                   </button>
 
@@ -427,10 +508,21 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     type="button"
                     onClick={() => updateLayerBuildings(selectedLayerName, { isCityCentre: !allCityCentre })}
                     className={`btn-tile ${allCityCentre ? 'active-amber' : someCityCentre ? 'active-indigo' : 'inactive'}`}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      padding: '6px 4px',
+                      textAlign: 'center',
+                      minHeight: '48px',
+                    }}
+                    title="Zabudowa śródmiejska (wszystkie obiekty na warstwie)"
                   >
-                    <span>Zabudowa śródmiejska</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                      {allCityCentre ? 'TAK (Wszystkie)' : someCityCentre ? 'CZĘŚCIOWO' : 'NIE'}
+                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Zabudowa śródmiejska</span>
+                    <span style={{ fontSize: '9.5px', fontWeight: 700 }}>
+                      {allCityCentre ? 'TAK' : someCityCentre ? 'CZĘŚĆ' : 'NIE'}
                     </span>
                   </button>
                 </div>
@@ -440,7 +532,646 @@ export const LayersAndObjectsGroup: React.FC = () => {
         </div>
       </div>
 
-      {/* 2.1 Edycja Obiektu 2.5D */}
+      {/* 2.1 Obiekty w projekcie */}
+      <div className="ui-card">
+        <div className="ui-title">
+          <span>Obiekty ({buildings.length})</span>
+          <Building size={14} color="#818cf8" />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {/* Grupa 1: Budynki */}
+          {objectTree.buildingList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <div
+                onClick={() => toggleTreeGroup('cat_buildings')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '5px 8px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {collapsedTreeGroups['cat_buildings'] ? (
+                    <ChevronRight size={13} color="#818cf8" />
+                  ) : (
+                    <ChevronDown size={13} color="#818cf8" />
+                  )}
+                  <Building size={13} color="#818cf8" />
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#e0e7ff' }}>
+                    Budynki ({objectTree.buildingList.length})
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    title="Zaznacz wszystkie budynki"
+                    onClick={() => setSelectedBuildingIds(objectTree.buildingList.map((b) => b.id))}
+                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px 4px' }}
+                  >
+                    <CheckSquare size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Zablokuj/odblokuj wszystkie budynki"
+                    onClick={() => {
+                      const allLocked = objectTree.buildingList.every((b) => b.isLocked);
+                      objectTree.buildingList.forEach((b) => updateBuilding(b.id, { isLocked: !allLocked }));
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: objectTree.buildingList.every((b) => b.isLocked) ? '#fbbf24' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    {objectTree.buildingList.every((b) => b.isLocked) ? <Lock size={13} /> : <Unlock size={13} />}
+                  </button>
+                  <button
+                    type="button"
+                    title="Włącz/wyłącz tryb ducha dla wszystkich budynków"
+                    onClick={() => {
+                      const allGhosted = objectTree.buildingList.every((b) => b.isGhosted);
+                      objectTree.buildingList.forEach((b) => updateBuilding(b.id, { isGhosted: !allGhosted }));
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: objectTree.buildingList.every((b) => b.isGhosted) ? '#c084fc' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    <Ghost size={13} />
+                  </button>
+                </div>
+              </div>
+
+              {!collapsedTreeGroups['cat_buildings'] && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '8px' }}>
+                  {objectTree.buildingSubgroups.map((subgroup) => {
+                    const groupKey = `bldg_sub_${subgroup.key}`;
+                    const isSubCollapsed = !!collapsedTreeGroups[groupKey];
+                    const allSubLocked = subgroup.items.every((b) => b.isLocked);
+                    const allSubGhosted = subgroup.items.every((b) => b.isGhosted);
+
+                    return (
+                      <div key={subgroup.key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {/* Subgroup Header */}
+                        <div
+                          onClick={() => toggleTreeGroup(groupKey)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '4px 6px',
+                            borderRadius: '5px',
+                            backgroundColor: 'rgba(30, 41, 59, 0.5)',
+                            border: '1px solid rgba(51, 65, 85, 0.4)',
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            {isSubCollapsed ? <ChevronRight size={12} color="#94a3b8" /> : <ChevronDown size={12} color="#94a3b8" />}
+                            <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#cbd5e1' }}>
+                              {subgroup.label} ({subgroup.items.length})
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              title="Zaznacz obiekty w tej grupie parametrów"
+                              onClick={() => setSelectedBuildingIds(subgroup.items.map((b) => b.id))}
+                              style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px' }}
+                            >
+                              <CheckSquare size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              title={allSubLocked ? 'Odblokuj grupę' : 'Zablokuj grupę'}
+                              onClick={() => subgroup.items.forEach((b) => updateBuilding(b.id, { isLocked: !allSubLocked }))}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: allSubLocked ? '#fbbf24' : '#64748b',
+                                cursor: 'pointer',
+                                padding: '2px',
+                              }}
+                            >
+                              {allSubLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                            </button>
+                            <button
+                              type="button"
+                              title={allSubGhosted ? 'Wyłącz ducha' : 'Włącz ducha'}
+                              onClick={() => subgroup.items.forEach((b) => updateBuilding(b.id, { isGhosted: !allSubGhosted }))}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: allSubGhosted ? '#c084fc' : '#64748b',
+                                cursor: 'pointer',
+                                padding: '2px',
+                              }}
+                            >
+                              <Ghost size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Subgroup Single Objects (NO dimensions) */}
+                        {!isSubCollapsed && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
+                            {subgroup.items.map((b) => {
+                              const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
+                              const isLocked = b.isLocked === true;
+                              const isGhosted = b.isGhosted === true;
+
+                              return (
+                                <div
+                                  key={b.id}
+                                  onClick={() => selectBuilding(b.id, false)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '4px 6px',
+                                    borderRadius: '5px',
+                                    backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                                    border: isSelected ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid rgba(51, 65, 85, 0.25)',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      fontWeight: isSelected ? 700 : 500,
+                                      color: isSelected ? '#e0e7ff' : '#94a3b8',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      flex: 1,
+                                    }}
+                                    title={b.name}
+                                  >
+                                    {b.name}
+                                  </span>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      title={isSelected ? 'Odznacz' : 'Zaznacz'}
+                                      onClick={() => selectBuilding(b.id, true)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: isSelected ? '#38bdf8' : '#64748b',
+                                        cursor: 'pointer',
+                                        padding: '2px',
+                                      }}
+                                    >
+                                      <CheckSquare size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title={isLocked ? 'Odblokuj' : 'Zablokuj'}
+                                      onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: isLocked ? '#fbbf24' : '#64748b',
+                                        cursor: 'pointer',
+                                        padding: '2px',
+                                      }}
+                                    >
+                                      {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title={isGhosted ? 'Wyłącz ducha' : 'Włącz ducha'}
+                                      onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: isGhosted ? '#c084fc' : '#64748b',
+                                        cursor: 'pointer',
+                                        padding: '2px',
+                                      }}
+                                    >
+                                      <Ghost size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Grupa 2: Obszary (Działki i Place zabaw) */}
+          {objectTree.areaList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <div
+                onClick={() => toggleTreeGroup('cat_areas')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '5px 8px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {collapsedTreeGroups['cat_areas'] ? (
+                    <ChevronRight size={13} color="#fca5a5" />
+                  ) : (
+                    <ChevronDown size={13} color="#fca5a5" />
+                  )}
+                  <Square size={13} color="#ef4444" />
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#fca5a5' }}>
+                    Obszary ({objectTree.areaList.length})
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    title="Zaznacz wszystkie obszary"
+                    onClick={() => setSelectedBuildingIds(objectTree.areaList.map((b) => b.id))}
+                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px 4px' }}
+                  >
+                    <CheckSquare size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Zablokuj/odblokuj wszystkie obszary"
+                    onClick={() => {
+                      const allLocked = objectTree.areaList.every((b) => b.isLocked);
+                      objectTree.areaList.forEach((b) => updateBuilding(b.id, { isLocked: !allLocked }));
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: objectTree.areaList.every((b) => b.isLocked) ? '#fbbf24' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    {objectTree.areaList.every((b) => b.isLocked) ? <Lock size={13} /> : <Unlock size={13} />}
+                  </button>
+                  <button
+                    type="button"
+                    title="Włącz/wyłącz tryb ducha dla wszystkich obszarów"
+                    onClick={() => {
+                      const allGhosted = objectTree.areaList.every((b) => b.isGhosted);
+                      objectTree.areaList.forEach((b) => updateBuilding(b.id, { isGhosted: !allGhosted }));
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: objectTree.areaList.every((b) => b.isGhosted) ? '#c084fc' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    <Ghost size={13} />
+                  </button>
+                </div>
+              </div>
+
+              {!collapsedTreeGroups['cat_areas'] && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '8px' }}>
+                  {/* Działki */}
+                  {objectTree.plotList.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <div
+                        onClick={() => toggleTreeGroup('area_sub_plots')}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '3px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(30, 41, 59, 0.4)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#fca5a5' }}>
+                          Działki ({objectTree.plotList.length})
+                        </span>
+                      </div>
+                      {!collapsedTreeGroups['area_sub_plots'] && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
+                          {objectTree.plotList.map((b) => {
+                            const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
+                            const isLocked = b.isLocked === true;
+                            const isGhosted = b.isGhosted === true;
+                            return (
+                              <div
+                                key={b.id}
+                                onClick={() => selectBuilding(b.id, false)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '4px 6px',
+                                  borderRadius: '5px',
+                                  backgroundColor: isSelected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                                  border: isSelected ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid rgba(51, 65, 85, 0.25)',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: isSelected ? 700 : 500,
+                                    color: isSelected ? '#fca5a5' : '#94a3b8',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {b.plotNumber ? `Działka ${b.plotNumber}` : b.name}
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => selectBuilding(b.id, true)}
+                                    style={{ background: 'transparent', border: 'none', color: isSelected ? '#38bdf8' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                  >
+                                    <CheckSquare size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
+                                    style={{ background: 'transparent', border: 'none', color: isLocked ? '#fbbf24' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                  >
+                                    {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
+                                    style={{ background: 'transparent', border: 'none', color: isGhosted ? '#c084fc' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                  >
+                                    <Ghost size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Place zabaw */}
+                  {objectTree.playgroundList.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <div
+                        onClick={() => toggleTreeGroup('area_sub_playgrounds')}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '3px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(30, 41, 59, 0.4)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#34d399' }}>
+                          Place zabaw ({objectTree.playgroundList.length})
+                        </span>
+                      </div>
+                      {!collapsedTreeGroups['area_sub_playgrounds'] && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
+                          {objectTree.playgroundList.map((b) => {
+                            const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
+                            const isLocked = b.isLocked === true;
+                            const isGhosted = b.isGhosted === true;
+                            return (
+                              <div
+                                key={b.id}
+                                onClick={() => selectBuilding(b.id, false)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '4px 6px',
+                                  borderRadius: '5px',
+                                  backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                                  border: isSelected ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid rgba(51, 65, 85, 0.25)',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: isSelected ? 700 : 500,
+                                    color: isSelected ? '#34d399' : '#94a3b8',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {b.name}
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => selectBuilding(b.id, true)}
+                                    style={{ background: 'transparent', border: 'none', color: isSelected ? '#38bdf8' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                  >
+                                    <CheckSquare size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
+                                    style={{ background: 'transparent', border: 'none', color: isLocked ? '#fbbf24' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                  >
+                                    {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
+                                    style={{ background: 'transparent', border: 'none', color: isGhosted ? '#c084fc' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                  >
+                                    <Ghost size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Grupa 3: Balkony */}
+          {objectTree.balconyList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              <div
+                onClick={() => toggleTreeGroup('cat_balconies')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '5px 8px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {collapsedTreeGroups['cat_balconies'] ? (
+                    <ChevronRight size={13} color="#38bdf8" />
+                  ) : (
+                    <ChevronDown size={13} color="#38bdf8" />
+                  )}
+                  <Square size={13} color="#38bdf8" />
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#e0f2fe' }}>
+                    Balkony ({objectTree.balconyList.length})
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    title="Zaznacz wszystkie balkony"
+                    onClick={() => setSelectedBuildingIds(objectTree.balconyList.map((b) => b.id))}
+                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px 4px' }}
+                  >
+                    <CheckSquare size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Zablokuj/odblokuj wszystkie balkony"
+                    onClick={() => {
+                      const allLocked = objectTree.balconyList.every((b) => b.isLocked);
+                      objectTree.balconyList.forEach((b) => updateBuilding(b.id, { isLocked: !allLocked }));
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: objectTree.balconyList.every((b) => b.isLocked) ? '#fbbf24' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    {objectTree.balconyList.every((b) => b.isLocked) ? <Lock size={13} /> : <Unlock size={13} />}
+                  </button>
+                  <button
+                    type="button"
+                    title="Włącz/wyłącz tryb ducha dla wszystkich balkonów"
+                    onClick={() => {
+                      const allGhosted = objectTree.balconyList.every((b) => b.isGhosted);
+                      objectTree.balconyList.forEach((b) => updateBuilding(b.id, { isGhosted: !allGhosted }));
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: objectTree.balconyList.every((b) => b.isGhosted) ? '#c084fc' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                    }}
+                  >
+                    <Ghost size={13} />
+                  </button>
+                </div>
+              </div>
+
+              {!collapsedTreeGroups['cat_balconies'] && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
+                  {objectTree.balconyList.map((b) => {
+                    const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
+                    const isLocked = b.isLocked === true;
+                    const isGhosted = b.isGhosted === true;
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={() => selectBuilding(b.id, false)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '4px 6px',
+                          borderRadius: '5px',
+                          backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                          border: isSelected ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid rgba(51, 65, 85, 0.25)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: isSelected ? 700 : 500,
+                            color: isSelected ? '#e0f2fe' : '#94a3b8',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {b.name}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => selectBuilding(b.id, true)}
+                            style={{ background: 'transparent', border: 'none', color: isSelected ? '#38bdf8' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                          >
+                            <CheckSquare size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
+                            style={{ background: 'transparent', border: 'none', color: isLocked ? '#fbbf24' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                          >
+                            {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
+                            style={{ background: 'transparent', border: 'none', color: isGhosted ? '#c084fc' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                          >
+                            <Ghost size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 2.2 Edycja Obiektu 2.5D */}
       {selectedBuilding ? (
         <div className="ui-card">
           <div className="ui-title">
@@ -453,65 +1184,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
-                Kategoria obiektu
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
-                <button
-                  type="button"
-                  onClick={() => updateSelectedBuilding({ category: 'building' })}
-                  style={{
-                    padding: '6px 8px',
-                    borderRadius: '6px',
-                    border: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony'
-                      ? '1px solid #818cf8'
-                      : '1px solid var(--border-light)',
-                    backgroundColor: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony'
-                      ? 'rgba(99, 102, 241, 0.25)'
-                      : 'var(--bg-input)',
-                    color: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony' ? '#e0e7ff' : '#94a3b8',
-                    fontWeight: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony' ? 700 : 500,
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '5px',
-                  }}
-                >
-                  <Building size={13} />
-                  <span>Budynek</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => updateSelectedBuilding({ category: 'boundary', defaultHeight: 0 })}
-                  style={{
-                    padding: '6px 8px',
-                    borderRadius: '6px',
-                    border: selectedBuilding.category === 'boundary'
-                      ? '1px solid #ef4444'
-                      : '1px solid var(--border-light)',
-                    backgroundColor: selectedBuilding.category === 'boundary'
-                      ? 'rgba(239, 68, 68, 0.25)'
-                      : 'var(--bg-input)',
-                    color: selectedBuilding.category === 'boundary' ? '#fca5a5' : '#94a3b8',
-                    fontWeight: selectedBuilding.category === 'boundary' ? 700 : 500,
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '5px',
-                  }}
-                >
-                  <Square size={13} />
-                  <span>Granica</span>
-                </button>
-              </div>
-            </div>
-
+            {/* 1. Nazwa obiektu ZAWSZE na samej górze */}
             <div>
               <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Nazwa</label>
               <input
@@ -530,49 +1203,452 @@ export const LayersAndObjectsGroup: React.FC = () => {
               />
             </div>
 
+            {/* 2. Przełączniki kategorii (Budynek / Obszar) bez etykiety tekstowej */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => updateSelectedBuilding({ category: 'building' })}
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  border: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony'
+                    ? '1px solid #818cf8'
+                    : '1px solid var(--border-light)',
+                  backgroundColor: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony'
+                    ? 'rgba(99, 102, 241, 0.25)'
+                    : 'var(--bg-input)',
+                  color: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony' ? '#e0e7ff' : '#94a3b8',
+                  fontWeight: selectedBuilding.category !== 'boundary' && selectedBuilding.category !== 'balcony' ? 700 : 500,
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                }}
+              >
+                <Building size={13} />
+                <span>Budynek</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => updateSelectedBuilding({ category: 'boundary', defaultHeight: 0 })}
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  border: selectedBuilding.category === 'boundary'
+                    ? '1px solid #ef4444'
+                    : '1px solid var(--border-light)',
+                  backgroundColor: selectedBuilding.category === 'boundary'
+                    ? 'rgba(239, 68, 68, 0.25)'
+                    : 'var(--bg-input)',
+                  color: selectedBuilding.category === 'boundary' ? '#fca5a5' : '#94a3b8',
+                  fontWeight: selectedBuilding.category === 'boundary' ? 700 : 500,
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                }}
+              >
+                <Square size={13} />
+                <span>Obszar</span>
+              </button>
+            </div>
+
             {selectedBuilding.category === 'boundary' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Numer działki</label>
-                  <input
-                    type="text"
-                    placeholder="np. 124/2"
-                    value={selectedBuilding.plotNumber || ''}
-                    onChange={(e) => updateSelectedBuilding({ plotNumber: e.target.value })}
-                    style={{
-                      width: '110px',
-                      backgroundColor: 'var(--bg-input)',
-                      border: '1px solid var(--border-light)',
-                      borderRadius: '8px',
-                      padding: '6px 8px',
-                      color: '#fca5a5',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      textAlign: 'right',
-                    }}
-                  />
+                {/* Podtyp Obszaru: Działka vs Plac zabaw */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                    Typ obszaru
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedBuilding({ areaType: 'plot' })}
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '6px',
+                        border: (!selectedBuilding.areaType || selectedBuilding.areaType === 'plot')
+                          ? '1px solid #ef4444'
+                          : '1px solid var(--border-light)',
+                        backgroundColor: (!selectedBuilding.areaType || selectedBuilding.areaType === 'plot')
+                          ? 'rgba(239, 68, 68, 0.25)'
+                          : 'var(--bg-input)',
+                        color: (!selectedBuilding.areaType || selectedBuilding.areaType === 'plot') ? '#fca5a5' : '#94a3b8',
+                        fontWeight: (!selectedBuilding.areaType || selectedBuilding.areaType === 'plot') ? 700 : 500,
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Działka
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedBuilding({ areaType: 'playground' })}
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '6px',
+                        border: selectedBuilding.areaType === 'playground'
+                          ? '1px solid #10b981'
+                          : '1px solid var(--border-light)',
+                        backgroundColor: selectedBuilding.areaType === 'playground'
+                          ? 'rgba(16, 185, 129, 0.25)'
+                          : 'var(--bg-input)',
+                        color: selectedBuilding.areaType === 'playground' ? '#34d399' : '#94a3b8',
+                        fontWeight: selectedBuilding.areaType === 'playground' ? 700 : 500,
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Plac zabaw
+                    </button>
+                  </div>
                 </div>
 
-                <div
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: '8px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    fontSize: '11px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#94a3b8' }}>Powierzchnia działki:</span>
-                    <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>{selectedBuildingArea.toFixed(1)} m² ({(selectedBuildingArea / 100).toFixed(2)} a)</b>
+                {selectedBuilding.areaType === 'playground' ? (
+                  /* Plac zabaw (§ 33.3) */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                        border: '1px solid rgba(245, 158, 11, 0.25)',
+                        fontSize: '11px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: '#94a3b8' }}>Powierzchnia placu zabaw:</span>
+                        <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>
+                          {selectedBuildingArea.toFixed(1)} m²
+                        </b>
+                      </div>
+                    </div>
+
+                    {/* Przelicznik pojemności mieszkań wg § 33 ust. 8 WT */}
+                    {(() => {
+                      const capacity = computePlaygroundApartmentCapacity(selectedBuildingArea);
+                      return (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                            border: '1px solid rgba(51, 65, 85, 0.5)',
+                            fontSize: '11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ color: '#94a3b8' }}>Chłonność (§ 33.8 WT):</span>
+                            <b style={{ color: '#38bdf8', fontFamily: 'monospace', fontWeight: 700 }}>
+                              {capacity.displayText}
+                            </b>
+                          </div>
+                          <div style={{ fontSize: '10px', color: '#64748b' }}>
+                            {capacity.tierDescription}
+                          </div>
+                          <div style={{ fontSize: '9.5px', color: '#94a3b8', fontStyle: 'italic', marginTop: '1px' }}>
+                            {capacity.details}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Wynik analizy nasłonecznienia placu zabaw wg § 33.3 */}
+                    {selectedBuilding.isTested && playgroundAnalysis && (
+                      <div
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: playgroundAnalysis.isCompliant
+                            ? 'rgba(16, 185, 129, 0.12)'
+                            : 'rgba(239, 68, 68, 0.12)',
+                          border: playgroundAnalysis.isCompliant
+                            ? '1px solid rgba(16, 185, 129, 0.4)'
+                            : '1px solid rgba(239, 68, 68, 0.4)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontWeight: 700, color: '#f8fafc' }}>
+                            § 33 ust. 3 WT (Plac zabaw)
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: playgroundAnalysis.isCompliant ? '#34d399' : '#fca5a5',
+                            }}
+                          >
+                            {playgroundAnalysis.isCompliant ? 'SPEŁNIONY' : 'NIESPEŁNIONY'}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          Silnik: <b style={{ color: '#cbd5e1' }}>{sunlightMethod === 'segments' ? 'Linijka Słońca (Geometryczny)' : 'Astronomiczny (Astro)'}</b>
+                        </div>
+
+                        <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          Wymóg: <b style={{ color: '#cbd5e1' }}>min. {playgroundAnalysis.requiredDurationHours}h na ≥ 50% pow. (okno 8h równonocy)</b>
+                        </div>
+
+                        {/* Pasek postępu procentowego */}
+                        <div style={{ marginTop: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', fontSize: '10px' }}>
+                            <span style={{ color: '#cbd5e1' }}>Nasłonecznienie:</span>
+                            <b style={{ color: playgroundAnalysis.isCompliant ? '#34d399' : '#fca5a5', fontFamily: 'monospace' }}>
+                              {playgroundAnalysis.sunlitPercentage}% ({playgroundAnalysis.compliantSamplePoints}/{playgroundAnalysis.totalSamplePoints} pkt)
+                            </b>
+                          </div>
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '6px',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              borderRadius: '3px',
+                              overflow: 'hidden',
+                              border: '1px solid rgba(51, 65, 85, 0.5)',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: `${Math.min(100, playgroundAnalysis.sunlitPercentage)}%`,
+                                height: '100%',
+                                backgroundColor: playgroundAnalysis.isCompliant ? '#10b981' : '#ef4444',
+                                transition: 'width 0.3s ease',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Przełącznik: Diagram Voronoi vs Siatka regularna */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedBuilding({
+                          playgroundVoronoi: selectedBuilding.playgroundVoronoi === false ? true : false,
+                        })
+                      }
+                      className={`btn-tile ${selectedBuilding.playgroundVoronoi !== false ? 'active-indigo' : 'inactive'}`}
+                      style={{ justifyContent: 'space-between', padding: '6px 8px', fontSize: '11px' }}
+                      title="Włącz diagram komórek Voronoi lub siatkę ortogonalną"
+                    >
+                      <span style={{ fontWeight: 600 }}>Diagram Voronoi</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                        {selectedBuilding.playgroundVoronoi !== false ? 'WŁ (Voronoi)' : 'WYŁ (Siatka)'}
+                      </span>
+                    </button>
+
+                    {/* Sekcja testowa parametrów gęstości siatki Voronoi */}
+                    {selectedBuilding.playgroundVoronoi !== false && (
+                      <div
+                        style={{
+                          marginTop: '4px',
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                          border: '1px solid rgba(99, 102, 241, 0.25)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#a5b4fc' }}>
+                            Gęstość Voronoi (faza testowa)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateSelectedBuilding({
+                                playgroundParams: undefined,
+                              })
+                            }
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#94a3b8',
+                              fontSize: '10px',
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              padding: 0,
+                            }}
+                            title="Przywróć domyślne parametry gęstości"
+                          >
+                            Domyślne
+                          </button>
+                        </div>
+
+                        {/* Krok makro (bazowy) */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#cbd5e1' }}>
+                            <span>Krok bazowy (makro):</span>
+                            <b style={{ color: '#818cf8', fontFamily: 'monospace' }}>
+                              {(selectedBuilding.playgroundParams?.baseStep ?? 4.5).toFixed(1)} m
+                            </b>
+                          </div>
+                          <input
+                            type="range"
+                            min="1.0"
+                            max="15.0"
+                            step="0.5"
+                            value={selectedBuilding.playgroundParams?.baseStep ?? 4.5}
+                            onChange={(e) =>
+                              updateSelectedBuilding({
+                                playgroundParams: {
+                                  ...selectedBuilding.playgroundParams,
+                                  baseStep: parseFloat(e.target.value),
+                                },
+                              })
+                            }
+                            style={{ width: '100%', accentColor: '#818cf8' }}
+                          />
+                        </div>
+
+                        {/* Zagęszczenie stref granicznych (maks punktów) */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#cbd5e1' }}>
+                            <span>Maks. punktów zagęszczających:</span>
+                            <b style={{ color: '#818cf8', fontFamily: 'monospace' }}>
+                              {selectedBuilding.playgroundParams?.maxExtraPoints ?? 15}
+                            </b>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="120"
+                            step="5"
+                            value={selectedBuilding.playgroundParams?.maxExtraPoints ?? 15}
+                            onChange={(e) =>
+                              updateSelectedBuilding({
+                                playgroundParams: {
+                                  ...selectedBuilding.playgroundParams,
+                                  maxExtraPoints: parseInt(e.target.value, 10),
+                                },
+                              })
+                            }
+                            style={{ width: '100%', accentColor: '#818cf8' }}
+                          />
+                        </div>
+
+                        {/* Minimalna odległość podziału */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#cbd5e1' }}>
+                            <span>Min. rozmiar komórki:</span>
+                            <b style={{ color: '#818cf8', fontFamily: 'monospace' }}>
+                              {(selectedBuilding.playgroundParams?.minSubdivDist ?? 1.5).toFixed(1)} m
+                            </b>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.3"
+                            max="4.0"
+                            step="0.2"
+                            value={selectedBuilding.playgroundParams?.minSubdivDist ?? 1.5}
+                            onChange={(e) =>
+                              updateSelectedBuilding({
+                                playgroundParams: {
+                                  ...selectedBuilding.playgroundParams,
+                                  minSubdivDist: parseFloat(e.target.value),
+                                },
+                              })
+                            }
+                            style={{ width: '100%', accentColor: '#818cf8' }}
+                          />
+                        </div>
+
+                        {/* Próg podziału przejścia słońce/cień */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#cbd5e1' }}>
+                            <span>Czułość przejścia (próg Δh):</span>
+                            <b style={{ color: '#818cf8', fontFamily: 'monospace' }}>
+                              {(selectedBuilding.playgroundParams?.hoursDeltaThreshold ?? 0.75).toFixed(2)} h
+                            </b>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.10"
+                            max="2.00"
+                            step="0.10"
+                            value={selectedBuilding.playgroundParams?.hoursDeltaThreshold ?? 0.75}
+                            onChange={(e) =>
+                              updateSelectedBuilding({
+                                playgroundParams: {
+                                  ...selectedBuilding.playgroundParams,
+                                  hoursDeltaThreshold: parseFloat(e.target.value),
+                                },
+                              })
+                            }
+                            style={{ width: '100%', accentColor: '#818cf8' }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: '10px', color: '#cbd5e1' }}>
-                    • Obrys geodezyjny (nie generuje cienia i kierunków śledzenia fasad).
+                ) : (
+                  /* Działka */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Numer działki</label>
+                      <input
+                        type="text"
+                        placeholder="np. 124/2"
+                        value={selectedBuilding.plotNumber || ''}
+                        onChange={(e) => updateSelectedBuilding({ plotNumber: e.target.value })}
+                        style={{
+                          width: '110px',
+                          backgroundColor: 'var(--bg-input)',
+                          border: '1px solid var(--border-light)',
+                          borderRadius: '8px',
+                          padding: '6px 8px',
+                          color: '#fca5a5',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        fontSize: '11px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: '#94a3b8' }}>Powierzchnia działki:</span>
+                        <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>
+                          {selectedBuildingArea.toFixed(1)} m² ({(selectedBuildingArea / 100).toFixed(2)} a)
+                        </b>
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#cbd5e1' }}>
+                        • Obrys geodezyjny (nie generuje cienia i kierunków śledzenia fasad).
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -619,83 +1695,207 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   />
                 </div>
 
-                {/* Kondygnacje: H1 = 3.0m, Ht = 3.0m domyślnie */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>Wys. parteru H₁</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={selectedBuilding.firstFloorHeight ?? 3.0}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 3.0;
-                        updateSelectedBuilding({ firstFloorHeight: val });
-                      }}
-                      style={{
-                        width: '100%',
-                        backgroundColor: 'transparent',
-                        border: '1px solid #475569',
-                        borderRadius: '5px',
-                        padding: '4px 6px',
-                        color: '#cbd5e1',
-                        fontSize: '11px',
-                        textAlign: 'right',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>Kond. typowa Hₜ</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      value={selectedBuilding.typicalFloorHeight ?? 3.0}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 3.0;
-                        updateSelectedBuilding({ typicalFloorHeight: val });
-                      }}
-                      style={{
-                        width: '100%',
-                        backgroundColor: 'transparent',
-                        border: '1px solid #475569',
-                        borderRadius: '5px',
-                        padding: '4px 6px',
-                        color: '#cbd5e1',
-                        fontSize: '11px',
-                        textAlign: 'right',
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                  <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Liczba kondygnacji (N)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={
-                      selectedBuilding.storeysCount ||
-                      (selectedBuilding.defaultHeight > (selectedBuilding.firstFloorHeight ?? 3.0)
-                        ? 1 + Math.max(1, Math.round((selectedBuilding.defaultHeight - (selectedBuilding.firstFloorHeight ?? 3.0)) / (selectedBuilding.typicalFloorHeight ?? 3.0)))
-                        : 1)
-                    }
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10) || 1;
-                      updateSelectedBuilding({ storeysCount: Math.max(1, val) });
-                    }}
+                {/* Parametry Wstęgi (jeśli obiekt został utworzony jako Wstęga) */}
+                {selectedBuilding.sweepPath && selectedBuilding.sweepPath.length >= 2 && (
+                  <div
                     style={{
-                      width: '80px',
-                      backgroundColor: 'var(--bg-input)',
-                      border: '1px solid var(--border-light)',
+                      padding: '8px 10px',
                       borderRadius: '8px',
-                      padding: '6px 8px',
-                      color: '#38bdf8',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      textAlign: 'right',
+                      backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
                     }}
-                  />
-                </div>
+                  >
+                    <div style={{ color: '#38bdf8', fontWeight: 600, fontSize: '11px' }}>
+                      Parametry Wstęgi (Sweep)
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <label style={{ fontSize: '10.5px', color: '#94a3b8' }}>Szerokość (m)</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0.5"
+                        value={selectedBuilding.sweepWidth ?? 6.0}
+                        onChange={(e) => updateSelectedBuilding({ sweepWidth: parseFloat(e.target.value) || 1.0 })}
+                        style={{
+                          width: '70px',
+                          backgroundColor: '#1e293b',
+                          border: '1px solid #475569',
+                          borderRadius: '5px',
+                          padding: '4px 6px',
+                          color: '#38bdf8',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <label style={{ fontSize: '10.5px', color: '#94a3b8' }}>Wyrównanie</label>
+                      <div style={{ display: 'flex', gap: '2px', backgroundColor: 'var(--bg-input)', padding: '2px', borderRadius: '5px', border: '1px solid var(--border-light)' }}>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ sweepAlignment: 'center' })}
+                          style={{
+                            padding: '2px 5px',
+                            fontSize: '9.5px',
+                            fontWeight: (selectedBuilding.sweepAlignment || 'center') === 'center' ? 700 : 500,
+                            borderRadius: '3px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: (selectedBuilding.sweepAlignment || 'center') === 'center' ? '#38bdf8' : 'transparent',
+                            color: (selectedBuilding.sweepAlignment || 'center') === 'center' ? '#0f172a' : '#94a3b8',
+                          }}
+                        >
+                          Oś
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ sweepAlignment: 'left' })}
+                          style={{
+                            padding: '2px 5px',
+                            fontSize: '9.5px',
+                            fontWeight: selectedBuilding.sweepAlignment === 'left' ? 700 : 500,
+                            borderRadius: '3px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: selectedBuilding.sweepAlignment === 'left' ? '#38bdf8' : 'transparent',
+                            color: selectedBuilding.sweepAlignment === 'left' ? '#0f172a' : '#94a3b8',
+                          }}
+                        >
+                          Lewo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedBuilding({ sweepAlignment: 'right' })}
+                          style={{
+                            padding: '2px 5px',
+                            fontSize: '9.5px',
+                            fontWeight: selectedBuilding.sweepAlignment === 'right' ? 700 : 500,
+                            borderRadius: '3px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            backgroundColor: selectedBuilding.sweepAlignment === 'right' ? '#38bdf8' : 'transparent',
+                            color: selectedBuilding.sweepAlignment === 'right' ? '#0f172a' : '#94a3b8',
+                          }}
+                        >
+                          Prawo
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Kondygnacje: H1 = 3.0m, Ht = 3.0m domyślnie */}
+                {(() => {
+                  const h1 = selectedBuilding.firstFloorHeight ?? 3.0;
+                  const ht = selectedBuilding.typicalFloorHeight ?? 3.0;
+                  const floorCalc = calculateBuildingFloors(selectedBuilding.defaultHeight, h1, ht, selectedBuilding.elevation ?? 0.0);
+
+                  return (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>Wys. parteru H₁</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={h1}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 3.0;
+                              updateSelectedBuilding({ firstFloorHeight: val });
+                            }}
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'transparent',
+                              border: '1px solid #475569',
+                              borderRadius: '5px',
+                              padding: '4px 6px',
+                              color: '#cbd5e1',
+                              fontSize: '11px',
+                              textAlign: 'right',
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>Kond. typowa Hₜ</label>
+                          <input
+                            type="number"
+                            step="0.05"
+                            value={ht}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 3.0;
+                              updateSelectedBuilding({ typicalFloorHeight: val });
+                            }}
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'transparent',
+                              border: '1px solid #475569',
+                              borderRadius: '5px',
+                              padding: '4px 6px',
+                              color: '#cbd5e1',
+                              fontSize: '11px',
+                              textAlign: 'right',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Automatyczna liczba kondygnacji (cyfry rzymskie) + Attyka */}
+                      <div
+                        style={{
+                          backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                          border: '1px solid var(--border-light)',
+                          borderRadius: '8px',
+                          padding: '8px 10px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '11px', color: '#94a3b8' }}>Liczba kondygnacji:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              style={{
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                color: '#38bdf8',
+                                backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(56, 189, 248, 0.3)',
+                                letterSpacing: '0.05em',
+                              }}
+                              title={`Liczba kondygnacji pełnych: ${floorCalc.storeysCount}`}
+                            >
+                              {floorCalc.storeysRoman} ({floorCalc.storeysCount})
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px' }}>
+                          <span style={{ color: '#94a3b8' }}>Wysokość attyki (Hₐ):</span>
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              fontFamily: 'monospace',
+                              color: floorCalc.atticHeight > 0.001 ? '#fbbf24' : '#64748b',
+                            }}
+                          >
+                            {floorCalc.atticHeight.toFixed(2)} m
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: '9.5px', color: '#64748b', borderTop: '1px dashed #334155', paddingTop: '4px' }}>
+                          H = {h1.toFixed(2)}m (parter) + {floorCalc.storeysCount > 1 ? `${floorCalc.storeysCount - 1}×${ht.toFixed(2)}m` : '0m'} + {floorCalc.atticHeight.toFixed(2)}m (attyka) = <b>{selectedBuilding.defaultHeight.toFixed(2)}m</b>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {(() => {
                   const currentRotDeg = selectedBuilding.transform?.rotationDeg !== undefined
@@ -747,37 +1947,69 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     ))}
                   </div>
                 )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                  <button
-                    type="button"
-                    onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
-                    className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
-                  >
-                    <span>Zabudowa śródmiejska</span>
-                    <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
-                  </button>
-                </div>
               </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+            {/* Zunifikowany blok 3 przełączników obok siebie dla WSZYSTKICH typów obiektów */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', marginTop: '4px' }}>
               <button
                 type="button"
                 onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
                 className={`btn-tile ${selectedBuilding.isIncluded !== false ? 'active-emerald' : 'inactive'}`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  padding: '6px 4px',
+                  textAlign: 'center',
+                  minHeight: '48px',
+                }}
+                title="Uwzględnij obiekt w kalkulacjach nasłonecznienia i przesłaniania"
               >
-                <span>Uwzględnij w kalkulacji</span>
-                <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
+                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Uwzględnij w kalkulacji</span>
+                <span style={{ fontSize: '9.5px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
                 className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  padding: '6px 4px',
+                  textAlign: 'center',
+                  minHeight: '48px',
+                }}
+                title="Oznacz obiekt jako badany (projektowany)"
               >
-                <span>Obiekt badany (Projektowany)</span>
-                <span style={{ fontSize: '10px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
+                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Obiekt badany</span>
+                <span style={{ fontSize: '9.5px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => updateSelectedBuilding({ isCityCentre: !selectedBuilding.isCityCentre })}
+                className={`btn-tile ${selectedBuilding.isCityCentre ? 'active-amber' : 'inactive'}`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  padding: '6px 4px',
+                  textAlign: 'center',
+                  minHeight: '48px',
+                }}
+                title="Włącz normę zabudowy śródmiejskiej dla obiektu"
+              >
+                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Zabudowa śródmiejska</span>
+                <span style={{ fontSize: '9.5px', fontWeight: 700 }}>{selectedBuilding.isCityCentre ? 'TAK' : 'NIE'}</span>
               </button>
             </div>
           </div>

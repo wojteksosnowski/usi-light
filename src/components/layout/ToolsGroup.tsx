@@ -4,10 +4,7 @@ import {
   Magnet,
   Compass,
   Square,
-  PenTool,
   RotateCw,
-  Edit3,
-  Maximize2,
   Combine,
   Ruler,
   MapPin,
@@ -24,6 +21,8 @@ import { useSceneStore, useCadToolStore } from '../../store';
 import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
+import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
+import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon } from '../common/CustomCadIcons';
 
 export const ToolsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -50,6 +49,10 @@ export const ToolsGroup: React.FC = () => {
   const drawingVerticesCount = useCadToolStore((s) => s.drawingVerticesCount);
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
   const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
+  const sweepWidth = useCadToolStore((s) => s.sweepWidth);
+  const setSweepWidth = useCadToolStore((s) => s.setSweepWidth);
+  const sweepAlignment = useCadToolStore((s) => s.sweepAlignment);
+  const setSweepAlignment = useCadToolStore((s) => s.setSweepAlignment);
 
   const isEditMode = useCadToolStore((s) => s.isEditMode);
   const setIsEditMode = useCadToolStore((s) => s.setIsEditMode);
@@ -135,8 +138,8 @@ export const ToolsGroup: React.FC = () => {
             </button>
           </div>
 
-          {/* Rząd 1: Prostokąt, Polilinia */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
+          {/* Rząd 1: Prostokąt, Polilinia, Wstęga */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
             <button
               type="button"
               onClick={() => {
@@ -146,7 +149,7 @@ export const ToolsGroup: React.FC = () => {
                 setFacadePointMode(false);
               }}
               className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
               title="Rysuj nowy prostokąt"
             >
               <Square size={13} />
@@ -162,15 +165,128 @@ export const ToolsGroup: React.FC = () => {
                 setFacadePointMode(false);
               }}
               className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
               title="Rysuj nową polilinię"
             >
-              <PenTool size={13} />
+              <TrapezoidIcon size={13} />
               <span style={{ fontWeight: 600 }}>Polilinia</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setDrawingMode(drawingMode === 'sweep' ? 'none' : 'sweep');
+                setDrawingVerticesCount(0);
+                setIsDimensionToolActive(false);
+                setFacadePointMode(false);
+                setIsEditMode(false);
+              }}
+              className={`btn-tile ${drawingMode === 'sweep' ? 'active-indigo' : 'inactive'}`}
+              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+              title="Rysuj wstęgę z odsunięciem (sweep)"
+            >
+              <BrokenLineIcon size={13} />
+              <span style={{ fontWeight: 600 }}>Wstęga</span>
             </button>
           </div>
 
-          {/* Rząd 2: Obrót, Wierzchołki, Krawędzie, Suma */}
+          {/* Pasek opcji Wstęgi (gdy aktywny tryb sweep) */}
+          {drawingMode === 'sweep' && (
+            <div
+              style={{
+                padding: '6px 8px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                fontSize: '11px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '6px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ color: '#94a3b8', fontSize: '10px' }}>Szer:</span>
+                <input
+                  type="number"
+                  min="0.5"
+                  max="100"
+                  step="0.5"
+                  value={sweepWidth}
+                  onChange={(e) => setSweepWidth(parseFloat(e.target.value) || 1)}
+                  style={{
+                    width: '42px',
+                    height: '20px',
+                    backgroundColor: '#1e293b',
+                    border: '1px solid #475569',
+                    borderRadius: '4px',
+                    color: '#f8fafc',
+                    fontSize: '10.5px',
+                    padding: '0 3px',
+                    textAlign: 'center',
+                  }}
+                  title="Szerokość wstęgi w metrach"
+                />
+                <span style={{ color: '#94a3b8', fontSize: '10px' }}>m</span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '2px', backgroundColor: 'var(--bg-input)', padding: '2px', borderRadius: '5px', border: '1px solid var(--border-light)' }}>
+                <button
+                  type="button"
+                  onClick={() => setSweepAlignment('center')}
+                  style={{
+                    padding: '2px 5px',
+                    fontSize: '9.5px',
+                    fontWeight: sweepAlignment === 'center' ? 700 : 500,
+                    borderRadius: '3px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: sweepAlignment === 'center' ? '#38bdf8' : 'transparent',
+                    color: sweepAlignment === 'center' ? '#0f172a' : '#94a3b8',
+                  }}
+                  title="Odsunięcie symetryczne z obu stron osi"
+                >
+                  Oś
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSweepAlignment('left')}
+                  style={{
+                    padding: '2px 5px',
+                    fontSize: '9.5px',
+                    fontWeight: sweepAlignment === 'left' ? 700 : 500,
+                    borderRadius: '3px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: sweepAlignment === 'left' ? '#38bdf8' : 'transparent',
+                    color: sweepAlignment === 'left' ? '#0f172a' : '#94a3b8',
+                  }}
+                  title="Odsunięcie po lewej stronie (kierunek normalnej)"
+                >
+                  Lewo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSweepAlignment('right')}
+                  style={{
+                    padding: '2px 5px',
+                    fontSize: '9.5px',
+                    fontWeight: sweepAlignment === 'right' ? 700 : 500,
+                    borderRadius: '3px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: sweepAlignment === 'right' ? '#38bdf8' : 'transparent',
+                    color: sweepAlignment === 'right' ? '#0f172a' : '#94a3b8',
+                  }}
+                  title="Odsunięcie po prawej stronie (przeciwnie do normalnej)"
+                >
+                  Prawo
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Rząd 2: Obrót, Suma */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
             <button
               type="button"
@@ -195,39 +311,6 @@ export const ToolsGroup: React.FC = () => {
             >
               <RotateCw size={13} />
               <span style={{ fontWeight: 600 }}>Obrót</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'vertexEdit' ? 'none' : 'vertexEdit');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'vertexEdit' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Edycja wierzchołków brył"
-            >
-              <Edit3 size={13} />
-              <span style={{ fontWeight: 600 }}>Wierzchołki</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsEditMode(!isEditMode);
-                setDrawingMode('none');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-              }}
-              className={`btn-tile ${isEditMode ? 'active-amber' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Równoległe przesuwanie krawędzi (offset)"
-            >
-              <Maximize2 size={13} />
-              <span style={{ fontWeight: 600 }}>Krawędzie</span>
             </button>
 
             <button
@@ -651,16 +734,18 @@ export const ToolsGroup: React.FC = () => {
               </span>
             )}
           </div>
-          <Layers size={14} color="#a855f7" />
+          <SetbackPenthouseIcon size={14} color="#a855f7" />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {selectedBuilding ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
                 <button
                   type="button"
+                  disabled={selectedBuilding.category === 'boundary'}
                   onClick={() => {
+                    if (selectedBuilding.category === 'boundary') return;
                     const newMod = {
                       id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                       type: 'story_offset' as const,
@@ -672,22 +757,66 @@ export const ToolsGroup: React.FC = () => {
                     setShowModifiersPanel(true);
                   }}
                   className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '5px', padding: '7px 6px', fontSize: '11px' }}
-                  title="Dodaj modyfikator uskoku kondygnacji"
+                  style={{
+                    justifyContent: 'center',
+                    gap: '4px',
+                    padding: '7px 4px',
+                    fontSize: '10px',
+                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
+                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
+                  }}
+                  title={
+                    selectedBuilding.category === 'boundary'
+                      ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji wysokościowych'
+                      : 'Dodaj modyfikator uskoku kondygnacji (penthouse / podcień)'
+                  }
                 >
-                  <Plus size={13} color="#c084fc" />
+                  <SetbackPenthouseIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#c084fc'} />
                   <span style={{ fontWeight: 600 }}>+ Uskok</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setShowModifiersPanel((prev) => !prev)}
-                  className={`btn-tile ${showModifiersPanel ? 'active-indigo' : 'inactive'}`}
-                  style={{ justifyContent: 'center', gap: '5px', padding: '7px 6px', fontSize: '11px' }}
-                  title="Otwórz boczny panel modyfikatorów"
+                  onClick={() => {
+                    const newMod = {
+                      id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                      type: 'zone_offset' as const,
+                      enabled: true,
+                      distance: 4.0,
+                      areaType: 'plot' as const,
+                      name: 'Strefa buforowa',
+                    };
+                    addBuildingModifier(selectedBuilding.id, newMod);
+                    setShowModifiersPanel(true);
+                  }}
+                  className="btn-tile active-indigo"
+                  style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
+                  title="Dodaj modyfikator strefy / bufora obszaru o zadanym offsecie"
                 >
-                  <Sliders size={13} color={showModifiersPanel ? '#c084fc' : '#64748b'} />
-                  <span style={{ fontWeight: 600 }}>{showModifiersPanel ? 'Panel WŁ' : 'Inspektor'}</span>
+                  <ZoneBufferIcon size={12} color="#38bdf8" />
+                  <span style={{ fontWeight: 600 }}>+ Strefa</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newMod = {
+                      id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                      type: 'bay_window' as const,
+                      enabled: true,
+                      width: 4.0,
+                      projection: 1.5,
+                      storiesCount: 0,
+                    };
+                    addBuildingModifier(selectedBuilding.id, newMod);
+                    setShowModifiersPanel(true);
+                  }}
+                  className="btn-tile active-indigo"
+                  style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
+                  title="Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi"
+                >
+                  <BayWindowIcon size={12} color="#fef08a" />
+                  <span style={{ fontWeight: 600 }}>+ Wykusz</span>
                 </button>
               </div>
 
@@ -695,7 +824,24 @@ export const ToolsGroup: React.FC = () => {
               {selectedBuilding.modifiers && selectedBuilding.modifiers.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
                   {selectedBuilding.modifiers.map((m, idx) => {
+                    const isStory = m.type === 'story_offset';
+                    const isZone = m.type === 'zone_offset';
+                    const isBay = m.type === 'bay_window';
                     const offMod = m as any;
+                    const accentColor = isStory ? '#c084fc' : isZone ? '#38bdf8' : '#fef08a';
+                    const bgAccent = isStory
+                      ? 'rgba(168, 85, 247, 0.15)'
+                      : isZone
+                      ? 'rgba(56, 189, 248, 0.15)'
+                      : 'rgba(234, 179, 8, 0.15)';
+                    const borderAccent = isStory
+                      ? 'rgba(168, 85, 247, 0.35)'
+                      : isZone
+                      ? 'rgba(56, 189, 248, 0.35)'
+                      : 'rgba(234, 179, 8, 0.35)';
+
+                    const typeName = isStory ? 'Uskok' : isZone ? 'Strefa' : 'Wykusz';
+
                     return (
                       <div
                         key={m.id}
@@ -705,8 +851,8 @@ export const ToolsGroup: React.FC = () => {
                           justifyContent: 'space-between',
                           padding: '4px 8px',
                           borderRadius: '6px',
-                          backgroundColor: m.enabled ? 'rgba(168, 85, 247, 0.15)' : 'rgba(15, 23, 42, 0.6)',
-                          border: `1px solid ${m.enabled ? 'rgba(168, 85, 247, 0.35)' : 'rgba(255, 255, 255, 0.08)'}`,
+                          backgroundColor: m.enabled ? bgAccent : 'rgba(15, 23, 42, 0.6)',
+                          border: `1px solid ${m.enabled ? borderAccent : 'rgba(255, 255, 255, 0.08)'}`,
                           fontSize: '10.5px',
                         }}
                       >
@@ -715,11 +861,18 @@ export const ToolsGroup: React.FC = () => {
                             type="checkbox"
                             checked={m.enabled}
                             onChange={() => toggleBuildingModifier(selectedBuilding.id, m.id)}
-                            style={{ cursor: 'pointer', accentColor: '#a855f7' }}
+                            style={{ cursor: 'pointer', accentColor }}
                           />
                           <span style={{ color: m.enabled ? '#f3e8ff' : '#94a3b8', fontWeight: 600 }}>
-                            #{idx + 1} {offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`} (
-                            {offMod.storiesCount < 0 ? `${offMod.storiesCount} góra` : `+${offMod.storiesCount} dół`})
+                            #{idx + 1} {typeName}{' '}
+                            {isStory && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
+                            {isZone && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
+                            {isBay && `(${offMod.width}m × ${offMod.projection > 0 ? `+${offMod.projection}m` : `${offMod.projection}m`})`}
+                            {isStory && (
+                              <span style={{ opacity: 0.8, fontSize: '9.5px', marginLeft: '3px' }}>
+                                ({offMod.storiesCount < 0 ? `${offMod.storiesCount} góra` : `+${offMod.storiesCount} dół`})
+                              </span>
+                            )}
                           </span>
                         </div>
                         <button

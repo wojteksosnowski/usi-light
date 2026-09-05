@@ -23,14 +23,14 @@ export function useCadHotkeys({
   onToggleOsnap,
   onStepRotateBuilding,
 }: {
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
   drawingVertices: Point2D[];
   hoveredBuildings: string[];
   selectedVertexIndex?: number | null;
   onDeleteSelectedVertex?: () => void;
   onCycleVertexSelection?: (direction: 'prev' | 'next') => void;
   onCancelDrawing?: () => void;
-  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => void;
+  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => void;
   setDrawingVertices: React.Dispatch<React.SetStateAction<Point2D[]>>;
   setCurrentMouseWorld: React.Dispatch<React.SetStateAction<Point2D | null>>;
   setHoveredBuildingIndex: React.Dispatch<React.SetStateAction<number>>;
@@ -135,15 +135,19 @@ export function useCadHotkeys({
           onFinishDrawing?.(drawingVertices, 'polyline');
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
+        } else if (drawingMode === 'sweep' && drawingVertices.length >= 2) {
+          onFinishDrawing?.(drawingVertices, 'sweep');
+          setDrawingVertices([]);
+          setCurrentMouseWorld(null);
         } else if (drawingMode === 'rotate') {
           onFinishDrawing?.([], 'rectangle');
         }
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawingMode === 'vertexEdit') {
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedVertexIndex !== null && selectedVertexIndex !== undefined) {
           e.preventDefault();
           onDeleteSelectedVertex?.();
         }
-      } else if (drawingMode === 'vertexEdit' && !isEditingEdgeLength) {
+      } else if (selectedVertexIndex !== null && selectedVertexIndex !== undefined && !isEditingEdgeLength) {
         if (e.key === '[' || e.key === '{' || e.code === 'BracketLeft') {
           e.preventDefault();
           onCycleVertexSelection?.('prev');

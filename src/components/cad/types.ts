@@ -28,6 +28,7 @@ export interface CadRenderContext {
   longitude: number;
   equinoxDate: 'spring' | 'autumn';
   sunlightMethod?: 'raycasting' | 'segments';
+  isInteracting?: boolean;
 }
 
 export interface CadCanvasProps {
@@ -57,12 +58,14 @@ export interface CadCanvasProps {
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;
   linkingSourceId?: string | null;
-  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
-  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => void;
-
+  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
+  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => void;
   onCancelDrawing?: () => void;
+  sweepWidth?: number;
+  sweepAlignment?: import('../../utils/math2d/sweep').SweepAlignment;
   onDrawingVerticesCountChange?: (count: number) => void;
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
+  onUpdateBuildingSweepPath?: (buildingId: string, newSweepPath: Point2D[], width?: number, alignment?: 'center' | 'left' | 'right') => void;
   onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
   onBooleanUnion?: (bldgIdA: string, bldgIdB: string) => void;
   pinnedPoints?: import('../../types/geometry').PinnedFacadePoint[];

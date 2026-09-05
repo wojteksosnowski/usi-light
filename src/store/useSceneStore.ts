@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { BuildingLoop, CadLayerSettings, Point2D, Modifier } from '../types/geometry';
 import { createSampleBuildings, createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
-import { offsetPolygonEdge, updateBuildingWithNewVertices, booleanUnionBuildings } from '@/utils/math2d';
+import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 
 export interface SavedSceneData {
@@ -52,6 +52,7 @@ interface SceneState {
   // Actions
   setBuildings: (buildings: BuildingLoop[] | ((prev: BuildingLoop[]) => BuildingLoop[])) => void;
   setSelectedBuildingId: (id: string | null) => void;
+  setSelectedBuildingIds: (ids: string[]) => void;
   selectBuilding: (id: string | null, isMultiSelect?: boolean) => void;
   addBuilding: (building: BuildingLoop) => void;
   deleteBuilding: (id: string) => void;
@@ -61,6 +62,7 @@ interface SceneState {
   updateSelectedBuilding: (patch: Partial<BuildingLoop>) => void;
   adjustSelectedBuildingHeight: (deltaMeters: number) => void;
   updateBuildingVertices: (buildingId: string, newVertices: Point2D[]) => void;
+  updateBuildingSweepPath: (buildingId: string, newSweepPath: Point2D[], width?: number, alignment?: 'center' | 'left' | 'right') => void;
   moveBuilding: (id: string, dx: number, dy: number) => void;
   moveBuildings: (ids: string[], dx: number, dy: number) => void;
   moveBuildingEdge: (buildingId: string, edgeIndex: number, dx: number, dy: number) => void;
@@ -122,6 +124,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set({
       selectedBuildingId: id,
       selectedBuildingIds: id ? [id] : [],
+    });
+  },
+
+  setSelectedBuildingIds: (ids) => {
+    set({
+      selectedBuildingIds: ids,
+      selectedBuildingId: ids.length > 0 ? ids[ids.length - 1] : null,
     });
   },
 
@@ -227,12 +236,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       p2: { x: s.p2.x + offset, y: s.p2.y + offset },
     }));
 
+    const newSweepPath = source.sweepPath
+      ? source.sweepPath.map((p) => ({ x: p.x + offset, y: p.y + offset }))
+      : undefined;
+
     const duplicate: BuildingLoop = {
       ...source,
       id: newId,
       name: newName,
       vertices: newVertices,
       segments: newSegments,
+      sweepPath: newSweepPath,
       groupId: undefined,
     };
 
@@ -257,7 +271,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((state) => ({
       buildings: state.buildings.map((bldg) => {
         if (!targetIds.includes(bldg.id)) return bldg;
-        const updated = { ...bldg, ...fields };
+        let updated = { ...bldg, ...fields };
+
+        // Jeśli zmieniono parametry wstęgi (sweepWidth, sweepAlignment), regenerujemy obrys z sweepPath
+        if (
+          updated.sweepPath &&
+          updated.sweepPath.length >= 2 &&
+          (fields.sweepWidth !== undefined || fields.sweepAlignment !== undefined)
+        ) {
+          const w = updated.sweepWidth ?? 6.0;
+          const align = updated.sweepAlignment ?? 'center';
+          const newVerts = generateSweepPolygon(updated.sweepPath, w, align);
+          if (newVerts.length >= 3) {
+            updated = rebuildBuildingSegments(updated, newVerts);
+          }
+        }
 
         if (fields.category === 'boundary') {
           updated.defaultHeight = 0;
@@ -297,6 +325,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         if (updated.modifiers && updated.modifiers.length > 0) {
           const modRes = applyBuildingModifiers(updated);
           updated.storyPolygons = modRes.storyPolygons;
+          updated.zonePolygons = modRes.zonePolygons;
           updated.segments = modRes.segments;
         }
 
@@ -325,6 +354,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         if (updated.modifiers && updated.modifiers.length > 0) {
           const modRes = applyBuildingModifiers(updated);
           updated.storyPolygons = modRes.storyPolygons;
+          updated.zonePolygons = modRes.zonePolygons;
           updated.segments = modRes.segments;
         }
         return updated;
@@ -340,6 +370,31 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
           const modRes = applyBuildingModifiers(rebuilt);
           rebuilt.storyPolygons = modRes.storyPolygons;
+          rebuilt.zonePolygons = modRes.zonePolygons;
+          rebuilt.segments = modRes.segments;
+        }
+        return rebuilt;
+      }),
+    }));
+  },
+
+  updateBuildingSweepPath: (buildingId, newSweepPath, width, alignment) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const effectiveWidth = width ?? bldg.sweepWidth ?? 6.0;
+        const effectiveAlignment = alignment ?? bldg.sweepAlignment ?? 'center';
+        const newVertices = generateSweepPolygon(newSweepPath, effectiveWidth, effectiveAlignment);
+
+        const rebuilt = rebuildBuildingSegments(bldg, newVertices);
+        rebuilt.sweepPath = newSweepPath.map((p) => ({ ...p }));
+        rebuilt.sweepWidth = effectiveWidth;
+        rebuilt.sweepAlignment = effectiveAlignment;
+
+        if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+          const modRes = applyBuildingModifiers(rebuilt);
+          rebuilt.storyPolygons = modRes.storyPolygons;
+          rebuilt.zonePolygons = modRes.zonePolygons;
           rebuilt.segments = modRes.segments;
         }
         return rebuilt;
@@ -358,6 +413,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           if (!shouldMove) return bldg;
 
           const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+          const newSweepPath = bldg.sweepPath
+            ? bldg.sweepPath.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+            : undefined;
           const newStoryPolygons = bldg.storyPolygons
             ? bldg.storyPolygons.map((sf) => ({
                 ...sf,
@@ -368,12 +426,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           const withMoved = {
             ...bldg,
             vertices: newVertices,
+            sweepPath: newSweepPath,
             storyPolygons: newStoryPolygons,
           };
 
           if (withMoved.modifiers && withMoved.modifiers.length > 0) {
             const modRes = applyBuildingModifiers(withMoved);
             withMoved.storyPolygons = modRes.storyPolygons;
+            withMoved.zonePolygons = modRes.zonePolygons;
             withMoved.segments = modRes.segments;
             return withMoved;
           }
@@ -410,6 +470,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           if (!shouldMove) return bldg;
 
           const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+          const newSweepPath = bldg.sweepPath
+            ? bldg.sweepPath.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+            : undefined;
           const newStoryPolygons = bldg.storyPolygons
             ? bldg.storyPolygons.map((sf) => ({
                 ...sf,
@@ -420,12 +483,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           const withMoved = {
             ...bldg,
             vertices: newVertices,
+            sweepPath: newSweepPath,
             storyPolygons: newStoryPolygons,
           };
 
           if (withMoved.modifiers && withMoved.modifiers.length > 0) {
             const modRes = applyBuildingModifiers(withMoved);
             withMoved.storyPolygons = modRes.storyPolygons;
+            withMoved.zonePolygons = modRes.zonePolygons;
             withMoved.segments = modRes.segments;
             return withMoved;
           }
@@ -449,11 +514,38 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((state) => ({
       buildings: state.buildings.map((bldg) => {
         if (bldg.id !== buildingId) return bldg;
+
+        // Jeśli obiekt to Wstęga (Sweep), przesuwamy odcinek linii generującej (sweepPath)
+        // z zachowaniem ścisłej niezmienności kątów sąsiednich odcinków
+        if (Array.isArray(bldg.sweepPath) && bldg.sweepPath.length >= 2) {
+          if (edgeIndex >= 0 && edgeIndex < bldg.sweepPath.length - 1) {
+            const nextSweepPath = offsetOpenPolylineEdge(bldg.sweepPath, edgeIndex, { x: dx, y: dy });
+
+            const effectiveWidth = bldg.sweepWidth ?? 6.0;
+            const effectiveAlignment = bldg.sweepAlignment ?? 'center';
+            const newVertices = generateSweepPolygon(nextSweepPath, effectiveWidth, effectiveAlignment);
+
+            const rebuilt = rebuildBuildingSegments(bldg, newVertices);
+            rebuilt.sweepPath = nextSweepPath;
+            rebuilt.sweepWidth = effectiveWidth;
+            rebuilt.sweepAlignment = effectiveAlignment;
+
+            if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+              const modRes = applyBuildingModifiers(rebuilt);
+              rebuilt.storyPolygons = modRes.storyPolygons;
+              rebuilt.zonePolygons = modRes.zonePolygons;
+              rebuilt.segments = modRes.segments;
+            }
+            return rebuilt;
+          }
+        }
+
         const newVerts = offsetPolygonEdge(bldg.vertices, edgeIndex, { x: dx, y: dy });
         const updated = updateBuildingWithNewVertices(bldg, newVerts);
         if (updated.modifiers && updated.modifiers.length > 0) {
           const modRes = applyBuildingModifiers(updated);
           updated.storyPolygons = modRes.storyPolygons;
+          updated.zonePolygons = modRes.zonePolygons;
           updated.segments = modRes.segments;
         }
         return updated;
@@ -484,6 +576,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             };
           });
 
+          const newSweepPath = bldg.sweepPath
+            ? bldg.sweepPath.map((v) => {
+                const rx = v.x - pivot.x;
+                const ry = v.y - pivot.y;
+                return {
+                  x: pivot.x + rx * cosA - ry * sinA,
+                  y: pivot.y + rx * sinA + ry * cosA,
+                };
+              })
+            : undefined;
+
           const updatedTransform = {
             ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
             rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
@@ -491,9 +594,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
           const rebuilt = rebuildBuildingSegments(bldg, newVertices);
           rebuilt.transform = updatedTransform;
+          rebuilt.sweepPath = newSweepPath;
           if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
             const modRes = applyBuildingModifiers(rebuilt);
             rebuilt.storyPolygons = modRes.storyPolygons;
+            rebuilt.zonePolygons = modRes.zonePolygons;
             rebuilt.segments = modRes.segments;
           }
           return rebuilt;
@@ -535,6 +640,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return {
           ...withMods,
           storyPolygons: res.storyPolygons,
+          zonePolygons: res.zonePolygons,
           segments: res.segments,
         };
       }),
@@ -546,12 +652,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       buildings: state.buildings.map((bldg) => {
         if (bldg.id !== buildingId) return bldg;
         const currentMods = bldg.modifiers || [];
-        const newMods = currentMods.map((m) => (m.id === modifierId ? { ...m, ...patch } : m));
+        const newMods = currentMods.map((m) => (m.id === modifierId ? ({ ...m, ...patch } as Modifier) : m));
         const withMods = { ...bldg, modifiers: newMods };
         const res = applyBuildingModifiers(withMods);
         return {
           ...withMods,
           storyPolygons: res.storyPolygons,
+          zonePolygons: res.zonePolygons,
           segments: res.segments,
         };
       }),
@@ -569,6 +676,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return {
           ...withMods,
           storyPolygons: res.storyPolygons,
+          zonePolygons: res.zonePolygons,
           segments: res.segments,
         };
       }),
@@ -590,6 +698,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return {
           ...withMods,
           storyPolygons: res.storyPolygons,
+          zonePolygons: res.zonePolygons,
           segments: res.segments,
         };
       }),
@@ -607,6 +716,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return {
           ...withMods,
           storyPolygons: res.storyPolygons,
+          zonePolygons: res.zonePolygons,
           segments: res.segments,
         };
       }),

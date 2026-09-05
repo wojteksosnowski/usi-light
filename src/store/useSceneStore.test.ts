@@ -65,4 +65,49 @@ describe('useSceneStore', () => {
     expect(updated.find((b) => b.id === 'b1')?.defaultHeight).toBe(25);
     expect(updated.find((b) => b.id === 'b2')?.defaultHeight).toBe(25);
   });
+
+  it('preserves and updates sweepPath during updateBuildingSweepPath and moveBuilding', () => {
+    const sweepPath = [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 15 },
+    ];
+    const sweepBldg = {
+      ...createBuildingFromVertices([
+        { x: 0, y: 2.5 },
+        { x: 20, y: 2.5 },
+        { x: 20, y: -2.5 },
+        { x: 0, y: -2.5 },
+      ], 'Wstęga 1', 12),
+      id: 'sweep-1',
+      sweepPath,
+      sweepWidth: 5.0,
+      sweepAlignment: 'center' as const,
+    };
+
+    useSceneStore.getState().setBuildings([sweepBldg]);
+    
+    // Test updateBuildingSweepPath
+    const newPath = [
+      { x: 0, y: 0 },
+      { x: 30, y: 0 },
+      { x: 30, y: 20 },
+    ];
+    useSceneStore.getState().updateBuildingSweepPath('sweep-1', newPath, 6.0, 'left');
+
+    let state = useSceneStore.getState();
+    const updatedSweep = state.buildings.find((b) => b.id === 'sweep-1');
+    expect(updatedSweep?.sweepPath).toEqual(newPath);
+    expect(updatedSweep?.sweepWidth).toBe(6.0);
+    expect(updatedSweep?.sweepAlignment).toBe('left');
+    expect(updatedSweep?.vertices.length).toBeGreaterThanOrEqual(4);
+
+    // Test moveBuilding transforms sweepPath along with vertices
+    useSceneStore.getState().moveBuilding('sweep-1', 5, 10);
+    state = useSceneStore.getState();
+    const movedSweep = state.buildings.find((b) => b.id === 'sweep-1');
+    expect(movedSweep?.sweepPath?.[0]).toEqual({ x: 5, y: 10 });
+    expect(movedSweep?.sweepPath?.[1]).toEqual({ x: 35, y: 10 });
+  });
 });
+

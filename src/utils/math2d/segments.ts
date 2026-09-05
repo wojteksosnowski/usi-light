@@ -239,3 +239,124 @@ export function closestPointOnSegment(p: Point2D, a: Point2D, b: Point2D): Point
   const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq));
   return { x: a.x + t * abx, y: a.y + t * aby };
 }
+
+/**
+ * Zwraca parametr t in [0, 1] na odcinku S1(t) = a1 + t*(a2 - a1)
+ * w punkcie przecięcia z odcinkiem S2(u) = b1 + u*(b2 - b1), lub null jeśli brak przecięcia.
+ */
+export function segmentSegmentIntersectionParam(
+  a1: Point2D,
+  a2: Point2D,
+  b1: Point2D,
+  b2: Point2D
+): number | null {
+  const d1x = a2.x - a1.x;
+  const d1y = a2.y - a1.y;
+  const d2x = b2.x - b1.x;
+  const d2y = b2.y - b1.y;
+
+  const cross = d1x * d2y - d1y * d2x;
+  if (Math.abs(cross) < 1e-9) {
+    return null; // Równoległe lub współliniowe
+  }
+
+  const ox = b1.x - a1.x;
+  const oy = b1.y - a1.y;
+
+  const t = (ox * d2y - oy * d2x) / cross;
+  const u = (ox * d1y - oy * d1x) / cross;
+
+  if (t >= -1e-6 && t <= 1 + 1e-6 && u >= -1e-6 && u <= 1 + 1e-6) {
+    return Math.max(0, Math.min(1, t));
+  }
+
+  return null;
+}
+
+export interface SegmentOcclusionPart {
+  p1: Point2D;
+  p2: Point2D;
+  isOccluded: boolean;
+}
+
+/**
+ * Analitycznie dzieli odcinek [p1, p2] na pododcinki w punktach przecięcia z wielokątami
+ * wyższych obiektów oraz klasyfikuje każdy pododcinek jako zasłonięty (wewnątrz) lub widoczny (na zewnątrz).
+ */
+export function splitSegmentByOccludingPolygons(
+  p1: Point2D,
+  p2: Point2D,
+  higherPolygons: Point2D[][],
+  isPointInsidePoly: (pt: Point2D, poly: Point2D[]) => boolean
+): SegmentOcclusionPart[] {
+  if (!p1 || !p2 || !higherPolygons || higherPolygons.length === 0) {
+    return [{ p1: { ...p1 }, p2: { ...p2 }, isOccluded: false }];
+  }
+
+  const validPolys = higherPolygons.filter((poly) => Array.isArray(poly) && poly.length >= 3);
+  if (validPolys.length === 0) {
+    return [{ p1: { ...p1 }, p2: { ...p2 }, isOccluded: false }];
+  }
+
+  const tSet = new Set<number>();
+  tSet.add(0);
+  tSet.add(1);
+
+  // Znajdź wszystkie parametry t przecięć odcinka p1-p2 z krawędziami każdego wielokąta
+  for (const poly of validPolys) {
+    const m = poly.length;
+    for (let i = 0; i < m; i++) {
+      const v1 = poly[i];
+      const v2 = poly[(i + 1) % m];
+      const t = segmentSegmentIntersectionParam(p1, p2, v1, v2);
+      if (t !== null && t > 1e-4 && t < 1 - 1e-4) {
+        tSet.add(t);
+      }
+    }
+  }
+
+  const sortedT = Array.from(tSet).sort((a, b) => a - b);
+  const result: SegmentOcclusionPart[] = [];
+
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+
+  for (let i = 0; i < sortedT.length - 1; i++) {
+    const tA = sortedT[i];
+    const tB = sortedT[i + 1];
+    if (tB - tA < 1e-5) continue;
+
+    const subP1: Point2D = {
+      x: p1.x + tA * dx,
+      y: p1.y + tA * dy,
+    };
+    const subP2: Point2D = {
+      x: p1.x + tB * dx,
+      y: p1.y + tB * dy,
+    };
+
+    // Test punktu środkowego pododcinka
+    const midT = (tA + tB) / 2;
+    const midPt: Point2D = {
+      x: p1.x + midT * dx,
+      y: p1.y + midT * dy,
+    };
+
+    let isOccluded = false;
+    for (const poly of validPolys) {
+      if (isPointInsidePoly(midPt, poly)) {
+        isOccluded = true;
+        break;
+      }
+    }
+
+    result.push({
+      p1: subP1,
+      p2: subP2,
+      isOccluded,
+    });
+  }
+
+  return result.length > 0 ? result : [{ p1: { ...p1 }, p2: { ...p2 }, isOccluded: false }];
+}
+

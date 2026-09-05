@@ -10,6 +10,8 @@ import {
   AnalysisPointResult,
   ProjectSettings,
   ShadowAnalysisResult,
+  PlaygroundSunlightResult,
+  PlaygroundSamplePoint,
 } from '../types/geometry';
 import {
   raySegmentIntersection,
@@ -20,7 +22,10 @@ import {
   clipSegmentToCircle,
   isDirectionInSegmentCone,
   computeFullShadowAnalysis,
+  computePolygonArea,
+  isPointInPolygon,
 } from '@/utils/math2d';
+import { generatePolygonalVoronoiCells } from '../utils/math2d/voronoi';
 
 
 import {
@@ -134,9 +139,14 @@ export function prefilterShadowingObstacles(
       }
     }
 
+    const pointBaseH = segment.hBase ?? 0.0;
+
     for (const seg of bldg.segments) {
       // Pomiń sam badany odcinek
       if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
+
+      // Jeśli przeszkoda w całości leży poniżej poziomu posadowienia fasady badanej, nie przesłania
+      if (seg.hTop <= pointBaseH) continue;
 
       // Backface culling: normalna odcinka przeszkody musi być zwrócona w stronę punktu P
       const dotExt =
@@ -221,7 +231,9 @@ export function prefilterSunlightObstacles(
       // Pomiń sam badany odcinek
       if (bldg.id === targetBuildingId && seg.id === segment.id) continue;
 
-      const deltaH = Math.max(0, seg.hTop);
+      // Wysokość przeszkody względem poziomu posadowienia fasady badanej (segment.hBase)
+      const pointBaseH = segment.hBase ?? 0.0;
+      const deltaH = Math.max(0, seg.hTop - pointBaseH);
       if (deltaH <= 0) continue;
 
       // 1. Filtr boczny N-S: L = H * 5 (odrzucenie odcinków leżących w całości poza korytarzem)
@@ -299,14 +311,16 @@ export function analyzeShadowingAtPoint(
 
   const bldgMap = buildingMap ?? new Map<string, BuildingLoop>(allBuildings.map((b) => [b.id, b]));
 
+  const pointBaseH = segment.hBase ?? 0.0;
+
   for (const { seg, bldgId } of baseObstacles) {
     const bldg = bldgMap.get(bldgId);
     if (!bldg) continue;
     // § 12 ust. 6: balkony i elementy drugorzędne są ignorowane w analizie przesłaniania
     if (bldg.category === 'balcony') continue;
 
-    // Required clearance for this obstacle (§ 12)
-    const deltaH = Math.max(0, seg.hTop);
+    // Required clearance for this obstacle (§ 12) względem poziomu posadowienia fasady badanej
+    const deltaH = Math.max(0, seg.hTop - pointBaseH);
     const dBase  = Math.min(deltaH, 35.0);
     const dReq   = segment.isCityCentre || bldg.isCityCentre
       ? 0.5 * dBase
@@ -783,8 +797,9 @@ export function analyzeSunlightAtPoint(
       );
 
       if (hitDist > 0.05 && hitDist < Infinity) {
-        const deltaH = Math.max(0, seg.hTop);
-        const deltaHbase = Math.max(0, seg.hBase ?? 0.0);
+        const pointBaseH = segment.hBase ?? 0.0;
+        const deltaH = Math.max(0, seg.hTop - pointBaseH);
+        const deltaHbase = Math.max(0, (seg.hBase ?? 0.0) - pointBaseH);
         const betaTopDeg = Math.atan2(deltaH, hitDist) * RAD2DEG;
         const betaBaseDeg = Math.atan2(deltaHbase, hitDist) * RAD2DEG;
 
@@ -793,7 +808,7 @@ export function analyzeSunlightAtPoint(
         }
 
         // Cień występuje, gdy promień słoneczny trafia w ścianę: betaBaseDeg <= elevationDeg <= betaTopDeg
-        if (slot.elevationDeg <= betaTopDeg && slot.elevationDeg >= betaBaseDeg) {
+        if (deltaH > 0 && slot.elevationDeg <= betaTopDeg && slot.elevationDeg >= betaBaseDeg) {
           isBlocked = true;
           blockingObstacleId = cand.bldgId;
           break;
@@ -905,9 +920,11 @@ export function analyzeSunlightAtPointSegments(
 
   const { nStart, nEnd } = windowInfo;
 
+  const pointBaseH = segment.hBase ?? 0.0;
+
   for (const { seg, bldgId } of obstacles) {
-    // Wysokość przeszkody H
-    const deltaH = Math.max(0, seg.hTop);
+    // Wysokość przeszkody H względem punktu badanego P (segment.hBase)
+    const deltaH = Math.max(0, seg.hTop - pointBaseH);
     if (deltaH <= 0) continue;
 
     // ── LINIOWY FILTR OKNA 10H (bez trygonometrii) ──
@@ -932,8 +949,8 @@ export function analyzeSunlightAtPointSegments(
     // od orientacji fasady badanej — wynika to z geometrii metody Twarowskiego.
     if (seg.p1.y < point.y - deltaH * 1.5 && seg.p2.y < point.y - deltaH * 1.5) continue;
 
-    // L_total = H_total × tan(lat), L_base = H_base × tan(lat)
-    const deltaHbase = Math.max(0, seg.hBase ?? 0.0);
+    // L_total = H_total × tan(lat), L_base = H_base × tan(lat) (względem punktu P)
+    const deltaHbase = Math.max(0, (seg.hBase ?? 0.0) - pointBaseH);
     const Ltotal = deltaH * k;
     const Lbase = deltaHbase * k;
 
@@ -1487,5 +1504,439 @@ export function runFullAnalysis(
     totalAnalysisMs,
     totalPoints: pointCount,
   };
+}
+
+/**
+ * Analiza nasłonecznienia placu zabaw dla dzieci zgodnie z § 33 ust. 3 WT:
+ * - Okno 8 godzin w dniach równonocy (T_noon +- 4h)
+ * - Wymagany czas nasłonecznienia >= 2.0h (lub >= 1.0h w zabudowie śródmiejskiej)
+ * - Warunek spełniony, jeśli co najmniej 50% powierzchni placu zabaw (punktów siatki) osiąga wymagany czas
+ * - Obliczenia zgodne z wybranym silnikiem: Astronomiczny (Astro) lub Geometryczny (Linijka Słońca)
+ */
+// Cache dla analiz nasłonecznienia placu zabaw (zapobiega jitterowi i przyspiesza renderowanie)
+const playgroundAnalysisCache = new Map<string, PlaygroundSunlightResult>();
+
+export function analyzePlaygroundSunlight(
+  playground: BuildingLoop,
+  allBuildings: BuildingLoop[],
+  settings: ProjectSettings,
+  sunlightMethod: 'raycasting' | 'segments' = 'raycasting',
+  options?: {
+    samplingInterval?: number;
+    stepMinutes?: number;
+    isInteracting?: boolean;
+  }
+): PlaygroundSunlightResult {
+  const vertices = playground.vertices || [];
+  if (vertices.length < 3) {
+    return {
+      playgroundId: playground.id,
+      totalArea: 0,
+      totalSamplePoints: 0,
+      compliantSamplePoints: 0,
+      sunlitPercentage: 0,
+      requiredDurationHours: playground.isCityCentre ? 1.0 : 2.0,
+      isCompliant: false,
+    };
+  }
+
+  const isVoronoiMode = playground.playgroundVoronoi !== false;
+  const isInteracting = options?.isInteracting === true;
+  const stepMinutes = options?.stepMinutes ?? 5;
+  const interval = Math.max(0.1, options?.samplingInterval ?? settings.samplingInterval ?? 0.5);
+  const elevation = playground.elevation ?? 0.0;
+  const isCityCentre = playground.isCityCentre || settings.isCityCentreDefault;
+  const requiredDurationHours = isCityCentre ? 1.0 : 2.0;
+
+  // Wyznacz segmenty przeszkód (budynki o H > elevation)
+  const obstacleSegments: FacadeSegment[] = [];
+  for (const bldg of allBuildings) {
+    if (bldg.id === playground.id || bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (!bldg.segments || bldg.segments.length === 0) continue;
+    for (const seg of bldg.segments) {
+      if (seg.hTop > elevation) {
+        obstacleSegments.push(seg);
+      }
+    }
+  }
+
+  // Generowanie deterministycznego klucza cache
+  const pgParamsStr = playground.playgroundParams ? JSON.stringify(playground.playgroundParams) : '';
+  const vertHash = vertices.map((v) => `${Math.round(v.x * 100)},${Math.round(v.y * 100)}`).join(';');
+  const obsHash = obstacleSegments
+    .map((s) => `${Math.round(s.p1.x * 10)},${Math.round(s.p1.y * 10)},${Math.round(s.p2.x * 10)},${Math.round(s.p2.y * 10)},${Math.round(s.hTop * 10)}`)
+    .join(';');
+  const cacheKey = `${playground.id}_${vertHash}_${obsHash}_${elevation}_${isCityCentre}_${isVoronoiMode}_${pgParamsStr}_${isInteracting}_${settings.latitude}_${settings.longitude}_${settings.equinoxDate}_${interval}_${sunlightMethod}_${stepMinutes}`;
+
+  const cachedResult = playgroundAnalysisCache.get(cacheKey);
+  if (cachedResult) {
+    return cachedResult;
+  }
+
+  const totalArea = computePolygonArea(vertices);
+
+  // 1. Trajektoria słońca w oknie 8h (isChildcare = true)
+  const sys =
+    sunlightMethod === 'segments'
+      ? new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate)
+      : new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
+
+  const trajectory = computeDailySolarTrajectory(settings, stepMinutes, true, sys);
+
+  // 4. Mechanizm pamięci podręcznej i deduplikacji punktów (żaden punkt nie jest liczony dwukrotnie)
+  const evaluatedCache = new Map<string, { hours: number; isCompliant: boolean }>();
+  const getCoordKey = (p: Point2D): string => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
+
+  const evaluateSinglePoint = (pt: Point2D): { hours: number; isCompliant: boolean } => {
+    const key = getCoordKey(pt);
+    const cached = evaluatedCache.get(key);
+    if (cached) return cached;
+
+    let directSunMinutes = 0;
+    for (const slot of trajectory) {
+      if (!slot.isSunAboveHorizon || slot.elevationDeg <= 0) continue;
+
+      const tanSunElev = Math.tan(slot.elevationDeg * DEG2RAD);
+      const dx = slot.sunDir.x;
+      const dy = slot.sunDir.y;
+      let blocked = false;
+
+      for (const seg of obstacleSegments) {
+        const dist = raySegmentDistance2D(
+          pt.x,
+          pt.y,
+          dx,
+          dy,
+          seg.p1.x,
+          seg.p1.y,
+          seg.p2.x,
+          seg.p2.y
+        );
+
+        if (dist > 1e-4 && dist < Infinity) {
+          const reqTan = (seg.hTop - elevation) / dist;
+          if (tanSunElev <= reqTan) {
+            blocked = true;
+            break;
+          }
+        }
+      }
+
+      if (!blocked) {
+        directSunMinutes += stepMinutes;
+      }
+    }
+
+    const hours = Number((directSunMinutes / 60).toFixed(2));
+    const isCompliant = hours >= requiredDurationHours;
+    const result = { hours, isCompliant };
+    evaluatedCache.set(key, result);
+    return result;
+  };
+
+  const evaluatedPoints: PlaygroundSamplePoint[] = [];
+  const registeredPointKeys = new Set<string>();
+
+  const addEvaluatedPoint = (pt: Point2D): { hours: number; isCompliant: boolean } => {
+    const evalRes = evaluateSinglePoint(pt);
+    const key = getCoordKey(pt);
+    if (!registeredPointKeys.has(key)) {
+      registeredPointKeys.add(key);
+      evaluatedPoints.push({ point: pt, hours: evalRes.hours, isCompliant: evalRes.isCompliant });
+    }
+    return evalRes;
+  };
+
+  if (!isVoronoiMode) {
+    // ═════════════════════════════════════════════════════════════════════════
+    // TRYB 1: CZYSTA REGULARNA SIATKA ORTOGONALNA (Cartesian Grid)
+    // ═════════════════════════════════════════════════════════════════════════
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const v of vertices) {
+      if (v.x < minX) minX = v.x;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.y > maxY) maxY = v.y;
+    }
+
+    const fineStep = Math.max(0.1, interval);
+    const halfStep = fineStep / 2;
+
+    const startX = minX + halfStep;
+    const endX = maxX + 1e-4;
+    const startY = minY + halfStep;
+    const endY = maxY + 1e-4;
+
+    const isPointNearPoly = (pt: Point2D): boolean => {
+      if (isPointInPolygon(pt, vertices)) return true;
+      const numV = vertices.length;
+      for (let i = 0; i < numV; i++) {
+        const vA = vertices[i];
+        const vB = vertices[(i + 1) % numV];
+        if (distancePointToSegment(pt, vA, vB) <= fineStep * 0.95) return true;
+      }
+      return false;
+    };
+
+    if (!isInteracting) {
+      for (let x = startX; x <= endX; x += fineStep) {
+        for (let y = startY; y <= endY; y += fineStep) {
+          const pt = { x, y };
+          if (isPointNearPoly(pt)) {
+            addEvaluatedPoint(pt);
+          }
+        }
+      }
+    } else {
+      // W trybie interakcji (przesuwanie/ruch): ewaluacja węzłów kotwiczących + pełna aproksymacja siatki
+      const stride = 3;
+      const anchorMap = new Map<string, { hours: number; isCompliant: boolean }>();
+      const getAnchorKey = (ix: number, iy: number) => `${ix},${iy}`;
+
+      let ix = 0;
+      for (let x = startX; x <= endX; x += fineStep, ix++) {
+        let iy = 0;
+        for (let y = startY; y <= endY; y += fineStep, iy++) {
+          if (ix % stride === 0 && iy % stride === 0) {
+            const pt = { x, y };
+            if (isPointNearPoly(pt)) {
+              const res = evaluateSinglePoint(pt);
+              anchorMap.set(getAnchorKey(ix, iy), res);
+            }
+          }
+        }
+      }
+
+      if (anchorMap.size === 0) {
+        let cx = 0, cy = 0;
+        for (const v of vertices) { cx += v.x; cy += v.y; }
+        const centerPt = { x: cx / vertices.length, y: cy / vertices.length };
+        const centerRes = evaluateSinglePoint(centerPt);
+        anchorMap.set(getAnchorKey(0, 0), centerRes);
+      }
+
+      ix = 0;
+      for (let x = startX; x <= endX; x += fineStep, ix++) {
+        let iy = 0;
+        for (let y = startY; y <= endY; y += fineStep, iy++) {
+          const pt = { x, y };
+          if (isPointNearPoly(pt)) {
+            const anchorIx = Math.round(ix / stride) * stride;
+            const anchorIy = Math.round(iy / stride) * stride;
+            let approxRes = anchorMap.get(getAnchorKey(anchorIx, anchorIy));
+            if (!approxRes) {
+              let minDistSq = Infinity;
+              for (const [key, val] of anchorMap.entries()) {
+                const [aix, aiy] = key.split(',').map(Number);
+                const dSq = (ix - aix) ** 2 + (iy - aiy) ** 2;
+                if (dSq < minDistSq) {
+                  minDistSq = dSq;
+                  approxRes = val;
+                }
+              }
+            }
+            if (approxRes) {
+              const key = getCoordKey(pt);
+              if (!registeredPointKeys.has(key)) {
+                registeredPointKeys.add(key);
+                evaluatedPoints.push({ point: pt, hours: approxRes.hours, isCompliant: approxRes.isCompliant });
+              }
+            }
+          }
+        }
+      }
+    }
+  } else {
+    // ═════════════════════════════════════════════════════════════════════════
+    // TRYB 2: ORGANICZNY DIAGRAM VORONOI O DUŻYM KONTRAŚCIE SKALI (Multi-scale Voronoi)
+    // ═════════════════════════════════════════════════════════════════════════
+    let centroidX = 0;
+    let centroidY = 0;
+    for (const v of vertices) {
+      centroidX += v.x;
+      centroidY += v.y;
+    }
+    const centroidPt: Point2D = { x: centroidX / vertices.length, y: centroidY / vertices.length };
+
+    const numVertices = vertices.length;
+    const edgeSamples: { point: Point2D; hours: number; isCompliant: boolean; segIdx: number; t: number }[] = [];
+
+    const customBaseStep = playground.playgroundParams?.baseStep;
+    const customMinSubdivDist = playground.playgroundParams?.minSubdivDist ?? 1.5;
+    const customMaxExtra = playground.playgroundParams?.maxExtraPoints ?? 15;
+    const customHoursDelta = playground.playgroundParams?.hoursDeltaThreshold ?? 0.75;
+
+    // Krok próbkowania krawędzi: duży w spoczynku (4.0m - 7.0m lub zdefiniowany w parametrach), ultra-lekki w czasie interakcji (8.0m - 12.0m)
+    const edgeBaseStep = isInteracting
+      ? 9.0
+      : (customBaseStep ?? Math.max(4.0, Math.min(7.0, interval * 4.0)));
+
+    // A. Próbkowanie wzdłuż krawędzi obrysu (Edge & Boundary chord sampling)
+    for (let i = 0; i < numVertices; i++) {
+      const v1 = vertices[i];
+      const v2 = vertices[(i + 1) % numVertices];
+      const edgeLen = Math.hypot(v2.x - v1.x, v2.y - v1.y);
+      if (edgeLen < 1e-4) continue;
+
+      const numSub = Math.max(1, Math.round(edgeLen / edgeBaseStep));
+      for (let s = 0; s <= numSub; s++) {
+        const t = s / numSub;
+        const ptOnEdge: Point2D = {
+          x: v1.x + t * (v2.x - v1.x),
+          y: v1.y + t * (v2.y - v1.y),
+        };
+        const inwardPt: Point2D = {
+          x: ptOnEdge.x * 0.98 + centroidPt.x * 0.02,
+          y: ptOnEdge.y * 0.98 + centroidPt.y * 0.02,
+        };
+        if (isPointInPolygon(inwardPt, vertices)) {
+          const res = addEvaluatedPoint(inwardPt);
+          edgeSamples.push({ point: inwardPt, hours: res.hours, isCompliant: res.isCompliant, segIdx: i, t });
+        }
+      }
+    }
+
+    // B. Promieniste sieczne od krawędzi do centroidu (Ray / Chord Inward Sampling)
+    const depths = isInteracting ? [0.5] : [0.35, 0.70];
+    for (const es of edgeSamples) {
+      for (const d of depths) {
+        const rayPt: Point2D = {
+          x: es.point.x * (1 - d) + centroidPt.x * d,
+          y: es.point.y * (1 - d) + centroidPt.y * d,
+        };
+        if (isPointInPolygon(rayPt, vertices)) {
+          addEvaluatedPoint(rayPt);
+        }
+      }
+    }
+
+    if (isPointInPolygon(centroidPt, vertices)) {
+      addEvaluatedPoint(centroidPt);
+    }
+
+    // C. Drugi stopień próbkowania (Multi-scale Dynamic Range) – wyostrzanie strefy przejścia i progu 2.0h
+    if (!isInteracting) {
+      const maxExtraPoints = customMaxExtra;
+      let extraCount = 0;
+
+      // Przebieg 1 & 2: Zagęszczanie par punktów rozdzielonych granicą nasłonecznienia
+      const maxPasses = 2;
+      for (let pass = 0; pass < maxPasses && extraCount < maxExtraPoints; pass++) {
+        const currentSnapshot = [...evaluatedPoints];
+        const numPts = currentSnapshot.length;
+
+        for (let i = 0; i < numPts && extraCount < maxExtraPoints; i++) {
+          const pA = currentSnapshot[i];
+
+          for (let j = i + 1; j < numPts && extraCount < maxExtraPoints; j++) {
+            const pB = currentSnapshot[j];
+            const dist = Math.hypot(pB.point.x - pA.point.x, pB.point.y - pA.point.y);
+
+            // Sprawdzamy sąsiadów w zasięgu minSubdivDist – 8.0m
+            if (dist >= customMinSubdivDist && dist <= 8.0) {
+              const hoursDiff = Math.abs(pB.hours - pA.hours);
+              const isComplianceCrossing =
+                pA.isCompliant !== pB.isCompliant ||
+                (pA.hours < requiredDurationHours) !== (pB.hours < requiredDurationHours);
+              const isSignificantTransition = isComplianceCrossing || hoursDiff >= customHoursDelta;
+
+              if (isSignificantTransition) {
+                // Poziom 1: Środek odcinka pA-pB
+                const mx = (pA.point.x + pB.point.x) / 2;
+                const my = (pA.point.y + pB.point.y) / 2;
+                const midPt: Point2D = { x: mx, y: my };
+
+                if (isPointInPolygon(midPt, vertices)) {
+                  const midRes = addEvaluatedPoint(midPt);
+                  extraCount++;
+
+                  // Poziom 2: Dokładniejsze wyszukiwanie krawędzi cienia (mniejsze kształty przy progu 2h)
+                  if (isComplianceCrossing && dist >= customMinSubdivDist * 1.8 && extraCount < maxExtraPoints) {
+                    // Wybierz stronę, po której następuje zmiana stanu (binarny podział granicy)
+                    const sidePt: Point2D = midRes.isCompliant === pA.isCompliant
+                      ? { x: (mx + pB.point.x) / 2, y: (my + pB.point.y) / 2 }
+                      : { x: (pA.point.x + mx) / 2, y: (pA.point.y + my) / 2 };
+
+                    if (isPointInPolygon(sidePt, vertices)) {
+                      addEvaluatedPoint(sidePt);
+                      extraCount++;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback jeśli żaden punkt nie został wygenerowany
+  if (evaluatedPoints.length === 0) {
+    let cx = 0;
+    let cy = 0;
+    for (const v of vertices) {
+      cx += v.x;
+      cy += v.y;
+    }
+    const centerPt = { x: cx / vertices.length, y: cy / vertices.length };
+    addEvaluatedPoint(centerPt);
+  }
+
+  let compliantCount = 0;
+  let insideCount = 0;
+  for (const ep of evaluatedPoints) {
+    if (isPointInPolygon(ep.point, vertices)) {
+      insideCount++;
+      if (ep.isCompliant) compliantCount++;
+    }
+  }
+
+  let sunlitPercentage: number;
+  if (isVoronoiMode && evaluatedPoints.length > 1) {
+    const sites = evaluatedPoints.map((sp) => sp.point);
+    const cells = generatePolygonalVoronoiCells(sites, vertices);
+    let compliantArea = 0;
+    let computedTotalArea = 0;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      const ep = evaluatedPoints[i];
+      if (cell.polygon && cell.polygon.length >= 3) {
+        const a = computePolygonArea(cell.polygon);
+        computedTotalArea += a;
+        if (ep?.isCompliant) {
+          compliantArea += a;
+        }
+      }
+    }
+    const effectiveTotalArea = computedTotalArea > 0 ? computedTotalArea : totalArea;
+    sunlitPercentage = Number(((compliantArea / effectiveTotalArea) * 100).toFixed(1));
+  } else {
+    const effectiveTotalPoints = insideCount > 0 ? insideCount : evaluatedPoints.length;
+    const effectiveCompliant = insideCount > 0 ? compliantCount : evaluatedPoints.filter((e) => e.isCompliant).length;
+    sunlitPercentage = Number(((effectiveCompliant / effectiveTotalPoints) * 100).toFixed(1));
+  }
+
+  const isCompliant = sunlitPercentage >= 50.0;
+
+  const result: PlaygroundSunlightResult = {
+    playgroundId: playground.id,
+    totalArea: Number(totalArea.toFixed(2)),
+    totalSamplePoints: insideCount > 0 ? insideCount : evaluatedPoints.length,
+    compliantSamplePoints: insideCount > 0 ? compliantCount : evaluatedPoints.filter((e) => e.isCompliant).length,
+    sunlitPercentage,
+    requiredDurationHours,
+    isCompliant,
+    samplePoints: evaluatedPoints,
+  };
+
+  // Zapis do pamięci podręcznej (utrzymujemy max 50 ostatnich wpisów)
+  if (playgroundAnalysisCache.size > 50) {
+    const firstKey = playgroundAnalysisCache.keys().next().value;
+    if (firstKey) playgroundAnalysisCache.delete(firstKey);
+  }
+  playgroundAnalysisCache.set(cacheKey, result);
+
+  return result;
 }
 

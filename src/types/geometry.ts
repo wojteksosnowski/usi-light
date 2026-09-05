@@ -37,37 +37,72 @@ export interface FacadeSegment {
 }
 
 export * from './modifiers';
-import { Modifier, StoryFootprint } from './modifiers';
+import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
+
 
 export type ObjectCategory = 'building' | 'boundary' | 'balcony';
+export type AreaType = 'plot' | 'playground';
+
+export interface PlaygroundSamplePoint {
+  point: Point2D;
+  hours: number;
+  isCompliant: boolean; // hours >= requiredHours
+}
+
+export interface PlaygroundSunlightResult {
+  playgroundId: string;
+  totalArea: number;
+  totalSamplePoints: number;
+  compliantSamplePoints: number;
+  sunlitPercentage: number;
+  requiredDurationHours: number; // 2.0h (standard) lub 1.0h (śródmieście)
+  isCompliant: boolean; // sunlitPercentage >= 50.0%
+  samplePoints?: PlaygroundSamplePoint[];
+}
 
 export interface BuildingLoop {
   id: string;
   name: string;
   category?: ObjectCategory; // Domyślnie 'building' dla zachowania kompatybilności wstecznej
-  plotNumber?: string; // Numer działki (np. "124/2") dla kategorii 'boundary'
+  areaType?: AreaType; // 'plot' (Działka, default) | 'playground' (Plac zabaw) gdy category === 'boundary'
+  plotNumber?: string; // Numer działki (np. "124/2") dla kategorii 'boundary' / 'plot'
   elevation?: number; // Posadowienie / rzędna dolnej krawędzi (m, default 0.0)
   firstFloorHeight?: number; // Wysokość 1. kondygnacji (m) dla kategorii 'building'
   typicalFloorHeight?: number; // Wysokość kondygnacji typowej (m) dla kategorii 'building'
   storeysCount?: number; // Wyliczona lub zadana liczba kondygnacji dla 'building'
   modifiers?: Modifier[]; // Stos modyfikatorów geometrycznych (np. uskok kondygnacji)
   storyPolygons?: StoryFootprint[]; // Wyliczone obrysy warstw 2.5D dla rzutu CAD i cieni
+  zonePolygons?: ZoneFootprint[]; // Wyliczone obrysy stref buforowych / obszarów
   layer: string;
   isTested: boolean; // True for the building under analysis, false for existing/obstacles
   isIncluded?: boolean; // True (default) if included in calculations (as tested or obstacle); false to ignore
+  isLocked?: boolean; // Indywidualna kłódka obiektu (blokada przesuwania i edycji)
+  isGhosted?: boolean; // Indywidualny tryb ducha (pomijanie kliknięć i selekcji)
   isCityCentre: boolean;
   buildingType: BuildingType;
   defaultHeight: number;
   hWindowBottom: number;
   vertices: Point2D[];
   segments: FacadeSegment[];
-  isClockwise: boolean;
+  isClockwise?: boolean;
+  sweepPath?: Point2D[]; // Otwarta polilinia bazowa dla obiektów typu Wstęga (Sweep)
+  sweepWidth?: number; // Szerokość wstęgi w metrach
+  sweepAlignment?: 'center' | 'left' | 'right'; // Wyrównanie wstęgi: oś / lewo / prawo
+  playgroundVoronoi?: boolean; // Czy generować komórki Voronoi dla placu zabaw (domyślnie true)
+  playgroundParams?: PlaygroundVoronoiConfig; // Opcjonalne parametry gęstości siatki Voronoi (faza testowa)
   groupId?: string; // Group ID for linked / grouped buildings that move together
   transform: {
     tx: number;
     ty: number;
     rotationDeg: number;
   };
+}
+
+export interface PlaygroundVoronoiConfig {
+  baseStep?: number; // Krok makro w metrach (np. 2.0 - 10.0m)
+  minSubdivDist?: number; // Minimalna odległość podziału drugiego stopnia w metrach
+  maxExtraPoints?: number; // Maksymalna liczba punktów zagęszczających (0 - 50)
+  hoursDeltaThreshold?: number; // Próg różnicy nasłonecznienia do podziału w godzinach
 }
 
 export interface ShadowingSector {

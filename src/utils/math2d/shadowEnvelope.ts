@@ -75,47 +75,56 @@ export function extractSilhouetteEdges(
 }
 
 /**
- * Buduje precyzyjny wielokąt cienia dla pojedynczego budynku o stałej wysokości w danym momencie czasu.
- * Tworzy pełny rzut dachu i ścian pionowych na płaszczyznę terenu.
+ * Buduje precyzyjny wielokąt cienia dla pojedynczego budynku / bryły o wysokości hTop i podstawie hBase w danym momencie czasu.
+ * Tworzy pełny rzut dachu i ścian pionowych na płaszczyznę terenu z uwzględnieniem paralaksy podstawy.
+ *
+ * @param polygon - obrys 2D bryły
+ * @param sunAzimuthRad - azymut słońca w radianach
+ * @param sunElevationRad - elewacja słońca w radianach
+ * @param hTop - wysokość górnej krawędzi bryły (Htotal)
+ * @param hBase - wysokość dolnej krawędzi bryły (Hbase, domyślnie 0)
  */
 export function computeFastShadowPolygon(
   polygon: Point2D[],
   sunAzimuthRad: number,
   sunElevationRad: number,
-  height: number
+  hTop: number,
+  hBase: number = 0
 ): Point2D[] {
-  if (!polygon || polygon.length < 3 || height <= 0 || sunElevationRad <= 0.001) {
+  if (!polygon || polygon.length < 3 || hTop <= 0 || sunElevationRad <= 0.001 || hTop <= hBase) {
     return polygon ? [...polygon] : [];
   }
 
-  const offset = getShadowOffsetVector(sunAzimuthRad, sunElevationRad, height);
-  if (offset.x === 0 && offset.y === 0) return [...polygon];
+  const topOffset = getShadowOffsetVector(sunAzimuthRad, sunElevationRad, hTop);
+  const baseOffset = hBase > 0 ? getShadowOffsetVector(sunAzimuthRad, sunElevationRad, hBase) : { x: 0, y: 0 };
 
-  // Dla wielokątów wypukłych: otoczka wypukła (podstawa + zrzutowany dach)
+  if (topOffset.x === baseOffset.x && topOffset.y === baseOffset.y) return [...polygon];
+
+  // Dla wielokątów wypukłych: otoczka wypukła (zrzutowana podstawa + zrzutowany dach)
   if (isPolygonConvex(polygon)) {
     const shadowPoints: Point2D[] = [
-      ...polygon,
-      ...polygon.map((v) => ({ x: v.x + offset.x, y: v.y + offset.y })),
+      ...polygon.map((v) => ({ x: v.x + baseOffset.x, y: v.y + baseOffset.y })),
+      ...polygon.map((v) => ({ x: v.x + topOffset.x, y: v.y + topOffset.y })),
     ];
     return computeConvexHull(shadowPoints);
   }
 
-  // Dla wielokątów wklęsłych: suma boolowska podstawy, rzutu dachu i czworokątów ścian
+  // Dla wielokątów wklęsłych: suma boolowska rzutu podstawy, rzutu dachu i wstęg ścian
   const clippingPolys: [number, number][][][] = [];
 
-  // Podstawa
-  const baseRing: [number, number][] = polygon.map((p) => [p.x, p.y]);
-  baseRing.push([polygon[0].x, polygon[0].y]);
+  // Podstawa (zrzutowana z uwzględnieniem hBase)
+  const baseRing: [number, number][] = polygon.map((p) => [p.x + baseOffset.x, p.y + baseOffset.y]);
+  baseRing.push([polygon[0].x + baseOffset.x, polygon[0].y + baseOffset.y]);
   clippingPolys.push([baseRing]);
 
-  // Dach
-  const roofRing: [number, number][] = polygon.map((p) => [p.x + offset.x, p.y + offset.y]);
-  roofRing.push([polygon[0].x + offset.x, polygon[0].y + offset.y]);
+  // Dach (zrzutowany z uwzględnieniem hTop)
+  const roofRing: [number, number][] = polygon.map((p) => [p.x + topOffset.x, p.y + topOffset.y]);
+  roofRing.push([polygon[0].x + topOffset.x, polygon[0].y + topOffset.y]);
   clippingPolys.push([roofRing]);
 
   // Ściany pionowe - zamiast generować dziesiątki pojedynczych czworokątów (quads),
   // łączymy przylegające krawędzie sylwetkowe w ciągłe wstęgi ścienne (Wall Ribbons).
-  // Redukuje to liczbę pod-obiektów w drzewie Sweep-Line z kilkudziesięciu do 1-3.
+  // Wstęga łączy zrzutowaną krawędź podstawy (baseOffset) ze zrzutowaną krawędzią dachu (topOffset).
   const isCCW = isPolygonCCW(polygon);
   const ring = isCCW ? polygon : [...polygon].reverse();
   const n = ring.length;
@@ -148,11 +157,11 @@ export function computeFastShadowPolygon(
         chainVertices.push(ring[curr]);
       }
 
-      const ribbonRing: [number, number][] = chainVertices.map((v) => [v.x, v.y]);
+      const ribbonRing: [number, number][] = chainVertices.map((v) => [v.x + baseOffset.x, v.y + baseOffset.y]);
       for (let c = chainVertices.length - 1; c >= 0; c--) {
-        ribbonRing.push([chainVertices[c].x + offset.x, chainVertices[c].y + offset.y]);
+        ribbonRing.push([chainVertices[c].x + topOffset.x, chainVertices[c].y + topOffset.y]);
       }
-      ribbonRing.push([chainVertices[0].x, chainVertices[0].y]);
+      ribbonRing.push([chainVertices[0].x + baseOffset.x, chainVertices[0].y + baseOffset.y]);
       clippingPolys.push([ribbonRing]);
     }
   }
@@ -160,18 +169,18 @@ export function computeFastShadowPolygon(
   try {
     const unionResult = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
     if (unionResult.length > 0 && unionResult[0].length > 0) {
-      const ring = unionResult[0][0];
-      const isClosed = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1];
-      const sliceEnd = isClosed && ring.length > 3 ? ring.length - 1 : ring.length;
-      return ring.slice(0, sliceEnd).map(([x, y]) => ({ x, y }));
+      const ringRes = unionResult[0][0];
+      const isClosed = ringRes[0][0] === ringRes[ringRes.length - 1][0] && ringRes[0][1] === ringRes[ringRes.length - 1][1];
+      const sliceEnd = isClosed && ringRes.length > 3 ? ringRes.length - 1 : ringRes.length;
+      return ringRes.slice(0, sliceEnd).map(([x, y]) => ({ x, y }));
     }
   } catch {
     // Fallback do otoczki wypukłej w razie błędu geometrii
   }
 
   const fallbackPoints: Point2D[] = [
-    ...polygon,
-    ...polygon.map((v) => ({ x: v.x + offset.x, y: v.y + offset.y })),
+    ...polygon.map((v) => ({ x: v.x + baseOffset.x, y: v.y + baseOffset.y })),
+    ...polygon.map((v) => ({ x: v.x + topOffset.x, y: v.y + topOffset.y })),
   ];
   return computeConvexHull(fallbackPoints);
 }
@@ -350,8 +359,8 @@ export function computeFullShadowAnalysis(
 
       if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
         for (const sf of bldg.storyPolygons) {
-          if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0) {
-            const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop);
+          if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > (sf.hBottom || 0)) {
+            const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
             if (p.length >= 3) hourPolys.push(p);
           }
         }
@@ -359,7 +368,7 @@ export function computeFullShadowAnalysis(
         const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
         let poly = buildingFastShadowCache.get(fastKey);
         if (!poly) {
-          poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
+          poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight, bldg.elevation || 0);
           if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
           if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
         }
@@ -405,8 +414,8 @@ export function computeFullShadowAnalysis(
 
           if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
             for (const sf of bldg.storyPolygons) {
-              if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0) {
-                const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop);
+              if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > (sf.hBottom || 0)) {
+                const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
                 if (p.length >= 3) blockingHourPolys.push(p);
               }
             }
@@ -414,7 +423,7 @@ export function computeFullShadowAnalysis(
             const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
             let poly = buildingFastShadowCache.get(fastKey);
             if (!poly) {
-              poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
+              poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight, bldg.elevation || 0);
               if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
               if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
             }

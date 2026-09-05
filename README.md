@@ -35,8 +35,15 @@ Aplikacja została zaprojektowana z myślą o natychmiastowej interakcji bez zew
   * Weryfikacja wymaganego kąta $60^\circ$ (ciągłego) lub łączonego $75^\circ$ z dopuszczalną przerwą $\le 15^\circ$.
   * Rzutowanie odległości normowej $D_{req} = H$ (lub $0.5 \cdot H$ w śródmieściu, max. 35m).
 * **Narzędzia CAD i Precyzyjne Rysowanie:**
-  * Rysowanie prostokątów (**R**), polilinii (**P**), edycja wierzchołków (**V**), równoległe przesuwanie krawędzi (**E**), obrót (**O**), wymiary (**D**).
+  * Rysowanie prostokątów (**R**), polilinii (**P**), wstęg z odsunięciem (**Wstęga / Sweep**), edycja wierzchołków (**V**), równoległe przesuwanie krawędzi (**E**), obrót (**O**), wymiary liniowe i kątowe (**D**).
   * Inteligentne przyciąganie OSNAP (wierzchołki, środki krawędzi, rzuty prostopadłe) oraz śledzenie ortogonalne OTRACK.
+  * Inkrementalne przesuwanie z precyzją 0,1 m przy przytrzymaniu klawisza `Ctrl`.
+* **Stos Modyfikatorów 2.5D (Niedestrukcyjne Modelowanie):**
+  * **Uskok kondygnacji (`story_offset`):** modelowanie wycofanych pięter (penthouse) lub podcieni parteru z precyzyjnym wyznaczaniem warstwic.
+  * **Strefa buforowa (`zone_offset`):** automatyczne generowanie stref ochronnych, buforów odległościowych i stref oddziaływania działki/placu zabaw.
+  * **Wykusz (`bay_window`):** parametryczne wykusze fasad o zmiennych kątach ścian bocznych (90°, 60°, 45°, 30°), regulowanej szerokości, wysunięciu oraz pozycji wzdłuż krawędzi.
+* **Analityczne Wykrywanie Przesłaniania Krawędzi (Occlusion & Stacking):**
+  * Automatyczny podział odcinków w punktach przecięcia z wyższymi bryłami – linie widoczne rysowane są jako ciągłe, a części zakryte pod wyższymi obiektami lub uskokami jako linie przerywane `[4, 3]`.
 * **Import / Eksport:**
   * Odczyt i interpretacja plików DXF/DWG z autodetekcją skali.
   * Eksport raportu technicznego PDF oraz geometrii sceny do AutoCAD DXF R12.

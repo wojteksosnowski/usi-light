@@ -1,6 +1,8 @@
 import React from 'react';
 import { AnalysisPointResult } from '../types/geometry';
 import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
+import { FloatingInspectorCard } from './common/FloatingInspectorCard';
+import { useSceneStore } from '../store';
 
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
@@ -12,6 +14,9 @@ interface PointInspectorModalProps {
   sunlightMethod?: 'raycasting' | 'segments';
   onModeChange?: (mode: 'shadowing' | 'sunlight') => void;
   onClose: () => void;
+  isEmbedded?: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: (collapsed: boolean) => void;
 }
 
 export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.memo(({
@@ -24,7 +29,13 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
   sunlightMethod = 'raycasting',
   onModeChange,
   onClose,
+  isEmbedded = false,
+  isCollapsed,
+  onToggleCollapse,
 }) => {
+  const buildings = useSceneStore((s) => s.buildings);
+  const setSelectedBuildingId = useSceneStore((s) => s.setSelectedBuildingId);
+
   if (!pointResult) return null;
 
   const { point, shadowing, sunlight } = pointResult;
@@ -32,30 +43,21 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
   const isCompliant56 = sunlight.isCompliant;
   const isLinijka = sunlightMethod === 'segments' || sunlight.sectors !== undefined;
 
+  const associatedBuilding = buildings.find((b) => b.id === pointResult.buildingId);
+  const buildingLabel = associatedBuilding ? associatedBuilding.name : `Budynek ${pointResult.buildingId}`;
+
   return (
-    <div className="inspector-card">
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b', paddingBottom: '10px', marginBottom: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ padding: '8px', borderRadius: '10px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
-            <Compass size={18} />
-          </div>
-          <div>
-            <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#f8fafc' }}>
-              {pointResult.label ? `Punkt fasady (${pointResult.label})` : 'Punkt fasady'}
-            </div>
-            <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>
-              X={point.x.toFixed(2)}m, Y={point.y.toFixed(2)}m
-            </div>
-          </div>
-        </div>
-        <button
-          onClick={onClose}
-          style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
-        >
-          <X size={18} />
-        </button>
-      </div>
+    <FloatingInspectorCard
+      title={pointResult.label ? `Punkt fasady (${pointResult.label})` : 'Punkt fasady'}
+      badge={allPoints.length > 0 ? allPoints.length : undefined}
+      icon={<Compass size={18} />}
+      accentColor="indigo"
+      onClose={onClose}
+      isEmbedded={isEmbedded}
+      width={isEmbedded ? '100%' : 360}
+      isCollapsed={isCollapsed}
+      onToggleCollapse={onToggleCollapse}
+    >
 
       {/* Multiple Pinned Points Tabs */}
       {allPoints.length > 0 && (
@@ -81,7 +83,12 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
-                onClick={() => onSelectPointId?.(pt.id)}
+                onClick={() => {
+                  onSelectPointId?.(pt.id);
+                  if (pt.buildingId) {
+                    setSelectedBuildingId(pt.buildingId);
+                  }
+                }}
               >
                 <span
                   style={{
@@ -287,6 +294,6 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
           <span>17:00</span>
         </div>
       </div>
-    </div>
+    </FloatingInspectorCard>
   );
 });

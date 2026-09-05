@@ -1,5 +1,6 @@
 import { CadRenderContext } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
+import { generateSweepPolygon, SweepAlignment } from '../../../utils/math2d';
 import { DirectionSnapResult } from '../../../utils/directionSnapping';
 import { OsnapSnapResult, BuildingDragSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
@@ -9,7 +10,7 @@ import { APP_CONFIG } from '../../../config/appConfig';
  */
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union',
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union',
   drawingVertices: Point2D[],
   currentMouseWorld: Point2D | null,
   selectedBuilding?: BuildingLoop | null,
@@ -19,7 +20,9 @@ export function renderDrawingToolPreview(
   directionSnapResult?: DirectionSnapResult | null,
   selectedVertexIndex?: number | null,
   osnapSnapResult?: OsnapSnapResult | null,
-  buildingDragSnap?: BuildingDragSnapResult | null
+  buildingDragSnap?: BuildingDragSnapResult | null,
+  sweepWidth: number = 5.0,
+  sweepAlignment: SweepAlignment = 'center'
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -526,16 +529,117 @@ export function renderDrawingToolPreview(
     ctx.restore();
   }
 
-  // 6. Vertex Edit Mode handles and midpoint [+] insertions
-  if (drawingMode === 'vertexEdit' && selectedBuilding && selectedBuilding.vertices) {
-    const verts = selectedBuilding.vertices;
-    if (verts.length >= 3) {
+  // 5.5. Sweep (Wstęga) Preview
+  if (drawingMode === 'sweep' && drawingVertices.length > 0) {
+    ctx.save();
+    const activePolyline = [...drawingVertices, ...(currentMouseWorld ? [currentMouseWorld] : [])];
+
+    // Render generated sweep polygon if at least 2 points
+    if (activePolyline.length >= 2) {
+      const sweepPolygon = generateSweepPolygon(activePolyline, sweepWidth, sweepAlignment);
+      if (sweepPolygon.length >= 3) {
+        ctx.beginPath();
+        const p0 = worldToScreen(sweepPolygon[0].x, sweepPolygon[0].y);
+        ctx.moveTo(p0.sx, p0.sy);
+        for (let i = 1; i < sweepPolygon.length; i++) {
+          const pt = worldToScreen(sweepPolygon[i].x, sweepPolygon[i].y);
+          ctx.lineTo(pt.sx, pt.sy);
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+        ctx.fill();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Render central baseline polyline axis
+    ctx.beginPath();
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([4, 3]);
+    activePolyline.forEach((v, idx) => {
+      const { sx, sy } = worldToScreen(v.x, v.y);
+      if (idx === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Baseline vertex grips
+    drawingVertices.forEach((v, idx) => {
+      const { sx, sy } = worldToScreen(v.x, v.y);
+      ctx.beginPath();
+      ctx.arc(sx, sy, idx === 0 ? 6 : 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = idx === 0 ? '#f59e0b' : '#38bdf8';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
+
+    // Informative badge near mouse cursor
+    if (currentMouseWorld) {
+      const sm = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
+      if (Number.isFinite(sm.sx) && Number.isFinite(sm.sy)) {
+        const alignLabel = sweepAlignment === 'center' ? 'Oś' : sweepAlignment === 'left' ? 'Lewo' : 'Prawo';
+        const badgeText = `Wstęga: szer. ${sweepWidth.toFixed(1)}m [${alignLabel}] | Enter: Zakończ`;
+        ctx.font = 'bold 10.5px Inter, sans-serif';
+        const tw = ctx.measureText(badgeText).width;
+        const bx = sm.sx + 14;
+        const by = sm.sy + 20;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.roundRect(bx, by - 10, tw + 14, 22, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#e0f2fe';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, bx + 7, by + 1);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  // 6. Vertex Edit Mode handles and midpoint [+] insertions (including Sweep spine path if present)
+  const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
+  if (selectedBuilding && !isCreatingShape) {
+    const isSweep = Array.isArray(selectedBuilding.sweepPath) && selectedBuilding.sweepPath.length >= 2;
+    const verts = isSweep ? selectedBuilding.sweepPath! : selectedBuilding.vertices;
+
+    if (verts && verts.length >= 2) {
       ctx.save();
 
+      // 0. Dla Wstęgi: renderuj linię osiową (kręgosłup) w kolorze błękitnym z kreskowaniem
+      if (isSweep) {
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 3]);
+        ctx.beginPath();
+        for (let i = 0; i < verts.length; i++) {
+          const pt = verts[i];
+          const s = worldToScreen(pt.x, pt.y);
+          if (i === 0) ctx.moveTo(s.sx, s.sy);
+          else ctx.lineTo(s.sx, s.sy);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
       // 1. Edge midpoints [+] handles
-      for (let i = 0; i < verts.length; i++) {
+      const numMidpoints = isSweep ? verts.length - 1 : verts.length;
+      for (let i = 0; i < numMidpoints; i++) {
         const v1 = verts[i];
-        const v2 = verts[(i + 1) % verts.length];
+        const v2 = isSweep ? verts[i + 1] : verts[(i + 1) % verts.length];
         const mx = (v1.x + v2.x) / 2;
         const my = (v1.y + v2.y) / 2;
         const { sx, sy } = worldToScreen(mx, my);
@@ -575,8 +679,8 @@ export function renderDrawingToolPreview(
         if (isSelected) {
           ctx.beginPath();
           ctx.arc(sx, sy, r + 6, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
-          ctx.strokeStyle = '#f59e0b';
+          ctx.fillStyle = isSweep ? 'rgba(56, 189, 248, 0.25)' : 'rgba(245, 158, 11, 0.25)';
+          ctx.strokeStyle = isSweep ? '#38bdf8' : '#f59e0b';
           ctx.lineWidth = 2;
           ctx.setLineDash([3, 2]);
           ctx.fill();
@@ -592,14 +696,18 @@ export function renderDrawingToolPreview(
 
         ctx.beginPath();
         ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected ? '#f59e0b' : isHovered ? '#38bdf8' : '#0f172a';
+        ctx.fillStyle = isSelected
+          ? (isSweep ? '#38bdf8' : '#f59e0b')
+          : isHovered
+          ? '#38bdf8'
+          : (isSweep ? '#0369a1' : '#0f172a');
         ctx.strokeStyle = isSelected ? '#ffffff' : isHovered ? '#ffffff' : '#38bdf8';
         ctx.lineWidth = isSelected ? 2.5 : 2;
         ctx.fill();
         ctx.stroke();
 
         ctx.font = isSelected ? 'bold 9px monospace' : 'bold 8.5px monospace';
-        ctx.fillStyle = isSelected ? '#020617' : isHovered ? '#020617' : '#94a3b8';
+        ctx.fillStyle = isSelected ? '#020617' : isHovered ? '#020617' : '#f8fafc';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${i + 1}`, sx, sy);

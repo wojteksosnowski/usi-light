@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyBuildingModifiers, computeStoryHeightIntervals } from './modifierPipeline';
+import { applyBuildingModifiers, computeStoryHeightIntervals, generateZonePolygon, generateBayWindowPolygon } from './modifierPipeline';
 import { BuildingLoop } from '../../types/geometry';
 
 describe('modifierPipeline', () => {
@@ -126,5 +126,116 @@ describe('modifierPipeline', () => {
     expect(res.storyPolygons[0].polygon[0].x).toBeCloseTo(10, 2);
     expect(res.storyPolygons[0].polygon[0].y).toBeCloseTo(5, 2);
   });
+
+  it('generates outward and inward zone polygons for ZoneOffsetModifier', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // Outward buffer +4m -> 18x18 square from (-4, -4) to (14, 14)
+    const outward = generateZonePolygon(squareVertices, 4.0);
+    expect(outward.length).toBe(4);
+    expect(outward[0].x).toBeCloseTo(-4, 2);
+    expect(outward[0].y).toBeCloseTo(-4, 2);
+    expect(outward[2].x).toBeCloseTo(14, 2);
+    expect(outward[2].y).toBeCloseTo(14, 2);
+
+    // Inward buffer -2m -> 6x6 square from (2, 2) to (8, 8)
+    const inward = generateZonePolygon(squareVertices, -2.0);
+    expect(inward.length).toBe(4);
+    expect(inward[0].x).toBeCloseTo(2, 2);
+    expect(inward[0].y).toBeCloseTo(2, 2);
+    expect(inward[2].x).toBeCloseTo(8, 2);
+    expect(inward[2].y).toBeCloseTo(8, 2);
+  });
+
+  it('populates zonePolygons in applyBuildingModifiers when zone_offset modifier is present', () => {
+    const bldgWithZone: BuildingLoop = {
+      ...baseBuilding,
+      modifiers: [
+        {
+          id: 'mod-zone-1',
+          type: 'zone_offset',
+          enabled: true,
+          distance: 4.0,
+          areaType: 'plot',
+        },
+      ],
+    };
+
+    const res = applyBuildingModifiers(bldgWithZone);
+    expect(res.zonePolygons.length).toBe(1);
+    expect(res.zonePolygons[0].distance).toBe(4.0);
+    expect(res.zonePolygons[0].polygon.length).toBe(4);
+    expect(res.zonePolygons[0].polygon[0].x).toBeCloseTo(-4, 2);
+    expect(res.zonePolygons[0].polygon[0].y).toBeCloseTo(-4, 2);
+  });
+
+  it('generates bay window polygon with width and outward/inward projection', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // Bay window on edge 0 (bottom edge (0,0) -> (10,0)): outward projection +1.5m, width 4.0m
+    const bayPoly = generateBayWindowPolygon(squareVertices, 4.0, 1.5, 0);
+    // Should insert 4 points for the bay window into the 4 base vertices -> 8 points total
+    expect(bayPoly.length).toBe(8);
+
+    // Normal for edge (0,0)->(10,0) in CCW is (0, -1)
+    // Points w1, w2 should have negative y around -1.5
+    const minY = Math.min(...bayPoly.map((p) => p.y));
+    expect(minY).toBeCloseTo(-1.5, 2);
+  });
+
+  it('generates bay window with 90 degree angle (perpendicular rectangle)', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // Bay window with sideAngle = 90 on edge 0: width 4m centered (margin = 3m)
+    // b1 = (3, 0), w1 = (3, -2), w2 = (7, -2), b2 = (7, 0)
+    const bayPoly = generateBayWindowPolygon(squareVertices, 4.0, 2.0, 0, 90, 0.5);
+    expect(bayPoly.length).toBe(8);
+
+    const bayPoints = bayPoly.filter((p) => p.y < -0.01);
+    expect(bayPoints.length).toBe(2);
+    expect(bayPoints[0].x).toBeCloseTo(3, 2);
+    expect(bayPoints[0].y).toBeCloseTo(-2, 2);
+    expect(bayPoints[1].x).toBeCloseTo(7, 2);
+    expect(bayPoints[1].y).toBeCloseTo(-2, 2);
+  });
+
+  it('positions bay window along edge according to positionRatio', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // positionRatio = 0.0 -> starts at beginning of edge (x = 0)
+    const bayPolyStart = generateBayWindowPolygon(squareVertices, 4.0, 2.0, 0, 90, 0.0);
+    const startPoints = bayPolyStart.filter((p) => p.y < -0.01);
+    expect(startPoints[0].x).toBeCloseTo(0, 2);
+    expect(startPoints[1].x).toBeCloseTo(4, 2);
+
+    // positionRatio = 1.0 -> ends at end of edge (x = 10)
+    const bayPolyEnd = generateBayWindowPolygon(squareVertices, 4.0, 2.0, 0, 90, 1.0);
+    const endPoints = bayPolyEnd.filter((p) => p.y < -0.01);
+    expect(endPoints[0].x).toBeCloseTo(6, 2);
+    expect(endPoints[1].x).toBeCloseTo(10, 2);
+  });
 });
+
+
+
 

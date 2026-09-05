@@ -19,3 +19,11 @@ b)	35 m – dla obiektów przesłaniających o wysokości ponad 35 m;
 4. Dla lokali mieszkalnych jednopokojowych mniejszych niż 35 m2 powierzchni użytkowej nie określa się czasu nasłonecznienia, pod warunkiem zwiększenia stosunku, o którym mowa w § 53 ust. 2, do co najmniej 1:4, przy czym udział tych lokali mieszkalnych w ogólnej liczbie lokali mieszkalnych w budynku mieszkalnym wielorodzinnym zlokalizowanym poza zabudową śródmiejską nie może przekraczać 10 %.
 5. Badanie nasłonecznienia wykonuje się na zewnętrznej powierzchni okna lub elementu doświetlającego w świetle ościeżnicy, uwzględniając nasłonecznienie w dowolnym punkcie tego okna lub elementu doświetlającego, przy czym za nasłoneczniony uważa się punkt, na który światło słoneczne pada pod kątem równym lub większym niż 12º mierzonym na rzucie. 
 6. W lokalu mieszkalnym wielopokojowym dopuszcza się sumowanie czasu nasłonecznienia dwóch pomieszczeń mieszkalnych, pod warunkiem że każde z nich jest nasłonecznione co najmniej 2 godziny, a suma czasu nasłonecznienia wynosi co najmniej 4 godziny, przy czym czas nasłonecznienia nie może się pokrywać.
+
+§ 33. 
+3. Nasłonecznienie co najmniej 50 % powierzchni placu zabaw dla dzieci ma wynosić co najmniej 2 godziny w dniach równonocy w okresie 4 godzin poprzedzających górowanie Słońca i 4 godzin następujących po górowaniu Słońca. W zabudowie śródmiejskiej dopuszcza się nasłonecznienie niekrótsze niż 1 godzina.
+8. Powierzchnia placu zabaw dla dzieci ma wynosić co najmniej: 
+1)	1 m2 na każdy lokal mieszkalny – w przypadku gdy w budynku lub zespole budynków znajduje się od 21 do 50 lokali mieszkalnych;
+2)	50 m2 – w przypadku gdy w budynku lub zespole budynków znajduje się od 51 do 100 lokali mieszkalnych; 
+3)	0,5 m2 na każdy lokal mieszkalny – w przypadku gdy w budynku lub zespole budynków znajduje się od 101 do 300 lokali mieszkalnych; 
+4)	200 m2 – w przypadku gdy w budynku lub zespole budynków znajduje się powyżej 300 lokali mieszkalnych. 

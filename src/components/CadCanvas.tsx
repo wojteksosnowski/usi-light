@@ -7,13 +7,15 @@ import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { renderCadGrid } from './cad/renderers/gridRenderer';
 import { renderAnalysisBands } from './cad/renderers/analysisBandsRenderer';
-import { renderBuildings, EditingEdgeLengthState } from './cad/renderers/buildingsRenderer';
+import { renderBuildings, EditingEdgeLengthState, getBuildingLabelHitAtPoint } from './cad/renderers/buildingsRenderer';
+import { useUiStore } from '../store/useUiStore';
 import { renderShadowRange } from './cad/renderers/shadowRangeRenderer';
 import { renderSunlightVisualization } from './cad/renderers/sunlightRenderer';
 import { renderShadowingVisualization } from './cad/renderers/shadowingRenderer';
 import { renderDimensions } from './cad/renderers/dimensionsRenderer';
 import { renderDrawingToolPreview } from './cad/renderers/drawingToolRenderer';
 import { renderSatelliteMap } from './cad/renderers/satelliteMapRenderer';
+import { renderPlaygroundSunlightVisualizations } from './cad/renderers/playgroundRenderer';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { calculateDirectionSnap } from '../utils/directionSnapping';
@@ -62,10 +64,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   isLinkingMode = false,
   linkingSourceId = null,
   drawingMode = 'none',
+  sweepWidth = 5.0,
+  sweepAlignment = 'center',
   onFinishDrawing,
   onCancelDrawing,
   onDrawingVerticesCountChange,
   onUpdateBuildingVertices,
+  onUpdateBuildingSweepPath,
   onBuildingRotate,
   onBooleanUnion,
   pinnedPoints = [],
@@ -518,6 +523,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
   }, [showShadowRange, isInteracting, liveShadowResult, shadowRangeLoops]);
 
 
+  const effectiveIsInteracting = Boolean(
+    isInteracting ||
+    isPanning ||
+    isDraggingBuilding ||
+    isDraggingPivot ||
+    isRotating ||
+    draggedVertexIndex !== null ||
+    draggingEdge !== null ||
+    draggingFacadePoint !== null ||
+    draggingPinnedPointId !== null
+  );
+
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
     height: typeof window !== 'undefined' ? window.innerHeight : 800,
@@ -626,6 +643,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       longitude,
       equinoxDate,
       sunlightMethod,
+      isInteracting: effectiveIsInteracting,
     };
 
     // 0. Podkład satelitarny Google Maps (ABSOLUTNIE NA SAMYM SPODZIE)
@@ -688,7 +706,24 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       selectedBuildingIds
     );
 
-    // 5. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
+    // 5. Playground Sunlight Analysis Visualization (§ 33.3) - podłączone pod przełącznik Analizy 56
+    if (showSunlightLines) {
+      renderPlaygroundSunlightVisualizations(
+        renderContext,
+        buildings,
+        {
+          latitude,
+          longitude,
+          isCityCentreDefault: false,
+          samplingInterval: 0.5,
+          equinoxDate,
+        },
+        sunlightMethod,
+        layerSettings
+      );
+    }
+
+    // 6. Point Analysis Visualization (Sunlight § 56 or Shadowing § 12) for all pinned points
     const pointsToVisualize = (pinnedPointResults && pinnedPointResults.length > 0)
       ? pinnedPointResults
       : (selectedPointResult ? [selectedPointResult] : []);
@@ -711,7 +746,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       }
     }
 
-    // 6. Dimensions & Annotations
+    // 7. Dimensions & Annotations
     renderDimensions(
       renderContext,
       visibleBuildings,
@@ -803,6 +838,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       longitude,
       equinoxDate,
       sunlightMethod,
+      isInteracting: effectiveIsInteracting,
     };
 
     const activeSelectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
@@ -832,7 +868,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       activeDirectionSnap,
       selectedVertexIndex,
       activeOsnapSnap,
-      activeBuildingDragSnap
+      activeBuildingDragSnap,
+      sweepWidth,
+      sweepAlignment
     );
   }, [
     canvasDimensions,
@@ -864,6 +902,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     selectedVertexIndex,
     activeOsnapSnap,
     activeBuildingDragSnap,
+    sweepWidth,
+    sweepAlignment,
   ]);
 
 
@@ -909,17 +949,81 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
-      // Check click on Edge Length Badges of Selected Building (disabled in vertexEdit mode)
-      if (selectedBuildingId && drawingMode !== 'vertexEdit') {
+      const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
+
+      // Check click on Vertices and Edge Midpoints [+] of Selected Building
+      if (selectedBuildingId && !isCreatingShape) {
+        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg) {
+          const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
+          const verts = isSweep ? selBldg.sweepPath! : selBldg.vertices;
+
+          if (verts && (isSweep ? verts.length >= 2 : verts.length >= 3)) {
+            // Check existing vertices (click selects and begins drag)
+            for (let i = 0; i < verts.length; i++) {
+              const s = worldToScreen(verts[i].x, verts[i].y);
+              if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+                setDraggedVertexIndex(i);
+                setSelectedVertexIndex(i);
+                onInteractionChange?.(true);
+                return;
+              }
+            }
+            // Check edge midpoint [+] to insert new vertex
+            const numMidpoints = isSweep ? verts.length - 1 : verts.length;
+            for (let i = 0; i < numMidpoints; i++) {
+              const v1 = verts[i];
+              const v2 = isSweep ? verts[i + 1] : verts[(i + 1) % verts.length];
+              const sm = worldToScreen((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
+              if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 10) {
+                const newPts = [...verts];
+                const newPt = { x: (v1.x + v2.x) / 2, y: (v1.y + v2.y) / 2 };
+                newPts.splice(i + 1, 0, newPt);
+                if (isSweep) {
+                  onUpdateBuildingSweepPath?.(selBldg.id, newPts);
+                } else {
+                  onUpdateBuildingVertices?.(selBldg.id, newPts);
+                }
+                setDraggedVertexIndex(i + 1);
+                setSelectedVertexIndex(i + 1);
+                onInteractionChange?.(true);
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // Check click on Edge Length Badges of Selected Building
+      if (selectedBuildingId && !isCreatingShape) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && selBldg.segments) {
           for (let eIdx = 0; eIdx < selBldg.segments.length; eIdx++) {
             const seg = selBldg.segments[eIdx];
             const midX = (seg.p1.x + seg.p2.x) / 2;
             const midY = (seg.p1.y + seg.p2.y) / 2;
+            const normX = seg.normal?.x ?? 0;
+            const normY = seg.normal?.y ?? 0;
             const sm = worldToScreen(midX, midY);
+            const sn = worldToScreen(midX + normX, midY + normY);
+            let screenNormX = sn.sx - sm.sx;
+            let screenNormY = sn.sy - sm.sy;
+            const screenNormLen = Math.hypot(screenNormX, screenNormY);
+            if (screenNormLen > 1e-4) {
+              screenNormX /= screenNormLen;
+              screenNormY /= screenNormLen;
+            } else {
+              screenNormX = 0;
+              screenNormY = -1;
+            }
+            const s1 = worldToScreen(seg.p1.x, seg.p1.y);
+            const s2 = worldToScreen(seg.p2.x, seg.p2.y);
+            const edgeScreenLen = Math.hypot(s2.sx - s1.sx, s2.sy - s1.sy);
+            const offsetPx = Math.max(8, Math.min(18, edgeScreenLen * 0.15 + 6));
+            const badgeSx = sm.sx + screenNormX * offsetPx;
+            const badgeSy = sm.sy + screenNormY * offsetPx;
             const len = Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-            if (Math.abs(sx - sm.sx) <= 25 && Math.abs(sy - sm.sy) <= 12) {
+            if (Math.hypot(sx - badgeSx, sy - badgeSy) <= 20 || (Math.abs(sx - badgeSx) <= 25 && Math.abs(sy - badgeSy) <= 14)) {
               (document.activeElement as HTMLElement)?.blur();
               setEditingEdgeLength({
                 buildingId: selBldg.id,
@@ -962,39 +1066,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           onDimensionClickEdge?.(dimHoveredEdge.buildingId, dimHoveredEdge.segmentId);
         }
         return;
-      }
-
-      if (drawingMode === 'vertexEdit' && selectedBuildingId) {
-        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
-        if (selBldg && selBldg.vertices.length >= 3) {
-          // Check existing vertices (click selects and begins drag)
-          for (let i = 0; i < selBldg.vertices.length; i++) {
-            const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
-            if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
-              setDraggedVertexIndex(i);
-              setSelectedVertexIndex(i);
-              onInteractionChange?.(true);
-              return;
-            }
-          }
-          // Check edge midpoint [+] to insert new vertex
-          for (let i = 0; i < selBldg.vertices.length; i++) {
-            const v1 = selBldg.vertices[i];
-            const v2 = selBldg.vertices[(i + 1) % selBldg.vertices.length];
-            const sm = worldToScreen((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
-            if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 10) {
-              const newVerts = [...selBldg.vertices];
-              const newPt = { x: (v1.x + v2.x) / 2, y: (v1.y + v2.y) / 2 };
-              newVerts.splice(i + 1, 0, newPt);
-              onUpdateBuildingVertices?.(selBldg.id, newVerts);
-              setDraggedVertexIndex(i + 1);
-              setSelectedVertexIndex(i + 1);
-              onInteractionChange?.(true);
-              return;
-            }
-          }
-          setSelectedVertexIndex(null);
-        }
       }
 
       if (drawingMode === 'rotate' && selectedBuildingId && effectivePivot) {
@@ -1102,6 +1173,26 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
+      if (drawingMode === 'sweep') {
+        const effectiveWorldPt = activeOsnapSnap?.snappedPoint || activeDirectionSnap?.snappedPoint || { x: world.wx, y: world.wy };
+        if (drawingVertices.length >= 2) {
+          const lastPt = drawingVertices[drawingVertices.length - 1];
+          const lastScreen = worldToScreen(lastPt.x, lastPt.y);
+          const clickScreen = worldToScreen(world.wx, world.wy);
+          // Kliknięcie w pobliżu ostatniego wierzchołka kończy rysowanie otwartej wstęgi
+          if (Math.hypot(clickScreen.sx - lastScreen.sx, clickScreen.sy - lastScreen.sy) <= 12 || Math.hypot(world.wx - lastPt.x, world.wy - lastPt.y) <= 0.3) {
+            onFinishDrawing?.(drawingVertices, 'sweep');
+            setDrawingVertices([]);
+            setCurrentMouseWorld(null);
+            setActiveDirectionSnap(null);
+            setActiveOsnapSnap(null);
+            return;
+          }
+        }
+        setDrawingVertices((prev) => [...prev, effectiveWorldPt]);
+        return;
+      }
+
 
 
       if (facadePointMode) {
@@ -1115,10 +1206,35 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         }
       }
 
-      if (isEditMode && hoveredEdge) {
+      if ((isEditMode || selectedBuildingId) && hoveredEdge) {
         setDraggingEdge(hoveredEdge);
         setDragStart({ x: world.wx, y: world.wy });
         onInteractionChange?.(true);
+        return;
+      }
+
+      // 0. Sprawdzenie kliknięcia bezpośrednio w etykietę/kartę obiektu (otwiera edycję w sidebarze)
+      const hitLabelBldgId = getBuildingLabelHitAtPoint(
+        sx,
+        sy,
+        buildings,
+        worldToScreen,
+        viewState.scale,
+        layerSettings
+      );
+      if (hitLabelBldgId) {
+        onSelectBuilding(hitLabelBldgId, e.shiftKey);
+        useUiStore.getState().setSidebarOpen(true);
+        useUiStore.getState().setOpenSidebarGroup('layers');
+
+        const clickedBldg = buildings.find((b) => b.id === hitLabelBldgId);
+        const lyr = clickedBldg?.layer || 'Domyślna (0)';
+        const isLocked = layerSettings[lyr]?.isLocked === true;
+        if (!isLocked) {
+          setIsDraggingBuilding(true);
+          setDragStart({ x: world.wx, y: world.wy });
+          onInteractionChange?.(true);
+        }
         return;
       }
 
@@ -1205,119 +1321,138 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
 
 
-    if (drawingMode === 'vertexEdit' && selectedBuildingId) {
+    const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
+    if (selectedBuildingId && !isCreatingShape) {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
-      if (selBldg && selBldg.vertices.length >= 3) {
-        if (draggedVertexIndex !== null) {
-          let targetPt: Point2D = { x: world.wx, y: world.wy };
-          let osnap: OsnapSnapResult | null = null;
+      if (selBldg) {
+        const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
+        const verts = isSweep ? selBldg.sweepPath! : selBldg.vertices;
 
-          if (isOsnapActive) {
-            osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
-              mouseWorld: targetPt,
-              lineBuffer,
-              worldToScreen,
-              screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
-              excludeBuildingId: selBldg.id,
-              previousSnapResult: activeOsnapSnap,
-              hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
-            });
-          }
+        if (verts && (isSweep ? verts.length >= 2 : verts.length >= 3)) {
+          if (draggedVertexIndex !== null) {
+            let targetPt: Point2D = { x: world.wx, y: world.wy };
+            let osnap: OsnapSnapResult | null = null;
 
-          if (osnap) {
-            targetPt = osnap.snappedPoint;
-            setActiveOsnapSnap(osnap);
-            setActiveDirectionSnap(null);
-          } else {
-            setActiveOsnapSnap(null);
-            if (isDirectionSnappingActive) {
-              const n = selBldg.vertices.length;
-              const prevV = selBldg.vertices[(draggedVertexIndex - 1 + n) % n];
-              const nextV = selBldg.vertices[(draggedVertexIndex + 1) % n];
-              const prevPrevV = selBldg.vertices[(draggedVertexIndex - 2 + n) % n];
-              const nextNextV = selBldg.vertices[(draggedVertexIndex + 2) % n];
-
-              // Wyklucz 2 ruchome krawędzie edytowanego budynku połączone z przesuwanym wierzchołkiem
-              const movingSegIndices = [(draggedVertexIndex - 1 + n) % n, draggedVertexIndex];
-
-              const snapPrev = calculateDirectionSnap({
-                currentMouseWorld: targetPt,
-                originPoint: prevV,
-                buildings,
-                dominantDirections,
-                polylineVertices: [prevPrevV, prevV],
+            if (isOsnapActive) {
+              osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
+                mouseWorld: targetPt,
+                lineBuffer,
                 worldToScreen,
-                hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
                 excludeBuildingId: selBldg.id,
-                excludeSegmentIndices: movingSegIndices,
-              });
-
-              const snapNext = calculateDirectionSnap({
-                currentMouseWorld: targetPt,
-                originPoint: nextV,
-                buildings,
-                dominantDirections,
-                polylineVertices: [nextNextV, nextV],
-                worldToScreen,
+                previousSnapResult: activeOsnapSnap,
                 hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
-                excludeBuildingId: selBldg.id,
-                excludeSegmentIndices: movingSegIndices,
               });
+            }
 
-              let chosenSnap: import('../utils/directionSnapping').DirectionSnapResult | null = null;
-              if (snapPrev && snapNext) {
-                chosenSnap = snapPrev.diffAngleDeg <= snapNext.diffAngleDeg ? snapPrev : snapNext;
-              } else {
-                chosenSnap = snapPrev || snapNext || null;
-              }
+            if (osnap) {
+              targetPt = osnap.snappedPoint;
+              setActiveOsnapSnap(osnap);
+              setActiveDirectionSnap(null);
+            } else {
+              setActiveOsnapSnap(null);
+              // Dla Wstęgi nie generujemy kierunków śledzenia podczas profilowania węzłów osi
+              if (isDirectionSnappingActive && !isSweep) {
+                const n = verts.length;
+                const prevIdx = (draggedVertexIndex - 1 + n) % n;
+                const nextIdx = (draggedVertexIndex + 1) % n;
 
-              if (chosenSnap) {
-                targetPt = chosenSnap.snappedPoint;
-                setActiveDirectionSnap(chosenSnap);
+                const prevV = prevIdx >= 0 && prevIdx < n ? verts[prevIdx] : null;
+                const nextV = nextIdx >= 0 && nextIdx < n ? verts[nextIdx] : null;
+
+                const snapPrev = prevV
+                  ? calculateDirectionSnap({
+                      currentMouseWorld: targetPt,
+                      originPoint: prevV,
+                      buildings,
+                      dominantDirections,
+                      polylineVertices: [prevV],
+                      worldToScreen,
+                      hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                      excludeBuildingId: selBldg.id,
+                    })
+                  : null;
+
+                const snapNext = nextV
+                  ? calculateDirectionSnap({
+                      currentMouseWorld: targetPt,
+                      originPoint: nextV,
+                      buildings,
+                      dominantDirections,
+                      polylineVertices: [nextV],
+                      worldToScreen,
+                      hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
+                      excludeBuildingId: selBldg.id,
+                    })
+                  : null;
+
+                let chosenSnap: import('../utils/directionSnapping').DirectionSnapResult | null = null;
+                if (snapPrev && snapNext) {
+                  chosenSnap = snapPrev.diffAngleDeg <= snapNext.diffAngleDeg ? snapPrev : snapNext;
+                } else {
+                  chosenSnap = snapPrev || snapNext || null;
+                }
+
+                if (chosenSnap) {
+                  targetPt = chosenSnap.snappedPoint;
+                  setActiveDirectionSnap(chosenSnap);
+                } else {
+                  setActiveDirectionSnap(null);
+                }
               } else {
                 setActiveDirectionSnap(null);
               }
-            } else {
-              setActiveDirectionSnap(null);
             }
+
+            if (e.ctrlKey || e.metaKey) {
+              targetPt = {
+                x: Math.round(targetPt.x * 10) / 10,
+                y: Math.round(targetPt.y * 10) / 10,
+              };
+            }
+
+            setCurrentMouseWorld(targetPt);
+
+            const updatedVerts = verts.map((v, idx) =>
+              idx === draggedVertexIndex ? targetPt : v
+            );
+
+            if (isSweep) {
+              onUpdateBuildingSweepPath?.(selBldg.id, updatedVerts);
+            } else {
+              onUpdateBuildingVertices?.(selBldg.id, updatedVerts);
+            }
+            return;
           }
 
-          setCurrentMouseWorld(targetPt);
+          // Check hover
+          let foundV: number | null = null;
+          let foundM: number | null = null;
 
-          const updatedVerts = selBldg.vertices.map((v, idx) =>
-            idx === draggedVertexIndex ? targetPt : v
-          );
-          onUpdateBuildingVertices?.(selBldg.id, updatedVerts);
-          return;
-        }
-
-
-        // Check hover
-        let foundV: number | null = null;
-        let foundM: number | null = null;
-
-        for (let i = 0; i < selBldg.vertices.length; i++) {
-          const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
-          if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
-            foundV = i;
-            break;
-          }
-        }
-
-        if (foundV === null) {
-          for (let i = 0; i < selBldg.vertices.length; i++) {
-            const v1 = selBldg.vertices[i];
-            const v2 = selBldg.vertices[(i + 1) % selBldg.vertices.length];
-            const sm = worldToScreen((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
-            if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 10) {
-              foundM = i;
+          for (let i = 0; i < verts.length; i++) {
+            const s = worldToScreen(verts[i].x, verts[i].y);
+            if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+              foundV = i;
               break;
             }
           }
-        }
 
-        setHoveredVertexIndex(foundV);
-        setHoveredMidpointIndex(foundM);
+          if (foundV === null) {
+            const numMidpoints = isSweep ? verts.length - 1 : verts.length;
+            for (let i = 0; i < numMidpoints; i++) {
+              const v1 = verts[i];
+              const v2 = isSweep ? verts[i + 1] : verts[(i + 1) % verts.length];
+              const sm = worldToScreen((v1.x + v2.x) / 2, (v1.y + v2.y) / 2);
+              if (Math.hypot(sx - sm.sx, sy - sm.sy) <= 10) {
+                foundM = i;
+                break;
+              }
+            }
+          }
+
+          setHoveredVertexIndex(foundV);
+          setHoveredMidpointIndex(foundM);
+        }
       }
     } else {
       if (hoveredVertexIndex !== null) setHoveredVertexIndex(null);
@@ -1496,7 +1631,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
     // Check Hover on Edge Length Badges of Selected Building (disabled in vertexEdit & rotate modes)
     if (selectedBuildingId && drawingMode !== 'vertexEdit' && drawingMode !== 'rotate') {
-
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       let foundEdgeBadge: { buildingId: string; edgeIndex: number } | null = null;
       if (selBldg && selBldg.segments) {
@@ -1504,8 +1638,27 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           const seg = selBldg.segments[eIdx];
           const midX = (seg.p1.x + seg.p2.x) / 2;
           const midY = (seg.p1.y + seg.p2.y) / 2;
+          const normX = seg.normal?.x ?? 0;
+          const normY = seg.normal?.y ?? 0;
           const sm = worldToScreen(midX, midY);
-          if (Math.abs(sx - sm.sx) <= 25 && Math.abs(sy - sm.sy) <= 12) {
+          const sn = worldToScreen(midX + normX, midY + normY);
+          let screenNormX = sn.sx - sm.sx;
+          let screenNormY = sn.sy - sm.sy;
+          const screenNormLen = Math.hypot(screenNormX, screenNormY);
+          if (screenNormLen > 1e-4) {
+            screenNormX /= screenNormLen;
+            screenNormY /= screenNormLen;
+          } else {
+            screenNormX = 0;
+            screenNormY = -1;
+          }
+          const s1 = worldToScreen(seg.p1.x, seg.p1.y);
+          const s2 = worldToScreen(seg.p2.x, seg.p2.y);
+          const edgeScreenLen = Math.hypot(s2.sx - s1.sx, s2.sy - s1.sy);
+          const offsetPx = Math.max(8, Math.min(18, edgeScreenLen * 0.15 + 6));
+          const badgeSx = sm.sx + screenNormX * offsetPx;
+          const badgeSy = sm.sy + screenNormY * offsetPx;
+          if (Math.hypot(sx - badgeSx, sy - badgeSy) <= 20 || (Math.abs(sx - badgeSx) <= 25 && Math.abs(sy - badgeSy) <= 14)) {
             foundEdgeBadge = { buildingId: selBldg.id, edgeIndex: eIdx };
             break;
           }
@@ -1542,7 +1695,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           let origin: Point2D | null = null;
           if (drawingMode === 'rectangle' && drawingVertices.length === 1) {
             origin = drawingVertices[0];
-          } else if (drawingMode === 'polyline' && drawingVertices.length > 0) {
+          } else if ((drawingMode === 'polyline' || drawingMode === 'sweep') && drawingVertices.length > 0) {
             origin = drawingVertices[drawingVertices.length - 1];
           }
 
@@ -1552,7 +1705,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
               originPoint: origin,
               buildings,
               dominantDirections,
-              polylineVertices: drawingMode === 'polyline' ? drawingVertices : [],
+              polylineVertices: (drawingMode === 'polyline' || drawingMode === 'sweep') ? drawingVertices : [],
               worldToScreen,
               hoveredBuildingId: hoveredBldgId,
               selectedBuildingId: selectedBuildingId ?? undefined,
@@ -1597,10 +1750,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
         return;
       }
 
-      // Snapping candidate calculation (prioritize hovered building)
+      // Snapping candidate calculation (prioritize hovered building, ignore 'boundary' category)
       let searchBuildings = hoveredBuildingId ? [buildings.find((b) => b.id === hoveredBuildingId)].filter(Boolean) : [];
-      if (searchBuildings.length === 0 || !searchBuildings[0]) {
+      if (searchBuildings.length === 0 || !searchBuildings[0] || searchBuildings[0].category === 'boundary') {
         searchBuildings = buildings.filter((b) => {
+          if (b.category === 'boundary') return false;
           const lyr = b.layer || 'Domyślna (0)';
           return layerSettings[lyr]?.isVisible !== false && layerSettings[lyr]?.isGhosted !== true;
         });
@@ -1608,7 +1762,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       let bestSnap: { point: Point2D; buildingId: string; segmentId: string; ratio: number } | null = null;
       let minSnapDist = 999999;
       for (const bldg of searchBuildings) {
-        if (!bldg || !Array.isArray(bldg.segments)) continue;
+        if (!bldg || bldg.category === 'boundary' || !Array.isArray(bldg.segments)) continue;
 
         for (const seg of bldg.segments) {
           const dx = seg.p2.x - seg.p1.x;
@@ -1676,34 +1830,42 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       if (dimHoveredEdge) setDimHoveredEdge(null);
     }
 
-    if (isEditMode && selectedBuildingId) {
+    if (selectedBuildingId && !isCreatingShape) {
       const bldg = buildings.find((b) => b.id === selectedBuildingId);
       const lyr = bldg?.layer || 'Domyślna (0)';
       const isLocked = layerSettings[lyr]?.isLocked === true;
 
-      if (bldg && bldg.vertices.length >= 3 && !isLocked) {
-        let closestEdgeIdx: number | null = null;
-        let minEdgeDist = 1.0;
-        for (let i = 0; i < bldg.vertices.length; i++) {
-          const p1 = bldg.vertices[i];
-          const p2 = bldg.vertices[(i + 1) % bldg.vertices.length];
-          const dx = p2.x - p1.x;
-          const dy = p2.y - p1.y;
-          const lenSq = dx * dx + dy * dy;
-          if (lenSq < 1e-4) continue;
-          const u = Math.max(0, Math.min(1, ((world.wx - p1.x) * dx + (world.wy - p1.y) * dy) / lenSq));
-          const px = p1.x + u * dx;
-          const py = p1.y + u * dy;
-          const dist = Math.hypot(world.wx - px, world.wy - py);
-          if (dist < minEdgeDist) {
-            minEdgeDist = dist;
-            closestEdgeIdx = i;
+      if (bldg && !isLocked) {
+        const isSweep = Array.isArray(bldg.sweepPath) && bldg.sweepPath.length >= 2;
+        const pts = isSweep ? bldg.sweepPath! : bldg.vertices;
+        const numEdges = isSweep ? pts.length - 1 : pts.length;
+
+        if (pts && numEdges > 0) {
+          let closestEdgeIdx: number | null = null;
+          let minEdgeDist = 1.0;
+          for (let i = 0; i < numEdges; i++) {
+            const p1 = pts[i];
+            const p2 = isSweep ? pts[i + 1] : pts[(i + 1) % pts.length];
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq < 1e-4) continue;
+            const u = Math.max(0, Math.min(1, ((world.wx - p1.x) * dx + (world.wy - p1.y) * dy) / lenSq));
+            const px = p1.x + u * dx;
+            const py = p1.y + u * dy;
+            const dist = Math.hypot(world.wx - px, world.wy - py);
+            if (dist < minEdgeDist) {
+              minEdgeDist = dist;
+              closestEdgeIdx = i;
+            }
           }
-        }
-        if (closestEdgeIdx !== null) {
-          setHoveredEdge({ buildingId: selectedBuildingId, edgeIndex: closestEdgeIdx });
+          if (closestEdgeIdx !== null) {
+            setHoveredEdge({ buildingId: selectedBuildingId, edgeIndex: closestEdgeIdx });
+          } else {
+            setHoveredEdge(null);
+          }
         } else {
-          setHoveredEdge(null);
+          if (hoveredEdge) setHoveredEdge(null);
         }
       } else {
         if (hoveredEdge) setHoveredEdge(null);
@@ -1715,8 +1877,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
     if (!dragStart) return;
 
     if (draggingEdge) {
-      const dwx = world.wx - dragStart.x;
-      const dwy = world.wy - dragStart.y;
+      let dwx = world.wx - dragStart.x;
+      let dwy = world.wy - dragStart.y;
+      if (e.ctrlKey || e.metaKey) {
+        dwx = Math.round(dwx * 10) / 10;
+        dwy = Math.round(dwy * 10) / 10;
+      }
       onBuildingEdgeMove?.(draggingEdge.buildingId, draggingEdge.edgeIndex, dwx, dwy);
       setDragStart({ x: world.wx, y: world.wy });
       return;
@@ -1735,9 +1901,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
       let dwx = world.wx - dragStart.x;
       let dwy = world.wy - dragStart.y;
 
+      if (e.ctrlKey || e.metaKey) {
+        dwx = Math.round(dwx * 10) / 10;
+        dwy = Math.round(dwy * 10) / 10;
+      }
+
       const primaryId = selectedBuildingId || selectedBuildingIds[0];
 
-      if (isOsnapActive && primaryId) {
+      if (isOsnapActive && primaryId && !(e.ctrlKey || e.metaKey)) {
         const movingBldg = buildings.find((b) => b.id === primaryId);
         if (movingBldg && movingBldg.vertices && movingBldg.vertices.length >= 2) {
           const tentVerts = movingBldg.vertices.map((v) => ({ x: v.x + dwx, y: v.y + dwy }));
@@ -1833,23 +2004,34 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
 
 
   const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (drawingMode === 'vertexEdit' && selectedBuildingId) {
-      e.preventDefault();
+    const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
+    if (selectedBuildingId && !isCreatingShape) {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
-      if (selBldg && selBldg.vertices.length > 3) {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const sx = e.clientX - rect.left;
-        const sy = e.clientY - rect.top;
-        for (let i = 0; i < selBldg.vertices.length; i++) {
-          const s = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
-          if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
-            const filtered = selBldg.vertices.filter((_, idx) => idx !== i);
-            onUpdateBuildingVertices?.(selBldg.id, filtered);
-            setSelectedVertexIndex(null);
-            setHoveredVertexIndex(null);
-            setHoveredMidpointIndex(null);
-            return;
+      if (selBldg) {
+        const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
+        const verts = isSweep ? selBldg.sweepPath! : selBldg.vertices;
+        const minCount = isSweep ? 2 : 3;
+
+        if (verts && verts.length > minCount) {
+          const rect = canvasRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const sx = e.clientX - rect.left;
+          const sy = e.clientY - rect.top;
+          for (let i = 0; i < verts.length; i++) {
+            const s = worldToScreen(verts[i].x, verts[i].y);
+            if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+              e.preventDefault();
+              const filtered = verts.filter((_, idx) => idx !== i);
+              if (isSweep) {
+                onUpdateBuildingSweepPath?.(selBldg.id, filtered);
+              } else {
+                onUpdateBuildingVertices?.(selBldg.id, filtered);
+              }
+              setSelectedVertexIndex(null);
+              setHoveredVertexIndex(null);
+              setHoveredMidpointIndex(null);
+              return;
+            }
           }
         }
       }
@@ -1887,23 +2069,21 @@ export const CadCanvas: React.FC<CadCanvasProps> = ({
           cursor:
             isDimensionMode
               ? 'crosshair'
-              : drawingMode === 'vertexEdit'
-              ? hoveredVertexIndex !== null || draggedVertexIndex !== null
-                ? 'move'
-                : hoveredMidpointIndex !== null
-                ? 'copy'
-                : 'default'
+              : (hoveredVertexIndex !== null || draggedVertexIndex !== null)
+              ? 'move'
+              : hoveredMidpointIndex !== null
+              ? 'copy'
               : drawingMode === 'rotate'
               ? isDraggingPivot || isPivotHovered
                 ? 'move'
                 : isRotating
                 ? 'grabbing'
                 : 'grab'
-              : drawingMode !== 'none'
+              : drawingMode !== 'none' && drawingMode !== 'vertexEdit'
               ? 'crosshair'
               : draggingEdge
               ? 'move'
-              : isEditMode && hoveredEdge
+              : hoveredEdge
               ? 'move'
               : hoveredBuildingId
               ? 'pointer'

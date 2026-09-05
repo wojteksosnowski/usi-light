@@ -1,4 +1,5 @@
 import { CadRenderContext } from '../types';
+import { getPolygonInteriorPoint, isPointInPolygon, splitSegmentByOccludingPolygons } from '@/utils/math2d';
 
 export interface EditingEdgeLengthState {
   buildingId: string;
@@ -22,6 +23,70 @@ interface BuildingCachedGeometry {
 }
 
 const buildingGeoCache = new WeakMap<object, BuildingCachedGeometry>();
+
+/**
+ * Sprawdza czy kliknięcie w punkcie ekranowym (screenX, screenY) trafiło w etykietę/kartę obiektu.
+ */
+export function getBuildingLabelHitAtPoint(
+  screenX: number,
+  screenY: number,
+  buildings: any[],
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  scale: number,
+  layerSettings: Record<string, any> = {}
+): string | null {
+  for (let i = buildings.length - 1; i >= 0; i--) {
+    const bldg = buildings[i];
+    if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
+
+    const lyr = bldg.layer || 'Bariery';
+    const lyrSetting = layerSettings[lyr] || {};
+    if (lyrSetting.isVisible === false) continue;
+
+    const geo = getOrComputeBuildingGeo(bldg);
+    if (!geo) continue;
+
+    const { sx: csx, sy: csy } = worldToScreen(geo.centerX, geo.centerY);
+    if (!Number.isFinite(csx) || !Number.isFinite(csy)) continue;
+
+    const screenBldgW = (geo.maxX - geo.minX) * scale;
+    const screenBldgH = (geo.maxY - geo.minY) * scale;
+
+    const isBoundary = bldg.category === 'boundary';
+    const isPlayground = isBoundary && bldg.areaType === 'playground';
+    const isBalcony = bldg.category === 'balcony';
+
+    let cardW = 42;
+    let cardH = 34;
+
+    if (isBoundary) {
+      const hasPlotNumber = !isPlayground && !!(bldg.plotNumber && bldg.plotNumber.trim());
+      const showHeader = hasPlotNumber;
+      cardW = showHeader ? 90 : 60;
+      cardH = showHeader ? 34 : 22;
+    } else if (isBalcony) {
+      cardW = 75;
+      cardH = 22;
+    } else {
+      cardW = 55;
+      cardH = 34;
+    }
+
+    if (cardW > screenBldgW || cardH > screenBldgH) continue;
+
+    const halfW = cardW / 2;
+    const halfH = cardH / 2;
+    if (
+      screenX >= csx - halfW &&
+      screenX <= csx + halfW &&
+      screenY >= csy - halfH &&
+      screenY <= csy + halfH
+    ) {
+      return bldg.id;
+    }
+  }
+  return null;
+}
 
 /**
  * Renders Lucide-style Lock icon on canvas
@@ -120,14 +185,16 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
 
   if (validCount < 3) return null;
 
+  const interior = getPolygonInteriorPoint(bldg.vertices);
+
   const res: BuildingCachedGeometry = {
     path,
     minX,
     minY,
     maxX,
     maxY,
-    centerX: sumX / validCount,
-    centerY: sumY / validCount,
+    centerX: interior.x,
+    centerY: interior.y,
   };
   buildingGeoCache.set(bldg, res);
   return res;
@@ -232,9 +299,16 @@ export function renderBuildings(
     ctx.setTransform(a, b, c, d, e, f);
 
     const isBoundary = bldg.category === 'boundary';
+    const isPlayground = isBoundary && bldg.areaType === 'playground';
     const isBalcony = bldg.category === 'balcony';
 
-    if (isBoundary) {
+    if (isPlayground) {
+      ctx.fillStyle = isSelected
+        ? 'rgba(245, 158, 11, 0.18)'
+        : bldg.id === hoveredBuildingId
+        ? 'rgba(245, 158, 11, 0.12)'
+        : 'rgba(245, 158, 11, 0.05)';
+    } else if (isBoundary) {
       ctx.fillStyle = isSelected
         ? 'rgba(239, 68, 68, 0.12)'
         : bldg.id === hoveredBuildingId
@@ -282,17 +356,43 @@ export function renderBuildings(
           }
           storyPath.closePath();
 
-          ctx.fillStyle = isSelected
-            ? 'rgba(168, 85, 247, 0.12)'
-            : 'rgba(168, 85, 247, 0.06)';
-          ctx.fill(storyPath);
-
           ctx.lineWidth = 1.2 / s;
           ctx.strokeStyle = isSelected ? 'rgba(192, 132, 252, 0.85)' : 'rgba(168, 85, 247, 0.6)';
           ctx.setLineDash([4 / s, 2 / s]);
           ctx.stroke(storyPath);
           ctx.setLineDash([]);
         }
+      }
+    }
+
+    // 1.2 Render Zone Polygons / Strefy (Linie obszaru wygenerowane przez modyfikator 'zone_offset')
+    if (Array.isArray(bldg.zonePolygons) && bldg.zonePolygons.length > 0) {
+      for (const zf of bldg.zonePolygons) {
+        if (!zf.polygon || zf.polygon.length < 3) continue;
+        const poly = zf.polygon;
+        const zonePath = new Path2D();
+        zonePath.moveTo(poly[0].x, poly[0].y);
+        for (let i = 1; i < poly.length; i++) {
+          zonePath.lineTo(poly[i].x, poly[i].y);
+        }
+        zonePath.closePath();
+
+        const isPlaygroundZone = zf.areaType === 'playground';
+        const zoneFill = isPlaygroundZone
+          ? isSelected ? 'rgba(245, 158, 11, 0.14)' : 'rgba(245, 158, 11, 0.07)'
+          : isSelected ? 'rgba(56, 189, 248, 0.14)' : 'rgba(56, 189, 248, 0.07)';
+        const zoneStroke = isPlaygroundZone
+          ? isSelected ? 'rgba(245, 158, 11, 0.95)' : 'rgba(245, 158, 11, 0.75)'
+          : isSelected ? 'rgba(56, 189, 248, 0.95)' : 'rgba(56, 189, 248, 0.75)';
+
+        ctx.fillStyle = zoneFill;
+        ctx.fill(zonePath);
+
+        ctx.lineWidth = (isSelected ? 1.8 : 1.3) / s;
+        ctx.strokeStyle = zoneStroke;
+        ctx.setLineDash([5 / s, 3 / s]);
+        ctx.stroke(zonePath);
+        ctx.setLineDash([]);
       }
     }
 
@@ -304,7 +404,9 @@ export function renderBuildings(
       ctx.stroke(geo.path);
     } else if (isSelected) {
       ctx.lineWidth = (isBoundary ? 2.0 : 2.5) / s;
-      ctx.strokeStyle = isBoundary
+      ctx.strokeStyle = isPlayground
+        ? '#f59e0b'
+        : isBoundary
         ? '#ef4444'
         : isBalcony
         ? '#c084fc'
@@ -312,7 +414,7 @@ export function renderBuildings(
         ? '#60a5fa'
         : '#94a3b8';
       if (isBoundary) {
-        ctx.setLineDash([8 / s, 4 / s]);
+        ctx.setLineDash([]);
       }
       ctx.stroke(geo.path);
       if (isBoundary) {
@@ -345,13 +447,33 @@ export function renderBuildings(
     const isTested = bldg.isTested;
     const isIncluded = bldg.isIncluded !== false;
 
-    ctx.save();
+    const isSweep = Array.isArray(bldg.sweepPath) && bldg.sweepPath.length >= 2;
+
+    // Render osi generującej Wstęgi w trybie edycji krawędzi (isEditMode lub zaznaczony obiekt)
+    if (isSweep && isSelected) {
+      for (let sIdx = 0; sIdx < bldg.sweepPath!.length - 1; sIdx++) {
+        const sp1 = bldg.sweepPath![sIdx];
+        const sp2 = bldg.sweepPath![sIdx + 1];
+        const { sx: sx1, sy: sy1 } = worldToScreen(sp1.x, sp1.y);
+        const { sx: sx2, sy: sy2 } = worldToScreen(sp2.x, sp2.y);
+        const isSpineHovered = hoveredEdge?.buildingId === bldg.id && hoveredEdge?.edgeIndex === sIdx;
+
+        ctx.beginPath();
+        ctx.moveTo(sx1, sy1);
+        ctx.lineTo(sx2, sy2);
+        ctx.strokeStyle = isSpineHovered ? '#38bdf8' : '#f59e0b';
+        ctx.lineWidth = isSpineHovered ? 4.5 : 2.5;
+        ctx.setLineDash(isSpineHovered ? [] : [6, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
 
     if (Array.isArray(bldg.segments)) {
       for (let eIdx = 0; eIdx < bldg.segments.length; eIdx++) {
         const seg = bldg.segments[eIdx];
         if (!seg || !seg.p1 || !seg.p2 || !Number.isFinite(seg.p1.x) || !Number.isFinite(seg.p1.y) || !Number.isFinite(seg.p2.x) || !Number.isFinite(seg.p2.y)) continue;
-        const isEdgeHovered = isEditMode && hoveredEdge?.buildingId === bldg.id && hoveredEdge?.edgeIndex === eIdx;
+        const isEdgeHovered = !isSweep && (isEditMode || isSelected) && hoveredEdge?.buildingId === bldg.id && hoveredEdge?.edgeIndex === eIdx;
         const { sx: x1, sy: y1 } = worldToScreen(seg.p1.x, seg.p1.y);
         const { sx: x2, sy: y2 } = worldToScreen(seg.p2.x, seg.p2.y);
         if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
@@ -361,49 +483,97 @@ export function renderBuildings(
         ctx.lineTo(x2, y2);
 
         const isBoundary = bldg.category === 'boundary';
+        const isPlayground = isBoundary && bldg.areaType === 'playground';
         const isBalcony = bldg.category === 'balcony';
+        const bldgMaxH = bldg.defaultHeight || 0;
+        const segHTop = seg.hTop ?? bldgMaxH;
 
-        if (isBoundary) {
-          ctx.setLineDash([]); // Granica rysowana ciągłą linią
-        } else if (isBalcony) {
-          ctx.setLineDash([4, 3]);
-        } else {
-          ctx.setLineDash([]);
+        // 1. Sprawdzenie uskoku w ramach tego samego budynku
+        const isIntraBldgOccluded = seg.hTop !== undefined && bldgMaxH > 0 && seg.hTop < bldgMaxH - 0.01;
+
+        // 2. Zbierz wielokąty wyższych budynków
+        const higherPolys: any[] = [];
+        if (!isBoundary && !isPlayground) {
+          for (const otherBldg of buildings) {
+            if (otherBldg.id === bldg.id || otherBldg.category === 'boundary') continue;
+            const otherH = otherBldg.defaultHeight || 0;
+            if (otherH > segHTop + 0.05) {
+              if (Array.isArray(otherBldg.vertices) && otherBldg.vertices.length >= 3) {
+                higherPolys.push(otherBldg.vertices);
+              }
+            }
+          }
         }
+
+        // Analityczny podział odcinka na części widoczne i zakryte
+        const parts = (!isBoundary && !isPlayground && higherPolys.length > 0)
+          ? splitSegmentByOccludingPolygons(seg.p1, seg.p2, higherPolys, isPointInPolygon)
+          : [{ p1: seg.p1, p2: seg.p2, isOccluded: false }];
+
+        // Ustal kolor i grubość dla całej krawędzi
+        let strokeColor = '#64748b';
+        let strokeWidth = isSelected ? 2.5 : 1.5;
 
         if (isEdgeHovered) {
-          ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 4;
+          strokeColor = '#38bdf8';
+          strokeWidth = 4;
+        } else if (isPlayground) {
+          strokeColor = isSelected ? '#f59e0b' : 'rgba(245, 158, 11, 0.85)';
+          strokeWidth = isSelected ? 2.5 : 1.8;
         } else if (isBoundary) {
-          ctx.strokeStyle = isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.85)';
-          ctx.lineWidth = isSelected ? 2.5 : 1.8;
+          strokeColor = isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.85)';
+          strokeWidth = isSelected ? 2.5 : 1.8;
         } else if (isBalcony) {
-          ctx.strokeStyle = isSelected ? '#c084fc' : 'rgba(192, 132, 252, 0.75)';
-          ctx.lineWidth = isSelected ? 2.0 : 1.4;
+          strokeColor = isSelected ? '#c084fc' : 'rgba(192, 132, 252, 0.75)';
+          strokeWidth = isSelected ? 2.0 : 1.4;
         } else if (isGhosted) {
           if (isTested) {
-            ctx.strokeStyle = 'rgba(96, 165, 250, 0.55)';
-            ctx.lineWidth = 1.2;
+            strokeColor = 'rgba(96, 165, 250, 0.55)';
+            strokeWidth = 1.2;
           } else if (isIncluded) {
-            ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
-            ctx.lineWidth = 1.2;
+            strokeColor = 'rgba(148, 163, 184, 0.55)';
+            strokeWidth = 1.2;
           } else {
-            // Delicate visible contour for non-tested non-included ghost
-            ctx.strokeStyle = 'rgba(148, 163, 184, 0.50)';
-            ctx.lineWidth = 1.0;
+            strokeColor = 'rgba(148, 163, 184, 0.50)';
+            strokeWidth = 1.0;
           }
         } else if (!isIncluded) {
-          ctx.strokeStyle = 'rgba(71, 85, 105, 0.4)';
-          ctx.lineWidth = 1;
+          strokeColor = 'rgba(71, 85, 105, 0.4)';
+          strokeWidth = 1;
         } else if (isTested) {
-          ctx.strokeStyle = isSelected ? '#3b82f6' : '#60a5fa';
-          ctx.lineWidth = isSelected ? 3 : 2;
+          strokeColor = isSelected ? '#3b82f6' : '#60a5fa';
+          strokeWidth = isSelected ? 3 : 2;
         } else {
-          ctx.strokeStyle = isSelected ? '#cbd5e1' : '#64748b';
-          ctx.lineWidth = isSelected ? 2.5 : 1.5;
+          strokeColor = isSelected ? '#cbd5e1' : '#64748b';
+          strokeWidth = isSelected ? 2.5 : 1.5;
         }
-        ctx.stroke();
-        ctx.setLineDash([]);
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = strokeWidth;
+
+        // Renderowanie poszczególnych pododcinków
+        for (const part of parts) {
+          const { sx: px1, sy: py1 } = worldToScreen(part.p1.x, part.p1.y);
+          const { sx: px2, sy: py2 } = worldToScreen(part.p2.x, part.p2.y);
+          if (!Number.isFinite(px1) || !Number.isFinite(py1) || !Number.isFinite(px2) || !Number.isFinite(py2)) continue;
+
+          const partOccluded = isIntraBldgOccluded || part.isOccluded;
+
+          ctx.beginPath();
+          ctx.moveTo(px1, py1);
+          ctx.lineTo(px2, py2);
+
+          if (isPlayground || isBoundary) {
+            ctx.setLineDash([]);
+          } else if (isBalcony || partOccluded) {
+            ctx.setLineDash([4, 3]);
+          } else {
+            ctx.setLineDash([]);
+          }
+
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
 
         if (showNormals && seg.normal && Number.isFinite(seg.normal.x) && Number.isFinite(seg.normal.y)) {
           const midX = (seg.p1.x + seg.p2.x) / 2;
@@ -436,13 +606,12 @@ export function renderBuildings(
         // Hidden during vertex editing and rotation to not obstruct handles/rotations
         if (isSelected && seg.p1 && seg.p2 && !isVertexEditMode && !isRotateMode) {
           const isEditingThisEdge =
-
             editingEdgeLength?.buildingId === bldg.id && editingEdgeLength?.edgeIndex === eIdx;
           const isHoveredBadge =
             hoveredEdgeLengthBadge?.buildingId === bldg.id && hoveredEdgeLengthBadge?.edgeIndex === eIdx;
 
-          let midX = (seg.p1.x + seg.p2.x) / 2;
-          let midY = (seg.p1.y + seg.p2.y) / 2;
+          let ep1 = seg.p1;
+          let ep2 = seg.p2;
           if (
             isEditingThisEdge &&
             editingEdgeLength?.previewVertices &&
@@ -454,23 +623,67 @@ export function renderBuildings(
                 (eIdx + 1) % editingEdgeLength.previewVertices.length
               ];
             if (p1 && p2) {
-              midX = (p1.x + p2.x) / 2;
-              midY = (p1.y + p2.y) / 2;
+              ep1 = p1;
+              ep2 = p2;
             }
           }
 
-          const len = Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-          const { sx: msx, sy: msy } = worldToScreen(midX, midY);
+          const midX = (ep1.x + ep2.x) / 2;
+          const midY = (ep1.y + ep2.y) / 2;
+          const len = Math.hypot(ep2.x - ep1.x, ep2.y - ep1.y);
 
-          if (Number.isFinite(msx) && Number.isFinite(msy)) {
+          // Wektor normalny krawędzi (na zewnątrz wielokąta)
+          const normX = seg.normal?.x ?? 0;
+          const normY = seg.normal?.y ?? 0;
+
+          // Punkty na ekranie
+          const s1 = worldToScreen(ep1.x, ep1.y);
+          const s2 = worldToScreen(ep2.x, ep2.y);
+          const sm = worldToScreen(midX, midY);
+          const sn = worldToScreen(midX + normX, midY + normY);
+
+          // Normalna w przestrzeni ekranu
+          let screenNormX = sn.sx - sm.sx;
+          let screenNormY = sn.sy - sm.sy;
+          const screenNormLen = Math.hypot(screenNormX, screenNormY);
+          if (screenNormLen > 1e-4) {
+            screenNormX /= screenNormLen;
+            screenNormY /= screenNormLen;
+          } else {
+            screenNormX = 0;
+            screenNormY = -1;
+          }
+
+          const edgeScreenLen = Math.hypot(s2.sx - s1.sx, s2.sy - s1.sy);
+
+          // Odsunięcie na zewnątrz krawędzi (skalowane z długością krawędzi na ekranie, aby etykieta nie odlatywała przy zoom-out)
+          const offsetPx = Math.max(8, Math.min(18, edgeScreenLen * 0.15 + 6));
+          const badgeSx = sm.sx + screenNormX * offsetPx;
+          const badgeSy = sm.sy + screenNormY * offsetPx;
+
+          if (Number.isFinite(badgeSx) && Number.isFinite(badgeSy)) {
             const labelText = isEditingThisEdge
               ? `[ ${editingEdgeLength.inputStr ? editingEdgeLength.inputStr : '_'}m ]`
               : `${len.toFixed(2)}m`;
+
+            // Obliczenie kąta krawędzi na ekranie
+            let edgeAngle = Math.atan2(s2.sy - s1.sy, s2.sx - s1.sx);
+
+            // Normalizacja kąta do [-π/2, π/2], aby tekst był zawsze czytelny (nie do góry nogami)
+            if (edgeAngle > Math.PI / 2) {
+              edgeAngle -= Math.PI;
+            } else if (edgeAngle < -Math.PI / 2) {
+              edgeAngle += Math.PI;
+            }
 
             ctx.font = 'bold 10px Inter, monospace';
             const tw = ctx.measureText(labelText).width;
             const pw = tw + 10;
             const ph = 18;
+
+            ctx.save();
+            ctx.translate(badgeSx, badgeSy);
+            ctx.rotate(edgeAngle);
 
             ctx.fillStyle = isEditingThisEdge
               ? '#f59e0b'
@@ -480,14 +693,16 @@ export function renderBuildings(
             ctx.strokeStyle = isEditingThisEdge ? '#fbbf24' : isHoveredBadge ? '#38bdf8' : 'rgba(56, 189, 248, 0.4)';
             ctx.lineWidth = isEditingThisEdge || isHoveredBadge ? 1.5 : 1;
             ctx.beginPath();
-            ctx.roundRect(msx - pw / 2, msy - ph / 2, pw, ph, 4);
+            ctx.roundRect(-pw / 2, -ph / 2, pw, ph, 4);
             ctx.fill();
             ctx.stroke();
 
             ctx.fillStyle = isEditingThisEdge ? '#0f172a' : '#f8fafc';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(labelText, msx, msy);
+            ctx.fillText(labelText, 0, 0);
+
+            ctx.restore();
           }
         }
       }
@@ -504,6 +719,7 @@ export function renderBuildings(
 
       if (Number.isFinite(csx) && Number.isFinite(csy)) {
         const isBoundary = bldg.category === 'boundary';
+        const isPlayground = isBoundary && bldg.areaType === 'playground';
         const isBalcony = bldg.category === 'balcony';
 
         if (isBoundary) {
@@ -517,44 +733,48 @@ export function renderBuildings(
           bndArea = Math.abs(bndArea) / 2;
           const areaText = `${Math.round(bndArea)} m²`;
 
-          const hasPlotNumber = !!(bldg.plotNumber && bldg.plotNumber.trim());
-          const plotName = hasPlotNumber
+          const hasPlotNumber = !isPlayground && !!(bldg.plotNumber && bldg.plotNumber.trim());
+          const headerName = hasPlotNumber
             ? (bldg.plotNumber!.startsWith('Dz.') ? bldg.plotNumber! : `Dz. ${bldg.plotNumber}`)
             : '';
 
-          ctx.font = hasPlotNumber ? 'bold 12px Inter, sans-serif' : 'bold 11px Inter, monospace';
-          const nameW = hasPlotNumber ? ctx.measureText(plotName).width : 0;
+          const showHeader = hasPlotNumber;
+
+          ctx.font = showHeader ? 'bold 12px Inter, sans-serif' : 'bold 11px Inter, monospace';
+          const nameW = showHeader ? ctx.measureText(headerName).width : 0;
           ctx.font = '10px Inter, monospace';
           const areaW = ctx.measureText(areaText).width;
 
-          const cardW = hasPlotNumber ? Math.max(nameW, areaW) + 20 : areaW + 16;
-          const cardH = hasPlotNumber ? 34 : 22;
+          const cardW = showHeader ? Math.max(nameW, areaW) + 20 : areaW + 16;
+          const cardH = showHeader ? 34 : 22;
 
           // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
           if (cardW <= screenBldgW && cardH <= screenBldgH) {
             ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-            ctx.strokeStyle = isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.5)';
+            ctx.strokeStyle = isPlayground
+              ? (isSelected ? '#f59e0b' : 'rgba(245, 158, 11, 0.6)')
+              : (isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.5)');
             ctx.lineWidth = isSelected ? 1.5 : 1;
             ctx.beginPath();
             ctx.roundRect(csx - cardW / 2, csy - cardH / 2, cardW, cardH, 6);
             ctx.fill();
             ctx.stroke();
 
-            if (hasPlotNumber) {
-              // Numer działki
+            if (showHeader) {
+              // Nazwa / Numer
               ctx.fillStyle = '#fca5a5';
               ctx.font = 'bold 12px Inter, sans-serif';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(plotName, csx, csy - 6);
+              ctx.fillText(headerName, csx, csy - 6);
 
-              // Powierzchnia działki
+              // Powierzchnia
               ctx.fillStyle = '#cbd5e1';
               ctx.font = '10px Inter, monospace';
               ctx.fillText(areaText, csx, csy + 8);
             } else {
               // Tylko powierzchnia
-              ctx.fillStyle = '#fca5a5';
+              ctx.fillStyle = isPlayground ? '#fbbf24' : '#fca5a5';
               ctx.font = 'bold 11px Inter, monospace';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';

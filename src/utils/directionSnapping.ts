@@ -178,26 +178,51 @@ export function collectTargetDirections(
     prioritizedBuildingIds.add(selectedBuildingId);
   }
 
-  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false && b.category !== 'boundary');
+  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false);
   for (const bldg of prioBuildings) {
-    if (!Array.isArray(bldg.segments)) continue;
-    for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
-      if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
-      const seg = bldg.segments[sIdx];
-      const sdx = seg.p2.x - seg.p1.x;
-      const sdy = seg.p2.y - seg.p1.y;
-      if (Math.hypot(sdx, sdy) >= 0.05) {
-        const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-        // Tłumienie szumu: jeśli kąt ściany różni się od siatki dominującej o <= 4.0°, przyciągamy do siatki
-        const segAng = isNearDominant(rawSegAng) && domPair
-          ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
-          : rawSegAng;
+    // Segmenty bazowe obiektu (o ile nie jest to czysty boundary bez segmentów)
+    if (Array.isArray(bldg.segments)) {
+      for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
+        if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+        const seg = bldg.segments[sIdx];
+        const sdx = seg.p2.x - seg.p1.x;
+        const sdy = seg.p2.y - seg.p1.y;
+        if (Math.hypot(sdx, sdy) >= 0.05) {
+          const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+          // Tłumienie szumu: jeśli kąt ściany różni się od siatki dominującej o <= 4.0°, przyciągamy do siatki
+          const segAng = isNearDominant(rawSegAng) && domPair
+            ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
+            : rawSegAng;
 
-        const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
-        const sourceSeg = { p1: seg.p1, p2: seg.p2, buildingId: bldg.id, edgeIndex: sIdx };
-        addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4, sourceSeg);
-        addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 4, sourceSeg);
+          const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
+          const sourceSeg = { p1: seg.p1, p2: seg.p2, buildingId: bldg.id, edgeIndex: sIdx };
+          addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4, sourceSeg);
+          addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 4, sourceSeg);
+        }
       }
+    }
+
+    // Krawędzie stref buforowych (zonePolygons)
+    if (Array.isArray(bldg.zonePolygons)) {
+      bldg.zonePolygons.forEach((zf) => {
+        if (!zf.polygon || zf.polygon.length < 2) return;
+        const nZ = zf.polygon.length;
+        for (let i = 0; i < nZ; i++) {
+          const p1 = zf.polygon[i];
+          const p2 = zf.polygon[(i + 1) % nZ];
+          const sdx = p2.x - p1.x;
+          const sdy = p2.y - p1.y;
+          if (Math.hypot(sdx, sdy) >= 0.05) {
+            const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+            const segAng = isNearDominant(rawSegAng) && domPair
+              ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
+              : rawSegAng;
+            const sourceSeg = { p1, p2, buildingId: bldg.id };
+            addCandidate(segAng, 'parallel', `Strefa (${bldg.name}) (Równoległy)`, 4, sourceSeg);
+            addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `Strefa (${bldg.name}) (Prostopadły 90°)`, 4, sourceSeg);
+          }
+        }
+      });
     }
   }
 

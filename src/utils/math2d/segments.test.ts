@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { raySegmentIntersection, raySegmentDistance2D } from './segments';
+import { raySegmentIntersection, raySegmentDistance2D, splitSegmentByOccludingPolygons } from './segments';
 import { Point2D, Vector2D } from '../../types/geometry';
 
 describe('raySegmentDistance2D vs raySegmentIntersection equivalence', () => {
@@ -79,4 +79,114 @@ describe('raySegmentDistance2D vs raySegmentIntersection equivalence', () => {
 
     expect(hitsCount).toBeGreaterThan(1000);
   }, 20000);
+
+  describe('splitSegmentByOccludingPolygons', () => {
+    // Prosta funkcja pomocnicza testu wewnątrz prostokąta [minX..maxX, minY..maxY]
+    const isInsideSquare = (pt: Point2D, poly: Point2D[]) => {
+      const minX = Math.min(...poly.map((p) => p.x));
+      const maxX = Math.max(...poly.map((p) => p.x));
+      const minY = Math.min(...poly.map((p) => p.y));
+      const maxY = Math.max(...poly.map((p) => p.y));
+      return pt.x > minX && pt.x < maxX && pt.y > minY && pt.y < maxY;
+    };
+
+    it('1. Partial occlusion: splits segment crossing a higher building into visible and occluded parts', () => {
+      // Segment: (0, 5) -> (20, 5)
+      const p1: Point2D = { x: 0, y: 5 };
+      const p2: Point2D = { x: 20, y: 5 };
+
+      // Higher building footprint: [5, 15] x [0, 10]
+      const higherSquare: Point2D[] = [
+        { x: 5, y: 0 },
+        { x: 15, y: 0 },
+        { x: 15, y: 10 },
+        { x: 5, y: 10 },
+      ];
+
+      const parts = splitSegmentByOccludingPolygons(p1, p2, [higherSquare], isInsideSquare);
+      expect(parts.length).toBe(3);
+
+      // Part 1: [0..5, 5] -> visible (not occluded)
+      expect(parts[0].p1.x).toBeCloseTo(0, 2);
+      expect(parts[0].p2.x).toBeCloseTo(5, 2);
+      expect(parts[0].isOccluded).toBe(false);
+
+      // Part 2: [5..15, 5] -> occluded
+      expect(parts[1].p1.x).toBeCloseTo(5, 2);
+      expect(parts[1].p2.x).toBeCloseTo(15, 2);
+      expect(parts[1].isOccluded).toBe(true);
+
+      // Part 3: [15..20, 5] -> visible (not occluded)
+      expect(parts[2].p1.x).toBeCloseTo(15, 2);
+      expect(parts[2].p2.x).toBeCloseTo(20, 2);
+      expect(parts[2].isOccluded).toBe(false);
+    });
+
+    it('2. Fully occluded segment inside higher building', () => {
+      const p1: Point2D = { x: 6, y: 5 };
+      const p2: Point2D = { x: 9, y: 5 };
+
+      const higherSquare: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const parts = splitSegmentByOccludingPolygons(p1, p2, [higherSquare], isInsideSquare);
+      expect(parts.length).toBe(1);
+      expect(parts[0].isOccluded).toBe(true);
+    });
+
+    it('3. Fully outside segment', () => {
+      const p1: Point2D = { x: 20, y: 5 };
+      const p2: Point2D = { x: 30, y: 5 };
+
+      const higherSquare: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const parts = splitSegmentByOccludingPolygons(p1, p2, [higherSquare], isInsideSquare);
+      expect(parts.length).toBe(1);
+      expect(parts[0].isOccluded).toBe(false);
+    });
+
+    it('4. Stacking multi-level buildings: splits segment occluded by multiple higher polygons', () => {
+      // Segment: (0, 5) -> (30, 5)
+      const p1: Point2D = { x: 0, y: 5 };
+      const p2: Point2D = { x: 30, y: 5 };
+
+      // Two higher towers: Tower A [5..10], Tower B [20..25]
+      const towerA: Point2D[] = [
+        { x: 5, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 5, y: 10 },
+      ];
+      const towerB: Point2D[] = [
+        { x: 20, y: 0 },
+        { x: 25, y: 0 },
+        { x: 25, y: 10 },
+        { x: 20, y: 10 },
+      ];
+
+      const parts = splitSegmentByOccludingPolygons(p1, p2, [towerA, towerB], isInsideSquare);
+      expect(parts.length).toBe(5);
+
+      // [0..5] visible
+      expect(parts[0].isOccluded).toBe(false);
+      // [5..10] occluded by Tower A
+      expect(parts[1].isOccluded).toBe(true);
+      // [10..20] visible
+      expect(parts[2].isOccluded).toBe(false);
+      // [20..25] occluded by Tower B
+      expect(parts[3].isOccluded).toBe(true);
+      // [25..30] visible
+      expect(parts[4].isOccluded).toBe(false);
+    });
+  });
 });
+

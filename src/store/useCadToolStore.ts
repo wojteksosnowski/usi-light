@@ -1,12 +1,17 @@
 import { create } from 'zustand';
 import { DimensionItem, DimensionReference, DimensionType, Point2D } from '../types/geometry';
+import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 
 interface CadToolState {
   // Drawing Tools
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
   drawingVerticesCount: number;
   rotateInitialBuildingsSnapshot: any[] | null;
+
+  // Sweep (Wstęga) settings
+  sweepWidth: number;
+  sweepAlignment: SweepAlignment;
 
   // Edge editing & facade point mode
   isEditMode: boolean;
@@ -33,9 +38,11 @@ interface CadToolState {
   isInteracting: boolean;
 
   // Actions
-  setDrawingMode: (mode: 'none' | 'rectangle' | 'polyline' | 'vertexEdit' | 'rotate' | 'union') => void;
+  setDrawingMode: (mode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union') => void;
   setDrawingVerticesCount: (count: number) => void;
   setRotateInitialBuildingsSnapshot: (snapshot: any[] | null) => void;
+  setSweepWidth: (width: number) => void;
+  setSweepAlignment: (alignment: SweepAlignment) => void;
   setIsEditMode: (active: boolean) => void;
   setFacadePointMode: (active: boolean) => void;
   setShowModifiersPanel: (show: boolean | ((prev: boolean) => boolean)) => void;
@@ -71,6 +78,9 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   drawingVerticesCount: 0,
   rotateInitialBuildingsSnapshot: null,
 
+  sweepWidth: 5.0,
+  sweepAlignment: 'center',
+
   isEditMode: false,
   facadePointMode: false,
   showModifiersPanel: false,
@@ -93,6 +103,8 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   setDrawingMode: (mode) => set({ drawingMode: mode }),
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
   setRotateInitialBuildingsSnapshot: (snapshot) => set({ rotateInitialBuildingsSnapshot: snapshot }),
+  setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : 5.0) }),
+  setSweepAlignment: (alignment) => set({ sweepAlignment: alignment }),
   setIsEditMode: (active) => set({ isEditMode: active }),
   setFacadePointMode: (active) => set({ facadePointMode: active }),
   setShowModifiersPanel: (show) =>

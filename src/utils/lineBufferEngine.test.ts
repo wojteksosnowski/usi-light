@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createCachedLineEquation,
   buildLineBufferForPolygon,
+  buildLineBufferFromBuildings,
   translateLineBuffer,
   rotateLineBuffer,
   updateVertexInLineBuffer,
@@ -11,6 +12,8 @@ import {
   normalizeAnglePi,
   angleDiffPi,
 } from './lineBufferEngine';
+import { BuildingLoop } from '../types/geometry';
+
 
 describe('lineBufferEngine', () => {
   it('creates normalized line equation with A^2 + B^2 = 1', () => {
@@ -140,4 +143,45 @@ describe('lineBufferEngine', () => {
     expect(angleDiffPi(0, Math.PI / 4)).toBeCloseTo(Math.PI / 4);
     expect(angleDiffPi(0.1, Math.PI - 0.1)).toBeCloseTo(0.2);
   });
+
+  it('buildLineBufferFromBuildings includes zonePolygons edges for snapping', () => {
+    const testBldg: BuildingLoop = {
+      id: 'bldg-zone',
+      name: 'Budynek ze strefą',
+      layer: '0',
+      isTested: true,
+      isCityCentre: false,
+      buildingType: 'residential',
+      defaultHeight: 15.0,
+      hWindowBottom: 0.85,
+      vertices: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+      segments: [],
+      zonePolygons: [
+        {
+          id: 'mod-zone-1',
+          distance: 4.0,
+          areaType: 'plot',
+          polygon: [
+            { x: -4, y: -4 },
+            { x: 14, y: -4 },
+            { x: 14, y: 14 },
+            { x: -4, y: 14 },
+          ],
+        },
+      ],
+      transform: { tx: 0, ty: 0, rotationDeg: 0 },
+    };
+
+    const map = buildLineBufferFromBuildings([testBldg]);
+    const bldgLines = map.get('bldg-zone');
+    expect(bldgLines).toBeDefined();
+    // 4 krawędzie bazowe + 4 krawędzie strefy buforowej = 8 krawędzi do snapowania
+    expect(bldgLines?.length).toBe(8);
+  });
 });
+

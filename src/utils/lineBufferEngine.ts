@@ -117,8 +117,22 @@ export function buildLineBufferFromBuildings(
     const lyr = bldg.layer || 'Domyślna (0)';
     if (layerSettings[lyr]?.isVisible === false) continue;
 
+    const bldgLines: CachedLineEquation[] = [];
     if (bldg.vertices && bldg.vertices.length >= 2) {
-      lineBufferMap.set(bldg.id, buildLineBufferForPolygon(bldg.id, bldg.vertices));
+      bldgLines.push(...buildLineBufferForPolygon(bldg.id, bldg.vertices));
+    }
+
+    // Dodaj krawędzie stref buforowych / obszarów z modyfikatorów
+    if (Array.isArray(bldg.zonePolygons)) {
+      bldg.zonePolygons.forEach((zf, zIdx) => {
+        if (zf.polygon && zf.polygon.length >= 2) {
+          bldgLines.push(...buildLineBufferForPolygon(`${bldg.id}_zone_${zIdx}`, zf.polygon));
+        }
+      });
+    }
+
+    if (bldgLines.length > 0) {
+      lineBufferMap.set(bldg.id, bldgLines);
     }
   }
 

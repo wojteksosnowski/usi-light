@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiersPanel';
+import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
@@ -26,6 +27,7 @@ import {
 import { Point2D, AnalysisPointResult } from './types/geometry';
 import { createBuildingFromVertices } from './utils/dxfParser';
 import { analyzeSegmentsStatistics } from './utils/segmentStatistics';
+import { generateSweepPolygon } from '@/utils/math2d';
 
 const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
 
@@ -44,6 +46,7 @@ export const App: React.FC = () => {
   const moveBuildingEdge = useSceneStore((s) => s.moveBuildingEdge);
   const rotateBuilding = useSceneStore((s) => s.rotateBuilding);
   const updateBuildingVertices = useSceneStore((s) => s.updateBuildingVertices);
+  const updateBuildingSweepPath = useSceneStore((s) => s.updateBuildingSweepPath);
   const booleanUnion = useSceneStore((s) => s.booleanUnion);
   const layerSettings = useSceneStore((s) => s.layerSettings);
   const setSelectedLayerName = useSceneStore((s) => s.setSelectedLayerName);
@@ -62,6 +65,8 @@ export const App: React.FC = () => {
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
   const rotateInitialBuildingsSnapshot = useCadToolStore((s) => s.rotateInitialBuildingsSnapshot);
   const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
+  const sweepWidth = useCadToolStore((s) => s.sweepWidth);
+  const sweepAlignment = useCadToolStore((s) => s.sweepAlignment);
   const isEditMode = useCadToolStore((s) => s.isEditMode);
   const setIsEditMode = useCadToolStore((s) => s.setIsEditMode);
   const facadePointMode = useCadToolStore((s) => s.facadePointMode);
@@ -132,6 +137,20 @@ export const App: React.FC = () => {
     }, 200);
     return () => clearTimeout(timer);
   }, [buildings, isInteracting, setAccuracyStage]);
+
+  // Automatyczne otwieranie panelu Modyfikatory 2.5D gdy zaznaczony obiekt posiada modyfikatory
+  useEffect(() => {
+    if (!selectedBuildingId) {
+      setShowModifiersPanel(false);
+      return;
+    }
+    const bldg = buildings.find((b) => b.id === selectedBuildingId);
+    if (bldg && Array.isArray(bldg.modifiers) && bldg.modifiers.length > 0) {
+      setShowModifiersPanel(true);
+    } else {
+      setShowModifiersPanel(false);
+    }
+  }, [selectedBuildingId, buildings, setShowModifiersPanel]);
 
   const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
     switch (accuracyStage) {
@@ -259,14 +278,36 @@ export const App: React.FC = () => {
       .filter(Boolean) as AnalysisPointResult[];
   }, [pinnedPoints, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
 
+  const selectedBuildingPinnedPoints = useMemo<AnalysisPointResult[]>(() => {
+    if (!selectedBuildingId) return [];
+    return pinnedPointResults.filter((p) => p.buildingId === selectedBuildingId);
+  }, [pinnedPointResults, selectedBuildingId]);
+
   const activePointResult = useMemo<AnalysisPointResult | null>(() => {
-    if (pinnedPointResults.length === 0) return null;
+    if (selectedBuildingPinnedPoints.length === 0) return null;
     if (activePinnedPointId) {
-      const found = pinnedPointResults.find((p) => p.id === activePinnedPointId);
+      const found = selectedBuildingPinnedPoints.find((p) => p.id === activePinnedPointId);
       if (found) return found;
     }
-    return pinnedPointResults[0] ?? null;
-  }, [pinnedPointResults, activePinnedPointId]);
+    return selectedBuildingPinnedPoints[0] ?? null;
+  }, [selectedBuildingPinnedPoints, activePinnedPointId]);
+
+  // Exclusive accordion section: 'points' | 'modifiers' (only 1 section open at a time)
+  const [activeAccordionSection, setActiveAccordionSection] = React.useState<'points' | 'modifiers'>('modifiers');
+
+  // Switch to 'points' section when a pinned point is selected or added
+  useEffect(() => {
+    if (activePointResult) {
+      setActiveAccordionSection('points');
+    }
+  }, [activePointResult?.id]);
+
+  // Switch to 'modifiers' when modifier panel is opened and no active point
+  useEffect(() => {
+    if (showModifiersPanel && !activePointResult) {
+      setActiveAccordionSection('modifiers');
+    }
+  }, [showModifiersPanel, activePointResult]);
 
   // LocalStorage Persistence (Load on mount)
   useEffect(() => {
@@ -444,25 +485,39 @@ export const App: React.FC = () => {
 
   // Handlers for CadCanvas
   const handleFinishDrawing = useCallback(
-    (vertices: Point2D[], shapeType: 'rectangle' | 'polyline') => {
+    (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => {
       if (drawingMode === 'rotate') {
         setRotateInitialBuildingsSnapshot(null);
         setDrawingMode('none');
         setDrawingVerticesCount(0);
         return;
       }
-      if (vertices.length < 3) return;
+      let effectiveVertices = vertices;
+      if (shapeType === 'sweep') {
+        if (vertices.length < 2) return;
+        effectiveVertices = generateSweepPolygon(vertices, sweepWidth, sweepAlignment);
+      }
+      if (effectiveVertices.length < 3) return;
       const defaultHeight = 15.0;
       const count = buildings.length + 1;
       const namePrefix =
-        shapeType === 'rectangle' ? `Budynek (Prostokąt ${count})` : `Budynek (Polilinia ${count})`;
-      const newBldg = createBuildingFromVertices(vertices, namePrefix, defaultHeight, false);
+        shapeType === 'rectangle'
+          ? `Budynek (Prostokąt ${count})`
+          : shapeType === 'sweep'
+          ? `Budynek (Wstęga ${count})`
+          : `Budynek (Polilinia ${count})`;
+      const newBldg = createBuildingFromVertices(effectiveVertices, namePrefix, defaultHeight, false);
+      if (shapeType === 'sweep') {
+        newBldg.sweepPath = vertices.map((v) => ({ ...v }));
+        newBldg.sweepWidth = sweepWidth;
+        newBldg.sweepAlignment = sweepAlignment;
+      }
 
       addBuilding(newBldg);
       setDrawingMode('none');
       setDrawingVerticesCount(0);
     },
-    [drawingMode, buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, setRotateInitialBuildingsSnapshot]
+    [drawingMode, buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, setRotateInitialBuildingsSnapshot, sweepWidth, sweepAlignment]
   );
 
   const handleCancelDrawing = useCallback(() => {
@@ -525,8 +580,19 @@ export const App: React.FC = () => {
             pinnedPoints={pinnedPoints}
             pinnedPointResults={pinnedPointResults}
             activePinnedPointId={activePinnedPointId}
-            onSelectPinnedPoint={(id) => setActivePinnedPointId(id)}
-            onAddPinnedPoint={addPinnedPoint}
+            onSelectPinnedPoint={(id) => {
+              setActivePinnedPointId(id);
+              const found = pinnedPoints.find((p) => p.id === id);
+              if (found?.buildingId) {
+                setSelectedBuildingId(found.buildingId);
+              }
+            }}
+            onAddPinnedPoint={(pt) => {
+              addPinnedPoint(pt);
+              if (pt.buildingId) {
+                setSelectedBuildingId(pt.buildingId);
+              }
+            }}
             onDeletePinnedPoint={deletePinnedPoint}
             onUpdatePinnedPoint={updatePinnedPoint}
             selectedPointResult={activePointResult}
@@ -537,6 +603,9 @@ export const App: React.FC = () => {
               } else {
                 setActivePinnedPointId(res.id);
                 setSelectedPointResult(res);
+                if (res.buildingId) {
+                  setSelectedBuildingId(res.buildingId);
+                }
               }
             }}
             activePointMode={activePointMode}
@@ -556,10 +625,13 @@ export const App: React.FC = () => {
             isLinkingMode={isLinkingMode}
             linkingSourceId={linkingSourceId}
             drawingMode={drawingMode}
+            sweepWidth={sweepWidth}
+            sweepAlignment={sweepAlignment}
             onFinishDrawing={handleFinishDrawing}
             onCancelDrawing={handleCancelDrawing}
             onDrawingVerticesCountChange={setDrawingVerticesCount}
             onUpdateBuildingVertices={updateBuildingVertices}
+            onUpdateBuildingSweepPath={updateBuildingSweepPath}
             onBuildingRotate={handleBuildingRotate}
             onBooleanUnion={handleBooleanUnion}
             facadePointMode={facadePointMode}
@@ -591,25 +663,42 @@ export const App: React.FC = () => {
           />
         </div>
 
-        {/* Floating Point Inspector Modal */}
-        <PointInspectorModal
-          pointResult={activePointResult}
-          allPoints={pinnedPointResults}
-          activePointId={activePinnedPointId}
-          onSelectPointId={setActivePinnedPointId}
-          onDeletePointId={deletePinnedPoint}
-          activeMode={activePointMode}
-          sunlightMethod={sunlightMethod}
-          onModeChange={setActivePointMode}
-          onClose={() => {
-            useSolarAnalysisStore.getState().clearPinnedPoints();
-          }}
-        />
+        {/* Floating Inspector Accordion (Right Side) */}
+        <FloatingInspectorAccordion>
+          {/* Section 1: Facade Point Inspector */}
+          {activePointResult && (
+            <PointInspectorModal
+              pointResult={activePointResult}
+              allPoints={selectedBuildingPinnedPoints}
+              activePointId={activePinnedPointId}
+              onSelectPointId={setActivePinnedPointId}
+              onDeletePointId={deletePinnedPoint}
+              activeMode={activePointMode}
+              sunlightMethod={sunlightMethod}
+              onModeChange={setActivePointMode}
+              onClose={() => {
+                selectedBuildingPinnedPoints.forEach((p) => deletePinnedPoint(p.id));
+              }}
+              isEmbedded={true}
+              isCollapsed={showModifiersPanel && selectedBuildingId ? activeAccordionSection !== 'points' : false}
+              onToggleCollapse={(collapsed) => {
+                setActiveAccordionSection(collapsed ? 'modifiers' : 'points');
+              }}
+            />
+          )}
 
-        {/* Floating Building Modifiers Panel */}
-        {showModifiersPanel && selectedBuildingId && !activePointResult && (
-          <BuildingModifiersPanel onClose={() => setShowModifiersPanel(false)} />
-        )}
+          {/* Section 2: Building 2.5D Modifiers Panel */}
+          {showModifiersPanel && selectedBuildingId && (
+            <BuildingModifiersPanel
+              onClose={() => setShowModifiersPanel(false)}
+              isEmbedded={true}
+              isCollapsed={activePointResult ? activeAccordionSection !== 'modifiers' : false}
+              onToggleCollapse={(collapsed) => {
+                setActiveAccordionSection(collapsed ? 'points' : 'modifiers');
+              }}
+            />
+          )}
+        </FloatingInspectorAccordion>
 
         {/* Rotatable Compass Rose (Bottom-Right) */}
         <CompassRose

@@ -513,3 +513,87 @@ export function computeBuildingsUnionArea(buildings: Array<{ vertices: Point2D[]
     return validPolys.reduce((sum, p) => sum + computePolygonArea(p), 0);
   }
 }
+
+/**
+ * Wyznacza punkt leżący ściśle wewnątrz wielokąta (bezpieczny dla pozycjonowania etykiet).
+ * W przypadku figur wklęsłych / L-kształtnych zapobiega umieszczeniu etykiety poza obrysem (pole of inaccessibility).
+ */
+export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
+  if (!vertices || vertices.length < 3) return { x: 0, y: 0 };
+  if (vertices.length === 3) {
+    return {
+      x: (vertices[0].x + vertices[1].x + vertices[2].x) / 3,
+      y: (vertices[0].y + vertices[1].y + vertices[2].y) / 3,
+    };
+  }
+
+  // 1. Oblicz centroid
+  let sumX = 0;
+  let sumY = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const v of vertices) {
+    sumX += v.x;
+    sumY += v.y;
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+  }
+  const centroid = { x: sumX / vertices.length, y: sumY / vertices.length };
+
+  const getDistToBoundary = (pt: Point2D): number => {
+    let minDist = Infinity;
+    for (let i = 0; i < vertices.length; i++) {
+      const p1 = vertices[i];
+      const p2 = vertices[(i + 1) % vertices.length];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const segLenSq = dx * dx + dy * dy;
+      let dist = 0;
+      if (segLenSq < 1e-8) {
+        dist = Math.hypot(pt.x - p1.x, pt.y - p1.y);
+      } else {
+        const t = Math.max(0, Math.min(1, ((pt.x - p1.x) * dx + (pt.y - p1.y) * dy) / segLenSq));
+        const projX = p1.x + t * dx;
+        const projY = p1.y + t * dy;
+        dist = Math.hypot(pt.x - projX, pt.y - projY);
+      }
+      if (dist < minDist) minDist = dist;
+    }
+    return minDist;
+  };
+
+  if (isPointInPolygon(centroid, vertices)) {
+    const cDist = getDistToBoundary(centroid);
+    const boxSpan = Math.max(maxX - minX, maxY - minY);
+    if (cDist >= boxSpan * 0.1) {
+      return centroid;
+    }
+  }
+
+  // 2. Próbkowanie siatki wewnątrz obwiedni w poszukiwaniu najgłębszego punktu wnętrza
+  const steps = 14;
+  const stepX = (maxX - minX) / steps;
+  const stepY = (maxY - minY) / steps;
+  let bestPt = centroid;
+  let bestDist = -1;
+
+  for (let ix = 1; ix < steps; ix++) {
+    for (let iy = 1; iy < steps; iy++) {
+      const candidate = { x: minX + ix * stepX, y: minY + iy * stepY };
+      if (isPointInPolygon(candidate, vertices)) {
+        const d = getDistToBoundary(candidate);
+        if (d > bestDist) {
+          bestDist = d;
+          bestPt = candidate;
+        }
+      }
+    }
+  }
+
+  return bestPt;
+}

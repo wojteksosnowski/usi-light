@@ -163,12 +163,21 @@ Aplikacja implementuje dwa niezależne, weryfikowane wzajemnie silniki obliczeni
 * **Narzędzie Polilinia (Polyline Tool):**
   * Wprowadzanie dowolnych wieloboków budynków punkt po punkcie.
   * Dynamiczny podgląd gumowej linii (*rubber band*), licznik wierzchołków, zamykanie obrysu kliknięciem w punkt startowy lub klawiszem `Enter`.
+* **Narzędzie Wstęgi z Odsunięciem (Sweep Tool):**
+  * Wprowadzanie otwartej polilinii osiowej i automatyczne generowanie bryły budynku o zadanej szerokości traktu (w metrach) i wyrównaniu (do osi, lewostronne, prawostronne).
+  * Równoległe przesuwanie segmentów osiowych z zachowaniem kątów sąsiednich ścian.
 * **Narzędzie Edycji Wierzchołków (Vertex Edit):**
   * Interaktywne przesuwanie narożników istniejącego budynku z automatycznym przeliczaniem normalnych i długości przyległych fasad.
 * **Narzędzie Obrotu Bryły (Rotate Tool):**
   * Obrót zaznaczonego budynku wokół środka ciężkości (lub wybranego pivotu) z precyzyjnym kątem w stopniach.
 * **Narzędzie Równoległego Przesuwania Krawędzi (Edge Parallel Edit / Stretch):**
   * Kliknięcie krawędzi budynku i przeciąganie wzdłuż jej normalnej w celu zmiany szerokości/głębokości traktu budynku bez deformacji pozostałych kątów.
+* **Stos Modyfikatorów 2.5D (Niedestrukcyjne Modelowanie):**
+  * **Uskok kondygnacji (`story_offset`):** odsuwanie rzutu wybranych kondygnacji (poddasza wycofane, podcienia parteru) z automatyczną generacją segmentów pośrednich.
+  * **Strefa (`zone_offset`):** generowanie stref buforowych o dodatnim (na zewnątrz) lub ujemnym (do wnętrza) offsecie.
+  * **Wykusz (`bay_window`):** parametryczne modelowanie wykuszy elewacyjnych ze zmiennym kątem ścian bocznych (90°, 60°, 45°, 30°), regulowaną szerokością, wysunięciem, pozycją wzdłuż ściany i wyborem kondygnacji.
+* **Analityczne Przesłanianie Krawędzi (Occlusion & Stacking):**
+  * Automatyczny podział krawędzi na punkty przecięcia z wyższymi budynkami i rysowanie odcinków zakrytych linią przerywaną `[4, 3]`.
 * **Grupowanie i Łączenie Obiektów (Link / Group Buildings):**
   * Powiązywanie wielu brył w zespoły urbanistyczne – przesunięcie jednego obiektu synchronicznie transformuje całą grupę.
 
