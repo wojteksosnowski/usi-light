@@ -289,5 +289,62 @@ describe('directionSnapping', () => {
     // Should NOT contain oblique angle atan2(8, 7) ≈ 48.8°
     expect(angles).not.toContain(49);
   });
+
+  it('snaps accurately to the intersection between a guide line and a building edge (Guide ✕ Edge)', () => {
+    // Target building with vertical wall from (20, -10) to (20, 20) -> edge at x = 20
+    const bldg = createBuildingFromVertices(
+      [{ x: 20, y: -10 }, { x: 30, y: -10 }, { x: 30, y: 20 }, { x: 20, y: 20 }],
+      'Obstacle Bldg',
+      15.0,
+      false
+    );
+    bldg.id = 'bldg-target-edge';
+
+    // Guide from origin (0, 5) along 0° (horizontal y = 5)
+    // Intersects building edge at (20, 5)
+    const origin = { x: 0, y: 5 };
+    const mouse = { x: 19.8, y: 5.1 }; // cursor near (20, 5)
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      buildings: [bldg],
+      dominantDirections: [{ angleDeg: 0, orthogonalDeg: 90, totalLength: 100, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(20, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(5, 2);
+    expect(snap?.intersectedSegment).toBeDefined();
+    expect(snap?.intersectedSegment?.buildingId).toBe('bldg-target-edge');
+    expect(snap?.sourceLabel).toContain('Przecięcie z krawędzią');
+  });
+
+  it('snaps accurately to an oblique guide line intersecting a slanted static edge', () => {
+    // Static edge from (0, 10) to (10, 0) -> line x + y = 10
+    const staticSegs = [
+      { p1: { x: 0, y: 10 }, p2: { x: 10, y: 0 }, label: 'Krawędź ukośna' }
+    ];
+
+    // Guide line from (0, 0) along 45° -> line y = x
+    // Intersection with x + y = 10 must be at (5, 5)
+    const origin = { x: 0, y: 0 };
+    const mouse = { x: 4.9, y: 5.1 }; // cursor near (5, 5)
+
+    const snap = calculateDirectionSnap({
+      originPoint: origin,
+      currentMouseWorld: mouse,
+      staticReferenceSegments: staticSegs,
+      dominantDirections: [{ angleDeg: 45, orthogonalDeg: 135, totalLength: 50, percentage: 100 }],
+      angleToleranceDeg: 5.0,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relationType).toBe('guide_intersection');
+    expect(snap?.snappedPoint.x).toBeCloseTo(5, 2);
+    expect(snap?.snappedPoint.y).toBeCloseTo(5, 2);
+  });
 });
 

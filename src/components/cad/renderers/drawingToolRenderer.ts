@@ -426,7 +426,7 @@ export function renderDrawingToolPreview(
       const distLabel = `${directionSnapResult.distanceFromOrigin.toFixed(2)} m`;
       const angleLabel = `${directionSnapResult.guideAngleDeg.toFixed(1)}°`;
       const badgeText = isIntersection
-        ? `✕ Przecięcie osi (${directionSnapResult.guideAngleDeg.toFixed(1)}° ✕ ${directionSnapResult.secondGuideLine?.angleDeg?.toFixed(1) || ''}°)`
+        ? (directionSnapResult.sourceLabel || `✕ Przecięcie osi (${directionSnapResult.guideAngleDeg.toFixed(1)}° ✕ ${directionSnapResult.secondGuideLine?.angleDeg?.toFixed(1) || ''}°)`)
         : `${relationLabel} | ${angleLabel} | ${distLabel}`;
 
       ctx.font = 'bold 10px Inter, sans-serif';

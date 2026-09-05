@@ -11,6 +11,7 @@ export interface DirectionSnapResult {
   isStatistical?: boolean; // true dla siatek głównych i statystycznych, false dla konkretnych krawędzi
   guideLine: { p1: Point2D; p2: Point2D };
   secondGuideLine?: { p1: Point2D; p2: Point2D; originPoint?: Point2D; angleDeg?: number; label?: string };
+  intersectedSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number; buildingName?: string };
   distanceFromOrigin: number;
   diffAngleDeg: number;
   sourceLabel?: string;
@@ -99,6 +100,49 @@ export function lineIntersection2D(
   return {
     x: p1.x + t1 * cos1,
     y: p1.y + t1 * sin1,
+  };
+}
+
+/**
+ * Helper to compute intersection point of a 2D line (pOrigin, angleRad) and a segment [segP1, segP2].
+ */
+export function lineSegmentIntersection2D(
+  pOrigin: Point2D,
+  angleRad: number,
+  segP1: Point2D,
+  segP2: Point2D
+): { point: Point2D; t: number; s: number } | null {
+  const cosA = Math.cos(angleRad);
+  const sinA = Math.sin(angleRad);
+  const vx = segP2.x - segP1.x;
+  const vy = segP2.y - segP1.y;
+
+  // Determinant
+  const det = sinA * vx - cosA * vy;
+  if (Math.abs(det) < 1e-4) {
+    return null; // Line and segment are parallel
+  }
+
+  const dx = segP1.x - pOrigin.x;
+  const dy = segP1.y - pOrigin.y;
+
+  // s: parameter along segment segP1 -> segP2
+  const s = (cosA * dy - sinA * dx) / det;
+  if (s < -0.01 || s > 1.01) {
+    return null;
+  }
+
+  // t: parameter along line from pOrigin
+  const t = (dx * vy - dy * vx) / det;
+
+  const clampedS = Math.max(0, Math.min(1, s));
+  return {
+    point: {
+      x: segP1.x + clampedS * vx,
+      y: segP1.y + clampedS * vy,
+    },
+    t,
+    s: clampedS,
   };
 }
 
@@ -376,11 +420,12 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
 
   const guideHalfLength = APP_CONFIG.directionSnapping.guideLineLengthMeters;
 
-  // 1. Sprawdzenie przecięcia dwóch prowadnic (Dual-Guide Intersection Snapping)
-  if (secondaryOriginPoints && secondaryOriginPoints.length > 0) {
-    let bestIntersection: DirectionSnapResult | null = null;
-    let bestIntScore = 999999;
+  // 1. Sprawdzenie przecięć prowadnic (Dual-Guide oraz Guide ✕ Edge Intersections)
+  let bestIntersection: DirectionSnapResult | null = null;
+  let bestIntScore = 999999;
 
+  // 1a. Przecięcie dwóch prowadnic (Dual-Guide Intersection Snapping)
+  if (secondaryOriginPoints && secondaryOriginPoints.length > 0) {
     for (const secOrigin of secondaryOriginPoints) {
       if (Math.hypot(secOrigin.x - originPoint.x, secOrigin.y - originPoint.y) < 0.05) continue;
 
@@ -460,10 +505,142 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         }
       }
     }
+  }
 
-    if (bestIntersection) {
-      return bestIntersection;
+  // 1b. Przecięcie prowadnicy z krawędzią obiektu w scenie (Guide ✕ Edge Intersection)
+  const intersectableSegments: {
+    p1: Point2D;
+    p2: Point2D;
+    buildingId?: string;
+    buildingName?: string;
+    edgeIndex?: number;
+    label?: string;
+  }[] = [];
+
+  if (Array.isArray(staticReferenceSegments)) {
+    for (const sSeg of staticReferenceSegments) {
+      intersectableSegments.push({
+        p1: sSeg.p1,
+        p2: sSeg.p2,
+        buildingId: sSeg.buildingId,
+        edgeIndex: sSeg.edgeIndex,
+        label: sSeg.label || 'Krawędź obiektu',
+      });
     }
+  }
+
+  for (const bldg of buildings) {
+    if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (Array.isArray(bldg.segments)) {
+      for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
+        if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+        const seg = bldg.segments[sIdx];
+        intersectableSegments.push({
+          p1: seg.p1,
+          p2: seg.p2,
+          buildingId: bldg.id,
+          buildingName: bldg.name,
+          edgeIndex: sIdx,
+          label: bldg.name,
+        });
+      }
+    }
+  }
+
+  for (const cand of primaryCandidates) {
+    const rad = (cand.angleDeg * Math.PI) / 180;
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+
+    for (const seg of intersectableSegments) {
+      if (
+        cand.sourceSegment &&
+        cand.sourceSegment.buildingId === seg.buildingId &&
+        cand.sourceSegment.edgeIndex === seg.edgeIndex
+      ) {
+        continue;
+      }
+      if (Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y) < 0.05) continue;
+      if (
+        Math.hypot(seg.p1.x - originPoint.x, seg.p1.y - originPoint.y) < 0.05 &&
+        Math.hypot(seg.p2.x - originPoint.x, seg.p2.y - originPoint.y) < 0.05
+      ) {
+        continue;
+      }
+
+      const intRes = lineSegmentIntersection2D(originPoint, rad, seg.p1, seg.p2);
+      if (!intRes) continue;
+
+      const intPt = intRes.point;
+      const intDist = Math.hypot(currentMouseWorld.x - intPt.x, currentMouseWorld.y - intPt.y);
+      let screenDistPx = intDist * 25;
+      let matchScreen = true;
+
+      if (worldToScreen) {
+        const sMouse = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
+        const sInt = worldToScreen(intPt.x, intPt.y);
+        screenDistPx = Math.hypot(sMouse.sx - sInt.sx, sMouse.sy - sInt.sy);
+        if (screenDistPx > (screenSnapThresholdPx || 14) * 1.5) {
+          matchScreen = false;
+        }
+      } else if (intDist > 1.5) {
+        matchScreen = false;
+      }
+
+      if (matchScreen) {
+        const projOntoRay = (intPt.x - originPoint.x) * cosA + (intPt.y - originPoint.y) * sinA;
+        const mouseProj = dx * cosA + dy * sinA;
+        if (
+          projOntoRay * mouseProj < -0.1 &&
+          Math.hypot(currentMouseWorld.x - originPoint.x, currentMouseWorld.y - originPoint.y) > 0.5
+        ) {
+          continue;
+        }
+
+        const score = screenDistPx + (cand.priority || 10) * 0.3;
+        if (score < bestIntScore) {
+          bestIntScore = score;
+          const segDx = seg.p2.x - seg.p1.x;
+          const segDy = seg.p2.y - seg.p1.y;
+          const segAngle = normalizeAngle180((Math.atan2(segDy, segDx) * 180) / Math.PI);
+          const segLabel = seg.buildingName ? `${seg.buildingName}` : seg.label || 'Krawędź';
+
+          bestIntersection = {
+            snappedPoint: intPt,
+            originPoint: { x: originPoint.x, y: originPoint.y },
+            guideAngleDeg: cand.angleDeg,
+            relationType: 'guide_intersection',
+            isStatistical: false,
+            guideLine: {
+              p1: { x: originPoint.x - guideHalfLength * cosA, y: originPoint.y - guideHalfLength * sinA },
+              p2: { x: originPoint.x + guideHalfLength * cosA, y: originPoint.y + guideHalfLength * sinA },
+            },
+            secondGuideLine: {
+              originPoint: seg.p1,
+              angleDeg: segAngle,
+              label: segLabel,
+              p1: seg.p1,
+              p2: seg.p2,
+            },
+            intersectedSegment: {
+              p1: seg.p1,
+              p2: seg.p2,
+              buildingId: seg.buildingId,
+              edgeIndex: seg.edgeIndex,
+              buildingName: seg.buildingName,
+            },
+            distanceFromOrigin: Math.hypot(intPt.x - originPoint.x, intPt.y - originPoint.y),
+            diffAngleDeg: 0,
+            sourceLabel: `✕ Przecięcie z krawędzią (${segLabel})`,
+            sourceSegment: cand.sourceSegment,
+          };
+        }
+      }
+    }
+  }
+
+  if (bestIntersection) {
+    return bestIntersection;
   }
 
   // 2. Standardowe dociąganie pojedynczej osi
