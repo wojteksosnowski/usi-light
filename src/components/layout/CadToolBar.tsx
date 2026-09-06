@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon } from '../common/CustomCadIcons';
+import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
 
 export const CadToolBar: React.FC = () => {
   const { undo, redo, pastStates, futureStates } = useStore(useSceneStore.temporal, (state) => state);
@@ -305,6 +305,70 @@ export const CadToolBar: React.FC = () => {
               <SetbackPenthouseIcon size={14} color={isStoryEligible ? '#c084fc' : '#94a3b8'} />
             </button>
 
+            {/* Przycisk Taras */}
+            <button
+              type="button"
+              disabled={!isStoryEligible}
+              style={{
+                ...buttonStyle(false),
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
+              }}
+              onClick={() => {
+                if (!isStoryEligible) return;
+                const newMod = {
+                  id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'terrace' as const,
+                  enabled: true,
+                  depth: -4.0,
+                  storiesCount: -1,
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
+                setShowModifiersPanel(true);
+              }}
+              title={
+                !selectedBuilding
+                  ? 'Modyfikator Taras (zaznacz budynek na scenie, aby dodać uskok krawędzi)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj taras (uskok wybranej krawędzi)'
+              }
+            >
+              <TerraceIcon size={14} color={isStoryEligible ? '#fed7aa' : '#94a3b8'} />
+            </button>
+
+            {/* Przycisk Donat */}
+            <button
+              type="button"
+              disabled={!isStoryEligible}
+              style={{
+                ...buttonStyle(false),
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
+              }}
+              onClick={() => {
+                if (!isStoryEligible) return;
+                const newMod = {
+                  id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'donut' as const,
+                  enabled: true,
+                  offset: -12.0,
+                  storiesCount: 0,
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
+                setShowModifiersPanel(true);
+              }}
+              title={
+                !selectedBuilding
+                  ? 'Modyfikator Donat (zaznacz budynek na scenie, aby dodać wewnętrzny otwór)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj donata (otwór / dziedziniec wewnątrz obrysu)'
+              }
+            >
+              <DonutIcon size={14} color={isStoryEligible ? '#a7f3d0' : '#94a3b8'} />
+            </button>
+
             {/* Przycisk Strefa / Obszar */}
             <button
               type="button"
@@ -339,14 +403,14 @@ export const CadToolBar: React.FC = () => {
             {/* Przycisk Wykusz (Bay Window) */}
             <button
               type="button"
-              disabled={!isEligible}
+              disabled={!isStoryEligible}
               style={{
                 ...buttonStyle(false),
-                opacity: isEligible ? 1 : 0.35,
-                cursor: isEligible ? 'pointer' : 'not-allowed',
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
               }}
               onClick={() => {
-                if (!isEligible) return;
+                if (!isStoryEligible) return;
                 const newMod = {
                   id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                   type: 'bay_window' as const,
@@ -360,11 +424,13 @@ export const CadToolBar: React.FC = () => {
               }}
               title={
                 !selectedBuilding
-                  ? 'Modyfikator Wykusz (zaznacz obiekt na scenie, aby dodać wykusz)'
-                  : 'Dodaj / edytuj wykusz (Bay Window) na elewacji / obwodzie'
+                  ? 'Modyfikator Wykusz (zaznacz budynek na scenie, aby dodać wykusz)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj wykusz (Bay Window) na elewacji'
               }
             >
-              <BayWindowIcon size={14} color={isEligible ? '#fef08a' : '#94a3b8'} />
+              <BayWindowIcon size={14} color={isStoryEligible ? '#fef08a' : '#94a3b8'} />
             </button>
           </div>
         );

@@ -21,7 +21,7 @@ import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d'
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon } from '../common/CustomCadIcons';
+import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
 
 export const ToolsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -724,7 +724,7 @@ export const ToolsGroup: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {selectedBuilding ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
                 <button
                   type="button"
                   disabled={selectedBuilding.category === 'boundary'}
@@ -761,6 +761,68 @@ export const ToolsGroup: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={selectedBuilding.category === 'boundary'}
+                  onClick={() => {
+                    if (selectedBuilding.category === 'boundary') return;
+                    const newMod = {
+                      id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                      type: 'terrace' as const,
+                      enabled: true,
+                      depth: -4.0,
+                      storiesCount: -1,
+                    };
+                    addBuildingModifier(selectedBuilding.id, newMod);
+                    setShowModifiersPanel(true);
+                  }}
+                  className="btn-tile active-indigo"
+                  style={{
+                    justifyContent: 'center',
+                    gap: '4px',
+                    padding: '7px 4px',
+                    fontSize: '10px',
+                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
+                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
+                  }}
+                  title="Dodaj modyfikator tarasu (uskok wybranej krawędzi)"
+                >
+                  <TerraceIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#fed7aa'} />
+                  <span style={{ fontWeight: 600 }}>+ Taras</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={selectedBuilding.category === 'boundary'}
+                  onClick={() => {
+                    if (selectedBuilding.category === 'boundary') return;
+                    const newMod = {
+                      id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                      type: 'donut' as const,
+                      enabled: true,
+                      offset: -12.0,
+                      storiesCount: 0,
+                    };
+                    addBuildingModifier(selectedBuilding.id, newMod);
+                    setShowModifiersPanel(true);
+                  }}
+                  className="btn-tile active-indigo"
+                  style={{
+                    justifyContent: 'center',
+                    gap: '4px',
+                    padding: '7px 4px',
+                    fontSize: '10px',
+                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
+                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
+                  }}
+                  title="Dodaj modyfikator donata (wewnętrzny otwór / patio)"
+                >
+                  <DonutIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#a7f3d0'} />
+                  <span style={{ fontWeight: 600 }}>+ Donat</span>
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+                <button
+                  type="button"
                   onClick={() => {
                     const newMod = {
                       id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -783,7 +845,9 @@ export const ToolsGroup: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={selectedBuilding.category === 'boundary'}
                   onClick={() => {
+                    if (selectedBuilding.category === 'boundary') return;
                     const newMod = {
                       id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                       type: 'bay_window' as const,
@@ -796,10 +860,21 @@ export const ToolsGroup: React.FC = () => {
                     setShowModifiersPanel(true);
                   }}
                   className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
-                  title="Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi"
+                  style={{
+                    justifyContent: 'center',
+                    gap: '4px',
+                    padding: '7px 4px',
+                    fontSize: '10px',
+                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
+                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
+                  }}
+                  title={
+                    selectedBuilding.category === 'boundary'
+                      ? 'Obiekty geodezyjne (granica/obszar) nie posiadają elewacji'
+                      : 'Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi'
+                  }
                 >
-                  <BayWindowIcon size={12} color="#fef08a" />
+                  <BayWindowIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#fef08a'} />
                   <span style={{ fontWeight: 600 }}>+ Wykusz</span>
                 </button>
               </div>
@@ -811,20 +886,46 @@ export const ToolsGroup: React.FC = () => {
                     const isStory = m.type === 'story_offset';
                     const isZone = m.type === 'zone_offset';
                     const isBay = m.type === 'bay_window';
+                    const isTerrace = m.type === 'terrace';
+                    const isDonut = m.type === 'donut';
                     const offMod = m as any;
-                    const accentColor = isStory ? '#c084fc' : isZone ? '#38bdf8' : '#fef08a';
+                    const accentColor = isStory
+                      ? '#c084fc'
+                      : isZone
+                      ? '#38bdf8'
+                      : isBay
+                      ? '#fef08a'
+                      : isTerrace
+                      ? '#fed7aa'
+                      : '#a7f3d0';
                     const bgAccent = isStory
                       ? 'rgba(168, 85, 247, 0.15)'
                       : isZone
                       ? 'rgba(56, 189, 248, 0.15)'
-                      : 'rgba(234, 179, 8, 0.15)';
+                      : isBay
+                      ? 'rgba(234, 179, 8, 0.15)'
+                      : isTerrace
+                      ? 'rgba(249, 115, 22, 0.15)'
+                      : 'rgba(16, 185, 129, 0.15)';
                     const borderAccent = isStory
                       ? 'rgba(168, 85, 247, 0.35)'
                       : isZone
                       ? 'rgba(56, 189, 248, 0.35)'
-                      : 'rgba(234, 179, 8, 0.35)';
+                      : isBay
+                      ? 'rgba(234, 179, 8, 0.35)'
+                      : isTerrace
+                      ? 'rgba(249, 115, 22, 0.35)'
+                      : 'rgba(16, 185, 129, 0.35)';
 
-                    const typeName = isStory ? 'Uskok' : isZone ? 'Strefa' : 'Wykusz';
+                    const typeName = isStory
+                      ? 'Uskok'
+                      : isZone
+                      ? 'Strefa'
+                      : isBay
+                      ? 'Wykusz'
+                      : isTerrace
+                      ? 'Taras'
+                      : 'Donat';
 
                     return (
                       <div
@@ -852,9 +953,15 @@ export const ToolsGroup: React.FC = () => {
                             {isStory && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
                             {isZone && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
                             {isBay && `(${offMod.width}m × ${offMod.projection > 0 ? `+${offMod.projection}m` : `${offMod.projection}m`})`}
-                            {isStory && (
+                            {isTerrace && `${offMod.depth}m`}
+                            {isDonut && `${offMod.offset}m`}
+                            {(isStory || isTerrace || isDonut) && (
                               <span style={{ opacity: 0.8, fontSize: '9.5px', marginLeft: '3px' }}>
-                                ({offMod.storiesCount < 0 ? `${offMod.storiesCount} góra` : `+${offMod.storiesCount} dół`})
+                                ({offMod.storiesCount === 0
+                                  ? 'całość'
+                                  : offMod.storiesCount < 0
+                                  ? `${offMod.storiesCount} góra`
+                                  : `+${offMod.storiesCount} dół`})
                               </span>
                             )}
                           </span>

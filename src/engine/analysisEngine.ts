@@ -131,13 +131,9 @@ export function prefilterShadowingCandidatesForSegment(
     for (const seg of bldg.segments) {
       if (bldg.id === targetBuildingId) {
         if (seg.id === segment.id) continue;
-        // Odrzuć ściany własnego budynku leżące w tej samej płaszczyźnie (np. wyższe/niższe kondygnacje tej samej elewacji)
+        // Odrzuć ściany własnego budynku skierowane w tę samą stronę (np. wyższe/niższe kondygnacje tej samej elewacji lub cofnięte tarasy)
         const dotNormal = segment.normal.x * seg.normal.x + segment.normal.y * seg.normal.y;
-        if (dotNormal > 0.99) {
-          const d1 = Math.abs((seg.p1.x - segment.p1.x) * segment.normal.x + (seg.p1.y - segment.p1.y) * segment.normal.y);
-          const d2 = Math.abs((seg.p2.x - segment.p1.x) * segment.normal.x + (seg.p2.y - segment.p1.y) * segment.normal.y);
-          if (d1 < 0.05 && d2 < 0.05) continue;
-        }
+        if (dotNormal > 0.5) continue;
       }
       if (seg.hTop <= pointBaseH) continue;
 
@@ -163,19 +159,35 @@ export function prefilterShadowingCandidatesForSegment(
 }
 
 /**
- * Filtruje prefiltrowane przeszkody § 12 dla konkretnego punktu P (backface culling + stożek widzenia fasady).
+ * Filtruje prefiltrowane przeszkody § 12 dla konkretnego punktu P (backface culling + stożek widzenia fasady + półpłaszczyzna czołowa).
  */
 export function filterPointShadowingFromCandidates(
   point: Point2D,
   candidates: PrefilteredObstacle[],
   n1: Point2D,
-  n2: Point2D
+  n2: Point2D,
+  segment?: FacadeSegment,
+  targetBuildingId?: string
 ): PrefilteredObstacle[] {
+  const normal = segment?.normal;
   const filtered: PrefilteredObstacle[] = [];
   const len = candidates.length;
   for (let i = 0; i < len; i++) {
     const item = candidates[i];
     const seg = item.seg;
+
+    // 1. Sprawdzenie położenia względem płaszczyzny fasady punktu P
+    if (normal) {
+      const distP1 = (seg.p1.x - point.x) * normal.x + (seg.p1.y - point.y) * normal.y;
+      const distP2 = (seg.p2.x - point.x) * normal.x + (seg.p2.y - point.y) * normal.y;
+      if (distP1 <= 0.001 && distP2 <= 0.001) continue;
+
+      // Ściany własnego budynku skierowane w tę samą stronę
+      if (targetBuildingId && item.bldgId === targetBuildingId) {
+        const dotN = normal.x * seg.normal.x + normal.y * seg.normal.y;
+        if (dotN > 0.5) continue;
+      }
+    }
 
     // Backface culling: normalna odcinka przeszkody musi być zwrócona w stronę punktu P
     const dotExt =
@@ -221,7 +233,7 @@ export function prefilterShadowingObstacles(
   const n2 = { x: -Math.sin(a2), y: Math.cos(a2) };
 
   const candidates = prefilterShadowingCandidatesForSegment(segment, allBuildings, targetBuildingId);
-  return filterPointShadowingFromCandidates(point, candidates, n1, n2);
+  return filterPointShadowingFromCandidates(point, candidates, n1, n2, segment, targetBuildingId);
 }
 
 /**
@@ -490,8 +502,26 @@ export function analyzeShadowingAtPoint(
   const rawBlocked: BlockedInterval[] = [];
 
   for (const cand of candidates) {
-    const a1 = getRelAngleDeg(cand.clipP1);
-    const a2 = getRelAngleDeg(cand.clipP2);
+    let pA = cand.clipP1;
+    let pB = cand.clipP2;
+
+    const dA = (pA.x - point.x) * normal.x + (pA.y - point.y) * normal.y;
+    const dB = (pB.x - point.x) * normal.x + (pB.y - point.y) * normal.y;
+
+    // Both endpoints behind or on the facade plane
+    if (dA <= 0.001 && dB <= 0.001) continue;
+
+    // Clip crossing segment to forward half-space (dA >= 0.001)
+    if (dA < 0.001) {
+      const t = (0.001 - dA) / (dB - dA);
+      pA = { x: pA.x + t * (pB.x - pA.x), y: pA.y + t * (pB.y - pA.y) };
+    } else if (dB < 0.001) {
+      const t = (0.001 - dA) / (dB - dA);
+      pB = { x: pA.x + t * (pB.x - pA.x), y: pA.y + t * (pB.y - pA.y) };
+    }
+
+    const a1 = getRelAngleDeg(pA);
+    const a2 = getRelAngleDeg(pB);
 
     const minA = Math.min(a1, a2);
     const maxA = Math.max(a1, a2);
