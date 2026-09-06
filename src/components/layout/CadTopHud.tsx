@@ -87,6 +87,15 @@ export const CadTopHud: React.FC = () => {
     // Inicjalne wystartowanie timerów
     resetIdleTimers();
 
+    // Czyszczenie ewentualnych starych kluczy licencyjnych z wersji eksperymentalnych
+    try {
+      if (localStorage.getItem('usi_license_key')) {
+        localStorage.removeItem('usi_license_key');
+      }
+    } catch {
+      // Ignoruj błędy dostępu do localStorage
+    }
+
     return () => {
       if (timer1) clearTimeout(timer1);
       if (timer2) clearTimeout(timer2);
@@ -404,7 +413,7 @@ export const CadTopHud: React.FC = () => {
       <button
         onClick={() => setShareModalOpen(true)}
         title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
-        className={`btn-share ${isShareGlinting ? 'glinting' : ''}`}
+        className={`cad-publish-btn ${isShareGlinting ? 'glinting' : ''}`}
         style={{
           height: '28px',
           display: 'inline-flex',

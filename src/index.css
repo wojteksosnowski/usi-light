@@ -315,14 +315,14 @@ html, body, #root {
   background-color: var(--border-color);
 }
 
-.btn-share {
+.cad-publish-btn {
   position: relative;
   overflow: hidden;
   flex-shrink: 0;
   min-width: max-content;
   white-space: nowrap;
   height: 28px;
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -337,7 +337,7 @@ html, body, #root {
   box-shadow: 0 2px 10px rgba(147, 51, 234, 0.25);
   transition: all 0.2s ease;
 }
-.btn-share:hover {
+.cad-publish-btn:hover {
   background: linear-gradient(135deg, rgba(147, 51, 234, 0.6), rgba(99, 102, 241, 0.65));
   border-color: rgba(217, 70, 239, 0.9);
   box-shadow: 0 4px 16px rgba(168, 85, 247, 0.5);
@@ -345,12 +345,12 @@ html, body, #root {
   color: #ffffff;
 }
 
-.btn-share.glinting {
-  animation: share-border-glint 1s ease-in-out forwards;
+.cad-publish-btn.glinting {
+  animation: publish-border-glint 1s ease-in-out forwards;
 }
 
 /* Szybki (~1s) błysk lśniącej ramki jak odblask wyzwalany timerem */
-@keyframes share-border-glint {
+@keyframes publish-border-glint {
   0% {
     border-color: rgba(168, 85, 247, 0.6);
     box-shadow: 0 2px 10px rgba(147, 51, 234, 0.25);
@@ -373,7 +373,7 @@ html, body, #root {
   }
 }
 
-.btn-share.glinting::after {
+.cad-publish-btn.glinting::after {
   content: '';
   position: absolute;
   top: 0;
@@ -388,10 +388,10 @@ html, body, #root {
   );
   transform: skewX(-20deg);
   pointer-events: none;
-  animation: share-sweep-glint 1s ease-in-out forwards;
+  animation: publish-sweep-glint 1s ease-in-out forwards;
 }
 
-@keyframes share-sweep-glint {
+@keyframes publish-sweep-glint {
   0% {
     left: -120%;
   }
