@@ -139,9 +139,6 @@ export const CadTopHud: React.FC = () => {
       >
         <MapPin size={13} color="#f59e0b" />
         <span style={{ fontWeight: 600, color: '#f8fafc' }}>{selectedCity}</span>
-        <span style={{ fontSize: '10px', color: '#94a3b8' }}>
-          ({settings.latitude.toFixed(2)}°N)
-        </span>
       </div>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
@@ -254,7 +251,7 @@ export const CadTopHud: React.FC = () => {
         title="Włącz / wyłącz podkład z mapy satelitarnej Google Maps pod sceną CAD"
       >
         <Globe size={13} />
-        <span>Satelita</span>
+        <span className="hud-btn-label">Satelita</span>
       </button>
       <button
         onClick={() => setShowProjectParameters((prev) => !prev)}
@@ -278,7 +275,7 @@ export const CadTopHud: React.FC = () => {
         title="Włącz / wyłącz panel analityczny: Parametry projektu i bilans powierzchni"
       >
         <FileSpreadsheet size={13} />
-        <span>Parametry</span>
+        <span className="hud-btn-label">Parametry</span>
       </button>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
@@ -313,7 +310,7 @@ export const CadTopHud: React.FC = () => {
           }}
         >
           <Maximize2 size={13} />
-          <span>Centruj</span>
+          <span className="hud-btn-label">Centruj</span>
         </button>
 
         <button
@@ -337,7 +334,7 @@ export const CadTopHud: React.FC = () => {
           }}
         >
           <RotateCw size={13} />
-          <span>Obrót</span>
+          <span className="hud-btn-label">Obrót</span>
         </button>
 
         <button
@@ -371,7 +368,7 @@ export const CadTopHud: React.FC = () => {
               transition: 'transform 0.2s ease',
             }}
           />
-          <span>Przełącz</span>
+          <span className="hud-btn-label">Przełącz</span>
         </button>
       </div>
 
@@ -399,7 +396,7 @@ export const CadTopHud: React.FC = () => {
         }}
       >
         <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
-        <span>Przyciąganie</span>
+        <span className="hud-btn-label">Przyciąganie</span>
       </button>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
@@ -408,6 +405,25 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShareModalOpen(true)}
         title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
         className={`btn-share ${isShareGlinting ? 'glinting' : ''}`}
+        style={{
+          height: '28px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '5px',
+          padding: '0 10px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 700,
+          cursor: 'pointer',
+          border: '1px solid rgba(168, 85, 247, 0.7)',
+          background: 'linear-gradient(135deg, rgba(147, 51, 234, 0.45), rgba(99, 102, 241, 0.5))',
+          color: '#ffffff',
+          boxShadow: '0 2px 10px rgba(147, 51, 234, 0.25)',
+          transition: 'all 0.2s ease',
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+        }}
       >
         <Share2 size={13} />
         <span>Udostępnij</span>
