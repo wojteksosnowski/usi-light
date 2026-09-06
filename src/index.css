@@ -197,16 +197,23 @@ html, body, #root {
   position: absolute;
   top: 16px;
   left: 16px;
+  max-width: calc(100% - 32px);
+  overflow-x: auto;
+  scrollbar-width: none;
   z-index: 20;
   background-color: rgba(11, 19, 41, 0.92);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-light);
   border-radius: 16px;
-  padding: 6px 10px;
+  padding: 5px 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.cad-hud-top::-webkit-scrollbar {
+  display: none;
 }
 
 .cad-toolbar {
@@ -305,6 +312,9 @@ html, body, #root {
 .btn-share {
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
+  min-width: max-content;
+  white-space: nowrap;
   height: 28px;
   display: inline-flex;
   align-items: center;

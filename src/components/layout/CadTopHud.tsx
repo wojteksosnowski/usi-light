@@ -125,13 +125,15 @@ export const CadTopHud: React.FC = () => {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          padding: '4px 10px',
+          gap: '5px',
+          padding: '4px 8px',
           borderRadius: '6px',
           backgroundColor: 'rgba(15, 23, 42, 0.85)',
           border: '1px solid #334155',
           fontSize: '11px',
           color: '#f8fafc',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
         }}
         title={`Lokalizacja projektu: ${selectedCity} (${settings.latitude.toFixed(2)}°N, ${settings.longitude.toFixed(2)}°E)`}
       >
@@ -142,13 +144,13 @@ export const CadTopHud: React.FC = () => {
         </span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       <button
         onClick={() => setShowShadowingLines((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -160,6 +162,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showShadowingLines ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
           color: showShadowingLines ? '#6ee7b7' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
       >
         § 12
@@ -168,7 +171,7 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShowSunlightLines((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -180,6 +183,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showSunlightLines ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
           color: showSunlightLines ? '#fcd34d' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
       >
         § 56
@@ -188,7 +192,7 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShowAnalysisPoints((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -200,6 +204,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showAnalysisPoints ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
           color: showAnalysisPoints ? '#38bdf8' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz punkty kontrolne na fasadzie oraz nasłonecznienie placu zabaw"
       >
@@ -209,7 +214,7 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShowShadowRange((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -221,6 +226,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showShadowRange ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
           color: showShadowRange ? '#c7d2fe' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz widoczność obwiedni maksymalnego zasięgu cienia rzucanego przez obiekty badane w równonoc"
       >
@@ -233,8 +239,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '5px',
-          padding: '0 9px',
+          gap: '4px',
+          padding: '0 8px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -243,6 +249,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
           color: showSatelliteLayer ? '#38bdf8' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz podkład z mapy satelitarnej Google Maps pod sceną CAD"
       >
@@ -256,8 +263,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '5px',
-          padding: '0 9px',
+          gap: '4px',
+          padding: '0 8px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -266,6 +273,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showProjectParameters ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
           color: showProjectParameters ? 'var(--accent-emerald, #34d399)' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz panel analityczny: Parametry projektu i bilans powierzchni"
       >
@@ -273,20 +281,17 @@ export const CadTopHud: React.FC = () => {
         <span>Parametry</span>
       </button>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       {/* Grupa Widok: centruj, obrót, przełącz */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
+          gap: '4px',
+          flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', paddingRight: '2px' }}>
-          Widok:
-        </span>
-
         <button
           onClick={triggerFit}
           title="Dopasuj widok do obiektów (Zoom Extents)"
@@ -295,8 +300,8 @@ export const CadTopHud: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '5px',
-            padding: '0 10px',
+            gap: '4px',
+            padding: '0 8px',
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: 600,
@@ -319,8 +324,8 @@ export const CadTopHud: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '5px',
-            padding: '0 10px',
+            gap: '4px',
+            padding: '0 8px',
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: 600,
@@ -347,8 +352,8 @@ export const CadTopHud: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '5px',
-            padding: '0 10px',
+            gap: '4px',
+            padding: '0 8px',
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: 600,
@@ -370,7 +375,7 @@ export const CadTopHud: React.FC = () => {
         </button>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       <button
         onClick={toggleOsnap}
@@ -380,8 +385,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '5px',
-          padding: '0 10px',
+          gap: '4px',
+          padding: '0 8px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -390,13 +395,14 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: isOsnapActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(30, 41, 59, 0.8)',
           color: isOsnapActive ? '#6ee7b7' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
       >
         <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
         <span>Przyciąganie</span>
       </button>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       <button
         onClick={() => setShareModalOpen(true)}
