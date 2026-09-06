@@ -60,6 +60,82 @@ interface DragVertexContext {
   }[];
 }
 
+export function getShiftOrthoSnap(
+  origin: Point2D,
+  currentMouse: Point2D,
+  dominantDirections: { angleDeg: number; orthogonalDeg?: number }[] = []
+): { snappedPoint: Point2D; dirSnap: DirectionSnapResult } {
+  const dx = currentMouse.x - origin.x;
+  const dy = currentMouse.y - origin.y;
+  const rawAngleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+
+  // Cardinal angles (0°, 90°, 180°, 270°)
+  const candidateAngles: { angleDeg: number; label: string; isStatistical: boolean }[] = [
+    { angleDeg: 0, label: 'Kardynalny X (0°)', isStatistical: false },
+    { angleDeg: 90, label: 'Kardynalny Y (90°)', isStatistical: false },
+    { angleDeg: 180, label: 'Kardynalny -X (180°)', isStatistical: false },
+    { angleDeg: 270, label: 'Kardynalny -Y (270°)', isStatistical: false },
+  ];
+
+  if (dominantDirections && dominantDirections.length > 0) {
+    const dom = dominantDirections[0];
+    const a1 = ((dom.angleDeg % 360) + 360) % 360;
+    const a2 = (a1 + 180) % 360;
+    const ortho = dom.orthogonalDeg ?? (dom.angleDeg + 90);
+    const o1 = ((ortho % 360) + 360) % 360;
+    const o2 = (o1 + 180) % 360;
+
+    candidateAngles.push(
+      { angleDeg: a1, label: `Siatka główna (${dom.angleDeg.toFixed(1)}°)`, isStatistical: true },
+      { angleDeg: a2, label: `Siatka główna (${dom.angleDeg.toFixed(1)}°)`, isStatistical: true },
+      { angleDeg: o1, label: `Siatka poprzeczna (${ortho.toFixed(1)}°)`, isStatistical: true },
+      { angleDeg: o2, label: `Siatka poprzeczna (${ortho.toFixed(1)}°)`, isStatistical: true }
+    );
+  }
+
+  let bestAngle = candidateAngles[0];
+  let minDiff = 360;
+
+  for (const cand of candidateAngles) {
+    let diff = Math.abs(cand.angleDeg - rawAngleDeg);
+    if (diff > 180) diff = 360 - diff;
+    if (diff < minDiff) {
+      minDiff = diff;
+      bestAngle = cand;
+    }
+  }
+
+  const rad = (bestAngle.angleDeg * Math.PI) / 180;
+  const cosA = Math.cos(rad);
+  const sinA = Math.sin(rad);
+  const projDist = dx * cosA + dy * sinA;
+  const effectiveDist = Math.max(0, projDist);
+
+  const snappedPoint: Point2D = {
+    x: origin.x + effectiveDist * cosA,
+    y: origin.y + effectiveDist * sinA,
+  };
+
+  const guideHalfLength = APP_CONFIG.directionSnapping.guideLineLengthMeters || 200;
+  const dirSnap: DirectionSnapResult = {
+    snappedPoint,
+    originPoint: { x: origin.x, y: origin.y },
+    guideAngleDeg: bestAngle.angleDeg,
+    relationType: bestAngle.isStatistical ? 'dominant' : 'parallel',
+    isStatistical: bestAngle.isStatistical,
+    guideLine: {
+      p1: { x: origin.x - guideHalfLength * cosA, y: origin.y - guideHalfLength * sinA },
+      p2: { x: origin.x + guideHalfLength * cosA, y: origin.y + guideHalfLength * sinA },
+    },
+    distanceFromOrigin: effectiveDist,
+    diffAngleDeg: minDiff,
+    sourceLabel: `${bestAngle.label} [SHIFT]`,
+  };
+
+  return { snappedPoint, dirSnap };
+}
+
+
 function computeIncidentAxes(
   verts: Point2D[],
   vertexIndex: number,
@@ -1452,15 +1528,22 @@ export function useCanvasInteraction({
       }
 
       let dirSnap: DirectionSnapResult | null = null;
-      if (isDirectionSnappingActive) {
-        let origin: Point2D | null = null;
-        if (drawingMode === 'rectangle' && drawingVertices.length === 1) {
-          origin = drawingVertices[0];
-        } else if ((drawingMode === 'polyline' || drawingMode === 'sweep') && drawingVertices.length > 0) {
-          origin = drawingVertices[drawingVertices.length - 1];
-        }
+      let origin: Point2D | null = null;
+      if (drawingMode === 'rectangle' && drawingVertices.length === 1) {
+        origin = drawingVertices[0];
+      } else if ((drawingMode === 'polyline' || drawingMode === 'sweep') && drawingVertices.length > 0) {
+        origin = drawingVertices[drawingVertices.length - 1];
+      }
 
-        if (origin) {
+      if (e.shiftKey && origin) {
+        // Shift modifier forces CAD cardinal directions and dominant statistical angles
+        const shiftRes = getShiftOrthoSnap(origin, mousePos, dominantDirections);
+        mousePos = shiftRes.snappedPoint;
+        dirSnap = shiftRes.dirSnap;
+        setActiveDirectionSnap(dirSnap);
+        setActiveOsnapSnap(null);
+      } else {
+        if (isDirectionSnappingActive && origin) {
           const secondaryOrigins: Point2D[] = [];
           if (drawingVertices.length > 1) {
             secondaryOrigins.push(drawingVertices[0]);
@@ -1481,30 +1564,31 @@ export function useCanvasInteraction({
             selectedBuildingId: selectedBuildingId ?? undefined,
           });
         }
-      }
 
-      if (osnap && (osnap.type === 'endpoint' || osnap.type === 'midpoint')) {
-        mousePos = osnap.snappedPoint;
-        setActiveOsnapSnap(osnap);
-        setActiveDirectionSnap(null);
-      } else if (dirSnap && dirSnap.relationType === 'guide_intersection') {
-        mousePos = dirSnap.snappedPoint;
-        setActiveDirectionSnap(dirSnap);
-        setActiveOsnapSnap(null);
-      } else if (dirSnap) {
-        mousePos = dirSnap.snappedPoint;
-        setActiveDirectionSnap(dirSnap);
-        setActiveOsnapSnap(null);
-      } else if (osnap) {
-        mousePos = osnap.snappedPoint;
-        setActiveOsnapSnap(osnap);
-        setActiveDirectionSnap(null);
-      } else {
-        setActiveOsnapSnap(null);
-        setActiveDirectionSnap(null);
+        if (osnap && (osnap.type === 'endpoint' || osnap.type === 'midpoint')) {
+          mousePos = osnap.snappedPoint;
+          setActiveOsnapSnap(osnap);
+          setActiveDirectionSnap(null);
+        } else if (dirSnap && dirSnap.relationType === 'guide_intersection') {
+          mousePos = dirSnap.snappedPoint;
+          setActiveDirectionSnap(dirSnap);
+          setActiveOsnapSnap(null);
+        } else if (dirSnap) {
+          mousePos = dirSnap.snappedPoint;
+          setActiveDirectionSnap(dirSnap);
+          setActiveOsnapSnap(null);
+        } else if (osnap) {
+          mousePos = osnap.snappedPoint;
+          setActiveOsnapSnap(osnap);
+          setActiveDirectionSnap(null);
+        } else {
+          setActiveOsnapSnap(null);
+          setActiveDirectionSnap(null);
+        }
       }
 
       setCurrentMouseWorld(mousePos);
+
     } else {
       if (activeDirectionSnap) setActiveDirectionSnap(null);
       if (activeOsnapSnap) setActiveOsnapSnap(null);

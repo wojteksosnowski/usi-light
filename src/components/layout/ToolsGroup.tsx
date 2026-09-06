@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Wrench,
   Magnet,
-  Compass,
   Square,
   RotateCw,
   Combine,
@@ -103,40 +102,25 @@ export const ToolsGroup: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          {/* Rząd przełączników: Dociąganie oraz Śledzenie */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px', marginBottom: '4px' }}>
+          {/* Główny przełącznik przyciągania */}
+          <div style={{ marginBottom: '4px' }}>
             <button
               type="button"
               onClick={toggleOsnap}
               className={`btn-tile ${isOsnapActive ? 'active-emerald' : 'inactive'}`}
-              style={{ padding: '7px 8px', justifyContent: 'space-between' }}
-              title="Włącz / wyłącz dociąganie geometryczne [F3] (wierzchołki, środki, krawędzie, przecięcia OTRACK)"
+              style={{ padding: '7px 10px', justifyContent: 'space-between', width: '100%' }}
+              title="Włącz / wyłącz przyciąganie geometryczne [S / F3] (przytrzymaj SHIFT aby wymusić kąty kardynalne i dominujące)"
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Magnet size={13} color={isOsnapActive ? '#10b981' : '#64748b'} />
-                <span style={{ fontWeight: 600, fontSize: '11px' }}>Dociąganie [F3]</span>
+                <span style={{ fontWeight: 600, fontSize: '11px' }}>Przyciąganie [S / F3]</span>
               </div>
               <span style={{ fontSize: '10px', fontWeight: 700 }}>
                 {isOsnapActive ? 'WŁ' : 'WYŁ'}
               </span>
             </button>
-
-            <button
-              type="button"
-              onClick={toggleDirectionSnapping}
-              className={`btn-tile ${isDirectionSnappingActive ? 'active-indigo' : 'inactive'}`}
-              style={{ padding: '7px 8px', justifyContent: 'space-between' }}
-              title="Włącz / wyłącz inteligentne śledzenie kątowe i kierunków"
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#64748b'} />
-                <span style={{ fontWeight: 600, fontSize: '11px' }}>Śledzenie</span>
-              </div>
-              <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                {isDirectionSnappingActive ? 'WŁ' : 'WYŁ'}
-              </span>
-            </button>
           </div>
+
 
           {/* Rząd 1: Prostokąt, Polilinia, Wstęga */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>

@@ -8,6 +8,7 @@ import {
   Sliders,
   Globe,
   Share2,
+  FileSpreadsheet,
 } from 'lucide-react';
 import {
   useSceneStore,
@@ -66,6 +67,8 @@ export const ProjectGroup: React.FC = () => {
   const setShowSatelliteLayer = useSolarAnalysisStore((s) => s.setShowSatelliteLayer);
   const satelliteOpacity = useSolarAnalysisStore((s) => s.satelliteOpacity);
   const setSatelliteOpacity = useSolarAnalysisStore((s) => s.setSatelliteOpacity);
+  const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
+  const setShowProjectParameters = useSolarAnalysisStore((s) => s.setShowProjectParameters);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
   const setSunlightMethod = useSolarAnalysisStore((s) => s.setSunlightMethod);
   const pinnedPoints = useSolarAnalysisStore((s) => s.pinnedPoints);
@@ -1143,6 +1146,66 @@ export const ProjectGroup: React.FC = () => {
                 />
               </div>
             )}
+          </div>
+
+          {/* 6. Parametry projektu (Bilans powierzchni i kubatury) */}
+          <div
+            style={{
+              padding: '8px 10px',
+              borderRadius: '10px',
+              backgroundColor: showProjectParameters ? 'rgba(16, 185, 129, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+              border: showProjectParameters ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #1e293b',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowProjectParameters((prev) => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'none',
+                border: 'none',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                padding: 0,
+                width: '100%',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileSpreadsheet size={14} color={showProjectParameters ? 'var(--accent-emerald, #34d399)' : '#64748b'} />
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Parametry projektu (Bilans i wskaźniki)</span>
+              </div>
+              <div
+                style={{
+                  width: '28px',
+                  height: '16px',
+                  borderRadius: '999px',
+                  backgroundColor: showProjectParameters ? '#10b981' : '#334155',
+                  position: 'relative',
+                  transition: 'background-color 0.2s ease',
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ffffff',
+                    position: 'absolute',
+                    top: '2px',
+                    left: showProjectParameters ? '14px' : '2px',
+                    transition: 'left 0.2s ease',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                  }}
+                />
+              </div>
+            </button>
           </div>
         </div>
       </div>

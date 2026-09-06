@@ -94,7 +94,13 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
    - Tło: `rgba(19, 29, 56, 0.8)`, hover: `var(--border-color)`
    - Obramowanie: `1px solid var(--border-light)`
    - Zaokrąglenie: `border-radius: 12px`, `font-size: 12px`
-3. **Kafle przełączników warstw (`.btn-tile`)**:
+3. **Wyróżniona akcja specjalna / Udostępnianie (`.btn-share`)**:
+   - Tło: `linear-gradient(135deg, rgba(147, 51, 234, 0.4), rgba(99, 102, 241, 0.45))`
+   - Obramowanie: `1px solid rgba(168, 85, 247, 0.6)`
+   - Efekt odblasku ramki: krótki (~1s) odblask ramki i refleks świetlny (`.glinting`), wyzwalany po **30 sekundach** bezczynności użytkownika, a następnie powtórzony po kolejnych **15 sekundach** (45s łącznie), po czym zatrzymywany do czasu kolejnej aktywności użytkownika.
+   - Kolor tekstu i ikony: `#f3e8ff`, hover `#ffffff` z cieniem `0 4px 16px rgba(168, 85, 247, 0.5)`
+   - Zaokrąglenie: `border-radius: 6px`, `font-size: 11px`, `font-weight: 700`
+4. **Kafle przełączników warstw (`.btn-tile`)**:
    - Zaokrąglenie: `border-radius: 8px`, `font-size: 11.5px`
    - Stan nieaktywny (`.inactive`): tło `rgba(6, 11, 24, 0.6)`, obramowanie `var(--border-color)`, kolor `var(--text-secondary)`
    - Stan aktywny emerald (`.active-emerald`): tło `rgba(16, 185, 129, 0.15)`, ramka `rgba(16, 185, 129, 0.4)`, tekst `#6ee7b7`

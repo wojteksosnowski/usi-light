@@ -6,9 +6,9 @@ import {
   RotateCw,
   Move,
   Magnet,
-  Compass,
   Globe,
   Share2,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 
@@ -30,6 +30,8 @@ export const CadTopHud: React.FC = () => {
   const setShowShadowRange = useSolarAnalysisStore((s) => s.setShowShadowRange);
   const showSatelliteLayer = useSolarAnalysisStore((s) => s.showSatelliteLayer);
   const setShowSatelliteLayer = useSolarAnalysisStore((s) => s.setShowSatelliteLayer);
+  const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
+  const setShowProjectParameters = useSolarAnalysisStore((s) => s.setShowProjectParameters);
 
   const triggerFit = useCadToolStore((s) => s.triggerFit);
   const viewRotationMode = useCadToolStore((s) => s.viewRotationMode);
@@ -38,8 +40,63 @@ export const CadTopHud: React.FC = () => {
   const toggleUcsRotation = useCadToolStore((s) => s.toggleUcsRotation);
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
-  const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
-  const toggleDirectionSnapping = useCadToolStore((s) => s.toggleDirectionSnapping);
+
+  // Timer bezczynności: 30s bezczynności -> 1. błyśnięcie (1s), kolejne 15s bezczynności -> 2. błyśnięcie (1s), potem stop
+  const [isShareGlinting, setIsShareGlinting] = React.useState(false);
+
+  React.useEffect(() => {
+    let timer1: NodeJS.Timeout | null = null;
+    let timer2: NodeJS.Timeout | null = null;
+    let glintOffTimer: NodeJS.Timeout | null = null;
+
+    const triggerGlint = () => {
+      setIsShareGlinting(true);
+      if (glintOffTimer) clearTimeout(glintOffTimer);
+      glintOffTimer = setTimeout(() => {
+        setIsShareGlinting(false);
+      }, 1000);
+    };
+
+    const resetIdleTimers = () => {
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      setIsShareGlinting(false);
+
+      // 1. błysk po 30 sekundach bezczynności
+      timer1 = setTimeout(() => {
+        triggerGlint();
+      }, 30000);
+
+      // 2. błysk po kolejnych 15 sekundach bezczynności (łącznie 45s)
+      timer2 = setTimeout(() => {
+        triggerGlint();
+      }, 45000);
+
+      // Po 45s już nie błyska
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'pointermove'];
+    const handleActivity = () => {
+      resetIdleTimers();
+    };
+
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleActivity, { passive: true });
+    });
+
+    // Inicjalne wystartowanie timerów
+    resetIdleTimers();
+
+    return () => {
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      if (glintOffTimer) clearTimeout(glintOffTimer);
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleActivity);
+      });
+    };
+  }, []);
+
 
   return (
     <div className="cad-hud-top">
@@ -192,6 +249,29 @@ export const CadTopHud: React.FC = () => {
         <Globe size={13} />
         <span>Satelita</span>
       </button>
+      <button
+        onClick={() => setShowProjectParameters((prev) => !prev)}
+        style={{
+          height: '28px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '5px',
+          padding: '0 9px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: 'none',
+          backgroundColor: showProjectParameters ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+          color: showProjectParameters ? 'var(--accent-emerald, #34d399)' : '#94a3b8',
+          transition: 'all 0.15s ease',
+        }}
+        title="Włącz / wyłącz panel analityczny: Parametry projektu i bilans powierzchni"
+      >
+        <FileSpreadsheet size={13} />
+        <span>Parametry</span>
+      </button>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
@@ -294,7 +374,7 @@ export const CadTopHud: React.FC = () => {
 
       <button
         onClick={toggleOsnap}
-        title="Włącz / wyłącz dociąganie geometryczne [F3] (wierzchołki, środki, krawędzie, przecięcia OTRACK)"
+        title="Włącz / wyłącz przyciąganie geometryczne [S / F3] (przytrzymaj SHIFT podczas rysowania aby wymusić kąty kardynalne i dominujące)"
         style={{
           height: '28px',
           display: 'inline-flex',
@@ -313,31 +393,7 @@ export const CadTopHud: React.FC = () => {
         }}
       >
         <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
-        <span>Dociąganie</span>
-      </button>
-
-      <button
-        onClick={toggleDirectionSnapping}
-        title="Włącz / wyłącz inteligentne śledzenie kątowe i kierunków (równoległe i prostopadłe)"
-        style={{
-          height: '28px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '5px',
-          padding: '0 10px',
-          borderRadius: '6px',
-          fontSize: '11px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          border: isDirectionSnappingActive ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid #334155',
-          backgroundColor: isDirectionSnappingActive ? 'rgba(99, 102, 241, 0.25)' : 'rgba(30, 41, 59, 0.8)',
-          color: isDirectionSnappingActive ? '#a5b4fc' : '#94a3b8',
-          transition: 'all 0.15s ease',
-        }}
-      >
-        <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#94a3b8'} />
-        <span>Śledzenie</span>
+        <span>Przyciąganie</span>
       </button>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
@@ -345,26 +401,13 @@ export const CadTopHud: React.FC = () => {
       <button
         onClick={() => setShareModalOpen(true)}
         title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
-        style={{
-          height: '28px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '5px',
-          padding: '0 10px',
-          borderRadius: '6px',
-          fontSize: '11px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          border: '1px solid rgba(99, 102, 241, 0.4)',
-          backgroundColor: 'rgba(99, 102, 241, 0.2)',
-          color: '#c7d2fe',
-          transition: 'all 0.15s ease',
-        }}
+        className={`btn-share ${isShareGlinting ? 'glinting' : ''}`}
       >
-        <Share2 size={13} color="#a5b4fc" />
+        <Share2 size={13} />
         <span>Udostępnij</span>
       </button>
+
     </div>
   );
 };
+

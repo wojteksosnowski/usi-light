@@ -105,6 +105,7 @@ export interface ExtractStateOptions {
   showShadowFill?: boolean;
   showSatelliteLayer?: boolean;
   satelliteOpacity?: number;
+  showProjectParameters?: boolean;
   sunlightMethod?: 'raycasting' | 'segments';
   activePointMode?: 'shadowing' | 'sunlight';
   viewRotationDeg?: number;
@@ -144,6 +145,7 @@ export function createSharedPayloadFromState(options: ExtractStateOptions): Shar
       showShadowFill: options.showShadowFill,
       showSatelliteLayer: options.showSatelliteLayer,
       satelliteOpacity: options.satelliteOpacity,
+      showProjectParameters: options.showProjectParameters,
       mapsInput: options.mapsInput,
     },
     scene: {

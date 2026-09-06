@@ -137,11 +137,12 @@ export function useCadHotkeys({
         }
       }
 
-      if (e.key === 'F3') {
+      if (e.key === 'F3' || ((e.key === 's' || e.key === 'S') && !isModifier)) {
         e.preventDefault();
         onToggleOsnap?.();
         return;
       }
+
 
       if (e.key === 'Escape') {
         useCadToolStore.getState().setShowModifiersPanel(false);
