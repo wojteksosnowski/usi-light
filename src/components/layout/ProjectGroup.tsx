@@ -276,6 +276,18 @@ export const ProjectGroup: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const isLocalhost = React.useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const host = window.location.host;
+    const hostname = window.location.hostname;
+    return (
+      host === 'localhost:3000' ||
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      Boolean((import.meta as any).env?.DEV)
+    );
+  }, []);
+
   return (
     <div className="sidebar-group-content">
       {/* 1.1 Lokalizacja (Kąt słońca § 56) */}
@@ -428,70 +440,91 @@ export const ProjectGroup: React.FC = () => {
         <span>Udostępnij projekt</span>
       </button>
 
-      {/* Przyciski importu i eksportu sceny/DXF - leżą obok siebie (Grid 3-kolumnowy) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+      {/* Przyciski importu i eksportu sceny/DXF */}
+      {isLocalhost ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+          <label
+            className="btn-primary"
+            style={{
+              margin: 0,
+              padding: '8px 4px',
+              fontSize: '10.5px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              textAlign: 'center',
+              cursor: 'pointer',
+            }}
+            title="Wgraj plik DXF"
+          >
+            <Upload size={14} />
+            <span>Wgraj DXF</span>
+            <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
+          </label>
+
+          <label
+            className="btn-primary"
+            style={{
+              margin: 0,
+              padding: '8px 4px',
+              fontSize: '10.5px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              textAlign: 'center',
+              cursor: 'pointer',
+            }}
+            title="Wgraj scenę JSON"
+          >
+            <Upload size={14} />
+            <span>Wgraj scenę</span>
+            <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
+          </label>
+
+          <button
+            type="button"
+            onClick={handleSceneDownload}
+            className="btn-secondary"
+            style={{
+              padding: '8px 4px',
+              fontSize: '10.5px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              textAlign: 'center',
+            }}
+            title="Zapisz scenę JSON"
+          >
+            <Download size={14} />
+            <span>Zapisz JSON</span>
+          </button>
+        </div>
+      ) : (
         <label
           className="btn-primary"
           style={{
             margin: 0,
-            padding: '8px 4px',
-            fontSize: '10.5px',
+            padding: '9px 12px',
+            fontSize: '12px',
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '4px',
-            textAlign: 'center',
+            gap: '8px',
             cursor: 'pointer',
           }}
           title="Wgraj plik DXF"
         >
-          <Upload size={14} />
-          <span>Wgraj DXF</span>
+          <Upload size={15} />
+          <span>Wgraj plik DXF</span>
           <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
         </label>
-
-        <label
-          className="btn-primary"
-          style={{
-            margin: 0,
-            padding: '8px 4px',
-            fontSize: '10.5px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            textAlign: 'center',
-            cursor: 'pointer',
-          }}
-          title="Wgraj scenę JSON"
-        >
-          <Upload size={14} />
-          <span>Wgraj scenę</span>
-          <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
-        </label>
-
-        <button
-          type="button"
-          onClick={handleSceneDownload}
-          className="btn-secondary"
-          style={{
-            padding: '8px 4px',
-            fontSize: '10.5px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            textAlign: 'center',
-          }}
-          title="Zapisz scenę JSON"
-        >
-          <Download size={14} />
-          <span>Zapisz JSON</span>
-        </button>
-      </div>
+      )}
 
       {/* 1.2 Jednostki DXF / Skala */}
       <div className="ui-card">
