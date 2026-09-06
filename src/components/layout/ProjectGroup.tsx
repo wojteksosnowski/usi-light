@@ -8,16 +8,23 @@ import {
   Sliders,
   Globe,
   Share2,
+  FileText,
+  FileCode,
+  Crown,
+  Sparkles,
 } from 'lucide-react';
 import {
   useSceneStore,
   useSolarAnalysisStore,
   useCadToolStore,
   useUiStore,
+  useLicenseStore,
   POLISH_CITIES,
 } from '../../store';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
 import { parseDxfWithMetadata, DxfUnitOption, createSampleBuildings } from '../../utils/dxfParser';
+import { exportAnalysisToPdf } from '../../utils/pdfExport';
+import { exportSceneToDxf } from '../../utils/dxfExport';
 import { PinnedFacadePoint } from '../../types/geometry';
 
 export const ProjectGroup: React.FC = () => {
@@ -92,6 +99,32 @@ export const ProjectGroup: React.FC = () => {
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
   const triggerFit = useCadToolStore((s) => s.triggerFit);
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
+  const setPricingModalOpen = useUiStore((s) => s.setPricingModalOpen);
+  const isPro = useLicenseStore((s) => s.isPro);
+
+  const handleExportPdf = () => {
+    if (!isPro) {
+      setPricingModalOpen(true);
+      return;
+    }
+    exportAnalysisToPdf({
+      buildings,
+      pinnedPoints,
+      settings,
+      selectedCity,
+    });
+  };
+
+  const handleExportDxf = () => {
+    if (!isPro) {
+      setPricingModalOpen(true);
+      return;
+    }
+    exportSceneToDxf({
+      buildings,
+      pinnedPoints,
+    });
+  };
 
   const handleMapsInputChange = (val: string) => {
     setMapsInput(val);
@@ -487,6 +520,51 @@ export const ProjectGroup: React.FC = () => {
         >
           <Download size={14} />
           <span>Zapisz JSON</span>
+        </button>
+      </div>
+
+      {/* Eksporty PRO: Raport PDF oraz Rysunek DXF */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+        <button
+          type="button"
+          onClick={handleExportPdf}
+          className="btn-tile"
+          style={{
+            justifyContent: 'center',
+            gap: '6px',
+            padding: '8px 6px',
+            background: isPro ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+            border: isPro ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(245, 158, 11, 0.35)',
+            color: isPro ? '#6ee7b7' : '#fcd34d',
+            fontSize: '11px',
+            fontWeight: 600,
+          }}
+          title={isPro ? 'Pobierz formalny raport analizy nasłonecznienia PDF' : 'Wymaga licencji PRO. Kliknij, aby odblokować.'}
+        >
+          <FileText size={13} color={isPro ? '#10b981' : '#f59e0b'} />
+          <span>Raport PDF</span>
+          {!isPro && <Crown size={11} color="#f59e0b" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleExportDxf}
+          className="btn-tile"
+          style={{
+            justifyContent: 'center',
+            gap: '6px',
+            padding: '8px 6px',
+            background: isPro ? 'rgba(56, 189, 248, 0.12)' : 'rgba(99, 102, 241, 0.12)',
+            border: isPro ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(99, 102, 241, 0.35)',
+            color: isPro ? '#7dd3fc' : '#a5b4fc',
+            fontSize: '11px',
+            fontWeight: 600,
+          }}
+          title={isPro ? 'Eksportuj geometrię i punkty pomiarowe do formatu CAD DXF' : 'Wymaga licencji PRO. Kliknij, aby odblokować.'}
+        >
+          <FileCode size={13} color={isPro ? '#38bdf8' : '#818cf8'} />
+          <span>Eksport DXF</span>
+          {!isPro && <Crown size={11} color="#f59e0b" />}
         </button>
       </div>
 

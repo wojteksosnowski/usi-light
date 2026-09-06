@@ -16,8 +16,9 @@ import {
   Layers,
   Plus,
   Sliders,
+  Crown,
 } from 'lucide-react';
-import { useSceneStore, useCadToolStore } from '../../store';
+import { useSceneStore, useCadToolStore, useUiStore, useLicenseStore } from '../../store';
 import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
@@ -36,6 +37,8 @@ export const ToolsGroup: React.FC = () => {
   const addBuildingModifier = useSceneStore((s) => s.addBuildingModifier);
   const toggleBuildingModifier = useSceneStore((s) => s.toggleBuildingModifier);
   const removeBuildingModifier = useSceneStore((s) => s.removeBuildingModifier);
+  const isPro = useLicenseStore((s) => s.isPro);
+  const setPricingModalOpen = useUiStore((s) => s.setPricingModalOpen);
 
   const showModifiersPanel = useCadToolStore((s) => s.showModifiersPanel);
   const setShowModifiersPanel = useCadToolStore((s) => s.setShowModifiersPanel);
@@ -716,6 +719,24 @@ export const ToolsGroup: React.FC = () => {
         <div className="ui-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span>Modyfikatory</span>
+            {!isPro && (
+              <span
+                style={{
+                  fontSize: '9.5px',
+                  padding: '1px 6px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                  color: '#fbbf24',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                <Crown size={10} color="#fbbf24" />
+                PRO
+              </span>
+            )}
             {selectedBuilding && (
               <span
                 style={{
@@ -746,6 +767,10 @@ export const ToolsGroup: React.FC = () => {
                   disabled={selectedBuilding.category === 'boundary'}
                   onClick={() => {
                     if (selectedBuilding.category === 'boundary') return;
+                    if (!isPro) {
+                      setPricingModalOpen(true);
+                      return;
+                    }
                     const newMod = {
                       id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                       type: 'story_offset' as const,
@@ -768,7 +793,9 @@ export const ToolsGroup: React.FC = () => {
                   title={
                     selectedBuilding.category === 'boundary'
                       ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji wysokościowych'
-                      : 'Dodaj modyfikator uskoku kondygnacji (penthouse / podcień)'
+                      : isPro
+                      ? 'Dodaj modyfikator uskoku kondygnacji (penthouse / podcień)'
+                      : 'Wymaga licencji PRO. Kliknij, aby odblokować.'
                   }
                 >
                   <SetbackPenthouseIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#c084fc'} />
@@ -778,6 +805,10 @@ export const ToolsGroup: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
+                    if (!isPro) {
+                      setPricingModalOpen(true);
+                      return;
+                    }
                     const newMod = {
                       id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                       type: 'zone_offset' as const,
@@ -790,8 +821,14 @@ export const ToolsGroup: React.FC = () => {
                     setShowModifiersPanel(true);
                   }}
                   className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
-                  title="Dodaj modyfikator strefy / bufora obszaru o zadanym offsecie"
+                  style={{
+                    justifyContent: 'center',
+                    gap: '4px',
+                    padding: '7px 4px',
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                  }}
+                  title={isPro ? 'Dodaj modyfikator strefy / bufora obszaru o zadanym offsecie' : 'Wymaga licencji PRO. Kliknij, aby odblokować.'}
                 >
                   <ZoneBufferIcon size={12} color="#38bdf8" />
                   <span style={{ fontWeight: 600 }}>+ Strefa</span>
@@ -800,6 +837,10 @@ export const ToolsGroup: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
+                    if (!isPro) {
+                      setPricingModalOpen(true);
+                      return;
+                    }
                     const newMod = {
                       id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                       type: 'bay_window' as const,
@@ -812,8 +853,14 @@ export const ToolsGroup: React.FC = () => {
                     setShowModifiersPanel(true);
                   }}
                   className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
-                  title="Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi"
+                  style={{
+                    justifyContent: 'center',
+                    gap: '4px',
+                    padding: '7px 4px',
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                  }}
+                  title={isPro ? 'Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi' : 'Wymaga licencji PRO. Kliknij, aby odblokować.'}
                 >
                   <BayWindowIcon size={12} color="#fef08a" />
                   <span style={{ fontWeight: 600 }}>+ Wykusz</span>

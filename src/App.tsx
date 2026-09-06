@@ -7,6 +7,10 @@ import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiers
 import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
 import { ShareProjectModal } from './components/common/ShareProjectModal';
+import { PricingModal } from './components/license/PricingModal';
+import { LicenseManagementModal } from './components/license/LicenseManagementModal';
+import { PaymentSuccessModal } from './components/license/PaymentSuccessModal';
+import { DevLicenseToolbar } from './components/license/DevLicenseToolbar';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
 import { CadToolBar } from './components/layout/CadToolBar';
@@ -16,6 +20,7 @@ import {
   useCadToolStore,
   useSolarAnalysisStore,
   useUiStore,
+  useLicenseStore,
   SavedSceneData,
 } from './store';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
@@ -132,6 +137,31 @@ export const App: React.FC = () => {
   // UI Store & Sharing
   const isShareModalOpen = useUiStore((s) => s.isShareModalOpen);
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
+  const setPaymentSuccessModalOpen = useUiStore((s) => s.setPaymentSuccessModalOpen);
+  const setPaymentSuccessSessionId = useUiStore((s) => s.setPaymentSuccessSessionId);
+
+  // License Store
+  const initializeLicense = useLicenseStore((s) => s.initializeLicense);
+
+  // Inicjalizacja licencji oraz detekcja powrotu ze Stripe Checkout
+  useEffect(() => {
+    initializeLicense();
+
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const isPaymentSuccess = urlParams.get('payment_success') === 'true';
+      const sessionId = urlParams.get('session_id');
+
+      if (isPaymentSuccess && sessionId) {
+        setPaymentSuccessSessionId(sessionId);
+        setPaymentSuccessModalOpen(true);
+        // Oczyszczamy pasek adresu z parametrów Stripe
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch (e) {
+      console.warn('Błąd odczytu parametrów URL:', e);
+    }
+  }, [initializeLicense, setPaymentSuccessModalOpen, setPaymentSuccessSessionId]);
 
   // Shared Project Loader (auto-hydrates state if /p/:id is detected)
   const { loadStatus, dismissStatus } = useSharedProjectLoader();
@@ -790,6 +820,14 @@ export const App: React.FC = () => {
 
         {/* Share Project Modal */}
         <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setShareModalOpen(false)} />
+
+        {/* License & Payment Modals */}
+        <PricingModal />
+        <LicenseManagementModal />
+        <PaymentSuccessModal />
+
+        {/* Development Floating Toolbar */}
+        <DevLicenseToolbar />
       </main>
     </div>
   );
