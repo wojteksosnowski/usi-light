@@ -1,4 +1,5 @@
 import React from 'react';
+import { useStore } from 'zustand';
 import {
   Square,
   RotateCw,
@@ -7,12 +8,18 @@ import {
   MapPin,
   Copy,
   Trash2,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
 import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon } from '../common/CustomCadIcons';
 
 export const CadToolBar: React.FC = () => {
+  const { undo, redo, pastStates, futureStates } = useStore(useSceneStore.temporal, (state) => state);
+  const canUndo = pastStates.length > 0;
+  const canRedo = futureStates.length > 0;
+
   const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
   const selectedBuildingIds = useSceneStore((s) => s.selectedBuildingIds);
@@ -398,6 +405,38 @@ export const CadToolBar: React.FC = () => {
         title={hasSelection ? 'Usuń zaznaczone obiekty [Del / Backspace]' : 'Zaznacz obiekt, aby go usunąć'}
       >
         <Trash2 size={14} />
+      </button>
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+      {/* 11. Cofnij (Undo) */}
+      <button
+        type="button"
+        disabled={!canUndo}
+        style={{
+          ...buttonStyle(false),
+          opacity: canUndo ? 1 : 0.35,
+          cursor: canUndo ? 'pointer' : 'not-allowed',
+        }}
+        onClick={() => undo()}
+        title={canUndo ? 'Cofnij [Ctrl+Z / Cmd+Z]' : 'Brak wcześniejszych zmian do cofnięcia'}
+      >
+        <Undo2 size={14} />
+      </button>
+
+      {/* 12. Ponów (Redo) */}
+      <button
+        type="button"
+        disabled={!canRedo}
+        style={{
+          ...buttonStyle(false),
+          opacity: canRedo ? 1 : 0.35,
+          cursor: canRedo ? 'pointer' : 'not-allowed',
+        }}
+        onClick={() => redo()}
+        title={canRedo ? 'Ponów [Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y]' : 'Brak zmian do ponowienia'}
+      >
+        <Redo2 size={14} />
       </button>
     </div>
   );

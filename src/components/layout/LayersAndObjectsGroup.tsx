@@ -222,7 +222,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
 
   // Obrót obiektu wokół centroidu
   const handleBuildingRotate = (id: string, pivot: { x: number; y: number }, deltaAngleRad: number) => {
-    setIsInteracting(true);
     rotateBuilding(id, pivot, deltaAngleRad);
   };
 

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Point2D } from '../../../types/geometry';
-import { useCadToolStore } from '../../../store';
+import { useCadToolStore, useSceneStore } from '../../../store';
 
 export function useCadHotkeys({
   drawingMode,
@@ -51,8 +51,28 @@ export function useCadHotkeys({
         target &&
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
           target.isContentEditable)
       ) {
+        return;
+      }
+
+      const isModifier = e.ctrlKey || e.metaKey;
+
+      // Undo / Redo shortcuts
+      if (isModifier && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          useSceneStore.temporal.getState().redo();
+        } else {
+          useSceneStore.temporal.getState().undo();
+        }
+        return;
+      }
+
+      if (isModifier && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        useSceneStore.temporal.getState().redo();
         return;
       }
 

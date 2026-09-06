@@ -148,7 +148,7 @@ export const App: React.FC = () => {
       setAccuracyStage('final');
     }, 200);
     return () => clearTimeout(timer);
-  }, [buildings, isInteracting, setAccuracyStage]);
+  }, [isInteracting, setAccuracyStage]);
 
   // Automatyczne otwieranie panelu Modyfikatory 2.5D gdy zaznaczony obiekt posiada modyfikatory
   useEffect(() => {
@@ -543,10 +543,9 @@ export const App: React.FC = () => {
 
   const handleBuildingRotate = useCallback(
     (id: string, pivot: Point2D, deltaAngleRad: number) => {
-      setIsInteracting(true);
       rotateBuilding(id, pivot, deltaAngleRad);
     },
-    [setIsInteracting, rotateBuilding]
+    [rotateBuilding]
   );
 
   const handleBooleanUnion = useCallback(
