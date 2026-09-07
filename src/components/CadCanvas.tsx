@@ -10,7 +10,6 @@ import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { APP_CONFIG } from '../config/appConfig';
-import { useDemoRecorder } from '../hooks/useDemoRecorder';
 
 export { isBuildingLocked, getBuildingTopElevation };
 
@@ -141,9 +140,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     onCancelEdgeLength: interaction.handleCancelEdgeLength,
     onToggleOsnap,
   });
-
-  // 🎬 Marketing demo recorder — dev-only, no-op in production (tree-shaked by Vite)
-  useDemoRecorder(canvasRef);
 
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
