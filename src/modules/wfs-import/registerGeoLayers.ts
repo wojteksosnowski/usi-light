@@ -36,48 +36,41 @@ export function registerGeoLayers(): () => void {
   registered = true;
 
   const pipeline = CadRenderPipeline.getDefault();
-  pipeline.registerMainLayer(terrainLayer);
-  pipeline.registerMainLayer(egibLayer);
-  pipeline.registerMainLayer(treesLayer);
 
-  const unsubTerrain = useWfsStore.subscribe(
-    (state) => state.showTerrainLayer,
-    (show) => {
-      if (show) {
-        pipeline.registerMainLayer(terrainLayer);
-      } else {
-        pipeline.unregisterMainLayer('wfs_terrain_shading');
-      }
-    }
-  );
+  let prevShowTerrain = false;
+  let prevShowEgib = false;
+  let prevShowTrees = false;
+  let prevTreesLen = 0;
 
-  const unsubEgib = useWfsStore.subscribe(
-    (state) => state.showEgibLayer,
-    (show) => {
-      if (show) {
-        pipeline.registerMainLayer(egibLayer);
-      } else {
-        pipeline.unregisterMainLayer('wfs_egib_overlay');
-      }
-    }
-  );
+  const unsub = useWfsStore.subscribe((state) => {
+    const { showTerrainLayer, showEgibLayer, showTreesLayer, trees } = state;
 
-  const unsubTrees = useWfsStore.subscribe(
-    (state, prev) => {
-      treesLayer.setTrees(state.trees);
-      treesLayer.setVisible(state.showTreesLayer);
-      if (state.showTreesLayer && state.trees.length > 0) {
-        pipeline.registerMainLayer(treesLayer);
-      } else {
-        pipeline.unregisterMainLayer('wfs_trees');
-      }
+    if (showTerrainLayer !== prevShowTerrain) {
+      if (showTerrainLayer) pipeline.registerMainLayer(terrainLayer);
+      else pipeline.unregisterMainLayer('wfs_terrain_shading');
+      prevShowTerrain = showTerrainLayer;
     }
-  );
+
+    if (showEgibLayer !== prevShowEgib) {
+      if (showEgibLayer) pipeline.registerMainLayer(egibLayer);
+      else pipeline.unregisterMainLayer('wfs_egib_overlay');
+      prevShowEgib = showEgibLayer;
+    }
+
+    treesLayer.setTrees(trees);
+    treesLayer.setVisible(showTreesLayer);
+
+    const shouldShowTrees = showTreesLayer && trees.length > 0;
+    if (shouldShowTrees !== prevShowTrees || trees.length !== prevTreesLen) {
+      if (shouldShowTrees) pipeline.registerMainLayer(treesLayer);
+      else pipeline.unregisterMainLayer('wfs_trees');
+      prevShowTrees = shouldShowTrees;
+      prevTreesLen = trees.length;
+    }
+  });
 
   return () => {
-    unsubTerrain();
-    unsubEgib();
-    unsubTrees();
+    unsub();
     pipeline.unregisterMainLayer('wfs_terrain_shading');
     pipeline.unregisterMainLayer('wfs_egib_overlay');
     pipeline.unregisterMainLayer('wfs_trees');

@@ -109,25 +109,25 @@ export const WfsImportPanel: React.FC = () => {
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0' }}>
+      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
         Dane z map
       </div>
 
       <AddressSearch onSelect={handleLocationSelect} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Promień:</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Promień:</span>
         <select
           value={radius}
           onChange={(e) => setRadius(Number(e.target.value))}
           style={{
             flex: 1,
-            background: 'rgba(30, 41, 59, 0.8)',
-            border: '1px solid rgba(148, 163, 184, 0.2)',
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border-color)',
             borderRadius: '6px',
             padding: '6px 8px',
             fontSize: '12px',
-            color: '#e2e8f0',
+            color: 'var(--text-primary)',
           }}
         >
           {RADIUS_OPTIONS.map((r) => (
@@ -145,8 +145,8 @@ export const WfsImportPanel: React.FC = () => {
           onChange={(v) => setOptions({ trees: v })} />
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid rgba(148,163,184,0.15)', paddingTop: '8px' }}>
-        <span style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>Podkłady mapowe:</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Podkłady mapowe:</span>
         <ToggleRow label="Cieniowanie terenu (NMT)" active={showTerrainLayer}
           onToggle={() => setShowTerrainLayer(!showTerrainLayer)} />
         <ToggleRow label="EGiB — działki i budynki" active={showEgibLayer}
@@ -164,12 +164,12 @@ export const WfsImportPanel: React.FC = () => {
           justifyContent: 'center',
           gap: '6px',
           padding: '8px 12px',
-          borderRadius: '6px',
+          borderRadius: '8px',
           border: 'none',
           background: selectedLocation && !status.isFetching
-            ? 'linear-gradient(135deg, #0ea5e9, #38bdf8)'
-            : 'rgba(51, 65, 85, 0.5)',
-          color: selectedLocation ? '#fff' : '#64748b',
+            ? 'linear-gradient(135deg, var(--accent-indigo), var(--accent-blue))'
+            : 'var(--bg-input)',
+          color: selectedLocation ? 'var(--text-primary)' : 'var(--text-muted)',
           fontSize: '12px',
           fontWeight: 600,
           cursor: selectedLocation && !status.isFetching ? 'pointer' : 'not-allowed',
@@ -195,7 +195,7 @@ const Checkbox: React.FC<{
       alignItems: 'center',
       gap: '6px',
       fontSize: '12px',
-      color: '#cbd5e1',
+      color: 'var(--text-primary)',
       cursor: 'pointer',
     }}
   >
@@ -203,7 +203,7 @@ const Checkbox: React.FC<{
       type="checkbox"
       checked={checked}
       onChange={(e) => onChange(e.target.checked)}
-      style={{ accentColor: '#38bdf8' }}
+      style={{ accentColor: 'var(--accent-blue)' }}
     />
     {label}
   </label>
@@ -223,7 +223,7 @@ const ToggleRow: React.FC<{
       padding: '4px 0',
       background: 'transparent',
       border: 'none',
-      color: active ? '#38bdf8' : '#64748b',
+      color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
       fontSize: '11px',
       cursor: 'pointer',
       textAlign: 'left',

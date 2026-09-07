@@ -10,7 +10,19 @@ const TREES_WFS_URL = 'https://wfs.um.warszawa.pl/serwis';
 /** Bbox w EPSG:4326: [west, south, east, north] */
 export type WfsBbox = [number, number, number, number];
 
-export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJSON.FeatureCollection> {
+export interface GeoJsonFeatureCollection {
+  type: string;
+  features: Array<{
+    type: string;
+    geometry: {
+      type: string;
+      coordinates: number[] | number[][] | number[][][] | number[][][][];
+    } | null;
+    properties: Record<string, unknown> | null;
+  }>;
+}
+
+export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
   const params = new URLSearchParams({
     service: 'WFS',
     version: '2.0.0',
@@ -25,7 +37,7 @@ export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJSON.Featu
   return res.json();
 }
 
-export async function fetchWarsawParcels(bbox: WfsBbox): Promise<GeoJSON.FeatureCollection> {
+export async function fetchWarsawParcels(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
   const params = new URLSearchParams({
     service: 'WFS',
     version: '2.0.0',
@@ -80,7 +92,7 @@ function parseTreesGml(gml: string): RawTreeFeature[] {
   const doc = parser.parseFromString(gml, 'text/xml');
   const features: RawTreeFeature[] = [];
 
-  const membersElements = doc.getElementsByTagNameNS('*', 'featureMember');
+  const memberElements = doc.getElementsByTagNameNS('*', 'featureMember');
 
   for (let i = 0; i < memberElements.length; i++) {
     const member = memberElements[i];

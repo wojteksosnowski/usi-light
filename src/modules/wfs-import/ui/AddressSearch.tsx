@@ -48,7 +48,7 @@ export const AddressSearch: React.FC<AddressSearchProps> = ({
   return (
     <div style={{ position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Search size={14} color="#94a3b8" />
+        <Search size={14} color="var(--text-secondary)" />
         <input
           type="text"
           value={query}
@@ -56,17 +56,17 @@ export const AddressSearch: React.FC<AddressSearchProps> = ({
           placeholder={placeholder}
           style={{
             flex: 1,
-            background: 'rgba(30, 41, 59, 0.8)',
-            border: '1px solid rgba(148, 163, 184, 0.2)',
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border-color)',
             borderRadius: '6px',
             padding: '7px 10px',
             fontSize: '12px',
-            color: '#e2e8f0',
+            color: 'var(--text-primary)',
             outline: 'none',
           }}
         />
         {isSearching && (
-          <span style={{ fontSize: '11px', color: '#64748b' }}>…</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>…</span>
         )}
       </div>
 
@@ -78,8 +78,8 @@ export const AddressSearch: React.FC<AddressSearchProps> = ({
             left: 0,
             right: 0,
             zIndex: 100,
-            background: '#1e293b',
-            border: '1px solid rgba(148, 163, 184, 0.3)',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-light)',
             borderRadius: '6px',
             marginTop: '4px',
             maxHeight: '150px',
@@ -98,19 +98,19 @@ export const AddressSearch: React.FC<AddressSearchProps> = ({
                 padding: '8px 10px',
                 background: 'transparent',
                 border: 'none',
-                color: '#e2e8f0',
+                color: 'var(--text-primary)',
                 fontSize: '11px',
                 cursor: 'pointer',
                 textAlign: 'left',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(56, 189, 248, 0.1)';
+                e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'transparent';
               }}
             >
-              <MapPin size={12} color="#38bdf8" />
+              <MapPin size={12} color="var(--accent-blue)" />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {s.displayName}
               </span>

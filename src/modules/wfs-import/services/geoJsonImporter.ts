@@ -6,7 +6,7 @@ import {
   CrsDetectionResult,
   LatLon,
 } from '../../../utils/geoTransform';
-import { RawTreeFeature } from './wfsWarsawClient';
+import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
 import { WfsTreeFeature } from '../store/useWfsStore';
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
@@ -18,6 +18,14 @@ export interface ImportResult {
   buildings: BuildingLoop[];
   parcels: BuildingLoop[];
   warnings: string[];
+}
+
+function str(v: unknown): string {
+  return v != null ? String(v) : '';
+}
+
+function strOrUndefined(v: unknown): string | undefined {
+  return v != null ? String(v) : undefined;
 }
 
 /**
@@ -35,13 +43,13 @@ function wfsCoordToCad(
   return wgs84ToCadPoint(latLon, projectCrs, projectCenter);
 }
 
-function extractRings(geometry: GeoJSON.Geometry): number[][][] {
+function extractRings(geometry: { type: string; coordinates: unknown }): number[][][] {
   if (geometry.type === 'Polygon') {
-    return (geometry as GeoJSON.Polygon).coordinates;
+    return geometry.coordinates as number[][][];
   }
   if (geometry.type === 'MultiPolygon') {
-    const mp = geometry as GeoJSON.MultiPolygon;
-    return mp.coordinates.flatMap((poly) => poly);
+    const mp = geometry.coordinates as number[][][][];
+    return mp.flatMap((poly) => poly);
   }
   return [];
 }
@@ -53,7 +61,7 @@ function estimateHeight(storeys: number | null): number {
 }
 
 export function importBuildingsFromGeoJson(
-  collection: GeoJSON.FeatureCollection,
+  collection: GeoJsonFeatureCollection,
   sourceCrs: CrsDetectionResult,
   projectCrs: CrsDetectionResult,
   projectCenter: LatLon
@@ -72,7 +80,7 @@ export function importBuildingsFromGeoJson(
       ? Math.round(Number(props.KONDYGNACJE_NADZIEMNE))
       : null;
     const height = estimateHeight(storeys);
-    const buildingId = props.ID_BUDYNKU || `wfs-bld-${now}-${fi}`;
+    const buildingId = str(props.ID_BUDYNKU) || `wfs-bld-${now}-${fi}`;
 
     for (let ri = 0; ri < rings.length; ri++) {
       const ring = rings[ri];
@@ -97,7 +105,7 @@ export function importBuildingsFromGeoJson(
 
       buildings.push({
         id,
-        name: `WFS ${props.ID_BUDYNKU || `#${fi + 1}`}`,
+        name: `WFS ${str(props.ID_BUDYNKU) || `#${fi + 1}`}`,
         layer: 'WFS_BUDYNKI',
         category: 'building',
         isTested: false,
@@ -123,7 +131,7 @@ export function importBuildingsFromGeoJson(
 }
 
 export function importParcelsFromGeoJson(
-  collection: GeoJSON.FeatureCollection,
+  collection: GeoJsonFeatureCollection,
   sourceCrs: CrsDetectionResult,
   projectCrs: CrsDetectionResult,
   projectCenter: LatLon
@@ -138,8 +146,8 @@ export function importParcelsFromGeoJson(
 
     const rings = extractRings(feature.geometry);
     const props = feature.properties || {};
-    const parcelId = props.ID_DZIALKI || `wfs-parcel-${now}-${fi}`;
-    const plotNumber = props.NUMER_DZIALKI || '';
+    const parcelId = str(props.ID_DZIALKI) || `wfs-parcel-${now}-${fi}`;
+    const plotNumber = str(props.NUMER_DZIALKI);
 
     for (let ri = 0; ri < rings.length; ri++) {
       const ring = rings[ri];
@@ -167,7 +175,7 @@ export function importParcelsFromGeoJson(
         layer: 'WFS_DZIALKI',
         category: 'boundary' as ObjectCategory,
         areaType: 'plot',
-        plotNumber: plotNumber || undefined,
+        plotNumber: strOrUndefined(props.NUMER_DZIALKI),
         isTested: false,
         isIncluded: true,
         isLocked: true,
