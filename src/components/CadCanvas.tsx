@@ -80,6 +80,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     }
   }, [googleMapsApiKey]);
 
+  // Geo module: re-render canvas when WMS tiles load or layers change
+  useEffect(() => {
+    const handler = () => setTileRenderTick((t) => t + 1);
+    window.addEventListener('geo-render-needed', handler);
+    return () => window.removeEventListener('geo-render-needed', handler);
+  }, []);
+
   // Detekcja układu współrzędnych sceny CAD
   const crsInfo = useMemo<CrsDetectionResult>(() => {
     const allPts: Point2D[] = [];

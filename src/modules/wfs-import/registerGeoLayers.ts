@@ -8,6 +8,10 @@ import { useWfsStore } from './store/useWfsStore';
 const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
 const EGIB_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
 
+const triggerRender = () => {
+  window.dispatchEvent(new Event('geo-render-needed'));
+};
+
 let registered = false;
 
 const terrainLayer = new TerrainShadingLayer();
@@ -19,14 +23,14 @@ const terrainTileManager = new WmsTileManager({
   layers: 'Raster',
   format: 'image/png',
   crs: 'EPSG:3857',
-});
+}, 200, triggerRender);
 
 const egibTileManager = new WmsTileManager({
   baseUrl: EGIB_WMS_URL,
   layers: 'dzialki,budynki',
   format: 'image/png',
   crs: 'EPSG:3857',
-});
+}, 200, triggerRender);
 
 terrainLayer.setTileManager(terrainTileManager);
 egibLayer.setTileManager(egibTileManager);
@@ -44,17 +48,20 @@ export function registerGeoLayers(): () => void {
 
   const unsub = useWfsStore.subscribe((state) => {
     const { showTerrainLayer, showEgibLayer, showTreesLayer, trees } = state;
+    let changed = false;
 
     if (showTerrainLayer !== prevShowTerrain) {
       if (showTerrainLayer) pipeline.registerMainLayer(terrainLayer);
       else pipeline.unregisterMainLayer('wfs_terrain_shading');
       prevShowTerrain = showTerrainLayer;
+      changed = true;
     }
 
     if (showEgibLayer !== prevShowEgib) {
       if (showEgibLayer) pipeline.registerMainLayer(egibLayer);
       else pipeline.unregisterMainLayer('wfs_egib_overlay');
       prevShowEgib = showEgibLayer;
+      changed = true;
     }
 
     treesLayer.setTrees(trees);
@@ -66,7 +73,10 @@ export function registerGeoLayers(): () => void {
       else pipeline.unregisterMainLayer('wfs_trees');
       prevShowTrees = shouldShowTrees;
       prevTreesLen = trees.length;
+      changed = true;
     }
+
+    if (changed) triggerRender();
   });
 
   return () => {
