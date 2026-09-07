@@ -7,11 +7,13 @@ import {
   FolderKanban,
   Layers,
   Wrench,
+  Map,
 } from 'lucide-react';
 import { useUiStore } from '../../store';
 import { ProjectGroup } from './ProjectGroup';
 import { LayersAndObjectsGroup } from './LayersAndObjectsGroup';
 import { ToolsGroup } from './ToolsGroup';
+import { WfsImportPanel } from '../../modules/wfs-import/ui/WfsImportPanel';
 
 export const AppSidebar: React.FC = () => {
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
@@ -22,6 +24,7 @@ export const AppSidebar: React.FC = () => {
   const isProjectGroupOpen = openSidebarGroup === 'project';
   const isLayersGroupOpen = openSidebarGroup === 'layers';
   const isToolsGroupOpen = openSidebarGroup === 'tools';
+  const isMapdataGroupOpen = openSidebarGroup === 'mapdata';
 
   return (
     <aside className={`app-sidebar ${!isSidebarOpen ? 'collapsed' : ''}`}>
@@ -118,6 +121,25 @@ export const AppSidebar: React.FC = () => {
           </button>
 
           {isToolsGroupOpen && <ToolsGroup />}
+        </div>
+
+        {/* GRUPA 4: DANE MAPOWE */}
+        <div className="sidebar-group-divider" />
+        <div className="sidebar-group">
+          <button
+            type="button"
+            className="sidebar-group-header"
+            onClick={() => toggleSidebarGroup('mapdata')}
+            title="Zwiń / rozwiń grupę: Dane mapowe"
+          >
+            <div className="sidebar-group-title">
+              <Map size={15} color="#10b981" />
+              <span>Dane mapowe</span>
+            </div>
+            {isMapdataGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
+          </button>
+
+          {isMapdataGroupOpen && <WfsImportPanel />}
         </div>
       </div>
     </aside>

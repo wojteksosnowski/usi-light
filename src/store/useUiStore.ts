@@ -2,14 +2,14 @@ import { create } from 'zustand';
 
 interface UiState {
   isSidebarOpen: boolean;
-  openSidebarGroup: 'project' | 'layers' | 'tools' | null;
+  openSidebarGroup: 'project' | 'layers' | 'tools' | 'mapdata' | null;
   copiedToast: string | null;
   isShareModalOpen: boolean;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
-  setOpenSidebarGroup: (group: 'project' | 'layers' | 'tools' | null) => void;
-  toggleSidebarGroup: (group: 'project' | 'layers' | 'tools') => void;
+  setOpenSidebarGroup: (group: 'project' | 'layers' | 'tools' | 'mapdata' | null) => void;
+  toggleSidebarGroup: (group: 'project' | 'layers' | 'tools' | 'mapdata') => void;
   showCopiedToast: (msg: string) => void;
   setShareModalOpen: (open: boolean) => void;
 }

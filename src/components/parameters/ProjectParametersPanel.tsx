@@ -10,7 +10,6 @@ import {
 import { useSceneStore, useUiStore } from '../../store';
 import {
   computePolygonArea,
-  computeDistancesToBoundaries,
   computePolygonIntersectionWithBoundaries,
 } from '@/utils/math2d';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
@@ -71,11 +70,6 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     return activePlotBoundaries.reduce((sum, b) => sum + computePolygonArea(b.vertices), 0);
   }, [activePlotBoundaries]);
 
-  // Distances from selected building to all boundaries
-  const distancesToBoundaries = useMemo(() => {
-    if (!selectedBuilding || selectedBuilding.category === 'boundary' || boundaryObjects.length === 0) return [];
-    return computeDistancesToBoundaries(selectedBuilding, boundaryObjects);
-  }, [selectedBuilding, boundaryObjects]);
 
   // Summary of tested buildings (Projektowane)
   const testedBuildingsSummary = useMemo(() => {
@@ -225,19 +219,6 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
                 <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(pum)} m²</b>
               </div>
 
-              {distancesToBoundaries.length > 0 && (
-                <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px dashed var(--border-light)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Najbliższa granica działki:</span>
-                  {distancesToBoundaries.slice(0, 2).map((d) => (
-                    <div key={d.boundaryId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>{d.boundaryName}:</span>
-                      <b style={{ color: d.minDistance < 3.0 ? 'var(--accent-rose)' : d.minDistance < 4.0 ? 'var(--accent-amber)' : 'var(--accent-emerald)', fontFamily: 'monospace' }}>
-                        {d.minDistance.toFixed(2)} m
-                      </b>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })()}

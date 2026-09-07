@@ -20,7 +20,6 @@ import { useSceneStore, useSolarAnalysisStore, useCadToolStore } from '../../sto
 import {
   computePolygonArea,
   computeBuildingsUnionArea,
-  computeDistancesToBoundaries,
 } from '@/utils/math2d';
 import { rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors, toRomanNumeral } from '../../utils/buildingFloorCalculator';
@@ -212,11 +211,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
   }, [buildings]);
 
   // Działki z włączonym "Obiekt badany (isTested)" dla kalkulacji wskaźników
-  // Distances from selected building to all boundaries
-  const distancesToBoundaries = useMemo(() => {
-    if (!selectedBuilding || selectedBuilding.category === 'boundary' || boundaryObjects.length === 0) return [];
-    return computeDistancesToBoundaries(selectedBuilding, boundaryObjects);
-  }, [selectedBuilding, boundaryObjects]);
 
   // Obrót obiektu wokół centroidu
   const handleBuildingRotate = (id: string, pivot: { x: number; y: number }, deltaAngleRad: number) => {
@@ -2008,19 +2002,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   );
                 })()}
 
-                {distancesToBoundaries.length > 0 && (
-                  <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.3)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                    <div style={{ color: '#fca5a5', fontWeight: 600 }}>Odległość od granicy działki:</div>
-                    {distancesToBoundaries.map((d) => (
-                      <div key={d.boundaryId} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#cbd5e1' }}>{d.boundaryName}:</span>
-                        <b style={{ color: d.minDistance < 3.0 ? '#f43f5e' : d.minDistance < 4.0 ? '#fbbf24' : '#6ee7b7', fontFamily: 'monospace' }}>
-                          {d.minDistance.toFixed(2)} m
-                        </b>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 

@@ -12,6 +12,7 @@ import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
 import { CadToolBar } from './components/layout/CadToolBar';
 import { CadLegendBottom } from './components/layout/CadLegendBottom';
+import { registerGeoLayers } from './modules/wfs-import/registerGeoLayers';
 import {
   useSceneStore,
   useCadToolStore,
@@ -140,6 +141,9 @@ export const App: React.FC = () => {
   const { loadStatus, dismissStatus } = useSharedProjectLoader();
 
   const sceneHydratedRef = useRef(false);
+
+  // Geo module: register WMS/WFS layers in render pipeline
+  useEffect(() => registerGeoLayers(), []);
 
   // Progressive Accuracy Refinement Effect
   useEffect(() => {

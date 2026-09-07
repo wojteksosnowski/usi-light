@@ -17,3 +17,5 @@ export {
   importTrees,
 } from './services/geoJsonImporter';
 export type { ImportResult } from './services/geoJsonImporter';
+
+export { registerGeoLayers } from './registerGeoLayers';
