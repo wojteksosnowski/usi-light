@@ -10,6 +10,30 @@ const TREES_WFS_URL = 'https://wfs.um.warszawa.pl/serwis';
 /** Bbox w EPSG:4326: [west, south, east, north] */
 export type WfsBbox = [number, number, number, number];
 
+import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
+
+const EPSG_2178: CrsDetectionResult = {
+  crs: 'EPSG:2178',
+  description: 'PL-2000 strefa 7',
+  isGeodetic: true,
+  zone: 7,
+};
+
+/**
+ * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2178
+ * w kolejności northing, easting (wymaganej przez GeoServer).
+ */
+function wgs84BboxToEpsg2178(bbox: WfsBbox): string {
+  const [west, south, east, north] = bbox;
+  const sw = wgs84ToCadPoint({ lat: south, lon: west }, EPSG_2178);
+  const ne = wgs84ToCadPoint({ lat: north, lon: east }, EPSG_2178);
+  const minN = Math.min(sw.y, ne.y);
+  const minE = Math.min(sw.x, ne.x);
+  const maxN = Math.max(sw.y, ne.y);
+  const maxE = Math.max(sw.x, ne.x);
+  return `${minN},${minE},${maxN},${maxE}`;
+}
+
 export interface GeoJsonFeatureCollection {
   type: string;
   features: Array<{
@@ -28,7 +52,7 @@ export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJsonFeatur
     version: '2.0.0',
     request: 'GetFeature',
     typeNames: 'wfs:budynki',
-    bbox: `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`,
+    bbox: wgs84BboxToEpsg2178(bbox),
     outputFormat: 'application/json',
   });
 
@@ -43,7 +67,7 @@ export async function fetchWarsawParcels(bbox: WfsBbox): Promise<GeoJsonFeatureC
     version: '2.0.0',
     request: 'GetFeature',
     typeNames: 'wfs:dzialki',
-    bbox: `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`,
+    bbox: wgs84BboxToEpsg2178(bbox),
     outputFormat: 'application/json',
   });
 
