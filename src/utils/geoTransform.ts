@@ -21,6 +21,7 @@ export type DetectedCrs =
 export interface CrsDetectionResult {
   crs: DetectedCrs;
   description: string;
+  geodeticLabel: string;
   isGeodetic: boolean;
   zone?: number;
 }
@@ -54,6 +55,7 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
     return {
       crs: 'LOCAL',
       description: 'Układ lokalny CAD (punkt odniesienia z ustawień projektu)',
+      geodeticLabel: 'LOKALNY (CAD)',
       isGeodetic: false,
     };
   }
@@ -76,10 +78,10 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
   // 1. Sprawdź PL-2000:
   // Northing (X_geod) mieści się w zakresie ~ 5 400 000 .. 6 100 000 m.
   // Easting (Y_geod) mieści się w zakresie:
-  // strefa 5: 5 400 000 .. 5 600 000 m
-  // strefa 6: 6 400 000 .. 6 600 000 m
-  // strefa 7: 7 400 000 .. 7 600 000 m
-  // strefa 8: 8 400 000 .. 8 600 000 m
+  // strefa 5: 5 400 000 .. 5 600 000 m (pas 15°)
+  // strefa 6: 6 400 000 .. 6 600 000 m (pas 18°)
+  // strefa 7: 7 400 000 .. 7 600 000 m (pas 21°)
+  // strefa 8: 8 400 000 .. 8 600 000 m (pas 24°)
   const isCoord2000 = (val: number) => val >= 5_000_000 && val <= 9_000_000;
 
   if (isCoord2000(avgX) || isCoord2000(avgY)) {
@@ -92,9 +94,11 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
         7: 'EPSG:2178',
         8: 'EPSG:2179',
       };
+      const lon0 = zone * 3;
       return {
         crs: crsMap[zone],
-        description: `Układ PL-2000 strefa ${zone} (południk ${(zone * 3)}° E)`,
+        description: `Układ PL-2000 strefa ${zone} (południk ${lon0}° E)`,
+        geodeticLabel: `ETRF2000-PL / CS2000 / ${lon0}`,
         isGeodetic: true,
         zone,
       };
@@ -105,7 +109,6 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
   // Cała Polska w jednym pasie:
   // Northing (X_geod): ~ 130 000 .. 870 000 m
   // Easting (Y_geod):  ~ 170 000 .. 860 000 m
-  // Przykład z reference/mapa.dxf: X_cad = 573200, Y_cad = 246100 (Kraków)
   if (
     avgX >= 100_000 && avgX <= 900_000 &&
     avgY >= 100_000 && avgY <= 900_000
@@ -113,6 +116,7 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
     return {
       crs: 'EPSG:2180',
       description: 'Układ PL-1992 (EPSG:2180, cała Polska, południk 19° E)',
+      geodeticLabel: 'ETRF2000-PL / CS1992',
       isGeodetic: true,
     };
   }
@@ -122,6 +126,7 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
     return {
       crs: 'EPSG:4326',
       description: 'Współrzędne geograficzne WGS84 (stopnie)',
+      geodeticLabel: 'WGS84 (EPSG:4326)',
       isGeodetic: true,
     };
   }
@@ -129,6 +134,7 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
   return {
     crs: 'LOCAL',
     description: 'Układ lokalny CAD (odniesienie do środka projektu)',
+    geodeticLabel: 'LOKALNY (CAD)',
     isGeodetic: false,
   };
 }

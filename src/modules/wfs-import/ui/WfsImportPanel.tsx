@@ -16,7 +16,7 @@ import {
   importParcelsFromGeoJson,
   importTrees,
 } from '../services/geoJsonImporter';
-import { detectCoordinateSystem } from '../../../utils/geoTransform';
+import { detectCoordinateSystem, CrsDetectionResult } from '../../../utils/geoTransform';
 
 const RADIUS_OPTIONS = [100, 200, 500];
 const WARSAW_BBOX = [20.85, 52.09, 21.27, 52.37];
@@ -62,7 +62,13 @@ export const WfsImportPanel: React.FC = () => {
 
       const projectCenter = { lat: settings.latitude, lon: settings.longitude };
       const projectCrs = detectCoordinateSystem([]);
-      const sourceCrs = { crs: 'EPSG:2178' as const, description: 'PL-2000 strefa 7', isGeodetic: true, zone: 7 };
+      const sourceCrs: CrsDetectionResult = {
+        crs: 'EPSG:2178',
+        description: 'PL-2000 strefa 7',
+        geodeticLabel: 'ETRF2000-PL / CS2000 / 21',
+        isGeodetic: true,
+        zone: 7,
+      };
 
       let buildingsCount = 0;
       let parcelsCount = 0;

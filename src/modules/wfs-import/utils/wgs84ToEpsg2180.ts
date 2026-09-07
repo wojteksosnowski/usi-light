@@ -3,6 +3,7 @@ import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform
 const EPSG_2180: CrsDetectionResult = {
   crs: 'EPSG:2180',
   description: 'PL-1992',
+  geodeticLabel: 'ETRF2000-PL / CS1992',
   isGeodetic: true,
 };
 

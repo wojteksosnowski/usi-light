@@ -9,8 +9,10 @@ import {
   Globe,
   Share2,
   FileSpreadsheet,
+  Layers,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
+import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
 
 export const CadTopHud: React.FC = () => {
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
@@ -285,6 +287,42 @@ export const CadTopHud: React.FC = () => {
       >
         <FileSpreadsheet size={13} />
         <span className="hud-btn-label">Parametry</span>
+      </button>
+
+      {/* Podkłady GEO (PRO) button */}
+      <button
+        onClick={() => {
+          const showOrthophotoLayer = useWfsStore.getState().showOrthophotoLayer;
+          const showKiutLayer = useWfsStore.getState().showKiutLayer;
+          const anyActive = showOrthophotoLayer || showKiutLayer;
+          if (anyActive) {
+            useWfsStore.getState().setShowOrthophotoLayer(false);
+            useWfsStore.getState().setShowKiutLayer(false);
+          } else {
+            useWfsStore.getState().setShowOrthophotoLayer(true);
+          }
+        }}
+        style={{
+          height: '28px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '4px',
+          padding: '0 8px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: 'none',
+          backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer) ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
+          color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer) ? '#c084fc' : '#94a3b8',
+          transition: 'all 0.15s ease',
+          flexShrink: 0,
+        }}
+        title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT) [Wersja PRO]"
+      >
+        <Layers size={13} />
+        <span className="hud-btn-label">Podkład GEO</span>
       </button>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />

@@ -15,6 +15,7 @@ import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform
 const EPSG_2178: CrsDetectionResult = {
   crs: 'EPSG:2178',
   description: 'PL-2000 strefa 7',
+  geodeticLabel: 'ETRF2000-PL / CS2000 / 21',
   isGeodetic: true,
   zone: 7,
 };

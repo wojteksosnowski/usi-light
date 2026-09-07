@@ -1,12 +1,23 @@
-import React from 'react';
-import { Activity, Timer } from 'lucide-react';
-import { useSolarAnalysisStore } from '../../store';
+import React, { useMemo } from 'react';
+import { Activity, Timer, Globe } from 'lucide-react';
+import { useSolarAnalysisStore, useSceneStore } from '../../store';
+import { detectCoordinateSystem } from '../../utils/geoTransform';
+import { Point2D } from '../../types/geometry';
 
 export const CadLegendBottom: React.FC = () => {
   const showShadowingLines = useSolarAnalysisStore((s) => s.showShadowingLines);
   const showSunlightLines = useSolarAnalysisStore((s) => s.showSunlightLines);
   const accuracyStage = useSolarAnalysisStore((s) => s.accuracyStage);
   const analysisOutput = useSolarAnalysisStore((s) => s.analysisOutput);
+  const buildings = useSceneStore((s) => s.buildings);
+
+  const crsInfo = useMemo(() => {
+    const allPts: Point2D[] = [];
+    for (const b of buildings) {
+      if (b.vertices) allPts.push(...b.vertices);
+    }
+    return detectCoordinateSystem(allPts);
+  }, [buildings]);
 
   const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
   const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
@@ -51,6 +62,29 @@ export const CadLegendBottom: React.FC = () => {
       {!showShadowingLines && !showSunlightLines && (
         <span style={{ fontSize: '10px', color: '#475569', fontStyle: 'italic' }}>Brak aktywnych analiz</span>
       )}
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+      {/* Geodetic Coordinate System Badge (ETRF2000-PL / CS2000) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '5px',
+          padding: '2px 7px',
+          borderRadius: '5px',
+          backgroundColor: 'rgba(56, 189, 248, 0.12)',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
+          color: '#38bdf8',
+          fontSize: '10px',
+          fontWeight: 600,
+          fontFamily: 'monospace',
+        }}
+        title={`Państwowy układ współrzędnych sceny CAD: ${crsInfo.description}`}
+      >
+        <Globe size={11} color="#38bdf8" />
+        <span>{crsInfo.geodeticLabel}</span>
+      </div>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 

@@ -9,6 +9,15 @@ import {
   Globe,
   Share2,
   FileSpreadsheet,
+  Lock,
+  Unlock,
+  Crosshair,
+  Sparkles,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Layers,
+  Map,
 } from 'lucide-react';
 import {
   useSceneStore,
@@ -17,9 +26,15 @@ import {
   useUiStore,
   POLISH_CITIES,
 } from '../../store';
+import { useWfsStore, ProjectRadius } from '../../modules/wfs-import/store/useWfsStore';
+import { fetchParcelsInRadius } from '../../modules/wfs-import/services/uldkClient';
+import { fetchWarsawBuildings } from '../../modules/wfs-import/services/wfsWarsawClient';
+import { importBuildingsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
+import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
+import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
 import { parseDxfWithMetadata, DxfUnitOption, createSampleBuildings } from '../../utils/dxfParser';
-import { PinnedFacadePoint } from '../../types/geometry';
+import { PinnedFacadePoint, BuildingLoop } from '../../types/geometry';
 
 export const ProjectGroup: React.FC = () => {
   // Scene Store
@@ -95,6 +110,85 @@ export const ProjectGroup: React.FC = () => {
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
   const triggerFit = useCadToolStore((s) => s.triggerFit);
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
+
+  // WFS Store & Geo Data
+  const projectRadius = useWfsStore((s) => s.projectRadius);
+  const setProjectRadius = useWfsStore((s) => s.setProjectRadius);
+  const isProjectCenterLocked = useWfsStore((s) => s.isProjectCenterLocked);
+  const setIsProjectCenterLocked = useWfsStore((s) => s.setIsProjectCenterLocked);
+  const showOrthophotoLayer = useWfsStore((s) => s.showOrthophotoLayer);
+  const setShowOrthophotoLayer = useWfsStore((s) => s.setShowOrthophotoLayer);
+  const orthophotoOpacity = useWfsStore((s) => s.orthophotoOpacity);
+  const setOrthophotoOpacity = useWfsStore((s) => s.setOrthophotoOpacity);
+  const showKiutLayer = useWfsStore((s) => s.showKiutLayer);
+  const setShowKiutLayer = useWfsStore((s) => s.setShowKiutLayer);
+  const kiutOpacity = useWfsStore((s) => s.kiutOpacity);
+  const setKiutOpacity = useWfsStore((s) => s.setKiutOpacity);
+  const showMpzpLayer = useWfsStore((s) => s.showMpzpLayer);
+  const setShowMpzpLayer = useWfsStore((s) => s.setShowMpzpLayer);
+  const mpzpOpacity = useWfsStore((s) => s.mpzpOpacity);
+  const setMpzpOpacity = useWfsStore((s) => s.setMpzpOpacity);
+  const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
+  const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
+  const showEgibLayer = useWfsStore((s) => s.showEgibLayer);
+  const setShowEgibLayer = useWfsStore((s) => s.setShowEgibLayer);
+  const status = useWfsStore((s) => s.status);
+  const setStatus = useWfsStore((s) => s.setStatus);
+
+  const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
+
+  const handleSyncGeoData = async () => {
+    setStatus({ isFetching: true, error: null, info: null });
+    setSyncFeedback(null);
+    try {
+      const centerLat = settings.latitude;
+      const centerLon = settings.longitude;
+      const radius = projectRadius;
+      const projectCenter = { lat: centerLat, lon: centerLon };
+      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
+
+      // 1. Działki ewidencyjne z ULDK (ogólnopolskie wektory)
+      const parcels = await fetchParcelsInRadius(centerLat, centerLon, radius, projectCrs, projectCenter);
+
+      // 2. Budynki wektorowe (dla Warszawy WFS, dla innych miast serwisy lokalne)
+      const bbox = latLonToBbox(centerLat, centerLon, radius);
+      let importedBuildings: BuildingLoop[] = [];
+      const WARSAW_BBOX = [20.85, 52.09, 21.27, 52.37];
+      const isWarsaw = centerLon >= WARSAW_BBOX[0] && centerLon <= WARSAW_BBOX[2] && centerLat >= WARSAW_BBOX[1] && centerLat <= WARSAW_BBOX[3];
+
+      if (isWarsaw) {
+        try {
+          const bldGeoJson = await fetchWarsawBuildings(bbox);
+          const sourceCrs = { crs: 'EPSG:2178' as const, description: 'PL-2000 strefa 7', geodeticLabel: 'ETRF2000-PL / CS2000 / 21', isGeodetic: true, zone: 7 };
+          const res = importBuildingsFromGeoJson(bldGeoJson, sourceCrs, projectCrs, projectCenter);
+          importedBuildings = res.buildings;
+        } catch {
+          // kontynuuj z działkami
+        }
+      }
+
+      // Synchronizacja do sceny
+      const existingUserBuildings = buildings.filter((b) => !b.id.startsWith('uldk-') && !b.id.startsWith('wfs-'));
+      const combined = [...existingUserBuildings, ...parcels, ...importedBuildings];
+      setBuildings(combined);
+
+      setStatus({
+        isFetching: false,
+        error: null,
+        info: null,
+        parcelsCount: parcels.length,
+        buildingsCount: importedBuildings.length,
+      });
+      setSyncFeedback(`Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków`);
+      triggerFit();
+    } catch (err) {
+      setStatus({
+        isFetching: false,
+        error: err instanceof Error ? err.message : 'Błąd synchronizacji',
+        info: null,
+      });
+    }
+  };
 
   const handleMapsInputChange = (val: string) => {
     setMapsInput(val);
@@ -290,11 +384,34 @@ export const ProjectGroup: React.FC = () => {
 
   return (
     <div className="sidebar-group-content">
-      {/* 1.1 Lokalizacja (Kąt słońca § 56) */}
+      {/* 1.1 Środek projektu (Punkt bazowy & Kąt słońca § 56) */}
       <div className="ui-card">
-        <div className="ui-title">
-          <span>Lokalizacja (Kąt słońca § 56)</span>
-          <MapPin size={14} color="#f59e0b" />
+        <div className="ui-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <MapPin size={14} color="#f59e0b" />
+            <span>Środek projektu</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsProjectCenterLocked(!isProjectCenterLocked)}
+            style={{
+              background: isProjectCenterLocked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              border: `1px solid ${isProjectCenterLocked ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+              borderRadius: '6px',
+              padding: '2px 6px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              color: isProjectCenterLocked ? '#6ee7b7' : '#fcd34d',
+              fontSize: '10px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+            title={isProjectCenterLocked ? 'Środek projektu zablokowany (kliknij, aby odblokować edycję)' : 'Środek projektu odblokowany (kliknij, aby zablokować)'}
+          >
+            {isProjectCenterLocked ? <Lock size={11} /> : <Unlock size={11} />}
+            <span>{isProjectCenterLocked ? 'Zablokowany' : 'Odblokowany'}</span>
+          </button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -307,12 +424,14 @@ export const ProjectGroup: React.FC = () => {
               padding: '6px 8px',
               borderRadius: '8px',
               border: `1px solid ${mapsParseError ? 'rgba(244, 63, 94, 0.5)' : 'var(--border-light)'}`,
+              opacity: isProjectCenterLocked ? 0.75 : 1,
             }}
           >
             <Link size={13} color={mapsParseError ? '#f43f5e' : '#f59e0b'} style={{ flexShrink: 0 }} />
             <input
               type="text"
               value={mapsInput}
+              disabled={isProjectCenterLocked}
               onChange={(e) => handleMapsInputChange(e.target.value)}
               placeholder="Wklej link Google Maps / współrzędne..."
               style={{
@@ -323,10 +442,11 @@ export const ProjectGroup: React.FC = () => {
                 fontSize: '11px',
                 color: '#f8fafc',
                 minWidth: 0,
+                cursor: isProjectCenterLocked ? 'not-allowed' : 'text',
               }}
-              title="Wklej link z Google Maps lub współrzędne (np. 52.23, 21.01)"
+              title={isProjectCenterLocked ? 'Odblokuj kłódkę, aby zmienić środek projektu' : 'Wklej link z Google Maps lub współrzędne (np. 52.23, 21.01)'}
             />
-            {mapsInput && (
+            {mapsInput && !isProjectCenterLocked && (
               <button
                 type="button"
                 onClick={() => handleMapsInputChange('')}
@@ -347,7 +467,7 @@ export const ProjectGroup: React.FC = () => {
           </div>
           {mapsParseError && (
             <div style={{ fontSize: '10px', color: '#f43f5e', paddingLeft: '4px' }}>
-              Nie rozpoznano współrzędnych. Wklej link lub np. 52.23, 21.01
+              Nie rozpoznano współrzędnych. Wklej link Google Maps lub np. 52.23, 21.01
             </div>
           )}
 
@@ -361,6 +481,8 @@ export const ProjectGroup: React.FC = () => {
               padding: '4px',
               borderRadius: '10px',
               border: '1px solid var(--border-light)',
+              opacity: isProjectCenterLocked ? 0.7 : 1,
+              pointerEvents: isProjectCenterLocked ? 'none' : 'auto',
             }}
           >
             {POLISH_CITIES.map((city) => {
@@ -398,25 +520,142 @@ export const ProjectGroup: React.FC = () => {
             })}
           </div>
 
-          {/* Coordinates info pill */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              fontSize: '11px',
-              color: '#94a3b8',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(245, 158, 11, 0.08)',
-              border: '1px solid rgba(245, 158, 11, 0.2)',
-            }}
-          >
-            <span>Współrzędne:</span>
-            <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
-              {settings.latitude.toFixed(4)}° N, {settings.longitude.toFixed(4)}° E
-            </span>
+          {/* Coordinates info pill & Center Action Button */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '11px',
+                color: '#94a3b8',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+              }}
+            >
+              <span>Punkt bazowy:</span>
+              <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
+                {settings.latitude.toFixed(4)}° N, {settings.longitude.toFixed(4)}° E
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={triggerFit}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '6px 8px',
+                borderRadius: '8px',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                color: '#38bdf8',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+              title="Centruj i dopasuj widok na środku projektu"
+            >
+              <Crosshair size={13} />
+              <span>Centruj</span>
+            </button>
           </div>
+
+          {/* Promień zasięgu projektu */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '2px' }}>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>Zasięg projektu:</span>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '4px',
+                backgroundColor: 'var(--bg-input)',
+                padding: '3px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-light)',
+              }}
+            >
+              {([50, 100, 200] as const).map((r) => {
+                const isActive = projectRadius === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setProjectRadius(r)}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: '10px',
+                      fontWeight: isActive ? 700 : 500,
+                      borderRadius: '5px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      backgroundColor: isActive ? 'var(--accent-indigo)' : 'transparent',
+                      color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                    }}
+                    title={`Obszar analizy i synchronizacji: okrąg o promieniu ${r} m`}
+                  >
+                    {r} m
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Przycisk Pobierz i Synchronizuj (PRO) */}
+          <button
+            type="button"
+            onClick={handleSyncGeoData}
+            disabled={status.isFetching}
+            style={{
+              marginTop: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px solid rgba(168, 85, 247, 0.6)',
+              background: 'linear-gradient(135deg, rgba(147, 51, 234, 0.35), rgba(99, 102, 241, 0.45))',
+              color: '#ffffff',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: status.isFetching ? 'not-allowed' : 'pointer',
+              boxShadow: '0 2px 8px rgba(147, 51, 234, 0.2)',
+            }}
+            title="Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK) oraz budynki wewnątrz okręgu projektu (Wersja PRO)"
+          >
+            {status.isFetching ? <RefreshCw size={13} className="spin" /> : <Sparkles size={13} color="#c084fc" />}
+            <span>{status.isFetching ? 'Synchronizacja danych...' : 'Pobierz i synchronizuj'}</span>
+            <span
+              style={{
+                fontSize: '9px',
+                fontWeight: 800,
+                backgroundColor: '#9333ea',
+                color: '#ffffff',
+                padding: '1px 4px',
+                borderRadius: '4px',
+                marginLeft: '2px',
+              }}
+            >
+              PRO
+            </span>
+          </button>
+
+          {syncFeedback && (
+            <div style={{ fontSize: '10.5px', color: '#34d399', textAlign: 'center', fontWeight: 600 }}>
+              {syncFeedback}
+            </div>
+          )}
+          {status.error && (
+            <div style={{ fontSize: '10.5px', color: '#f43f5e', textAlign: 'center' }}>
+              {status.error}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1239,6 +1478,199 @@ export const ProjectGroup: React.FC = () => {
                 />
               </div>
             </button>
+          </div>
+
+          {/* 7. Podkłady geodezyjne i branżowe (PRO) */}
+          <div
+            style={{
+              padding: '10px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(147, 51, 234, 0.06)',
+              border: '1px solid rgba(147, 51, 234, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Layers size={13} color="#c084fc" />
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#e9d5ff' }}>
+                  Podkłady geodezyjne i branżowe
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 800,
+                  backgroundColor: '#9333ea',
+                  color: '#ffffff',
+                  padding: '1px 4px',
+                  borderRadius: '4px',
+                }}
+              >
+                PRO
+              </span>
+            </div>
+
+            {/* A. Ortofotomapa HR GUGiK */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Ortofotomapa HR (&le;10 cm)</span>
+                <button
+                  type="button"
+                  onClick={() => setShowOrthophotoLayer(!showOrthophotoLayer)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: showOrthophotoLayer ? '#38bdf8' : '#64748b',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                  }}
+                >
+                  {showOrthophotoLayer ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showOrthophotoLayer ? 'WŁ' : 'WYŁ'}</span>
+                </button>
+              </div>
+              {showOrthophotoLayer && (
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.05"
+                  value={orthophotoOpacity}
+                  onChange={(e) => setOrthophotoOpacity(parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
+                />
+              )}
+            </div>
+
+            {/* B. Sieci uzbrojenia terenu GESUT (KIUT) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Uzbrojenie GESUT (KIUT)</span>
+                <button
+                  type="button"
+                  onClick={() => setShowKiutLayer(!showKiutLayer)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: showKiutLayer ? '#fbbf24' : '#64748b',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                  }}
+                >
+                  {showKiutLayer ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showKiutLayer ? 'WŁ' : 'WYŁ'}</span>
+                </button>
+              </div>
+              {showKiutLayer && (
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.05"
+                  value={kiutOpacity}
+                  onChange={(e) => setKiutOpacity(parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
+                />
+              )}
+            </div>
+
+            {/* C. Miejscowe plany MPZP (KIMPZP) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Plany miejscowe (MPZP)</span>
+                <button
+                  type="button"
+                  onClick={() => setShowMpzpLayer(!showMpzpLayer)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: showMpzpLayer ? '#a855f7' : '#64748b',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                  }}
+                >
+                  {showMpzpLayer ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showMpzpLayer ? 'WŁ' : 'WYŁ'}</span>
+                </button>
+              </div>
+              {showMpzpLayer && (
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.05"
+                  value={mpzpOpacity}
+                  onChange={(e) => setMpzpOpacity(parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: '#a855f7', cursor: 'pointer' }}
+                />
+              )}
+            </div>
+
+            {/* D. Cieniowanie rzeźby terenu (NMT) */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+              <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Cieniowanie rzeźby (NMT)</span>
+              <button
+                type="button"
+                onClick={() => setShowTerrainLayer(!showTerrainLayer)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: showTerrainLayer ? '#34d399' : '#64748b',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                }}
+              >
+                {showTerrainLayer ? <Eye size={12} /> : <EyeOff size={12} />}
+                <span>{showTerrainLayer ? 'WŁ' : 'WYŁ'}</span>
+              </button>
+            </div>
+
+            {/* E. Ewidencja gruntów i budynków (KIEG) */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+              <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Ewidencja gruntów (KIEG)</span>
+              <button
+                type="button"
+                onClick={() => setShowEgibLayer(!showEgibLayer)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: showEgibLayer ? '#f43f5e' : '#64748b',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                }}
+              >
+                {showEgibLayer ? <Eye size={12} /> : <EyeOff size={12} />}
+                <span>{showEgibLayer ? 'WŁ' : 'WYŁ'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
