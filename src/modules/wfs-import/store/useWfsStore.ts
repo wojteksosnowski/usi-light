@@ -19,6 +19,7 @@ export interface WfsImportStatus {
   parcelsCount: number;
   treesCount: number;
   error: string | null;
+  info: string | null;
 }
 
 export interface WfsImportOptions {
@@ -54,6 +55,7 @@ const defaultStatus: WfsImportStatus = {
   parcelsCount: 0,
   treesCount: 0,
   error: null,
+  info: null,
 };
 
 export const useWfsStore = create<WfsState>((set) => ({

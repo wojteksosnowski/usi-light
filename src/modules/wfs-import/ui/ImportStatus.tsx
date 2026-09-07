@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, CheckCircle2, AlertCircle, Building2, TreePine } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Building2, TreePine, Info } from 'lucide-react';
 import { WfsImportStatus } from '../store/useWfsStore';
 
 interface ImportStatusProps {
@@ -7,7 +7,7 @@ interface ImportStatusProps {
 }
 
 export const ImportStatus: React.FC<ImportStatusProps> = ({ status }) => {
-  if (!status.isFetching && status.buildingsCount === 0 && status.treesCount === 0 && !status.error) {
+  if (!status.isFetching && status.buildingsCount === 0 && status.treesCount === 0 && !status.error && !status.info) {
     return null;
   }
 
@@ -18,6 +18,8 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({ status }) => {
         borderRadius: '6px',
         background: status.error
           ? 'rgba(244, 63, 94, 0.1)'
+          : status.info
+          ? 'rgba(59, 130, 246, 0.08)'
           : 'rgba(59, 130, 246, 0.08)',
         border: `1px solid ${status.error ? 'rgba(244, 63, 94, 0.3)' : 'var(--border-color)'}`,
         fontSize: '11px',
@@ -34,6 +36,13 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({ status }) => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-rose)' }}>
           <AlertCircle size={13} />
           <span>{status.error}</span>
+        </div>
+      )}
+
+      {status.info && !status.error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-blue)' }}>
+          <Info size={13} />
+          <span>{status.info}</span>
         </div>
       )}
 

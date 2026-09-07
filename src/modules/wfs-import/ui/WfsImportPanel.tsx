@@ -53,7 +53,7 @@ export const WfsImportPanel: React.FC = () => {
   const handleFetch = useCallback(async () => {
     if (!selectedLocation) return;
 
-    setStatus({ isFetching: true, error: null, buildingsCount: 0, parcelsCount: 0, treesCount: 0 });
+    setStatus({ isFetching: true, error: null, info: null, buildingsCount: 0, parcelsCount: 0, treesCount: 0 });
 
     try {
       const { lat, lon } = selectedLocation;
@@ -95,17 +95,32 @@ export const WfsImportPanel: React.FC = () => {
       }
 
       setLastImportBbox(bbox);
-      setStatus({ isFetching: false, error: null, buildingsCount, parcelsCount, treesCount });
+
+      if (!isWarsaw) {
+        setShowEgibLayer(true);
+        setShowTerrainLayer(true);
+        setStatus({
+          isFetching: false,
+          error: null,
+          info: 'Poza Warszawą — włączono podkłady krajowe (EGiB, NMT)',
+          buildingsCount: 0,
+          parcelsCount: 0,
+          treesCount: 0,
+        });
+      } else {
+        setStatus({ isFetching: false, error: null, info: null, buildingsCount, parcelsCount, treesCount });
+      }
     } catch (err) {
       setStatus({
         isFetching: false,
         error: err instanceof Error ? err.message : 'Błąd pobierania danych',
+        info: null,
         buildingsCount: 0,
         parcelsCount: 0,
         treesCount: 0,
       });
     }
-  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setLastImportBbox]);
+  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowEgibLayer, setShowTerrainLayer, setLastImportBbox]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
