@@ -50,14 +50,42 @@ const GRS80_E2 = 2 * GRS80_F - GRS80_F * GRS80_F; // pierwszy mimośród podnies
 /**
  * Automatycznie wykrywa układ współrzędnych na podstawie analizy statystycznej wierzchołków.
  */
-export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
-  if (!points || points.length === 0) {
+export function detectCoordinateSystem(
+  points: Point2D[],
+  projectCenterLatLon?: LatLon
+): CrsDetectionResult {
+  const getLocalOrGeodeticForCenter = (): CrsDetectionResult => {
+    if (projectCenterLatLon) {
+      const { lat, lon } = projectCenterLatLon;
+      if (lat >= 48.0 && lat <= 56.0 && lon >= 14.0 && lon <= 25.0) {
+        // Oblicz strefę PL-2000 (strefy 5..8: 15°, 18°, 21°, 24°)
+        const zone = Math.max(5, Math.min(8, Math.round(lon / 3)));
+        const lon0 = zone * 3;
+        const crsMap: Record<number, DetectedCrs> = {
+          5: 'EPSG:2176',
+          6: 'EPSG:2177',
+          7: 'EPSG:2178',
+          8: 'EPSG:2179',
+        };
+        return {
+          crs: crsMap[zone] || 'EPSG:2178',
+          description: `Układ PL-2000 strefa ${zone} (południk ${lon0}° E, odniesienie lokalne)`,
+          geodeticLabel: `ETRF2000-PL / CS2000 / ${lon0}`,
+          isGeodetic: true,
+          zone,
+        };
+      }
+    }
     return {
       crs: 'LOCAL',
-      description: 'Układ lokalny CAD (punkt odniesienia z ustawień projektu)',
+      description: 'Układ lokalny CAD (odniesienie do środka projektu)',
       geodeticLabel: 'LOKALNY (CAD)',
       isGeodetic: false,
     };
+  };
+
+  if (!points || points.length === 0) {
+    return getLocalOrGeodeticForCenter();
   }
 
   // Oblicz min/max i średnie
@@ -131,12 +159,7 @@ export function detectCoordinateSystem(points: Point2D[]): CrsDetectionResult {
     };
   }
 
-  return {
-    crs: 'LOCAL',
-    description: 'Układ lokalny CAD (odniesienie do środka projektu)',
-    geodeticLabel: 'LOKALNY (CAD)',
-    isGeodetic: false,
-  };
+  return getLocalOrGeodeticForCenter();
 }
 
 /**

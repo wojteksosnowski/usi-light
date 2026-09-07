@@ -4,7 +4,7 @@ import { WmsTileManager } from '../renderers/wmsTileManager';
 
 export class KiutOverlayLayer implements CadRenderLayer {
   readonly id = 'wfs_kiut_overlay';
-  readonly zIndex = -1;
+  readonly zIndex = 8;
 
   private tileManager: WmsTileManager | null = null;
   private opacity = 0.65;

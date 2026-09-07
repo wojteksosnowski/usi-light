@@ -10,14 +10,15 @@ export const CadLegendBottom: React.FC = () => {
   const accuracyStage = useSolarAnalysisStore((s) => s.accuracyStage);
   const analysisOutput = useSolarAnalysisStore((s) => s.analysisOutput);
   const buildings = useSceneStore((s) => s.buildings);
+  const settings = useSolarAnalysisStore((s) => s.settings);
 
   const crsInfo = useMemo(() => {
     const allPts: Point2D[] = [];
     for (const b of buildings) {
       if (b.vertices) allPts.push(...b.vertices);
     }
-    return detectCoordinateSystem(allPts);
-  }, [buildings]);
+    return detectCoordinateSystem(allPts, { lat: settings.latitude, lon: settings.longitude });
+  }, [buildings, settings.latitude, settings.longitude]);
 
   const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
   const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;

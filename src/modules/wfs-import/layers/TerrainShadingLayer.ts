@@ -4,7 +4,7 @@ import { WmsTileManager } from '../renderers/wmsTileManager';
 
 export class TerrainShadingLayer implements CadRenderLayer {
   readonly id = 'wfs_terrain_shading';
-  readonly zIndex = -5;
+  readonly zIndex = 2;
 
   private tileManager: WmsTileManager | null = null;
 

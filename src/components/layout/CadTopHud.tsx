@@ -292,14 +292,18 @@ export const CadTopHud: React.FC = () => {
       {/* Podkłady GEO (PRO) button */}
       <button
         onClick={() => {
-          const showOrthophotoLayer = useWfsStore.getState().showOrthophotoLayer;
-          const showKiutLayer = useWfsStore.getState().showKiutLayer;
-          const anyActive = showOrthophotoLayer || showKiutLayer;
+          const s = useWfsStore.getState();
+          const anyActive = s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer;
           if (anyActive) {
-            useWfsStore.getState().setShowOrthophotoLayer(false);
-            useWfsStore.getState().setShowKiutLayer(false);
+            s.setShowOrthophotoLayer(false);
+            s.setShowKiutLayer(false);
+            s.setShowMpzpLayer(false);
+            s.setShowBdotLayer(false);
+            s.setShowTerrainLayer(false);
+            s.setShowEgibLayer(false);
           } else {
-            useWfsStore.getState().setShowOrthophotoLayer(true);
+            s.setShowOrthophotoLayer(true);
+            s.setShowKiutLayer(true);
           }
         }}
         style={{
@@ -314,12 +318,16 @@ export const CadTopHud: React.FC = () => {
           fontWeight: 600,
           cursor: 'pointer',
           border: 'none',
-          backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer) ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
-          color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer) ? '#c084fc' : '#94a3b8',
+          backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+            ? 'rgba(99, 102, 241, 0.2)'
+            : 'transparent',
+          color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+            ? '#a5b4fc'
+            : '#94a3b8',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
-        title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT) [Wersja PRO]"
+        title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT / BDOT / MPZP) [Wersja PRO]"
       >
         <Layers size={13} />
         <span className="hud-btn-label">Podkład GEO</span>

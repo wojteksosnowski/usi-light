@@ -4,7 +4,7 @@ import { WmsTileManager } from '../renderers/wmsTileManager';
 
 export class MpzpOverlayLayer implements CadRenderLayer {
   readonly id = 'wfs_mpzp_overlay';
-  readonly zIndex = -2;
+  readonly zIndex = 4;
 
   private tileManager: WmsTileManager | null = null;
   private opacity = 0.5;

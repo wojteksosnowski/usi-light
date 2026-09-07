@@ -82,6 +82,8 @@ export const ProjectGroup: React.FC = () => {
   const setShowSatelliteLayer = useSolarAnalysisStore((s) => s.setShowSatelliteLayer);
   const satelliteOpacity = useSolarAnalysisStore((s) => s.satelliteOpacity);
   const setSatelliteOpacity = useSolarAnalysisStore((s) => s.setSatelliteOpacity);
+  const satelliteProvider = useSolarAnalysisStore((s) => s.satelliteProvider);
+  const setSatelliteProvider = useSolarAnalysisStore((s) => s.setSatelliteProvider);
   const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
   const setShowProjectParameters = useSolarAnalysisStore((s) => s.setShowProjectParameters);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
@@ -128,6 +130,10 @@ export const ProjectGroup: React.FC = () => {
   const setShowMpzpLayer = useWfsStore((s) => s.setShowMpzpLayer);
   const mpzpOpacity = useWfsStore((s) => s.mpzpOpacity);
   const setMpzpOpacity = useWfsStore((s) => s.setMpzpOpacity);
+  const showBdotLayer = useWfsStore((s) => s.showBdotLayer);
+  const setShowBdotLayer = useWfsStore((s) => s.setShowBdotLayer);
+  const bdotOpacity = useWfsStore((s) => s.bdotOpacity);
+  const setBdotOpacity = useWfsStore((s) => s.setBdotOpacity);
   const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
   const showEgibLayer = useWfsStore((s) => s.showEgibLayer);
@@ -1342,7 +1348,7 @@ export const ProjectGroup: React.FC = () => {
             )}
           </div>
 
-          {/* 5. Podkład satelitarny Google Maps */}
+          {/* 5. Podkład satelitarny */}
           <div
             style={{
               padding: '8px 10px',
@@ -1372,7 +1378,7 @@ export const ProjectGroup: React.FC = () => {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Globe size={14} color={showSatelliteLayer ? '#38bdf8' : '#64748b'} />
-                <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny Google</span>
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny</span>
               </div>
               <div
                 style={{
@@ -1402,7 +1408,61 @@ export const ProjectGroup: React.FC = () => {
             </button>
 
             {showSatelliteLayer && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                {/* Dostawca map satelitarnych: Google vs HERE */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '10px', color: '#94a3b8' }}>Dostawca mapy:</span>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '2px',
+                      backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                      borderRadius: '7px',
+                      padding: '2px',
+                      border: '1px solid #334155',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSatelliteProvider('google')}
+                      title="Google Maps Satellite (Aktywny)"
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: 'none',
+                        backgroundColor: satelliteProvider === 'google' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                        color: satelliteProvider === 'google' ? '#38bdf8' : '#64748b',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      Google
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      title="HERE Satellite (Zablokowane — integracja wkrótce)"
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        cursor: 'not-allowed',
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: '#475569',
+                        opacity: 0.6,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      HERE
+                    </button>
+                  </div>
+                </div>
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
                   <span>Krycie podkładu:</span>
                   <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(satelliteOpacity * 100)}%</span>
@@ -1485,8 +1545,8 @@ export const ProjectGroup: React.FC = () => {
             style={{
               padding: '10px',
               borderRadius: '10px',
-              backgroundColor: 'rgba(147, 51, 234, 0.06)',
-              border: '1px solid rgba(147, 51, 234, 0.25)',
+              backgroundColor: 'rgba(99, 102, 241, 0.05)',
+              border: '1px solid rgba(99, 102, 241, 0.2)',
               display: 'flex',
               flexDirection: 'column',
               gap: '8px',
@@ -1494,8 +1554,8 @@ export const ProjectGroup: React.FC = () => {
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Layers size={13} color="#c084fc" />
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#e9d5ff' }}>
+                <Layers size={13} color="#818cf8" />
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#c7d2fe' }}>
                   Podkłady geodezyjne i branżowe
                 </span>
               </div>
@@ -1503,9 +1563,9 @@ export const ProjectGroup: React.FC = () => {
                 style={{
                   fontSize: '9px',
                   fontWeight: 800,
-                  backgroundColor: '#9333ea',
+                  backgroundColor: 'var(--accent-indigo)',
                   color: '#ffffff',
-                  padding: '1px 4px',
+                  padding: '1px 5px',
                   borderRadius: '4px',
                 }}
               >
@@ -1515,160 +1575,329 @@ export const ProjectGroup: React.FC = () => {
 
             {/* A. Ortofotomapa HR GUGiK */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                onClick={() => setShowOrthophotoLayer(!showOrthophotoLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
                 <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Ortofotomapa HR (&le;10 cm)</span>
-                <button
-                  type="button"
-                  onClick={() => setShowOrthophotoLayer(!showOrthophotoLayer)}
+                <div
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    color: showOrthophotoLayer ? '#38bdf8' : '#64748b',
-                    cursor: 'pointer',
-                    padding: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '10px',
-                    fontWeight: 700,
+                    width: '24px',
+                    height: '14px',
+                    borderRadius: '999px',
+                    backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
                   }}
                 >
-                  {showOrthophotoLayer ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showOrthophotoLayer ? 'WŁ' : 'WYŁ'}</span>
-                </button>
-              </div>
+                  <div
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showOrthophotoLayer ? '12px' : '2px',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </div>
+              </button>
               {showOrthophotoLayer && (
-                <input
-                  type="range"
-                  min="0.1"
-                  max="1.0"
-                  step="0.05"
-                  value={orthophotoOpacity}
-                  onChange={(e) => setOrthophotoOpacity(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(orthophotoOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={orthophotoOpacity}
+                    onChange={(e) => setOrthophotoOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
+                  />
+                </div>
               )}
             </div>
 
             {/* B. Sieci uzbrojenia terenu GESUT (KIUT) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                onClick={() => setShowKiutLayer(!showKiutLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
                 <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Uzbrojenie GESUT (KIUT)</span>
-                <button
-                  type="button"
-                  onClick={() => setShowKiutLayer(!showKiutLayer)}
+                <div
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    color: showKiutLayer ? '#fbbf24' : '#64748b',
-                    cursor: 'pointer',
-                    padding: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '10px',
-                    fontWeight: 700,
+                    width: '24px',
+                    height: '14px',
+                    borderRadius: '999px',
+                    backgroundColor: showKiutLayer ? '#fbbf24' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
                   }}
                 >
-                  {showKiutLayer ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showKiutLayer ? 'WŁ' : 'WYŁ'}</span>
-                </button>
-              </div>
+                  <div
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showKiutLayer ? '12px' : '2px',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </div>
+              </button>
               {showKiutLayer && (
-                <input
-                  type="range"
-                  min="0.1"
-                  max="1.0"
-                  step="0.05"
-                  value={kiutOpacity}
-                  onChange={(e) => setKiutOpacity(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(kiutOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={kiutOpacity}
+                    onChange={(e) => setKiutOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
+                  />
+                </div>
               )}
             </div>
 
             {/* C. Miejscowe plany MPZP (KIMPZP) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                onClick={() => setShowMpzpLayer(!showMpzpLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
                 <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Plany miejscowe (MPZP)</span>
-                <button
-                  type="button"
-                  onClick={() => setShowMpzpLayer(!showMpzpLayer)}
+                <div
                   style={{
-                    background: 'none',
-                    border: 'none',
-                    color: showMpzpLayer ? '#a855f7' : '#64748b',
-                    cursor: 'pointer',
-                    padding: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '10px',
-                    fontWeight: 700,
+                    width: '24px',
+                    height: '14px',
+                    borderRadius: '999px',
+                    backgroundColor: showMpzpLayer ? '#818cf8' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
                   }}
                 >
-                  {showMpzpLayer ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showMpzpLayer ? 'WŁ' : 'WYŁ'}</span>
-                </button>
-              </div>
+                  <div
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showMpzpLayer ? '12px' : '2px',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </div>
+              </button>
               {showMpzpLayer && (
-                <input
-                  type="range"
-                  min="0.1"
-                  max="1.0"
-                  step="0.05"
-                  value={mpzpOpacity}
-                  onChange={(e) => setMpzpOpacity(parseFloat(e.target.value))}
-                  style={{ width: '100%', accentColor: '#a855f7', cursor: 'pointer' }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(mpzpOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={mpzpOpacity}
+                    onChange={(e) => setMpzpOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#818cf8', cursor: 'pointer' }}
+                  />
+                </div>
               )}
             </div>
 
-            {/* D. Cieniowanie rzeźby terenu (NMT) */}
+            {/* D. Obiekty topograficzne BDOT10k */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+              <button
+                type="button"
+                onClick={() => setShowBdotLayer(!showBdotLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
+                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Topografia BDOT10k</span>
+                <div
+                  style={{
+                    width: '24px',
+                    height: '14px',
+                    borderRadius: '999px',
+                    backgroundColor: showBdotLayer ? '#34d399' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showBdotLayer ? '12px' : '2px',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </div>
+              </button>
+              {showBdotLayer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(bdotOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={bdotOpacity}
+                    onChange={(e) => setBdotOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#34d399', cursor: 'pointer' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* E. Cieniowanie rzeźby terenu (NMT) */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
               <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Cieniowanie rzeźby (NMT)</span>
               <button
                 type="button"
                 onClick={() => setShowTerrainLayer(!showTerrainLayer)}
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  color: showTerrainLayer ? '#34d399' : '#64748b',
-                  cursor: 'pointer',
-                  padding: 0,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '10px',
-                  fontWeight: 700,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
                 }}
               >
-                {showTerrainLayer ? <Eye size={12} /> : <EyeOff size={12} />}
-                <span>{showTerrainLayer ? 'WŁ' : 'WYŁ'}</span>
+                <div
+                  style={{
+                    width: '24px',
+                    height: '14px',
+                    borderRadius: '999px',
+                    backgroundColor: showTerrainLayer ? '#34d399' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showTerrainLayer ? '12px' : '2px',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </div>
               </button>
             </div>
 
-            {/* E. Ewidencja gruntów i budynków (KIEG) */}
+            {/* F. Ewidencja gruntów i budynków (KIEG) */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
               <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Ewidencja gruntów (KIEG)</span>
               <button
                 type="button"
                 onClick={() => setShowEgibLayer(!showEgibLayer)}
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  color: showEgibLayer ? '#f43f5e' : '#64748b',
-                  cursor: 'pointer',
-                  padding: 0,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '10px',
-                  fontWeight: 700,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
                 }}
               >
-                {showEgibLayer ? <Eye size={12} /> : <EyeOff size={12} />}
-                <span>{showEgibLayer ? 'WŁ' : 'WYŁ'}</span>
+                <div
+                  style={{
+                    width: '24px',
+                    height: '14px',
+                    borderRadius: '999px',
+                    backgroundColor: showEgibLayer ? '#f43f5e' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showEgibLayer ? '12px' : '2px',
+                      transition: 'left 0.2s ease',
+                    }}
+                  />
+                </div>
               </button>
             </div>
           </div>

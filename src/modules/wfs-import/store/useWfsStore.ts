@@ -49,6 +49,8 @@ interface WfsState {
   kiutOpacity: number;
   showMpzpLayer: boolean;
   mpzpOpacity: number;
+  showBdotLayer: boolean;
+  bdotOpacity: number;
   showTerrainLayer: boolean;
   terrainOpacity: number;
   showEgibLayer: boolean;
@@ -70,6 +72,8 @@ interface WfsState {
   setKiutOpacity: (val: number) => void;
   setShowMpzpLayer: (show: boolean) => void;
   setMpzpOpacity: (val: number) => void;
+  setShowBdotLayer: (show: boolean) => void;
+  setBdotOpacity: (val: number) => void;
   setShowTerrainLayer: (show: boolean) => void;
   setTerrainOpacity: (val: number) => void;
   setShowEgibLayer: (show: boolean) => void;
@@ -110,6 +114,8 @@ export const useWfsStore = create<WfsState>((set) => ({
   kiutOpacity: 0.65,
   showMpzpLayer: false,
   mpzpOpacity: 0.5,
+  showBdotLayer: false,
+  bdotOpacity: 0.6,
   showTerrainLayer: false,
   terrainOpacity: 0.35,
   showEgibLayer: false,
@@ -134,6 +140,8 @@ export const useWfsStore = create<WfsState>((set) => ({
   setKiutOpacity: (val) => set({ kiutOpacity: val }),
   setShowMpzpLayer: (show) => set({ showMpzpLayer: show }),
   setMpzpOpacity: (val) => set({ mpzpOpacity: val }),
+  setShowBdotLayer: (show) => set({ showBdotLayer: show }),
+  setBdotOpacity: (val) => set({ bdotOpacity: val }),
   setShowTerrainLayer: (show) => set({ showTerrainLayer: show }),
   setTerrainOpacity: (val) => set({ terrainOpacity: val }),
   setShowEgibLayer: (show) => set({ showEgibLayer: show }),

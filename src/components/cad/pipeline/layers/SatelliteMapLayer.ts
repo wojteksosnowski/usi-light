@@ -13,11 +13,7 @@ export class SatelliteMapLayer implements CadRenderLayer {
     const { renderContext, tileManager, crsInfo, satelliteOpacity = 1 } = context;
     if (!tileManager || !crsInfo) return;
 
-    const { ctx, width, height, latitude, longitude } = renderContext;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#020617';
-    ctx.fillRect(0, 0, width, height);
+    const { latitude, longitude } = renderContext;
 
     renderSatelliteMap({
       rc: renderContext,

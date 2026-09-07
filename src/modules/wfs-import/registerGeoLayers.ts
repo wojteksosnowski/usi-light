@@ -2,6 +2,7 @@ import { CadRenderPipeline } from '../../components/cad/pipeline/CadRenderPipeli
 import { OrthophotoLayer } from './layers/OrthophotoLayer';
 import { KiutOverlayLayer } from './layers/KiutOverlayLayer';
 import { MpzpOverlayLayer } from './layers/MpzpOverlayLayer';
+import { BdotOverlayLayer } from './layers/BdotOverlayLayer';
 import { TerrainShadingLayer } from './layers/TerrainShadingLayer';
 import { EgibOverlayLayer } from './layers/EgibOverlayLayer';
 import { WfsTreesLayer } from './layers/WfsTreesLayer';
@@ -11,6 +12,7 @@ import { useWfsStore } from './store/useWfsStore';
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';
 const MPZP_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego';
+const BDOT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaBazDanychObiektowTopograficznych';
 const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
 const EGIB_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
 
@@ -23,6 +25,7 @@ let registered = false;
 const orthophotoLayer = new OrthophotoLayer();
 const kiutLayer = new KiutOverlayLayer();
 const mpzpLayer = new MpzpOverlayLayer();
+const bdotLayer = new BdotOverlayLayer();
 const terrainLayer = new TerrainShadingLayer();
 const egibLayer = new EgibOverlayLayer();
 const treesLayer = new WfsTreesLayer();
@@ -48,6 +51,13 @@ const mpzpTileManager = new WmsTileManager({
   crs: 'EPSG:3857',
 }, 200, triggerRender);
 
+const bdotTileManager = new WmsTileManager({
+  baseUrl: BDOT_WMS_URL,
+  layers: 'bdot:OT_PTWP_A,bdot:OT_BUBD_A,bdot:OT_SKJZ_L,bdot:OT_OIPR_P',
+  format: 'image/png',
+  crs: 'EPSG:3857',
+}, 200, triggerRender);
+
 const terrainTileManager = new WmsTileManager({
   baseUrl: NMT_WMS_URL,
   layers: 'Raster',
@@ -65,6 +75,7 @@ const egibTileManager = new WmsTileManager({
 orthophotoLayer.setTileManager(orthophotoTileManager);
 kiutLayer.setTileManager(kiutTileManager);
 mpzpLayer.setTileManager(mpzpTileManager);
+bdotLayer.setTileManager(bdotTileManager);
 terrainLayer.setTileManager(terrainTileManager);
 egibLayer.setTileManager(egibTileManager);
 
@@ -77,6 +88,7 @@ export function registerGeoLayers(): () => void {
   let prevShowOrtho = false;
   let prevShowKiut = false;
   let prevShowMpzp = false;
+  let prevShowBdot = false;
   let prevShowTerrain = false;
   let prevShowEgib = false;
   let prevShowTrees = false;
@@ -90,6 +102,8 @@ export function registerGeoLayers(): () => void {
       kiutOpacity,
       showMpzpLayer,
       mpzpOpacity,
+      showBdotLayer,
+      bdotOpacity,
       showTerrainLayer,
       showEgibLayer,
       showTreesLayer,
@@ -125,7 +139,16 @@ export function registerGeoLayers(): () => void {
       changed = true;
     }
 
-    // 4. Cieniowanie NMT
+    // 4. BDOT10k
+    bdotLayer.setOpacity(bdotOpacity);
+    if (showBdotLayer !== prevShowBdot) {
+      if (showBdotLayer) pipeline.registerMainLayer(bdotLayer);
+      else pipeline.unregisterMainLayer('wfs_bdot_overlay');
+      prevShowBdot = showBdotLayer;
+      changed = true;
+    }
+
+    // 5. Cieniowanie NMT
     if (showTerrainLayer !== prevShowTerrain) {
       if (showTerrainLayer) pipeline.registerMainLayer(terrainLayer);
       else pipeline.unregisterMainLayer('wfs_terrain_shading');
@@ -133,7 +156,7 @@ export function registerGeoLayers(): () => void {
       changed = true;
     }
 
-    // 5. EGiB
+    // 6. EGiB
     if (showEgibLayer !== prevShowEgib) {
       if (showEgibLayer) pipeline.registerMainLayer(egibLayer);
       else pipeline.unregisterMainLayer('wfs_egib_overlay');
@@ -141,7 +164,7 @@ export function registerGeoLayers(): () => void {
       changed = true;
     }
 
-    // 6. Drzewa
+    // 7. Drzewa
     treesLayer.setTrees(trees);
     treesLayer.setVisible(showTreesLayer);
     const shouldShowTrees = showTreesLayer && trees.length > 0;
@@ -161,6 +184,7 @@ export function registerGeoLayers(): () => void {
     pipeline.unregisterMainLayer('wfs_orthophoto');
     pipeline.unregisterMainLayer('wfs_kiut_overlay');
     pipeline.unregisterMainLayer('wfs_mpzp_overlay');
+    pipeline.unregisterMainLayer('wfs_bdot_overlay');
     pipeline.unregisterMainLayer('wfs_terrain_shading');
     pipeline.unregisterMainLayer('wfs_egib_overlay');
     pipeline.unregisterMainLayer('wfs_trees');

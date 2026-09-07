@@ -93,7 +93,14 @@ export class CadRenderPipeline {
    */
   public renderMain(context: CadRenderFrameContext): void {
     const { renderContext } = context;
-    const { ctx } = renderContext;
+    const { ctx, width, height } = renderContext;
+
+    // 1. Podstawowe czyszczenie płótna pod spodem wszystkich warstw
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
 
     for (const layer of this.mainLayers) {
       if (layer.shouldRender(context)) {

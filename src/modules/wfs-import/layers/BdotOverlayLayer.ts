@@ -2,14 +2,19 @@ import { CadRenderLayer, CadRenderFrameContext } from '../../../components/cad/p
 import { renderWmsOverlay } from '../renderers/wmsOverlayRenderer';
 import { WmsTileManager } from '../renderers/wmsTileManager';
 
-export class EgibOverlayLayer implements CadRenderLayer {
-  readonly id = 'wfs_egib_overlay';
-  readonly zIndex = 9;
+export class BdotOverlayLayer implements CadRenderLayer {
+  readonly id = 'wfs_bdot_overlay';
+  readonly zIndex = 6;
 
   private tileManager: WmsTileManager | null = null;
+  private opacity = 0.6;
 
   setTileManager(manager: WmsTileManager | null) {
     this.tileManager = manager;
+  }
+
+  setOpacity(opacity: number) {
+    this.opacity = opacity;
   }
 
   shouldRender(context: CadRenderFrameContext): boolean {
@@ -29,7 +34,7 @@ export class EgibOverlayLayer implements CadRenderLayer {
         lat: renderContext.latitude,
         lon: renderContext.longitude,
       },
-      opacity: 0.5,
+      opacity: this.opacity,
     });
   }
 }

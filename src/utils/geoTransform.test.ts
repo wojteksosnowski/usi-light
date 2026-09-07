@@ -43,16 +43,19 @@ describe('geoTransform', () => {
     expect(res.zone).toBe(7);
   });
 
-  it('detects local CAD coordinates for origin-centered project', () => {
+  it('detects local CAD coordinates with project center returning proper ETRF2000-PL zone', () => {
     const points = [
       { x: 0, y: 0 },
       { x: 25, y: 0 },
       { x: 25, y: 15 },
       { x: 0, y: 15 },
     ];
-    const res = detectCoordinateSystem(points);
-    expect(res.crs).toBe('LOCAL');
-    expect(res.isGeodetic).toBe(false);
+    // Warsaw center: 52.2297 N, 21.0122 E -> zone 7 (21° E)
+    const res = detectCoordinateSystem(points, { lat: 52.2297, lon: 21.0122 });
+    expect(res.crs).toBe('EPSG:2178');
+    expect(res.geodeticLabel).toBe('ETRF2000-PL / CS2000 / 21');
+    expect(res.isGeodetic).toBe(true);
+    expect(res.zone).toBe(7);
   });
 
   it('computes Web Mercator pixels and tile coordinates correctly at zoom 18', () => {
