@@ -30,7 +30,6 @@ import { useWfsStore, ProjectRadius } from '../../modules/wfs-import/store/useWf
 import { fetchParcelsInRadius } from '../../modules/wfs-import/services/uldkClient';
 import { fetchWarsawBuildings } from '../../modules/wfs-import/services/wfsWarsawClient';
 import { importBuildingsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
-import { fetchBuildingElevations } from '../../modules/wfs-import/services/nmtElevationClient';
 import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
@@ -174,23 +173,7 @@ export const ProjectGroup: React.FC = () => {
         }
       }
 
-      // 3. Pobierz rzędne terenu z GUGiK NMT (2.5D — posadowienie budynków na terenie)
-      const allNewObjects = [...parcels, ...importedBuildings];
-      if (allNewObjects.length > 0) {
-        try {
-          const elevMap = await fetchBuildingElevations(allNewObjects, projectCrs, projectCenter);
-          for (const obj of allNewObjects) {
-            const elev = elevMap.get(obj.id);
-            if (elev != null) {
-              (obj as BuildingLoop).elevation = elev;
-            }
-          }
-        } catch {
-          // rzędne terenu opcjonalne — pomiń błąd
-        }
-      }
-
-      // 4. Synchronizacja do sceny
+      // 3. Synchronizacja do sceny
       const existingUserBuildings = buildings.filter((b) => !b.id.startsWith('uldk-') && !b.id.startsWith('wfs-'));
       const combined = [...existingUserBuildings, ...parcels, ...importedBuildings];
       setBuildings(combined);
@@ -608,7 +591,7 @@ export const ProjectGroup: React.FC = () => {
                 border: '1px solid var(--border-light)',
               }}
             >
-              {([50, 100, 200, 500] as const).map((r) => {
+              {([50, 100, 200, 300] as const).map((r) => {
                 const isActive = projectRadius === r;
                 return (
                   <button

@@ -106,7 +106,7 @@ export function importBuildingsFromGeoJson(
       // Filtr zasięgu: budynek musi mieć co najmniej 50% powierzchni wewnątrz okręgu projektu
       if (radiusMeters != null && radiusMeters > 0) {
         const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
-        if (ratio < 0.5) continue;
+        if (ratio < 0.1) continue;
       }
 
       const id = ri === 0 ? buildingId : `${buildingId}-r${ri}`;

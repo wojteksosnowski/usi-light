@@ -33,48 +33,95 @@ export interface UldkParcelResult {
   raw: UldkParcelRaw;
 }
 
+export type Ring = Array<[number, number]>;
+
+/** Jedna część wielokąta: pierścień zewnętrzny + ewentualne pierścienie-otwory (enklawy). */
+export interface PolygonPart {
+  outer: Ring;
+  holes: Ring[];
+}
+
 /**
  * Parsuje geometrię WKT (POLYGON / MULTIPOLYGON) ze standardu ULDK/PostGIS.
  * Obsługuje opcjonalny prefix "SRID=2180;".
+ * Zachowuje przynależność pierścieni: pierwszy pierścień każdej części to granica
+ * zewnętrzna, kolejne to otwory (np. działka-enklawa wycięta w środku innej działki).
  */
-export function parseWktToRings(wktString: string): Array<Array<[number, number]>> {
+export function parseWktToPolygonParts(wktString: string): PolygonPart[] {
   if (!wktString || typeof wktString !== 'string') return [];
 
   // Usunięcie prefixu SRID jeśli występuje
-  let clean = wktString.replace(/^SRID=\d+;/i, '').trim();
+  const clean = wktString.replace(/^SRID=\d+;/i, '').trim();
 
-  const rings: Array<Array<[number, number]>> = [];
+  const parts: PolygonPart[] = [];
 
-  // 1. Obsługa MULTIPOLYGON (((x y, ...), (x y, ...)), ((x y, ...)))
+  const ringGroupToPart = (ringGroup: string): PolygonPart | null => {
+    const ringStrs = splitTopLevel(ringGroup);
+    const rings: Ring[] = [];
+    for (const ringStr of ringStrs) {
+      const ring = parseCoordinateList(stripOuterParens(ringStr));
+      if (ring.length >= 3) rings.push(ring);
+    }
+    if (rings.length === 0) return null;
+    return { outer: rings[0], holes: rings.slice(1) };
+  };
+
+  // 1. Obsługa MULTIPOLYGON((poly1 rings...), (poly2 rings...), ...)
   if (clean.startsWith('MULTIPOLYGON')) {
-    const coordsMatch = clean.match(/\(\(\(([\s\S]+?)\)\)\)/g) || clean.match(/\(\(([\s\S]+?)\)\)/g);
-    if (coordsMatch) {
-      for (const polyStr of coordsMatch) {
-        const ringMatches = polyStr.match(/\(([^()]+)\)/g);
-        if (ringMatches) {
-          for (const ringStr of ringMatches) {
-            const ring = parseCoordinateList(ringStr);
-            if (ring.length >= 3) rings.push(ring);
-          }
-        }
+    const inner = extractOuterParenContent(clean, 'MULTIPOLYGON');
+    if (inner) {
+      const polyGroups = splitTopLevel(inner);
+      for (const polyGroup of polyGroups) {
+        const part = ringGroupToPart(stripOuterParens(polyGroup));
+        if (part) parts.push(part);
       }
     }
-    return rings;
+    return parts;
   }
 
-  // 2. Obsługa POLYGON ((x y, x y, ...), (x y, ...))
+  // 2. Obsługa POLYGON((x y, x y, ...), (x y, ...))
   if (clean.startsWith('POLYGON')) {
-    const ringMatches = clean.match(/\(([^()]+)\)/g);
-    if (ringMatches) {
-      for (const ringStr of ringMatches) {
-        const ring = parseCoordinateList(ringStr);
-        if (ring.length >= 3) rings.push(ring);
-      }
+    const inner = extractOuterParenContent(clean, 'POLYGON');
+    if (inner) {
+      const part = ringGroupToPart(inner);
+      if (part) parts.push(part);
     }
-    return rings;
+    return parts;
   }
 
-  return rings;
+  return parts;
+}
+
+/** Zwraca zawartość między najbardziej zewnętrznymi nawiasami po nazwie typu geometrii WKT. */
+function extractOuterParenContent(clean: string, typeName: string): string | null {
+  const rest = clean.slice(typeName.length).trim();
+  if (!rest.startsWith('(') || !rest.endsWith(')')) return null;
+  return rest.slice(1, -1);
+}
+
+function stripOuterParens(s: string): string {
+  const t = s.trim();
+  if (t.startsWith('(') && t.endsWith(')')) return t.slice(1, -1);
+  return t;
+}
+
+/** Dzieli listę oddzieloną przecinkami na najwyższym poziomie zagnieżdżenia nawiasów. */
+function splitTopLevel(s: string): string[] {
+  const result: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of s) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) result.push(current.trim());
+  return result;
 }
 
 function parseCoordinateList(ringStr: string): Array<[number, number]> {
@@ -161,39 +208,37 @@ export async function fetchParcelsInRadius(
   const center2180 = wgs84ToEpsg2180(centerLat, centerLon);
   const parcelsMap = new Map<string, UldkParcelRaw>();
 
-  // Siatka próbkowania wewnątrz okręgu projektu (środek + punkty kardynalne i pośrednie)
-  const steps = radiusMeters <= 50
-    ? [0, 25, 45]
-    : radiusMeters <= 100
-      ? [0, 40, 80]
-      : radiusMeters <= 200
-        ? [0, 60, 120, 180]
-        : [0, 100, 200, 350, 460]; // 500m — 5 pierścieni
-  const angles = [0, 45, 90, 135, 180, 225, 270, 315];
-
-  const samplePoints: Array<{ x: number; y: number }> = [{ x: center2180.x, y: center2180.y }];
-
-  for (const r of steps) {
-    if (r === 0) continue;
-    for (const a of angles) {
-      const rad = (a * Math.PI) / 180;
-      samplePoints.push({
-        x: center2180.x + r * Math.cos(rad),
-        y: center2180.y + r * Math.sin(rad),
-      });
+  // ULDK nie oferuje zapytania obszarowego (tylko point-lookup GetParcelByXY),
+  // więc kompletność pokrycia zależy wyłącznie od gęstości siatki próbkowania.
+  // Siatka kwadratowa pokrywająca cały okrąg zasięgu, z krokiem poniżej typowej
+  // szerokości najwęższej działki miejskiej — żeby nie przeoczyć wąskich/małych działek
+  // leżących między punktami próbkowania.
+  const GRID_STEP_METERS = radiusMeters <= 100 ? 10 : radiusMeters <= 200 ? 14 : 18;
+  const samplePoints: Array<{ x: number; y: number }> = [];
+  for (let dx = -radiusMeters; dx <= radiusMeters; dx += GRID_STEP_METERS) {
+    for (let dy = -radiusMeters; dy <= radiusMeters; dy += GRID_STEP_METERS) {
+      if (dx * dx + dy * dy <= radiusMeters * radiusMeters) {
+        samplePoints.push({ x: center2180.x + dx, y: center2180.y + dy });
+      }
     }
   }
 
-  // Zapytania równoległe (ULDK jest bardzo szybki i stabilny)
-  const fetchPromises = samplePoints.map((pt) =>
-    fetchParcelByEpsg2180(pt.x, pt.y, signal).then((raw) => {
-      if (raw && raw.id && !parcelsMap.has(raw.id)) {
-        parcelsMap.set(raw.id, raw);
-      }
-    })
-  );
-
-  await Promise.allSettled(fetchPromises);
+  // Zapytania w batchach równoległych (ULDK jest szybki, ale siatka może liczyć
+  // setki punktów dla większych promieni — unikamy jednorazowego zalewu tysiącami fetchy).
+  const SAMPLE_CONCURRENCY = 24;
+  for (let i = 0; i < samplePoints.length; i += SAMPLE_CONCURRENCY) {
+    if (signal?.aborted) break;
+    const batch = samplePoints.slice(i, i + SAMPLE_CONCURRENCY);
+    await Promise.allSettled(
+      batch.map((pt) =>
+        fetchParcelByEpsg2180(pt.x, pt.y, signal).then((raw) => {
+          if (raw && raw.id && !parcelsMap.has(raw.id)) {
+            parcelsMap.set(raw.id, raw);
+          }
+        })
+      )
+    );
+  }
 
   const sourceCrs: CrsDetectionResult = {
     crs: 'EPSG:2180',
@@ -205,16 +250,28 @@ export async function fetchParcelsInRadius(
   const loops: BuildingLoop[] = [];
 
   for (const [id, raw] of parcelsMap) {
-    const rings = parseWktToRings(raw.wkt);
-    for (let ri = 0; ri < rings.length; ri++) {
-      const ring = rings[ri];
-      const cadPoints: Point2D[] = ring.map(([x2180, y2180]) => {
+    const parts = parseWktToPolygonParts(raw.wkt);
+    for (let pi = 0; pi < parts.length; pi++) {
+      const part = parts[pi];
+      // Uwaga: renderujemy wyłącznie granicę zewnętrzną części wielokąta.
+      // Pierścienie-otwory (np. działka-enklawa wycięta w środku innej działki) NIE są
+      // wycinane z bryły — BuildingLoop nie ma koncepcji wielopierścieniowego wielokąta.
+      // Zamiast tworzyć fantomową, nakładającą się bryłę w miejscu otworu (jak poprzednio),
+      // po prostu pomijamy pierścienie-otwory i sygnalizujemy to w konsoli.
+      if (part.holes.length > 0) {
+        console.warn(
+          `[ULDK] Działka ${id} (część ${pi}) zawiera ${part.holes.length} nieodwzorowany(ch) otwór(ów) — ` +
+          `render pominie wycięcie enklawy w środku bryły.`
+        );
+      }
+
+      const cadPoints: Point2D[] = part.outer.map(([x2180, y2180]) => {
         // Konwersja EPSG:2180 -> WGS84 -> CAD
         const latLon = cadPointToWgs84({ x: x2180, y: y2180 }, sourceCrs);
         return wgs84ToCadPoint(latLon, projectCrs, projectCenter);
       });
 
-      const loopId = ri === 0 ? `uldk-${id}` : `uldk-${id}-r${ri}`;
+      const loopId = pi === 0 ? `uldk-${id}` : `uldk-${id}-p${pi}`;
       const sanitized = sanitizePolygon(cadPoints, {
         buildingId: loopId,
         defaultHeight: 0,
@@ -224,13 +281,15 @@ export async function fetchParcelsInRadius(
 
       if (!sanitized.valid) continue;
 
-      // Filtr zasięgu: działka musi mieć co najmniej 50% powierzchni wewnątrz okręgu projektu
+      // Filtr zasięgu: działka musi mieć co najmniej 10% powierzchni wewnątrz okręgu projektu
       const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
-      if (ratio < 0.5) continue;
+      if (ratio < 0.1) continue;
 
       loops.push({
         id: loopId,
-        name: raw.plotNumber ? `Działka nr ${raw.plotNumber}` : `Działka ${id}`,
+        name: raw.plotNumber
+          ? `Działka nr ${raw.plotNumber}${part.holes.length > 0 ? ' (⚠ zawiera nieodwzorowany otwór)' : ''}`
+          : `Działka ${id}`,
         layer: 'WFS_DZIALKI',
         category: 'boundary' as ObjectCategory,
         areaType: 'plot',

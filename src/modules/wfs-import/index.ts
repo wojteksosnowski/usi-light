@@ -7,9 +7,9 @@ export type { GeocodingResult } from './services/geocoding';
 export {
   fetchParcelByEpsg2180,
   fetchParcelsInRadius,
-  parseWktToRings,
+  parseWktToPolygonParts,
 } from './services/uldkClient';
-export type { UldkParcelRaw, UldkParcelResult } from './services/uldkClient';
+export type { UldkParcelRaw, UldkParcelResult, PolygonPart, Ring } from './services/uldkClient';
 
 export {
   fetchWarsawBuildings,
