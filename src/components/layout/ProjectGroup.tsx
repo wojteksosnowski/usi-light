@@ -30,6 +30,7 @@ import { useWfsStore, ProjectRadius } from '../../modules/wfs-import/store/useWf
 import { fetchParcelsInRadius } from '../../modules/wfs-import/services/uldkClient';
 import { fetchWarsawBuildings } from '../../modules/wfs-import/services/wfsWarsawClient';
 import { importBuildingsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
+import { fetchBuildingElevations } from '../../modules/wfs-import/services/nmtElevationClient';
 import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
@@ -166,14 +167,30 @@ export const ProjectGroup: React.FC = () => {
         try {
           const bldGeoJson = await fetchWarsawBuildings(bbox);
           const sourceCrs = { crs: 'EPSG:2178' as const, description: 'PL-2000 strefa 7', geodeticLabel: 'ETRF2000-PL / CS2000 / 21', isGeodetic: true, zone: 7 };
-          const res = importBuildingsFromGeoJson(bldGeoJson, sourceCrs, projectCrs, projectCenter);
+          const res = importBuildingsFromGeoJson(bldGeoJson, sourceCrs, projectCrs, projectCenter, radius);
           importedBuildings = res.buildings;
         } catch {
           // kontynuuj z działkami
         }
       }
 
-      // Synchronizacja do sceny
+      // 3. Pobierz rzędne terenu z GUGiK NMT (2.5D — posadowienie budynków na terenie)
+      const allNewObjects = [...parcels, ...importedBuildings];
+      if (allNewObjects.length > 0) {
+        try {
+          const elevMap = await fetchBuildingElevations(allNewObjects, projectCrs, projectCenter);
+          for (const obj of allNewObjects) {
+            const elev = elevMap.get(obj.id);
+            if (elev != null) {
+              (obj as BuildingLoop).elevation = elev;
+            }
+          }
+        } catch {
+          // rzędne terenu opcjonalne — pomiń błąd
+        }
+      }
+
+      // 4. Synchronizacja do sceny
       const existingUserBuildings = buildings.filter((b) => !b.id.startsWith('uldk-') && !b.id.startsWith('wfs-'));
       const combined = [...existingUserBuildings, ...parcels, ...importedBuildings];
       setBuildings(combined);
@@ -186,6 +203,12 @@ export const ProjectGroup: React.FC = () => {
         buildingsCount: importedBuildings.length,
       });
       setSyncFeedback(`Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków`);
+
+      // 5. Prefetch kafelków satelitarnych w obszarze zasięgu projektu
+      window.dispatchEvent(new CustomEvent('geo-prefetch-satellite', {
+        detail: { lat: centerLat, lon: centerLon, radius },
+      }));
+
       triggerFit();
     } catch (err) {
       setStatus({
@@ -577,7 +600,7 @@ export const ProjectGroup: React.FC = () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
+                gridTemplateColumns: 'repeat(4, 1fr)',
                 gap: '4px',
                 backgroundColor: 'var(--bg-input)',
                 padding: '3px',
@@ -585,7 +608,7 @@ export const ProjectGroup: React.FC = () => {
                 border: '1px solid var(--border-light)',
               }}
             >
-              {([50, 100, 200] as const).map((r) => {
+              {([50, 100, 200, 500] as const).map((r) => {
                 const isActive = projectRadius === r;
                 return (
                   <button
@@ -593,7 +616,7 @@ export const ProjectGroup: React.FC = () => {
                     type="button"
                     onClick={() => setProjectRadius(r)}
                     style={{
-                      padding: '3px 8px',
+                      padding: '3px 6px',
                       fontSize: '10px',
                       fontWeight: isActive ? 700 : 500,
                       borderRadius: '5px',
@@ -1543,19 +1566,19 @@ export const ProjectGroup: React.FC = () => {
           {/* 7. Podkłady geodezyjne i branżowe (PRO) */}
           <div
             style={{
-              padding: '10px',
+              padding: '8px 10px',
               borderRadius: '10px',
               backgroundColor: 'rgba(99, 102, 241, 0.05)',
-              border: '1px solid rgba(99, 102, 241, 0.2)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
               display: 'flex',
               flexDirection: 'column',
               gap: '8px',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Layers size={13} color="#818cf8" />
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#c7d2fe' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Layers size={14} color="#818cf8" />
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#e0e7ff' }}>
                   Podkłady geodezyjne i branżowe
                 </span>
               </div>
@@ -1574,7 +1597,7 @@ export const ProjectGroup: React.FC = () => {
             </div>
 
             {/* A. Ortofotomapa HR GUGiK */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
               <button
                 type="button"
                 onClick={() => setShowOrthophotoLayer(!showOrthophotoLayer)}
@@ -1584,16 +1607,28 @@ export const ProjectGroup: React.FC = () => {
                   justifyContent: 'space-between',
                   background: 'none',
                   border: 'none',
+                  color: '#f8fafc',
                   cursor: 'pointer',
                   padding: 0,
                   width: '100%',
                 }}
               >
-                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Ortofotomapa HR (&le;10 cm)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#64748b',
+                      boxShadow: showOrthophotoLayer ? '0 0 6px rgba(56, 189, 248, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Ortofotomapa HR (&le;10 cm)</span>
+                </div>
                 <div
                   style={{
-                    width: '24px',
-                    height: '14px',
+                    width: '28px',
+                    height: '16px',
                     borderRadius: '999px',
                     backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#334155',
                     position: 'relative',
@@ -1603,20 +1638,21 @@ export const ProjectGroup: React.FC = () => {
                 >
                   <div
                     style={{
-                      width: '10px',
-                      height: '10px',
+                      width: '12px',
+                      height: '12px',
                       borderRadius: '50%',
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showOrthophotoLayer ? '12px' : '2px',
+                      left: showOrthophotoLayer ? '14px' : '2px',
                       transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>
               </button>
               {showOrthophotoLayer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
                     <span>Krycie:</span>
                     <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(orthophotoOpacity * 100)}%</span>
@@ -1635,7 +1671,7 @@ export const ProjectGroup: React.FC = () => {
             </div>
 
             {/* B. Sieci uzbrojenia terenu GESUT (KIUT) */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
               <button
                 type="button"
                 onClick={() => setShowKiutLayer(!showKiutLayer)}
@@ -1645,18 +1681,30 @@ export const ProjectGroup: React.FC = () => {
                   justifyContent: 'space-between',
                   background: 'none',
                   border: 'none',
+                  color: '#f8fafc',
                   cursor: 'pointer',
                   padding: 0,
                   width: '100%',
                 }}
               >
-                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Uzbrojenie GESUT (KIUT)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showKiutLayer ? '#fbbf24' : '#64748b',
+                      boxShadow: showKiutLayer ? '0 0 6px rgba(251, 191, 36, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Uzbrojenie GESUT (KIUT)</span>
+                </div>
                 <div
                   style={{
-                    width: '24px',
-                    height: '14px',
+                    width: '28px',
+                    height: '16px',
                     borderRadius: '999px',
-                    backgroundColor: showKiutLayer ? '#fbbf24' : '#334155',
+                    backgroundColor: showKiutLayer ? '#f59e0b' : '#334155',
                     position: 'relative',
                     transition: 'background-color 0.2s ease',
                     flexShrink: 0,
@@ -1664,20 +1712,21 @@ export const ProjectGroup: React.FC = () => {
                 >
                   <div
                     style={{
-                      width: '10px',
-                      height: '10px',
+                      width: '12px',
+                      height: '12px',
                       borderRadius: '50%',
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showKiutLayer ? '12px' : '2px',
+                      left: showKiutLayer ? '14px' : '2px',
                       transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>
               </button>
               {showKiutLayer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
                     <span>Krycie:</span>
                     <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(kiutOpacity * 100)}%</span>
@@ -1696,7 +1745,7 @@ export const ProjectGroup: React.FC = () => {
             </div>
 
             {/* C. Miejscowe plany MPZP (KIMPZP) */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
               <button
                 type="button"
                 onClick={() => setShowMpzpLayer(!showMpzpLayer)}
@@ -1706,16 +1755,28 @@ export const ProjectGroup: React.FC = () => {
                   justifyContent: 'space-between',
                   background: 'none',
                   border: 'none',
+                  color: '#f8fafc',
                   cursor: 'pointer',
                   padding: 0,
                   width: '100%',
                 }}
               >
-                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Plany miejscowe (MPZP)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showMpzpLayer ? '#818cf8' : '#64748b',
+                      boxShadow: showMpzpLayer ? '0 0 6px rgba(129, 140, 248, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Plany miejscowe (MPZP)</span>
+                </div>
                 <div
                   style={{
-                    width: '24px',
-                    height: '14px',
+                    width: '28px',
+                    height: '16px',
                     borderRadius: '999px',
                     backgroundColor: showMpzpLayer ? '#818cf8' : '#334155',
                     position: 'relative',
@@ -1725,20 +1786,21 @@ export const ProjectGroup: React.FC = () => {
                 >
                   <div
                     style={{
-                      width: '10px',
-                      height: '10px',
+                      width: '12px',
+                      height: '12px',
                       borderRadius: '50%',
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showMpzpLayer ? '12px' : '2px',
+                      left: showMpzpLayer ? '14px' : '2px',
                       transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>
               </button>
               {showMpzpLayer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
                     <span>Krycie:</span>
                     <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(mpzpOpacity * 100)}%</span>
@@ -1757,7 +1819,7 @@ export const ProjectGroup: React.FC = () => {
             </div>
 
             {/* D. Obiekty topograficzne BDOT10k */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
               <button
                 type="button"
                 onClick={() => setShowBdotLayer(!showBdotLayer)}
@@ -1767,18 +1829,30 @@ export const ProjectGroup: React.FC = () => {
                   justifyContent: 'space-between',
                   background: 'none',
                   border: 'none',
+                  color: '#f8fafc',
                   cursor: 'pointer',
                   padding: 0,
                   width: '100%',
                 }}
               >
-                <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Topografia BDOT10k</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showBdotLayer ? '#34d399' : '#64748b',
+                      boxShadow: showBdotLayer ? '0 0 6px rgba(52, 211, 153, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Topografia BDOT10k</span>
+                </div>
                 <div
                   style={{
-                    width: '24px',
-                    height: '14px',
+                    width: '28px',
+                    height: '16px',
                     borderRadius: '999px',
-                    backgroundColor: showBdotLayer ? '#34d399' : '#334155',
+                    backgroundColor: showBdotLayer ? '#10b981' : '#334155',
                     position: 'relative',
                     transition: 'background-color 0.2s ease',
                     flexShrink: 0,
@@ -1786,20 +1860,21 @@ export const ProjectGroup: React.FC = () => {
                 >
                   <div
                     style={{
-                      width: '10px',
-                      height: '10px',
+                      width: '12px',
+                      height: '12px',
                       borderRadius: '50%',
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showBdotLayer ? '12px' : '2px',
+                      left: showBdotLayer ? '14px' : '2px',
                       transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>
               </button>
               {showBdotLayer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingTop: '4px', borderTop: '1px solid rgba(51,65,85,0.4)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
                     <span>Krycie:</span>
                     <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(bdotOpacity * 100)}%</span>
@@ -1818,8 +1893,19 @@ export const ProjectGroup: React.FC = () => {
             </div>
 
             {/* E. Cieniowanie rzeźby terenu (NMT) */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
-              <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Cieniowanie rzeźby (NMT)</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: showTerrainLayer ? '#34d399' : '#64748b',
+                    boxShadow: showTerrainLayer ? '0 0 6px rgba(52, 211, 153, 0.6)' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: '11px', fontWeight: 500, color: '#f8fafc' }}>Cieniowanie rzeźby (NMT)</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowTerrainLayer(!showTerrainLayer)}
@@ -1834,10 +1920,10 @@ export const ProjectGroup: React.FC = () => {
               >
                 <div
                   style={{
-                    width: '24px',
-                    height: '14px',
+                    width: '28px',
+                    height: '16px',
                     borderRadius: '999px',
-                    backgroundColor: showTerrainLayer ? '#34d399' : '#334155',
+                    backgroundColor: showTerrainLayer ? '#10b981' : '#334155',
                     position: 'relative',
                     transition: 'background-color 0.2s ease',
                     flexShrink: 0,
@@ -1845,14 +1931,15 @@ export const ProjectGroup: React.FC = () => {
                 >
                   <div
                     style={{
-                      width: '10px',
-                      height: '10px',
+                      width: '12px',
+                      height: '12px',
                       borderRadius: '50%',
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showTerrainLayer ? '12px' : '2px',
+                      left: showTerrainLayer ? '14px' : '2px',
                       transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>
@@ -1860,8 +1947,19 @@ export const ProjectGroup: React.FC = () => {
             </div>
 
             {/* F. Ewidencja gruntów i budynków (KIEG) */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'var(--bg-input)', padding: '6px 8px', borderRadius: '7px' }}>
-              <span style={{ fontSize: '10.5px', color: '#f1f5f9', fontWeight: 500 }}>Ewidencja gruntów (KIEG)</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: showEgibLayer ? '#f43f5e' : '#64748b',
+                    boxShadow: showEgibLayer ? '0 0 6px rgba(244, 63, 94, 0.6)' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: '11px', fontWeight: 500, color: '#f8fafc' }}>Ewidencja gruntów (KIEG)</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowEgibLayer(!showEgibLayer)}
@@ -1876,8 +1974,8 @@ export const ProjectGroup: React.FC = () => {
               >
                 <div
                   style={{
-                    width: '24px',
-                    height: '14px',
+                    width: '28px',
+                    height: '16px',
                     borderRadius: '999px',
                     backgroundColor: showEgibLayer ? '#f43f5e' : '#334155',
                     position: 'relative',
@@ -1887,14 +1985,15 @@ export const ProjectGroup: React.FC = () => {
                 >
                   <div
                     style={{
-                      width: '10px',
-                      height: '10px',
+                      width: '12px',
+                      height: '12px',
                       borderRadius: '50%',
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showEgibLayer ? '12px' : '2px',
+                      left: showEgibLayer ? '14px' : '2px',
                       transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>

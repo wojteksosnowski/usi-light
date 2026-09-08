@@ -126,6 +126,18 @@ export const APP_CONFIG = {
     defaultOpacity: 0.65,
   },
 
+  // Konfiguracja modułu geodezyjnego (ukryta przed użytkownikiem)
+  geo: {
+    // Twardy clip canvas WMS do okręgu zasięgu projektu (wizualnie widoczne tylko w promieniu)
+    wmsClipToProjectRadius: true,
+    // Pomiń kafelki WMS całkowicie poza okręgiem zasięgu (oszczędność sieci)
+    wmsTileCullingEnabled: true,
+    // Liczba równoległych zapytań do NMT REST API (GUGiK) przy pobieraniu rzędnych terenu
+    nmtConcurrency: 8,
+    // Fallback NMT: użyj Open-Elevation SRTM jeśli GUGiK niedostępny
+    nmtFallbackEnabled: true,
+  },
+
   // Wypełnienie cienia godzinowego (warstwa Zakres cienia)
   shadowFill: {
     // 95% przezroczystości (alpha = 0.05) — subtelne, prawie niewidoczne tło

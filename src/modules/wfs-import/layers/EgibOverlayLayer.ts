@@ -30,6 +30,7 @@ export class EgibOverlayLayer implements CadRenderLayer {
         lon: renderContext.longitude,
       },
       opacity: 0.5,
+      projectRadius: context.projectRadius,
     });
   }
 }

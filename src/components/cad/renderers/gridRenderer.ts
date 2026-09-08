@@ -14,7 +14,8 @@ export function renderCadGrid(
   } | null,
   viewRotationMode: boolean,
   buildings: any[],
-  hasSatelliteBackground: boolean = false
+  hasSatelliteBackground: boolean = false,
+  projectCirclePulse?: { radius: number; opacity: number } | null
 ) {
   const { ctx, width, height, viewState, screenToWorld, worldToScreen, viewRotationDeg } = rc;
 
@@ -92,6 +93,57 @@ export function renderCadGrid(
   ctx.moveTo(yStart.sx, yStart.sy);
   ctx.lineTo(yEnd.sx, yEnd.sy);
   ctx.stroke();
+
+  // 4b. Project Center Target Marker & Range Pulse Circle at (0,0)
+  const originSc = worldToScreen(0, 0);
+  if (originSc.sx >= -100 && originSc.sx <= width + 100 && originSc.sy >= -100 && originSc.sy <= height + 100) {
+    ctx.save();
+
+    // Permanent Subtle Center Target
+    ctx.beginPath();
+    ctx.arc(originSc.sx, originSc.sy, 5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(originSc.sx - 8, originSc.sy);
+    ctx.lineTo(originSc.sx + 8, originSc.sy);
+    ctx.moveTo(originSc.sx, originSc.sy - 8);
+    ctx.lineTo(originSc.sx, originSc.sy + 8);
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Animated / Triggered Project Circle Pulse
+    if (projectCirclePulse && projectCirclePulse.opacity > 0.01) {
+      const radiusPx = projectCirclePulse.radius * viewState.scale;
+      const alpha = Math.max(0, Math.min(1, projectCirclePulse.opacity));
+
+      // Filled subtle disc
+      ctx.beginPath();
+      ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(56, 189, 248, ${alpha * 0.08})`;
+      ctx.fill();
+
+      // Outer animated ring
+      ctx.beginPath();
+      ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(56, 189, 248, ${alpha * 0.8})`;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([8, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Label at top of range circle
+      ctx.font = 'bold 11px Inter, monospace, sans-serif';
+      ctx.fillStyle = `rgba(56, 189, 248, ${alpha})`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`Zasięg projektu: ${projectCirclePulse.radius} m`, originSc.sx, originSc.sy - radiusPx - 8);
+    }
+
+    ctx.restore();
+  }
 
   // 5. Rotation tool guide overlay (Origin anchor + Direction arrow + Colored angle arc)
   if (viewRotationMode && rotationHover) {

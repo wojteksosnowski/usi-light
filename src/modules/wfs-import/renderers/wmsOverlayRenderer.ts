@@ -9,6 +9,7 @@ import {
 } from '../../../utils/geoTransform';
 import { WmsTileManager } from './wmsTileManager';
 import { Point2D } from '../../../types/geometry';
+import { APP_CONFIG } from '../../../config/appConfig';
 
 export interface RenderWmsOverlayOptions {
   rc: CadRenderContext;
@@ -16,10 +17,33 @@ export interface RenderWmsOverlayOptions {
   crsInfo: CrsDetectionResult;
   projectCenterLatLon?: LatLon;
   opacity?: number;
+  /** Promień zasięgu projektu w metrach CAD (środek projektu = (0,0)) */
+  projectRadius?: number;
+}
+
+/**
+ * Sprawdza czy kafelek (prostokąt ekranowy) przecina okrąg projektu.
+ * Używa algorytmu "rectangle vs circle" (AABB vs circle).
+ */
+function tileIntersectsCircle(
+  tileSx: number,
+  tileSy: number,
+  tileSx2: number,
+  tileSy2: number,
+  circleCx: number,
+  circleCy: number,
+  circleR: number
+): boolean {
+  // Znajdź punkt prostokąta najbliższy środkowi okręgu
+  const nearX = Math.max(tileSx, Math.min(circleCx, tileSx2));
+  const nearY = Math.max(tileSy, Math.min(circleCy, tileSy2));
+  const dx = nearX - circleCx;
+  const dy = nearY - circleCy;
+  return dx * dx + dy * dy <= circleR * circleR;
 }
 
 export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
-  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45 } = options;
+  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius } = options;
   const { ctx, width, height, viewState, screenToWorld, worldToScreen } = rc;
 
   const c1 = screenToWorld(0, 0);
@@ -58,12 +82,52 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
 
   if ((endTileX - startTileX + 1) * (endTileY - startTileY + 1) > 120) return;
 
+  // Oblicz pozycję środka projektu na ekranie dla clip/culling
+  const originSc = worldToScreen(0, 0);
+  const radiusPx = projectRadius != null ? projectRadius * viewState.scale : null;
+
   ctx.save();
   ctx.globalAlpha = Math.max(0.05, Math.min(1.0, opacity));
   ctx.imageSmoothingEnabled = true;
 
+  // Twardy clip canvas do okręgu zasięgu projektu
+  if (radiusPx != null && APP_CONFIG.geo.wmsClipToProjectRadius) {
+    ctx.beginPath();
+    ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+    ctx.clip();
+  }
+
   for (let tx = startTileX; tx <= endTileX; tx++) {
     for (let ty = startTileY; ty <= endTileY; ty++) {
+      // Tile culling: pomiń kafelki całkowicie poza okręgiem zasięgu
+      if (radiusPx != null && APP_CONFIG.geo.wmsTileCullingEnabled) {
+        // Oblicz narożniki kafelka na ekranie (przybliżenie przez środkową wgs->cad->screen)
+        const wgsTileCenter = webMercatorPixelToLatLon(
+          { x: (tx + 0.5) * 256, y: (ty + 0.5) * 256 },
+          targetZoom
+        );
+        const cadTileCenter = wgs84ToCadPoint(wgsTileCenter, crsInfo, projectCenterLatLon);
+        const sTileCenter = worldToScreen(cadTileCenter.x, cadTileCenter.y);
+
+        // Rozmiar kafelka na ekranie (256px / skala kafelka w pikselu)
+        const wgsTL = webMercatorPixelToLatLon({ x: tx * 256, y: ty * 256 }, targetZoom);
+        const wgsTR = webMercatorPixelToLatLon({ x: (tx + 1) * 256, y: ty * 256 }, targetZoom);
+        const cadTL = wgs84ToCadPoint(wgsTL, crsInfo, projectCenterLatLon);
+        const cadTR = wgs84ToCadPoint(wgsTR, crsInfo, projectCenterLatLon);
+        const sTL = worldToScreen(cadTL.x, cadTL.y);
+        const sTR = worldToScreen(cadTR.x, cadTR.y);
+        const tileSizePx = Math.hypot(sTR.sx - sTL.sx, sTR.sy - sTL.sy);
+
+        const minTileSx = sTileCenter.sx - tileSizePx / 2;
+        const maxTileSx = sTileCenter.sx + tileSizePx / 2;
+        const minTileSy = sTileCenter.sy - tileSizePx / 2;
+        const maxTileSy = sTileCenter.sy + tileSizePx / 2;
+
+        if (!tileIntersectsCircle(minTileSx, minTileSy, maxTileSx, maxTileSy, originSc.sx, originSc.sy, radiusPx)) {
+          continue;
+        }
+      }
+
       const tileImg = tileManager.getTile(tx, ty, targetZoom);
       if (!tileImg) continue;
 

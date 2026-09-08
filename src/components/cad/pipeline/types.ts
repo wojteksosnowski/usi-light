@@ -67,6 +67,8 @@ export interface CadRenderFrameContext {
   readonly crsInfo?: CrsDetectionResult;
   readonly draggedVertexIndex?: number | null;
   readonly dragVertexPreviewPt?: Point2D | null;
+  readonly projectCirclePulse?: { radius: number; opacity: number } | null;
+  readonly projectRadius?: number;
 
   // Overlay / Tool Preview context
   readonly effectivePivot?: Point2D | null;

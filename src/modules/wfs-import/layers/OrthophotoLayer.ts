@@ -35,6 +35,7 @@ export class OrthophotoLayer implements CadRenderLayer {
         lon: renderContext.longitude,
       },
       opacity: this.opacity,
+      projectRadius: context.projectRadius,
     });
   }
 }

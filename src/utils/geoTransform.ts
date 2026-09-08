@@ -23,6 +23,7 @@ export interface CrsDetectionResult {
   description: string;
   geodeticLabel: string;
   isGeodetic: boolean;
+  isLocalReference?: boolean;
   zone?: number;
 }
 
@@ -72,6 +73,7 @@ export function detectCoordinateSystem(
           description: `Układ PL-2000 strefa ${zone} (południk ${lon0}° E, odniesienie lokalne)`,
           geodeticLabel: `ETRF2000-PL / CS2000 / ${lon0}`,
           isGeodetic: true,
+          isLocalReference: true,
           zone,
         };
       }
@@ -81,6 +83,7 @@ export function detectCoordinateSystem(
       description: 'Układ lokalny CAD (odniesienie do środka projektu)',
       geodeticLabel: 'LOKALNY (CAD)',
       isGeodetic: false,
+      isLocalReference: true,
     };
   };
 
@@ -216,12 +219,29 @@ export function cadPointToWgs84(
   crsInfo: CrsDetectionResult,
   projectCenterLatLon?: LatLon
 ): LatLon {
-  // 1. Układ PL-1992 (EPSG:2180)
+  // 1. Jeśli układ ma odniesienie lokalne do środka projektu (np. lokalny CAD ze środkiem w Warszawie)
+  if (crsInfo.isLocalReference || crsInfo.crs === 'LOCAL') {
+    const centerLat = projectCenterLatLon?.lat ?? 52.2297;
+    const centerLon = projectCenterLatLon?.lon ?? 21.0122;
+
+    const dx = point.x; // metry na wschód od (0, 0)
+    const dy = point.y; // metry na północ od (0, 0)
+
+    const metersPerDegLat = 111132.954 - 559.822 * Math.cos(2 * centerLat * Math.PI / 180);
+    const metersPerDegLon = 111412.84 * Math.cos(centerLat * Math.PI / 180);
+
+    return {
+      lat: centerLat + dy / metersPerDegLat,
+      lon: centerLon + dx / metersPerDegLon,
+    };
+  }
+
+  // 2. Układ PL-1992 (EPSG:2180) - współrzędne bezwzględne
   if (crsInfo.crs === 'EPSG:2180') {
     return transverseMercatorToWgs84(point.x, point.y, 19.0, 0.9993, 500000, -5300000);
   }
 
-  // 2. Układ PL-2000 (strefy 5..8)
+  // 3. Układ PL-2000 (strefy 5..8) - współrzędne bezwzględne
   if (crsInfo.crs.startsWith('EPSG:217')) {
     const zone = crsInfo.zone || 7;
     const lon0 = zone * 3;
@@ -235,19 +255,17 @@ export function cadPointToWgs84(
     return transverseMercatorToWgs84(easting, northing, lon0, k0, falseEast, 0);
   }
 
-  // 3. WGS84 bezpośrednio
+  // 4. WGS84 bezpośrednio
   if (crsInfo.crs === 'EPSG:4326') {
     return { lat: point.y, lon: point.x };
   }
 
-  // 4. Układ lokalny CAD wokół zadanego centrum projektu
-  // Stały punkt bazowy: punkt CAD (0,0) odpowiada dokładnie (centerLat, centerLon).
-  // Dzięki temu ruch obiektów/budynków na scenie NIE powoduje przesuwania podkładu satelitarnego (zero efektu paralaksy).
+  // Domyślnie lokalny CAD
   const centerLat = projectCenterLatLon?.lat ?? 52.2297;
   const centerLon = projectCenterLatLon?.lon ?? 21.0122;
 
-  const dx = point.x; // metry na wschód od (0, 0)
-  const dy = point.y; // metry na północ od (0, 0)
+  const dx = point.x;
+  const dy = point.y;
 
   const metersPerDegLat = 111132.954 - 559.822 * Math.cos(2 * centerLat * Math.PI / 180);
   const metersPerDegLon = 111412.84 * Math.cos(centerLat * Math.PI / 180);
@@ -266,6 +284,21 @@ export function wgs84ToCadPoint(
   crsInfo: CrsDetectionResult,
   projectCenterLatLon?: LatLon
 ): Point2D {
+  // 1. Jeśli układ ma odniesienie lokalne do środka projektu
+  if (crsInfo.isLocalReference || crsInfo.crs === 'LOCAL') {
+    const centerLat = projectCenterLatLon?.lat ?? 52.2297;
+    const centerLon = projectCenterLatLon?.lon ?? 21.0122;
+
+    const metersPerDegLat = 111132.954 - 559.822 * Math.cos(2 * centerLat * Math.PI / 180);
+    const metersPerDegLon = 111412.84 * Math.cos(centerLat * Math.PI / 180);
+
+    return {
+      x: (latLon.lon - centerLon) * metersPerDegLon,
+      y: (latLon.lat - centerLat) * metersPerDegLat,
+    };
+  }
+
+  // 2. Bezwzględne współrzędne PL-1992 lub PL-2000
   if (crsInfo.crs === 'EPSG:2180' || crsInfo.crs.startsWith('EPSG:217')) {
     // Forward Gauss-Kruger
     const lon0 = crsInfo.crs === 'EPSG:2180' ? 19.0 : (crsInfo.zone || 7) * 3;

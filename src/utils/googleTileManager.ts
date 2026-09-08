@@ -110,4 +110,50 @@ export class GoogleTileManager {
     }
     this.cache.set(key, img);
   }
+
+  /**
+   * Prefetch kafelków satelitarnych w obszarze okręgu wokół punktu geograficznego.
+   * Wywołaj po zakończeniu synchronizacji geo, aby kafelki były gotowe bez scrollowania.
+   *
+   * @param lat     szerokość geograficzna środka (WGS84)
+   * @param lon     długość geograficzna środka (WGS84)
+   * @param radiusMeters  promień okręgu w metrach
+   */
+  public prefetchTilesInRadius(lat: number, lon: number, radiusMeters: number) {
+    // Dobierz zoom do promienia: małe obszary wymagają wyższego zoomu
+    const zoom = radiusMeters <= 100 ? 18 : radiusMeters <= 200 ? 17 : radiusMeters <= 500 ? 16 : 15;
+
+    // Oblicz bounding box okręgu w stopniach geograficznych
+    const latDelta = radiusMeters / 111320;
+    const lonDelta = radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180));
+
+    const minLat = lat - latDelta;
+    const maxLat = lat + latDelta;
+    const minLon = lon - lonDelta;
+    const maxLon = lon + lonDelta;
+
+    // Konwersja narożników bbox na piksele Web Mercator
+    const maxTile = Math.pow(2, zoom);
+    const latToTileY = (latDeg: number) => {
+      const latRad = (latDeg * Math.PI) / 180;
+      return Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * maxTile);
+    };
+    const lonToTileX = (lonDeg: number) => Math.floor(((lonDeg + 180) / 360) * maxTile);
+
+    const startTileX = lonToTileX(minLon);
+    const endTileX = lonToTileX(maxLon);
+    const startTileY = latToTileY(maxLat); // Y jest odwrócony (0 = północ)
+    const endTileY = latToTileY(minLat);
+
+    // Ogranicz liczbę kafelków do prefetchu (zabezpieczenie)
+    const tileCount = (endTileX - startTileX + 1) * (endTileY - startTileY + 1);
+    if (tileCount > 200) return;
+
+    for (let tx = startTileX; tx <= endTileX; tx++) {
+      for (let ty = startTileY; ty <= endTileY; ty++) {
+        // getTile() automatycznie startuje download jeśli kafelka nie ma w cache
+        this.getTile(tx, ty, zoom);
+      }
+    }
+  }
 }

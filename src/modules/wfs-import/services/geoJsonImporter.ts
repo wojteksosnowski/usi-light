@@ -8,6 +8,8 @@ import {
 } from '../../../utils/geoTransform';
 import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
 import { WfsTreeFeature } from '../store/useWfsStore';
+import { polygonCircleIntersectionRatio } from '../../../utils/math2d/polygons';
+
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
@@ -64,7 +66,8 @@ export function importBuildingsFromGeoJson(
   collection: GeoJsonFeatureCollection,
   sourceCrs: CrsDetectionResult,
   projectCrs: CrsDetectionResult,
-  projectCenter: LatLon
+  projectCenter: LatLon,
+  radiusMeters?: number
 ): ImportResult {
   const buildings: BuildingLoop[] = [];
   const warnings: string[] = [];
@@ -98,6 +101,12 @@ export function importBuildingsFromGeoJson(
       if (!sanitized.valid) {
         warnings.push(`${buildingId}: ${sanitized.warnings?.join(', ')}`);
         continue;
+      }
+
+      // Filtr zasięgu: budynek musi mieć co najmniej 50% powierzchni wewnątrz okręgu projektu
+      if (radiusMeters != null && radiusMeters > 0) {
+        const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
+        if (ratio < 0.5) continue;
       }
 
       const id = ri === 0 ? buildingId : `${buildingId}-r${ri}`;

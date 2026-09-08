@@ -11,7 +11,7 @@ import { useWfsStore } from './store/useWfsStore';
 
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';
-const MPZP_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego';
+const MPZP_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego';
 const BDOT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaBazDanychObiektowTopograficznych';
 const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
 const EGIB_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
@@ -39,21 +39,21 @@ const orthophotoTileManager = new WmsTileManager({
 
 const kiutTileManager = new WmsTileManager({
   baseUrl: KIUT_WMS_URL,
-  layers: 'przewod_wodociagowy,przewod_kanalizacyjny,przewod_gazowy,przewod_elektroenergetyczny,przewod_telekomunikacyjny,urzadzenie_techniczne,slup,studnia',
+  layers: 'gesut,przewod_wodociagowy,przewod_kanalizacyjny,przewod_gazowy,przewod_elektroenergetyczny,przewod_cieplowniczy,przewod_telekomunikacyjny,przewod_urzadzenia',
   format: 'image/png',
   crs: 'EPSG:3857',
 }, 200, triggerRender);
 
 const mpzpTileManager = new WmsTileManager({
   baseUrl: MPZP_WMS_URL,
-  layers: 'granice,przeznaczenie',
+  layers: 'plany,raster,wektor-str,wektor-pow,granice',
   format: 'image/png',
   crs: 'EPSG:3857',
 }, 200, triggerRender);
 
 const bdotTileManager = new WmsTileManager({
   baseUrl: BDOT_WMS_URL,
-  layers: 'bdot:OT_PTWP_A,bdot:OT_BUBD_A,bdot:OT_SKJZ_L,bdot:OT_OIPR_P',
+  layers: 'bdot',
   format: 'image/png',
   crs: 'EPSG:3857',
 }, 200, triggerRender);

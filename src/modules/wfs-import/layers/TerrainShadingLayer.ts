@@ -30,6 +30,7 @@ export class TerrainShadingLayer implements CadRenderLayer {
         lon: renderContext.longitude,
       },
       opacity: 0.35,
+      projectRadius: context.projectRadius,
     });
   }
 }

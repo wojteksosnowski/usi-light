@@ -30,7 +30,7 @@ export interface WfsImportOptions {
   egibOverlay: boolean;
 }
 
-export type ProjectRadius = 50 | 100 | 200;
+export type ProjectRadius = 50 | 100 | 200 | 500;
 
 interface WfsState {
   trees: WfsTreeFeature[];

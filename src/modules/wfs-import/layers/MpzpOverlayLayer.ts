@@ -35,6 +35,7 @@ export class MpzpOverlayLayer implements CadRenderLayer {
         lon: renderContext.longitude,
       },
       opacity: this.opacity,
+      projectRadius: context.projectRadius,
     });
   }
 }

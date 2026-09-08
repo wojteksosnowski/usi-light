@@ -15,6 +15,8 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { wgs84ToEpsg2180 } from '../utils/wgs84ToEpsg2180';
+import { polygonCircleIntersectionRatio } from '../../../utils/math2d/polygons';
+
 
 const ULDK_BASE_URL = 'https://uldk.gugik.gov.pl/';
 
@@ -160,7 +162,13 @@ export async function fetchParcelsInRadius(
   const parcelsMap = new Map<string, UldkParcelRaw>();
 
   // Siatka próbkowania wewnątrz okręgu projektu (środek + punkty kardynalne i pośrednie)
-  const steps = radiusMeters <= 50 ? [0, 25, 45] : radiusMeters <= 100 ? [0, 40, 80] : [0, 60, 120, 180];
+  const steps = radiusMeters <= 50
+    ? [0, 25, 45]
+    : radiusMeters <= 100
+      ? [0, 40, 80]
+      : radiusMeters <= 200
+        ? [0, 60, 120, 180]
+        : [0, 100, 200, 350, 460]; // 500m — 5 pierścieni
   const angles = [0, 45, 90, 135, 180, 225, 270, 315];
 
   const samplePoints: Array<{ x: number; y: number }> = [{ x: center2180.x, y: center2180.y }];
@@ -215,6 +223,10 @@ export async function fetchParcelsInRadius(
       });
 
       if (!sanitized.valid) continue;
+
+      // Filtr zasięgu: działka musi mieć co najmniej 50% powierzchni wewnątrz okręgu projektu
+      const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
+      if (ratio < 0.5) continue;
 
       loops.push({
         id: loopId,
