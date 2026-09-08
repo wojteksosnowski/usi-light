@@ -8,10 +8,7 @@ import {
   Sliders,
   Globe,
   Share2,
-  FileText,
   FileCode,
-  Crown,
-  Sparkles,
   FileSpreadsheet,
   Lock,
   Unlock,
@@ -21,6 +18,7 @@ import {
   EyeOff,
   Layers,
   Map,
+  Wrench,
 } from 'lucide-react';
 import {
   useSceneStore,
@@ -38,9 +36,9 @@ import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
 import { parseDxfWithMetadata, DxfUnitOption, createSampleBuildings } from '../../utils/dxfParser';
-import { exportAnalysisToPdf } from '../../utils/pdfExport';
 import { exportSceneToDxf } from '../../utils/dxfExport';
 import { PinnedFacadePoint, BuildingLoop } from '../../types/geometry';
+import { APP_CONFIG } from '../../config/appConfig';
 
 export const ProjectGroup: React.FC = () => {
   // Scene Store
@@ -121,19 +119,6 @@ export const ProjectGroup: React.FC = () => {
   const setPricingModalOpen = useUiStore((s) => s.setPricingModalOpen);
   const isPro = useLicenseStore((s) => s.isPro);
 
-  const handleExportPdf = () => {
-    if (!isPro) {
-      setPricingModalOpen(true);
-      return;
-    }
-    exportAnalysisToPdf({
-      buildings,
-      pinnedPoints,
-      settings,
-      selectedCity,
-    });
-  };
-
   const handleExportDxf = () => {
     if (!isPro) {
       setPricingModalOpen(true);
@@ -176,6 +161,10 @@ export const ProjectGroup: React.FC = () => {
   const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
 
   const handleSyncGeoData = async () => {
+    if (!isPro) {
+      setPricingModalOpen(true);
+      return;
+    }
     setStatus({ isFetching: true, error: null, info: null });
     setSyncFeedback(null);
     try {
@@ -439,14 +428,14 @@ export const ProjectGroup: React.FC = () => {
             type="button"
             onClick={() => setIsProjectCenterLocked(!isProjectCenterLocked)}
             style={{
-              background: isProjectCenterLocked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-              border: `1px solid ${isProjectCenterLocked ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+              background: isProjectCenterLocked ? 'rgba(244, 63, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              border: `1px solid ${isProjectCenterLocked ? 'rgba(244, 63, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
               borderRadius: '6px',
               padding: '2px 6px',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              color: isProjectCenterLocked ? '#6ee7b7' : '#fcd34d',
+              color: isProjectCenterLocked ? 'var(--accent-rose)' : '#fcd34d',
               fontSize: '10px',
               fontWeight: 600,
               cursor: 'pointer',
@@ -591,21 +580,17 @@ export const ProjectGroup: React.FC = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                padding: '6px 8px',
+                justifyContent: 'center',
+                padding: '6px',
                 borderRadius: '8px',
                 border: '1px solid rgba(56, 189, 248, 0.3)',
                 backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                color: '#38bdf8',
-                fontSize: '11px',
-                fontWeight: 600,
+                color: 'var(--accent-cyan)',
                 cursor: 'pointer',
-                whiteSpace: 'nowrap',
               }}
               title="Centruj i dopasuj widok na środku projektu"
             >
               <Crosshair size={13} />
-              <span>Centruj</span>
             </button>
           </div>
 
@@ -638,8 +623,8 @@ export const ProjectGroup: React.FC = () => {
                       border: 'none',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
-                      backgroundColor: isActive ? 'var(--accent-indigo)' : 'transparent',
-                      color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                      backgroundColor: isActive ? 'var(--accent-cyan)' : 'transparent',
+                      color: isActive ? 'var(--bg-main)' : 'var(--text-secondary)',
                     }}
                     title={`Obszar analizy i synchronizacji: okrąg o promieniu ${r} m`}
                   >
@@ -650,55 +635,46 @@ export const ProjectGroup: React.FC = () => {
             </div>
           </div>
 
-          {/* Przycisk Pobierz i Synchronizuj (PRO) */}
-          <button
-            type="button"
-            onClick={handleSyncGeoData}
-            disabled={status.isFetching}
-            style={{
-              marginTop: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              border: '1px solid rgba(168, 85, 247, 0.6)',
-              background: 'linear-gradient(135deg, rgba(147, 51, 234, 0.35), rgba(99, 102, 241, 0.45))',
-              color: '#ffffff',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: status.isFetching ? 'not-allowed' : 'pointer',
-              boxShadow: '0 2px 8px rgba(147, 51, 234, 0.2)',
-            }}
-            title="Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK) oraz budynki wewnątrz okręgu projektu (Wersja PRO)"
-          >
-            {status.isFetching ? <RefreshCw size={13} className="spin" /> : <Sparkles size={13} color="#c084fc" />}
-            <span>{status.isFetching ? 'Synchronizacja danych...' : 'Pobierz i synchronizuj'}</span>
-            <span
-              style={{
-                fontSize: '9px',
-                fontWeight: 800,
-                backgroundColor: '#9333ea',
-                color: '#ffffff',
-                padding: '1px 4px',
-                borderRadius: '4px',
-                marginLeft: '2px',
-              }}
-            >
-              PRO
-            </span>
-          </button>
+          {isPro && (
+            <>
+              {/* Przycisk Pobierz działki i budynki (PRO) */}
+              <button
+                type="button"
+                onClick={handleSyncGeoData}
+                disabled={status.isFetching}
+                style={{
+                  marginTop: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--accent-amber)',
+                  background: 'linear-gradient(135deg, #f59e0b, #ea580c)',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: status.isFetching ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 2px 8px rgba(245, 158, 11, 0.35)',
+                }}
+                title="Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK) oraz budynki wewnątrz okręgu projektu"
+              >
+                {status.isFetching && <RefreshCw size={13} className="spin" />}
+                <span>{status.isFetching ? 'Synchronizacja danych...' : 'Pobierz działki i budynki'}</span>
+              </button>
 
-          {syncFeedback && (
-            <div style={{ fontSize: '10.5px', color: '#34d399', textAlign: 'center', fontWeight: 600 }}>
-              {syncFeedback}
-            </div>
-          )}
-          {status.error && (
-            <div style={{ fontSize: '10.5px', color: '#f43f5e', textAlign: 'center' }}>
-              {status.error}
-            </div>
+              {syncFeedback && (
+                <div style={{ fontSize: '10.5px', color: '#34d399', textAlign: 'center', fontWeight: 600 }}>
+                  {syncFeedback}
+                </div>
+              )}
+              {status.error && (
+                <div style={{ fontSize: '10.5px', color: '#f43f5e', textAlign: 'center' }}>
+                  {status.error}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -707,161 +683,66 @@ export const ProjectGroup: React.FC = () => {
       <button
         type="button"
         onClick={() => setShareModalOpen(true)}
-        className="btn-primary"
-        style={{
-          padding: '9px 12px',
-          fontSize: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '8px',
-          cursor: 'pointer',
-        }}
+        className="btn-share"
         title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
       >
-        <Share2 size={15} />
+        <Share2 size={14} />
         <span>Udostępnij projekt</span>
       </button>
 
-      {/* Przyciski importu i eksportu sceny/DXF */}
-      {isLocalhost ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-          <label
-            className="btn-primary"
-            style={{
-              margin: 0,
-              padding: '8px 4px',
-              fontSize: '10.5px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              textAlign: 'center',
-              cursor: 'pointer',
-            }}
-            title="Wgraj plik DXF"
-          >
-            <Upload size={14} />
-            <span>Wgraj DXF</span>
-            <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
-          </label>
-
-          <label
-            className="btn-primary"
-            style={{
-              margin: 0,
-              padding: '8px 4px',
-              fontSize: '10.5px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              textAlign: 'center',
-              cursor: 'pointer',
-            }}
-            title="Wgraj scenę JSON"
-          >
-            <Upload size={14} />
-            <span>Wgraj scenę</span>
-            <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
-          </label>
-
-          <button
-            type="button"
-            onClick={handleSceneDownload}
-            className="btn-secondary"
-            style={{
-              padding: '8px 4px',
-              fontSize: '10.5px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              textAlign: 'center',
-            }}
-            title="Zapisz scenę JSON"
-          >
-            <Download size={14} />
-            <span>Zapisz JSON</span>
-          </button>
-        </div>
-      ) : (
-        <label
-          className="btn-primary"
-          style={{
-            margin: 0,
-            padding: '9px 12px',
-            fontSize: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            cursor: 'pointer',
-          }}
-          title="Wgraj plik DXF"
-        >
-          <Upload size={15} />
-          <span>Wgraj plik DXF</span>
-          <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
-        </label>
-      )}
-
-      {/* Eksporty PRO: Raport PDF oraz Rysunek DXF */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-        <button
-          type="button"
-          onClick={handleExportPdf}
-          className="btn-tile"
-          style={{
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '8px 6px',
-            background: isPro ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-            border: isPro ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(245, 158, 11, 0.35)',
-            color: isPro ? '#6ee7b7' : '#fcd34d',
-            fontSize: '11px',
-            fontWeight: 600,
-          }}
-          title={isPro ? 'Pobierz formalny raport analizy nasłonecznienia PDF' : 'Wymaga licencji PRO. Kliknij, aby odblokować.'}
-        >
-          <FileText size={13} color={isPro ? '#10b981' : '#f59e0b'} />
-          <span>Raport PDF</span>
-          {!isPro && <Crown size={11} color="#f59e0b" />}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleExportDxf}
-          className="btn-tile"
-          style={{
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '8px 6px',
-            background: isPro ? 'rgba(56, 189, 248, 0.12)' : 'rgba(99, 102, 241, 0.12)',
-            border: isPro ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(99, 102, 241, 0.35)',
-            color: isPro ? '#7dd3fc' : '#a5b4fc',
-            fontSize: '11px',
-            fontWeight: 600,
-          }}
-          title={isPro ? 'Eksportuj geometrię i punkty pomiarowe do formatu CAD DXF' : 'Wymaga licencji PRO. Kliknij, aby odblokować.'}
-        >
-          <FileCode size={13} color={isPro ? '#38bdf8' : '#818cf8'} />
-          <span>Eksport DXF</span>
-          {!isPro && <Crown size={11} color="#f59e0b" />}
-        </button>
-      </div>
-
-      {/* 1.2 Jednostki DXF / Skala */}
+      {/* 1.2 Pliki CAD */}
       <div className="ui-card">
         <div className="ui-title">
-          <span>Jednostki DXF / Skala</span>
+          <span>Pliki CAD</span>
           <Sliders size={14} color="#818cf8" />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isPro ? 'repeat(2, 1fr)' : '1fr',
+              gap: '6px',
+            }}
+          >
+            <label
+              className="btn-tile active-indigo"
+              style={{
+                margin: 0,
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '8px 6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+              title="Wgraj plik DXF"
+            >
+              <Upload size={13} />
+              <span>Wgraj DXF</span>
+              <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
+            </label>
+
+            {isPro && (
+              <button
+                type="button"
+                onClick={handleExportDxf}
+                className="btn-tile active-cyan"
+                style={{
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '8px 6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                }}
+                title="Eksportuj geometrię i punkty pomiarowe do formatu CAD DXF"
+              >
+                <FileCode size={13} />
+                <span>Eksport DXF</span>
+              </button>
+            )}
+          </div>
+
           <div style={{ fontSize: '11px', color: '#94a3b8' }}>
             Jednostka rysunku DXF:
           </div>
@@ -1623,7 +1504,8 @@ export const ProjectGroup: React.FC = () => {
             </button>
           </div>
 
-          {/* 7. Podkłady geodezyjne i branżowe (PRO) */}
+          {/* 7. Podkłady geodezyjne i branżowe (PRO) — ukryte do czasu publikacji, patrz APP_CONFIG.geoOverlays */}
+          {APP_CONFIG.geoOverlays.showTogglesPanel && (
           <div
             style={{
               padding: '8px 10px',
@@ -2060,6 +1942,59 @@ export const ProjectGroup: React.FC = () => {
               </button>
             </div>
           </div>
+          )}
+
+          {/* Narzędzia deweloperskie: zapis/wczytanie sceny JSON — widoczne tylko na localhost */}
+          {isLocalhost && (
+            <div className="ui-card">
+              <div className="ui-title">
+                <span>Narzędzia deweloperskie</span>
+                <Wrench size={14} color="#94a3b8" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                <label
+                  className="btn-primary"
+                  style={{
+                    margin: 0,
+                    padding: '8px 4px',
+                    fontSize: '10.5px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                  }}
+                  title="Wgraj scenę JSON"
+                >
+                  <Upload size={14} />
+                  <span>Wgraj scenę</span>
+                  <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleSceneDownload}
+                  className="btn-secondary"
+                  style={{
+                    padding: '8px 4px',
+                    fontSize: '10.5px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
+                    textAlign: 'center',
+                  }}
+                  title="Zapisz scenę JSON"
+                >
+                  <Download size={14} />
+                  <span>Zapisz JSON</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

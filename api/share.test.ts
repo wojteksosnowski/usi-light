@@ -103,7 +103,7 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.data.error).toMatch(/Zbyt wiele zapytań/);
     });
 
-    it('powinien zapisać projekt do Redis z TTL 14 dni i zwrócić shareId', async () => {
+    it('powinien zapisać projekt do Redis z TTL 7 dni (free) i zwrócić shareId', async () => {
       mockRedisSet.mockResolvedValueOnce('OK');
       const req: any = {
         method: 'POST',
@@ -116,10 +116,11 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.statusCode).toBe(200);
       expect(res.data.shareId).toBeDefined();
       expect(res.data.url).toMatch(/^\/p\//);
+      expect(res.data.ttlDays).toBe(7);
       expect(mockRedisSet).toHaveBeenCalledWith(
         expect.stringMatching(/^project:/),
         'H4sICCAAAAAAA...',
-        { ex: 1209600 }
+        { ex: 604800 }
       );
     });
   });

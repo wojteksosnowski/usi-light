@@ -16,13 +16,12 @@ export class DrawingToolLayer implements CadRenderLayer {
       buildings,
       selectedBuildingId,
       effectivePivot,
-      isPivotHovered = false,
-      isDraggingPivot = false,
+      isRotateHandleHovered = false,
       isRotating = false,
-      rotStartAngleScreen = 0,
       rotAngleDeg = 0,
-      hoveredRotateVertexIndex = null,
       activeRotateAngleSnap = null,
+      alignPendingRef = null,
+      alignHoveredEdge = null,
       drawingMode,
       drawingVertices = [],
       currentMouseWorld = null,
@@ -58,12 +57,9 @@ export class DrawingToolLayer implements CadRenderLayer {
       ? ({
           ...activeSelectedBuilding,
           customPivot: effectivePivot,
-          isPivotHovered,
-          isDraggingPivot,
+          isRotateHandleHovered,
           isRotating,
-          rotStartAngleScreen,
           rotAngleDeg,
-          hoveredRotateVertexIndex,
           activeRotateAngleSnap,
         } as any)
       : null;
@@ -82,7 +78,10 @@ export class DrawingToolLayer implements CadRenderLayer {
       activeOsnapSnap,
       activeBuildingDragSnap,
       sweepWidth,
-      sweepAlignment
+      sweepAlignment,
+      effectiveBuildings,
+      alignPendingRef,
+      alignHoveredEdge
     );
   }
 }

@@ -23,7 +23,7 @@ export function useCadHotkeys({
   onToggleOsnap,
   onStepRotateBuilding,
 }: {
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
   drawingVertices: Point2D[];
   hoveredBuildings: string[];
   selectedVertexIndex?: number | null;
@@ -160,8 +160,6 @@ export function useCadHotkeys({
           onFinishDrawing?.(drawingVertices, 'sweep');
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
-        } else if (drawingMode === 'rotate') {
-          onFinishDrawing?.([], 'rectangle');
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedVertexIndex !== null && selectedVertexIndex !== undefined) {
@@ -176,7 +174,7 @@ export function useCadHotkeys({
           e.preventDefault();
           onCycleVertexSelection?.('next');
         }
-      } else if (drawingMode === 'rotate') {
+      } else if (drawingMode === 'none') {
         if (e.key === '[' || e.key === '{' || e.code === 'BracketLeft') {
           e.preventDefault();
           onStepRotateBuilding?.('ccw');

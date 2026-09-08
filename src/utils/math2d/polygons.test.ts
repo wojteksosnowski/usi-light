@@ -1,6 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { booleanUnionBuildings } from './polygons';
+import { booleanUnionBuildings, getPolygonCentroid } from './polygons';
 import { BuildingLoop } from '../../types/geometry';
+
+describe('getPolygonCentroid', () => {
+  it('computes the centroid of a square', () => {
+    const c = getPolygonCentroid([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ]);
+    expect(c).toEqual({ x: 5, y: 5 });
+  });
+
+  it('computes the centroid of a triangle', () => {
+    const c = getPolygonCentroid([
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      { x: 0, y: 6 },
+    ]);
+    expect(c).toEqual({ x: 2, y: 2 });
+  });
+
+  it('handles a degenerate single-point polygon', () => {
+    const c = getPolygonCentroid([{ x: 3, y: 4 }]);
+    expect(c).toEqual({ x: 3, y: 4 });
+  });
+
+  it('returns origin for an empty vertex list', () => {
+    expect(getPolygonCentroid([])).toEqual({ x: 0, y: 0 });
+  });
+});
 
 describe('booleanUnionBuildings', () => {
   const createTestBuilding = (id: string, vertices: { x: number; y: number }[], height = 10): BuildingLoop => ({

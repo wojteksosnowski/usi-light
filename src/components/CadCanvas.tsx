@@ -50,6 +50,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     isDimensionMode = false,
     dimensionType = 'linear',
     dimensionPendingRef = null,
+    alignPendingRef = null,
     layerSettings = {},
     viewRotationMode = false,
     viewRotationDeg = 0,
@@ -480,13 +481,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       buildings,
       selectedBuildingId,
       effectivePivot: interaction.effectivePivot,
-      isPivotHovered: interaction.isPivotHovered,
-      isDraggingPivot: interaction.isDraggingPivot,
+      isRotateHandleHovered: interaction.isRotateHandleHovered,
       isRotating: interaction.isRotating,
-      rotStartAngleScreen: interaction.rotStartAngleScreen,
       rotAngleDeg: interaction.rotAngleDeg,
-      hoveredRotateVertexIndex: interaction.hoveredRotateVertexIndex,
       activeRotateAngleSnap: interaction.activeRotateAngleSnap,
+      alignPendingRef,
+      alignHoveredEdge: interaction.alignHoveredEdge,
       drawingMode,
       drawingVertices: interaction.drawingVertices,
       currentMouseWorld: interaction.currentMouseWorld,
@@ -514,13 +514,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     buildings,
     selectedBuildingId,
     interaction.effectivePivot,
-    interaction.isPivotHovered,
-    interaction.isDraggingPivot,
+    interaction.isRotateHandleHovered,
     interaction.isRotating,
-    interaction.rotStartAngleScreen,
     interaction.rotAngleDeg,
-    interaction.hoveredRotateVertexIndex,
     interaction.activeRotateAngleSnap,
+    alignPendingRef,
+    interaction.alignHoveredEdge,
     drawingMode,
     interaction.drawingVertices,
     interaction.currentMouseWorld,
@@ -554,6 +553,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         ref={canvasRef}
         onWheel={interaction.handleWheel}
         onMouseDown={interaction.handleMouseDown}
+        onDoubleClick={interaction.handleDoubleClick}
         onMouseMove={interaction.handleMouseMove}
         onMouseUp={interaction.handleMouseUp}
         onMouseLeave={interaction.handleMouseUp}

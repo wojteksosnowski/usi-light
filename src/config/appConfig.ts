@@ -143,6 +143,18 @@ export const APP_CONFIG = {
     // 95% przezroczystości (alpha = 0.05) — subtelne, prawie niewidoczne tło
     fillAlpha: 0.05,
   },
+
+  // Tryb zapoznawczy udostępniania aplikacji: zakup PRO przez Stripe zablokowany w UI,
+  // zamiast tego dostępny darmowy klucz dostępu na 7 dni. Wyłączyć po zakończeniu okresu promocyjnego.
+  previewMode: {
+    enabled: true,
+  },
+
+  // Podkłady geodezyjne i branżowe (ortofotomapa, KIUT, MPZP, BDOT, NMT, EGiB) scalone z gałęzi 'survey'.
+  // Panel przełączników jest gotowy w kodzie, ale nie ma być jeszcze publikowany — ukryty do odwołania.
+  geoOverlays: {
+    showTogglesPanel: false,
+  },
 } as const;
 
 

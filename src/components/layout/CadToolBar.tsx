@@ -2,10 +2,9 @@ import React from 'react';
 import { useStore } from 'zustand';
 import {
   Square,
-  RotateCw,
+  AlignCenterVertical,
   Combine,
   Ruler,
-  MapPin,
   Copy,
   Trash2,
   Undo2,
@@ -33,7 +32,7 @@ export const CadToolBar: React.FC = () => {
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
-  const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
+  const cancelAlign = useCadToolStore((s) => s.cancelAlign);
 
   const sweepWidth = useCadToolStore((s) => s.sweepWidth);
   const setSweepWidth = useCadToolStore((s) => s.setSweepWidth);
@@ -42,7 +41,6 @@ export const CadToolBar: React.FC = () => {
 
   const isEditMode = useCadToolStore((s) => s.isEditMode);
   const setIsEditMode = useCadToolStore((s) => s.setIsEditMode);
-  const facadePointMode = useCadToolStore((s) => s.facadePointMode);
   const setFacadePointMode = useCadToolStore((s) => s.setFacadePointMode);
 
   const isDimensionToolActive = useCadToolStore((s) => s.isDimensionToolActive);
@@ -190,28 +188,32 @@ export const CadToolBar: React.FC = () => {
         </div>
       )}
 
-      {/* 3. Obrót */}
+      {/* 3. Wyrównaj */}
       <button
         type="button"
-        style={buttonStyle(drawingMode === 'rotate', '#818cf8', 'rgba(99, 102, 241, 0.25)')}
+        disabled={!selectedBuildingId}
+        style={{
+          ...buttonStyle(drawingMode === 'align', '#818cf8', 'rgba(99, 102, 241, 0.25)'),
+          opacity: selectedBuildingId ? 1 : 0.4,
+          cursor: selectedBuildingId ? 'pointer' : 'not-allowed',
+        }}
         onClick={() => {
-          if (drawingMode === 'rotate') {
-            setRotateInitialBuildingsSnapshot(null);
+          if (!selectedBuildingId) return;
+          if (drawingMode === 'align') {
+            cancelAlign();
             setDrawingMode('none');
           } else {
-            setRotateInitialBuildingsSnapshot(
-              buildings.map((b) => ({ ...b, vertices: [...b.vertices], segments: [...b.segments] }))
-            );
-            setDrawingMode('rotate');
+            cancelAlign();
+            setDrawingMode('align');
             setDrawingVerticesCount(0);
             setIsDimensionToolActive(false);
             setFacadePointMode(false);
             setIsEditMode(false);
           }
         }}
-        title="Obrót zaznaczonych obiektów wokół punktu (Esc aby anulować)"
+        title={selectedBuildingId ? 'Wyrównaj krawędzie: kliknij krawędź obiektu, potem krawędź obiektu odniesienia (Esc aby anulować)' : 'Zaznacz obiekt, aby wyrównać jego krawędź'}
       >
-        <RotateCw size={14} />
+        <AlignCenterVertical size={14} />
       </button>
 
       {/* 4. Suma boolowska */}
@@ -247,21 +249,6 @@ export const CadToolBar: React.FC = () => {
         title="Dodaj wymiar liniowy / kątowy"
       >
         <Ruler size={14} />
-      </button>
-
-      {/* 8. Punkt fasady */}
-      <button
-        type="button"
-        style={buttonStyle(facadePointMode, '#818cf8', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          setFacadePointMode(!facadePointMode);
-          setDrawingMode('none');
-          setIsDimensionToolActive(false);
-          setIsEditMode(false);
-        }}
-        title="Dodaj punkt kontrolny analizy na fasadzie"
-      >
-        <MapPin size={14} />
       </button>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />

@@ -54,6 +54,7 @@ export interface SharedProjectPayload {
 export interface ShareApiResponse {
   shareId: string;
   url: string;
+  ttlDays: number;
 }
 
 export interface ShareApiGetResponse {

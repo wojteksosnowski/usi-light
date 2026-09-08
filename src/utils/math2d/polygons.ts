@@ -22,6 +22,58 @@ export function calculateSignedArea(points: Point2D[]): number {
   return area / 2;
 }
 
+/**
+ * Average (centroid) of a polygon's vertices — used as the pivot for
+ * per-object rotation (rotate handle, align tool).
+ */
+export function getPolygonCentroid(vertices: Point2D[]): Point2D {
+  if (!vertices || vertices.length === 0) return { x: 0, y: 0 };
+  let x = 0, y = 0;
+  for (const v of vertices) {
+    x += v.x;
+    y += v.y;
+  }
+  return { x: x / vertices.length, y: y / vertices.length };
+}
+
+const ROTATE_HANDLE_MARGIN_PX = 28;
+
+/**
+ * Screen position of the per-object rotate handle. Anchored to the vertex
+ * farthest from the centroid (a rotation-invariant choice, since rotation
+ * preserves distances), so the handle orbits the centroid rigidly with the
+ * shape instead of jumping around like an axis-aligned bounding box would.
+ */
+export function getRotateHandleScreenPos(
+  bldg: { vertices: Point2D[] },
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  scale: number
+): { sx: number; sy: number } | null {
+  if (!bldg.vertices || bldg.vertices.length === 0) return null;
+  const centroid = getPolygonCentroid(bldg.vertices);
+  let apex = bldg.vertices[0];
+  let maxDistSq = -Infinity;
+  for (const v of bldg.vertices) {
+    const d = (v.x - centroid.x) ** 2 + (v.y - centroid.y) ** 2;
+    if (d > maxDistSq) {
+      maxDistSq = d;
+      apex = v;
+    }
+  }
+  const dist = Math.sqrt(maxDistSq);
+  const dx = apex.x - centroid.x;
+  const dy = apex.y - centroid.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const marginWorld = ROTATE_HANDLE_MARGIN_PX / (scale || 1);
+  const worldPos = {
+    x: centroid.x + (dx / len) * (dist + marginWorld),
+    y: centroid.y + (dy / len) * (dist + marginWorld),
+  };
+  const s = worldToScreen(worldPos.x, worldPos.y);
+  if (!Number.isFinite(s.sx) || !Number.isFinite(s.sy)) return null;
+  return s;
+}
+
 export function isPolygonCCW(points: Point2D[]): boolean {
   if (!points || points.length < 3) return true;
   return calculateSignedArea(points) > 0;

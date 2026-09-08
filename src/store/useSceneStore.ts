@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
-import { BuildingLoop, CadLayerSettings, Point2D, Modifier } from '../types/geometry';
+import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference } from '../types/geometry';
 import { createSampleBuildings, createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
-import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon } from '@/utils/math2d';
+import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 
 export interface SavedSceneData {
@@ -68,6 +68,7 @@ interface SceneState {
   moveBuildings: (ids: string[], dx: number, dy: number) => void;
   moveBuildingEdge: (buildingId: string, edgeIndex: number, dx: number, dy: number) => void;
   rotateBuilding: (id: string, pivot: Point2D, deltaAngleRad: number) => void;
+  alignBuildingEdgeToEdge: (targetRef: DimensionReference, referenceRef: DimensionReference) => void;
   booleanUnion: (bldgIdA: string, bldgIdB: string) => { success: boolean; error?: string };
 
   // Modifiers
@@ -624,6 +625,30 @@ export const useSceneStore = create<SceneState>()(
         }),
       };
     });
+  },
+
+  alignBuildingEdgeToEdge: (targetRef, referenceRef) => {
+    const { buildings } = get();
+    const targetBldg = buildings.find((b) => b.id === targetRef.buildingId);
+    const referenceBldg = buildings.find((b) => b.id === referenceRef.buildingId);
+    if (!targetBldg || !referenceBldg) return;
+
+    const targetSeg = targetBldg.segments.find((s) => s.id === targetRef.segmentId);
+    const referenceSeg = referenceBldg.segments.find((s) => s.id === referenceRef.segmentId);
+    if (!targetSeg || !referenceSeg) return;
+
+    // Edges are undirected lines: normalize both angles into [0, PI) before
+    // taking the difference, so we always rotate by the shortest amount that
+    // makes them parallel (never an unnecessary 180° flip).
+    const normalizeLineAngle = (angleRad: number) => ((angleRad % Math.PI) + Math.PI) % Math.PI;
+    let deltaRad = normalizeLineAngle(referenceSeg.angleRad) - normalizeLineAngle(targetSeg.angleRad);
+    if (deltaRad > Math.PI / 2) deltaRad -= Math.PI;
+    if (deltaRad < -Math.PI / 2) deltaRad += Math.PI;
+
+    if (Math.abs(deltaRad) < 1e-6) return;
+
+    const pivot = getPolygonCentroid(targetBldg.vertices);
+    get().rotateBuilding(targetBldg.id, pivot, deltaRad);
   },
 
   booleanUnion: (bldgIdA, bldgIdB) => {

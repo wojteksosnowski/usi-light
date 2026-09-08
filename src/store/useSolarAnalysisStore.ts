@@ -221,6 +221,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
       set((state) => ({
         pinnedPoints: [...state.pinnedPoints, newPt],
         activePinnedPointId: newPt.id,
+        showAnalysisPoints: true,
       }));
     }
   },

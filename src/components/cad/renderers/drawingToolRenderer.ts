@@ -1,6 +1,6 @@
 import { CadRenderContext } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
-import { generateSweepPolygon, SweepAlignment } from '../../../utils/math2d';
+import { generateSweepPolygon, SweepAlignment, getPolygonCentroid, getRotateHandleScreenPos } from '../../../utils/math2d';
 import { OsnapSnapResult, BuildingDragSnapResult, EdgeDragSnapResult, DirectionSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
 
@@ -9,7 +9,7 @@ import { APP_CONFIG } from '../../../config/appConfig';
  */
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union',
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union',
   drawingVertices: Point2D[],
   currentMouseWorld: Point2D | null,
   selectedBuilding?: BuildingLoop | null,
@@ -21,7 +21,10 @@ export function renderDrawingToolPreview(
   osnapSnapResult?: OsnapSnapResult | null,
   buildingDragSnap?: BuildingDragSnapResult | EdgeDragSnapResult | null,
   sweepWidth: number = 5.0,
-  sweepAlignment: SweepAlignment = 'center'
+  sweepAlignment: SweepAlignment = 'center',
+  allBuildings?: BuildingLoop[],
+  alignPendingRef?: { buildingId: string; segmentId: string } | null,
+  alignHoveredEdge?: { buildingId: string; segmentId: string } | null
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -669,8 +672,7 @@ export function renderDrawingToolPreview(
   }
 
   // 6. Vertex Edit Mode handles and midpoint [+] insertions (including Sweep spine path if present)
-  const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
-  if (selectedBuilding && !isCreatingShape) {
+  if (selectedBuilding && drawingMode === 'vertexEdit') {
     const isSweep = Array.isArray(selectedBuilding.sweepPath) && selectedBuilding.sweepPath.length >= 2;
     const verts = isSweep ? selectedBuilding.sweepPath! : selectedBuilding.vertices;
 
@@ -775,242 +777,96 @@ export function renderDrawingToolPreview(
     }
   }
 
-  // 7. Object Rotate Tool (with Movable Pivot Point, Vertex Grips & Angle Tracking)
-  if (drawingMode === 'rotate' && selectedBuilding && selectedBuilding.vertices) {
-    const verts = selectedBuilding.vertices;
-    if (verts.length >= 3) {
+  // 7. Per-object rotate handle: shown above a plainly-selected (non-editing) building.
+  // Dragging it rotates the object around its own centroid.
+  if (drawingMode === 'none' && selectedBuilding && selectedBuilding.vertices && selectedBuilding.vertices.length >= 3) {
+    const isHandleHovered = Boolean((selectedBuilding as any).isRotateHandleHovered);
+    const isHandleRotating = Boolean((selectedBuilding as any).isRotating);
+    const handleRotAngleDeg = (selectedBuilding as any).rotAngleDeg || 0;
+
+    const centroid = getPolygonCentroid(selectedBuilding.vertices);
+    const handlePos = getRotateHandleScreenPos(selectedBuilding, worldToScreen, rc.viewState.scale);
+    const centroidScreen = worldToScreen(centroid.x, centroid.y);
+
+    if (handlePos && Number.isFinite(centroidScreen.sx)) {
+      const hx = handlePos.sx;
+      const hy = handlePos.sy;
+
       ctx.save();
-
-      let pivot = (selectedBuilding as any).customPivot;
-      if (!pivot) {
-        let cx = 0;
-        let cy = 0;
-        for (const v of verts) {
-          cx += v.x;
-          cy += v.y;
-        }
-        pivot = { x: cx / verts.length, y: cy / verts.length };
-      }
-
-      const pS = worldToScreen(pivot.x, pivot.y);
-      const isPivotHovered = (selectedBuilding as any).isPivotHovered;
-      const isDraggingPivot = (selectedBuilding as any).isDraggingPivot;
-      const isRotating = (selectedBuilding as any).isRotating;
-      const rotAngleDeg = (selectedBuilding as any).rotAngleDeg || 0;
-      const hoveredRotateVertexIndex = (selectedBuilding as any).hoveredRotateVertexIndex ?? null;
-      const activeRotateAngleSnap = (selectedBuilding as any).activeRotateAngleSnap ?? null;
-
-      // 7.1 Vertex Grips (Uchwyty na wierzchołkach do chwytania i obracania)
-      for (let i = 0; i < verts.length; i++) {
-        const v = verts[i];
-        const vs = worldToScreen(v.x, v.y);
-        if (!Number.isFinite(vs.sx) || !Number.isFinite(vs.sy)) continue;
-
-        const isHovered = hoveredRotateVertexIndex === i;
-        const gr = isHovered ? 8 : 5.5;
-
-        // Grip glow ring
-        if (isHovered) {
-          ctx.beginPath();
-          ctx.arc(vs.sx, vs.sy, gr + 5, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(129, 140, 248, 0.25)';
-          ctx.strokeStyle = '#818cf8';
-          ctx.lineWidth = 1.5;
-          ctx.fill();
-          ctx.stroke();
-        }
-
-        ctx.beginPath();
-        ctx.arc(vs.sx, vs.sy, gr, 0, Math.PI * 2);
-        ctx.fillStyle = isHovered ? '#818cf8' : 'rgba(30, 41, 59, 0.9)';
-        ctx.strokeStyle = isHovered ? '#ffffff' : '#818cf8';
-        ctx.lineWidth = 2;
-        ctx.fill();
-        ctx.stroke();
-
-        // Symbol or number inside
-        ctx.font = 'bold 8px monospace';
-        ctx.fillStyle = isHovered ? '#ffffff' : '#c7d2fe';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('⟳', vs.sx, vs.sy);
-      }
-
-      const ringRadiusPx = Math.max(45, Math.min(120, 3.5 * rc.viewState.scale));
-
-      // 7.2 Protractor Dial (Podziałka kątowa i tarcza referencyjna wokół punktu obrotu)
       ctx.beginPath();
-      ctx.arc(pS.sx, pS.sy, ringRadiusPx, 0, Math.PI * 2);
-      ctx.fillStyle = isRotating ? 'rgba(99, 102, 241, 0.06)' : 'rgba(15, 23, 42, 0.35)';
-      ctx.fill();
-      ctx.strokeStyle = isRotating ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
-      ctx.lineWidth = isRotating ? 2 : 1.5;
-      ctx.setLineDash(isRotating ? [] : [4, 4]);
+      ctx.moveTo(centroidScreen.sx, centroidScreen.sy);
+      ctx.lineTo(hx, hy);
+      ctx.strokeStyle = 'rgba(129, 140, 248, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 2]);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Tick marks on the protractor dial
-      for (let deg = 0; deg < 360; deg += 15) {
-        const isMajor = deg % 90 === 0;
-        const isSemi = deg % 45 === 0;
-        const tickLen = isMajor ? 8 : isSemi ? 5 : 3;
-        const rad = (deg * Math.PI) / 180;
-        const cos = Math.cos(rad);
-        const sin = Math.sin(rad);
-        const r1 = ringRadiusPx - tickLen;
-        const r2 = ringRadiusPx;
+      const isActive = isHandleHovered || isHandleRotating;
+      const r = isHandleRotating ? 9 : isHandleHovered ? 8 : 6.5;
 
+      if (isActive) {
         ctx.beginPath();
-        ctx.moveTo(pS.sx + cos * r1, pS.sy + sin * r1);
-        ctx.lineTo(pS.sx + cos * r2, pS.sy + sin * r2);
-        ctx.strokeStyle = isMajor ? '#818cf8' : isSemi ? 'rgba(129, 140, 248, 0.6)' : 'rgba(148, 163, 184, 0.3)';
-        ctx.lineWidth = isMajor ? 1.5 : 1;
-        ctx.stroke();
-      }
-
-      // 7.3 Angle Tracking guideline ray when angle is snapped
-      if (activeRotateAngleSnap && isRotating) {
-        const rad = ((activeRotateAngleSnap.angleDeg) * Math.PI) / 180;
-        const rayLen = ringRadiusPx * 2.0;
-        const rx = pS.sx + Math.cos(rad) * rayLen;
-        const ry = pS.sy + Math.sin(rad) * rayLen;
-
-        ctx.beginPath();
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 4]);
-        ctx.moveTo(pS.sx, pS.sy);
-        ctx.lineTo(rx, ry);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      if (isRotating && currentMouseWorld) {
-        const mouseScreen = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
-        const mouseAngle = Math.atan2(mouseScreen.sy - pS.sy, mouseScreen.sx - pS.sx);
-        const startAngle = (selectedBuilding as any).rotStartAngleScreen || 0;
-
-        // Dynamic filled arc illustrating the rotation range
-        ctx.beginPath();
-        ctx.moveTo(pS.sx, pS.sy);
-        ctx.arc(pS.sx, pS.sy, ringRadiusPx, startAngle, mouseAngle, false);
-        ctx.fillStyle = 'rgba(129, 140, 248, 0.22)';
-        ctx.fill();
-        ctx.strokeStyle = '#818cf8';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Start vector ray
-        ctx.beginPath();
-        ctx.moveTo(pS.sx, pS.sy);
-        ctx.lineTo(pS.sx + Math.cos(startAngle) * ringRadiusPx, pS.sy + Math.sin(startAngle) * ringRadiusPx);
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Current mouse ray
-        ctx.beginPath();
-        ctx.moveTo(pS.sx, pS.sy);
-        ctx.lineTo(mouseScreen.sx, mouseScreen.sy);
+        ctx.arc(hx, hy, r + 5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(129, 140, 248, 0.25)';
         ctx.strokeStyle = '#818cf8';
         ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        const badgeAngle = (startAngle + mouseAngle) / 2;
-        const badgeX = pS.sx + Math.cos(badgeAngle) * (ringRadiusPx + 24);
-        const badgeY = pS.sy + Math.sin(badgeAngle) * (ringRadiusPx + 24);
-        const trackingLabel = activeRotateAngleSnap?.label
-          ? ` [${activeRotateAngleSnap.label}]`
-          : activeRotateAngleSnap
-          ? ' [Śledzenie]'
-          : '';
-        const badgeText = `${rotAngleDeg >= 0 ? '+' : ''}${rotAngleDeg.toFixed(1)}°${trackingLabel}`;
-
-        ctx.font = 'bold 11px monospace';
-        const bw = ctx.measureText(badgeText).width;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
-        ctx.strokeStyle = activeRotateAngleSnap ? '#38bdf8' : '#818cf8';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(badgeX - bw / 2 - 6, badgeY - 10, bw + 12, 20, 5);
         ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = activeRotateAngleSnap ? '#7dd3fc' : '#c7d2fe';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(badgeText, badgeX, badgeY);
-      } else if (!isRotating && !isDraggingPivot) {
-        // Idle state dial badge
-        const badgeX = pS.sx;
-        const badgeY = pS.sy - ringRadiusPx - 14;
-        const currentRot = (selectedBuilding as any).transform?.rotationDeg || 0;
-        const badgeText = `Kąt: ${currentRot.toFixed(1)}°`;
-
-        ctx.font = 'bold 10px monospace';
-        const bw = ctx.measureText(badgeText).width;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.strokeStyle = 'rgba(129, 140, 248, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(badgeX - bw / 2 - 5, badgeY - 9, bw + 10, 18, 4);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#c7d2fe';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(badgeText, badgeX, badgeY);
-      }
-
-      const pr = isPivotHovered || isDraggingPivot ? 10 : 8;
-
-      if (isPivotHovered || isDraggingPivot) {
-        ctx.beginPath();
-        ctx.arc(pS.sx, pS.sy, pr + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
-        ctx.lineWidth = 2;
         ctx.stroke();
       }
 
       ctx.beginPath();
-      ctx.arc(pS.sx, pS.sy, pr, 0, Math.PI * 2);
-      ctx.fillStyle = isPivotHovered || isDraggingPivot ? '#f59e0b' : '#0f172a';
-      ctx.strokeStyle = isPivotHovered || isDraggingPivot ? '#ffffff' : '#f59e0b';
+      ctx.arc(hx, hy, r, 0, Math.PI * 2);
+      ctx.fillStyle = isActive ? '#818cf8' : 'rgba(30, 41, 59, 0.9)';
+      ctx.strokeStyle = isActive ? '#ffffff' : '#818cf8';
       ctx.lineWidth = 2;
       ctx.fill();
       ctx.stroke();
 
-      ctx.beginPath();
-      ctx.moveTo(pS.sx - pr - 4, pS.sy);
-      ctx.lineTo(pS.sx + pr + 4, pS.sy);
-      ctx.moveTo(pS.sx, pS.sy - pr - 4);
-      ctx.lineTo(pS.sx + pr + 4, pS.sy);
-      ctx.strokeStyle = isPivotHovered || isDraggingPivot ? '#0f172a' : '#f59e0b';
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
+      ctx.font = 'bold 10px monospace';
+      ctx.fillStyle = isActive ? '#ffffff' : '#c7d2fe';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⟳', hx, hy);
 
-      if (!isRotating) {
-        const pivotText = 'Punkt obrotu (przeciągnij)';
-        ctx.font = 'bold 9.5px sans-serif';
-        const ptw = ctx.measureText(pivotText).width;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 1;
+      if (isHandleRotating) {
+        const badgeText = `${handleRotAngleDeg >= 0 ? '+' : ''}${handleRotAngleDeg.toFixed(1)}°`;
+        ctx.font = 'bold 11px monospace';
+        const bw = ctx.measureText(badgeText).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+        ctx.strokeStyle = '#818cf8';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.roundRect(pS.sx - ptw / 2 - 4, pS.sy - pr - 18, ptw + 8, 15, 4);
+        ctx.roundRect(hx - bw / 2 - 6, hy - r - 26, bw + 12, 20, 5);
         ctx.fill();
         ctx.stroke();
-
-        ctx.fillStyle = '#fde68a';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pivotText, pS.sx, pS.sy - pr - 10);
+        ctx.fillStyle = '#c7d2fe';
+        ctx.fillText(badgeText, hx, hy - r - 16);
       }
 
       ctx.restore();
     }
+  }
+
+  // 8. Align tool: highlight the pending edge and the currently hovered edge.
+  if (drawingMode === 'align' && Array.isArray(allBuildings)) {
+    const drawEdgeHighlight = (ref: { buildingId: string; segmentId: string }, color: string) => {
+      const bldg = allBuildings!.find((b) => b.id === ref.buildingId);
+      const seg = bldg?.segments.find((s) => s.id === ref.segmentId);
+      if (!seg) return;
+      const s1 = worldToScreen(seg.p1.x, seg.p1.y);
+      const s2 = worldToScreen(seg.p2.x, seg.p2.y);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(s1.sx, s1.sy);
+      ctx.lineTo(s2.sx, s2.sy);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.restore();
+    };
+    if (alignPendingRef) drawEdgeHighlight(alignPendingRef, '#f59e0b');
+    if (alignHoveredEdge) drawEdgeHighlight(alignHoveredEdge, '#38bdf8');
   }
 }

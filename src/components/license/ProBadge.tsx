@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crown, Sparkles } from 'lucide-react';
+import { Crown } from 'lucide-react';
 import { useLicenseStore, useUiStore } from '../../store';
 
 export const ProBadge: React.FC = () => {
@@ -56,10 +56,9 @@ export const ProBadge: React.FC = () => {
         letterSpacing: '0.02em',
         transition: 'all 0.2s ease',
       }}
-      title="Odblokuj zaawansowane modyfikatory brył oraz eksporty PDF i DXF"
+      title="Rozszerz o import działek geodezyjnych i obrysów budynków oraz eksport DXF"
     >
-      <Sparkles size={12} color="#ffffff" />
-      <span>Kup PRO</span>
+      <span>Rozszerz</span>
     </button>
   );
 };

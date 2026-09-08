@@ -24,9 +24,9 @@ export const DevLicenseToolbar: React.FC = () => {
   return (
     <div
       style={{
-        position: 'fixed',
-        bottom: '16px',
-        right: '16px',
+        position: 'absolute',
+        bottom: '64px',
+        left: '16px',
         zIndex: 9999,
         display: 'flex',
         alignItems: 'center',
@@ -88,7 +88,7 @@ export const DevLicenseToolbar: React.FC = () => {
         title={
           isPro
             ? 'Przełącz na wersję darmową (aby przetestować blokady i modale zakupu)'
-            : 'Przełącz na wersję PRO (odblokuj wszystkie eksporty i modyfikatory)'
+            : 'Przełącz na wersję PRO (rozszerz o import geo i eksport DXF)'
         }
       >
         <RefreshCw size={10} />

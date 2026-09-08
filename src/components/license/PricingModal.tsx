@@ -10,18 +10,66 @@ import {
   Building2,
   KeyRound,
   Loader2,
+  Gift,
+  Copy,
+  Sparkles,
 } from 'lucide-react';
-import { useUiStore } from '../../store';
+import { useUiStore, useLicenseStore } from '../../store';
+import { APP_CONFIG } from '../../config/appConfig';
+
+const PREVIEW_MODE = APP_CONFIG.previewMode.enabled;
 
 export const PricingModal: React.FC = () => {
   const isPricingModalOpen = useUiStore((s) => s.isPricingModalOpen);
   const setPricingModalOpen = useUiStore((s) => s.setPricingModalOpen);
   const setLicenseModalOpen = useUiStore((s) => s.setLicenseModalOpen);
+  const activateLicense = useLicenseStore((s) => s.activateLicense);
 
   const [loadingPlan, setLoadingPlan] = useState<'7d' | '30d' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [trialLoading, setTrialLoading] = useState(false);
+  const [trialError, setTrialError] = useState<string | null>(null);
+  const [trialKey, setTrialKey] = useState<string | null>(null);
+  const [trialActivating, setTrialActivating] = useState(false);
+  const [trialCopied, setTrialCopied] = useState(false);
+
   if (!isPricingModalOpen) return null;
+
+  const handleGetTrialKey = async () => {
+    try {
+      setTrialLoading(true);
+      setTrialError(null);
+
+      const res = await fetch('/api/license/trial', { method: 'POST' });
+      const data = await res.json();
+
+      if (!res.ok || !data.licenseKey) {
+        throw new Error(data.error || 'Nie udało się wygenerować klucza próbnego.');
+      }
+
+      setTrialKey(data.licenseKey);
+    } catch (err: any) {
+      setTrialError(err.message || 'Wystąpił błąd podczas generowania klucza próbnego.');
+    } finally {
+      setTrialLoading(false);
+    }
+  };
+
+  const handleCopyTrialKey = () => {
+    if (!trialKey) return;
+    navigator.clipboard.writeText(trialKey);
+    setTrialCopied(true);
+    setTimeout(() => setTrialCopied(false), 2000);
+  };
+
+  const handleActivateTrialKey = async () => {
+    if (!trialKey) return;
+    setTrialActivating(true);
+    await activateLicense(trialKey);
+    setTrialActivating(false);
+    setPricingModalOpen(false);
+  };
 
   const handleCheckout = async (plan: '7d' | '30d') => {
     try {
@@ -107,7 +155,7 @@ export const PricingModal: React.FC = () => {
             </div>
             <div>
               <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Odblokuj Pełne Możliwości USI Light PRO
+                Rozszerz Pełne Możliwości Światło PRO
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                 Wybierz dostęp czasowy dopasowany do Twojego projektu. Czas biegnie od momentu aktywacji.
@@ -192,19 +240,15 @@ export const PricingModal: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11.5px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
                     <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Eksport raportów PDF</span>
+                    <span>Import działek geodezyjnych i obrysów budynków (ULDK)</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
                     <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
                     <span>Eksport geometrii do DXF</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Modyfikatory 2.5D (Uskoki / Strefy)</span>
-                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
                     <Check size={14} color="#64748b" style={{ flexShrink: 0 }} />
-                    <span>Start 7 dni od momentu aktywacji</span>
+                    <span>Linki współdzielenia ważne 14 dni</span>
                   </div>
                 </div>
               </div>
@@ -212,15 +256,17 @@ export const PricingModal: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleCheckout('7d')}
-                disabled={loadingPlan !== null}
+                disabled={loadingPlan !== null || PREVIEW_MODE}
                 className="btn-secondary"
                 style={{
                   padding: '10px 14px',
                   fontWeight: 600,
                   fontSize: '12.5px',
                   gap: '8px',
-                  cursor: loadingPlan !== null ? 'not-allowed' : 'pointer',
+                  opacity: PREVIEW_MODE ? 0.5 : 1,
+                  cursor: PREVIEW_MODE ? 'not-allowed' : loadingPlan !== null ? 'not-allowed' : 'pointer',
                 }}
+                title={PREVIEW_MODE ? 'Dostępne wkrótce — trwa okres zapoznawczy' : undefined}
               >
                 {loadingPlan === '7d' ? (
                   <>
@@ -230,7 +276,7 @@ export const PricingModal: React.FC = () => {
                 ) : (
                   <>
                     <Zap size={14} color="#38bdf8" />
-                    <span>Wybierz pakiet 7 dni</span>
+                    <span>{PREVIEW_MODE ? 'Dostępne wkrótce' : 'Wybierz pakiet 7 dni'}</span>
                   </>
                 )}
               </button>
@@ -251,25 +297,6 @@ export const PricingModal: React.FC = () => {
                 boxShadow: '0 8px 24px rgba(245, 158, 11, 0.15)',
               }}
             >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '-10px',
-                  right: '16px',
-                  backgroundColor: '#f59e0b',
-                  color: '#020617',
-                  fontSize: '9.5px',
-                  fontWeight: 800,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  padding: '2px 8px',
-                  borderRadius: '999px',
-                  boxShadow: '0 2px 8px rgba(245, 158, 11, 0.4)',
-                }}
-              >
-                Najpopularniejszy
-              </div>
-
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -297,19 +324,15 @@ export const PricingModal: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11.5px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
                     <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Eksport raportów PDF bez limitu</span>
+                    <span>Import działek geodezyjnych i obrysów budynków (ULDK)</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
                     <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
                     <span>Eksport DXF do CAD</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Wszystkie modyfikatory bryły</span>
-                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontWeight: 600 }}>
                     <Check size={14} color="#fbbf24" style={{ flexShrink: 0 }} />
-                    <span>Start 30 dni od momentu aktywacji</span>
+                    <span>Linki współdzielenia ważne 30 dni</span>
                   </div>
                 </div>
               </div>
@@ -317,16 +340,18 @@ export const PricingModal: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleCheckout('30d')}
-                disabled={loadingPlan !== null}
+                disabled={loadingPlan !== null || PREVIEW_MODE}
                 className="btn-primary"
                 style={{
                   padding: '10px 14px',
                   fontWeight: 700,
                   fontSize: '12.5px',
                   gap: '8px',
-                  cursor: loadingPlan !== null ? 'not-allowed' : 'pointer',
+                  opacity: PREVIEW_MODE ? 0.5 : 1,
+                  cursor: PREVIEW_MODE ? 'not-allowed' : loadingPlan !== null ? 'not-allowed' : 'pointer',
                   background: 'linear-gradient(135deg, #f59e0b, #ea580c)',
                 }}
+                title={PREVIEW_MODE ? 'Dostępne wkrótce — trwa okres zapoznawczy' : undefined}
               >
                 {loadingPlan === '30d' ? (
                   <>
@@ -336,12 +361,144 @@ export const PricingModal: React.FC = () => {
                 ) : (
                   <>
                     <Crown size={15} color="#ffffff" />
-                    <span>Kup dostęp 30 dni</span>
+                    <span>{PREVIEW_MODE ? 'Dostępne wkrótce' : 'Kup dostęp 30 dni'}</span>
                   </>
                 )}
               </button>
             </div>
           </div>
+
+          {/* Tryb zapoznawczy: darmowy klucz dostępu na 7 dni */}
+          {PREVIEW_MODE && (
+            <div
+              style={{
+                backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+                borderRadius: '14px',
+                padding: '16px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Gift size={16} color="#34d399" />
+                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Okres zapoznawczy: bezpłatny klucz dostępu na 7 dni
+                </span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                Zakupy przez Stripe są chwilowo wstrzymane. Wygeneruj darmowy klucz PRO ważny 7 dni i wypróbuj pełną funkcjonalność (import działek, DXF, modyfikatory).
+              </div>
+
+              {trialError && (
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                    border: '1px solid rgba(244, 63, 94, 0.4)',
+                    color: '#fca5a5',
+                    fontSize: '11px',
+                  }}
+                >
+                  {trialError}
+                </div>
+              )}
+
+              {trialKey ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div
+                    style={{
+                      backgroundColor: 'var(--bg-card)',
+                      border: '2px solid rgba(16, 185, 129, 0.5)',
+                      borderRadius: '12px',
+                      padding: '10px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <span style={{ fontSize: '14px', fontWeight: 800, fontFamily: 'monospace', color: '#34d399', letterSpacing: '0.03em' }}>
+                      {trialKey}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyTrialKey}
+                      className="btn-secondary"
+                      style={{ width: 'auto', padding: '6px 10px', fontSize: '11px', gap: '5px' }}
+                      title="Skopiuj klucz do schowka"
+                    >
+                      {trialCopied ? (
+                        <>
+                          <Check size={12} color="#10b981" />
+                          <span style={{ color: '#10b981' }}>Skopiowano</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} />
+                          <span>Kopiuj</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleActivateTrialKey}
+                    disabled={trialActivating}
+                    className="btn-primary"
+                    style={{
+                      padding: '9px 14px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      background: 'linear-gradient(135deg, #10b981, #059669)',
+                      cursor: trialActivating ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {trialActivating ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Aktywowanie...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} />
+                        <span>Aktywuj klucz na tym urządzeniu</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGetTrialKey}
+                  disabled={trialLoading}
+                  className="btn-secondary"
+                  style={{
+                    padding: '10px 14px',
+                    fontWeight: 600,
+                    fontSize: '12.5px',
+                    gap: '8px',
+                    borderColor: 'rgba(16, 185, 129, 0.5)',
+                    cursor: trialLoading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {trialLoading ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      <span>Generowanie klucza...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Gift size={14} color="#34d399" />
+                      <span>Uzyskaj bezpłatny klucz na 7 dni</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Footer information & Activate existing key button */}
           <div
@@ -358,7 +515,7 @@ export const PricingModal: React.FC = () => {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
               <ShieldCheck size={16} color="#10b981" style={{ flexShrink: 0 }} />
-              <span>Bezpieczna płatność Stripe (BLIK, Karty, P24, Apple Pay). Płatność jednorazowa bez autoodnawiania.</span>
+              <span>Bezpieczna płatność Stripe (BLIK, Karty, P24, Apple Pay).</span>
             </div>
 
             <button

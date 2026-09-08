@@ -25,6 +25,8 @@ Zdefiniowane w [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.c
 | `--accent-emerald` | `#10b981` (Emerald 500) | Zgodność § 12, sukces, punkty końcowe snap (Endpoint) |
 | `--accent-amber` | `#f59e0b` (Amber 500) | Nasłonecznienie § 56, ostrzeżenia, statystyki OTRACK |
 | `--accent-rose` | `#f43f5e` (Rose 500) | Niezgodność § 12, błędy, przecięcia OSNAP |
+| `--accent-cyan` | `#38bdf8` (Sky 400) | Akcent PRO / eksport CAD (`.btn-tile.active-cyan`, `.cad-control-point-btn`, przycisk "Centruj") |
+| `--accent-cyan-light` | `#7dd3fc` (Sky 300) | Jaśniejszy wariant akcentu cyan (stan aktywny/hover) |
 
 ### 1.2. Pływające Powierzchnie Szklane (Glassmorphism Surfaces)
 Pływające panele nad rzutem CAD wykorzystują efekt rozmycia tła:
@@ -97,15 +99,17 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
 3. **Wyróżniona akcja specjalna / Udostępnianie (`.btn-share`)**:
    - Tło: `linear-gradient(135deg, rgba(147, 51, 234, 0.4), rgba(99, 102, 241, 0.45))`
    - Obramowanie: `1px solid rgba(168, 85, 247, 0.6)`
-   - Efekt odblasku ramki: krótki (~1s) odblask ramki i refleks świetlny (`.glinting`), wyzwalany po **30 sekundach** bezczynności użytkownika, a następnie powtórzony po kolejnych **15 sekundach** (45s łącznie), po czym zatrzymywany do czasu kolejnej aktywności użytkownika.
    - Kolor tekstu i ikony: `#f3e8ff`, hover `#ffffff` z cieniem `0 4px 16px rgba(168, 85, 247, 0.5)`
    - Zaokrąglenie: `border-radius: 6px`, `font-size: 11px`, `font-weight: 700`
+   - Używany jako statyczny wariant (przycisk "Udostępnij projekt" w sidebarze).
+   - Wariant rozszerzony `.cad-publish-btn` (canvas, floating topbar) dodaje do tej samej bazy wizualnej efekt odblasku ramki: krótki (~1s) odblask i refleks świetlny (`.glinting`), wyzwalany po **30 sekundach** bezczynności użytkownika, a następnie powtórzony po kolejnych **15 sekundach** (45s łącznie), po czym zatrzymywany do czasu kolejnej aktywności użytkownika (mechanizm: `useIdleGlint` hook, `src/hooks/useIdleGlint.ts`).
 4. **Kafle przełączników warstw (`.btn-tile`)**:
    - Zaokrąglenie: `border-radius: 8px`, `font-size: 11.5px`
    - Stan nieaktywny (`.inactive`): tło `rgba(6, 11, 24, 0.6)`, obramowanie `var(--border-color)`, kolor `var(--text-secondary)`
    - Stan aktywny emerald (`.active-emerald`): tło `rgba(16, 185, 129, 0.15)`, ramka `rgba(16, 185, 129, 0.4)`, tekst `#6ee7b7`
    - Stan aktywny amber (`.active-amber`): tło `rgba(245, 158, 11, 0.15)`, ramka `rgba(245, 158, 11, 0.4)`, tekst `#fcd34d`
    - Stan aktywny indigo (`.active-indigo`): tło `rgba(99, 102, 241, 0.15)`, ramka `rgba(99, 102, 241, 0.4)`, tekst `#a5b4fc`
+   - Stan aktywny cyan (`.active-cyan`) — akcent PRO / eksport CAD: tło `rgba(56, 189, 248, 0.15)`, ramka `rgba(56, 189, 248, 0.4)`, tekst `#7dd3fc`
 
 ### 4.2. Promienie Zaokrągleń (Border Radius Scale)
 - **Tagi / Małe badge**: `border-radius: 4px` - `6px`

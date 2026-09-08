@@ -74,7 +74,7 @@ export class BuildingsLayer implements CadRenderLayer {
       liveFacadeSnap,
       facadePointMode,
       drawingMode === 'vertexEdit',
-      drawingMode === 'rotate',
+      drawingMode === 'align',
       selectedBuildingIds,
       showAnalysisPoints
     );

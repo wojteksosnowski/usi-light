@@ -15,6 +15,7 @@ import { DevLicenseToolbar } from './components/license/DevLicenseToolbar';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
 import { CadToolBar } from './components/layout/CadToolBar';
+import { ControlPointButton } from './components/layout/ControlPointButton';
 import { CadLegendBottom } from './components/layout/CadLegendBottom';
 import { registerGeoLayers } from './modules/wfs-import/registerGeoLayers';
 import {
@@ -74,8 +75,6 @@ export const App: React.FC = () => {
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
-  const rotateInitialBuildingsSnapshot = useCadToolStore((s) => s.rotateInitialBuildingsSnapshot);
-  const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
   const sweepWidth = useCadToolStore((s) => s.sweepWidth);
   const sweepAlignment = useCadToolStore((s) => s.sweepAlignment);
   const isEditMode = useCadToolStore((s) => s.isEditMode);
@@ -96,6 +95,9 @@ export const App: React.FC = () => {
   const handleDimensionClickEdge = useCadToolStore((s) => s.handleDimensionClickEdge);
   const cancelDimension = useCadToolStore((s) => s.cancelDimension);
   const deleteDimension = useCadToolStore((s) => s.deleteDimension);
+  const alignPendingRef = useCadToolStore((s) => s.alignPendingRef);
+  const handleAlignClickEdge = useCadToolStore((s) => s.handleAlignClickEdge);
+  const cancelAlign = useCadToolStore((s) => s.cancelAlign);
   const viewRotationMode = useCadToolStore((s) => s.viewRotationMode);
   const setViewRotationMode = useCadToolStore((s) => s.setViewRotationMode);
   const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
@@ -450,11 +452,10 @@ export const App: React.FC = () => {
           cancelDimension();
           handledTool = true;
         }
+        if (drawingMode === 'align') {
+          cancelAlign();
+        }
         if (drawingMode !== 'none') {
-          if (drawingMode === 'rotate' && rotateInitialBuildingsSnapshot) {
-            setBuildings(rotateInitialBuildingsSnapshot);
-            setRotateInitialBuildingsSnapshot(null);
-          }
           setDrawingMode('none');
           setDrawingVerticesCount(0);
           handledTool = true;
@@ -515,7 +516,6 @@ export const App: React.FC = () => {
   }, [
     isDimensionToolActive,
     drawingMode,
-    rotateInitialBuildingsSnapshot,
     isLinkingMode,
     isEditMode,
     viewRotationMode,
@@ -524,10 +524,9 @@ export const App: React.FC = () => {
     selectedBuildingIds,
     deleteBuildings,
     cancelDimension,
+    cancelAlign,
     setDrawingMode,
     setDrawingVerticesCount,
-    setRotateInitialBuildingsSnapshot,
-    setBuildings,
     setIsLinkingMode,
     setLinkingSourceId,
     setIsEditMode,
@@ -542,12 +541,6 @@ export const App: React.FC = () => {
   // Handlers for CadCanvas
   const handleFinishDrawing = useCallback(
     (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => {
-      if (drawingMode === 'rotate') {
-        setRotateInitialBuildingsSnapshot(null);
-        setDrawingMode('none');
-        setDrawingVerticesCount(0);
-        return;
-      }
       let effectiveVertices = vertices;
       if (shapeType === 'sweep') {
         if (vertices.length < 2) return;
@@ -573,17 +566,13 @@ export const App: React.FC = () => {
       setDrawingMode('none');
       setDrawingVerticesCount(0);
     },
-    [drawingMode, buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, setRotateInitialBuildingsSnapshot, sweepWidth, sweepAlignment]
+    [buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, sweepWidth, sweepAlignment]
   );
 
   const handleCancelDrawing = useCallback(() => {
-    if (drawingMode === 'rotate' && rotateInitialBuildingsSnapshot) {
-      setBuildings(rotateInitialBuildingsSnapshot);
-      setRotateInitialBuildingsSnapshot(null);
-    }
     setDrawingMode('none');
     setDrawingVerticesCount(0);
-  }, [drawingMode, rotateInitialBuildingsSnapshot, setBuildings, setDrawingMode, setDrawingVerticesCount, setRotateInitialBuildingsSnapshot]);
+  }, [setDrawingMode, setDrawingVerticesCount]);
 
   const handleBuildingRotate = useCallback(
     (id: string, pivot: Point2D, deltaAngleRad: number) => {
@@ -617,7 +606,10 @@ export const App: React.FC = () => {
         <CadTopHud />
 
         {/* Floating Tool Bar under Top HUD */}
-        <CadToolBar />
+        <div className="cad-toolbar-row">
+          <ControlPointButton />
+          <CadToolBar />
+        </div>
 
         {/* Legend & Stats Overlay at Bottom-Left */}
         <CadLegendBottom />
@@ -681,6 +673,7 @@ export const App: React.FC = () => {
             isLinkingMode={isLinkingMode}
             linkingSourceId={linkingSourceId}
             drawingMode={drawingMode}
+            onDrawingModeChange={setDrawingMode}
             sweepWidth={sweepWidth}
             sweepAlignment={sweepAlignment}
             onFinishDrawing={handleFinishDrawing}
@@ -702,6 +695,8 @@ export const App: React.FC = () => {
             dimensionPendingRef={dimensionPendingRef}
             onDimensionClickEdge={handleDimensionClickEdge}
             onDeleteDimension={deleteDimension}
+            alignPendingRef={alignPendingRef}
+            onAlignClickEdge={handleAlignClickEdge}
             layerSettings={layerSettings}
             viewRotationMode={viewRotationMode}
             viewRotationDeg={viewRotationDeg}

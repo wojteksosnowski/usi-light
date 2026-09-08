@@ -121,7 +121,7 @@ export function createSharedPayloadFromState(options: ExtractStateOptions): Shar
     v: 1,
     createdAt: Date.now(),
     metadata: {
-      name: options.projectName || `Projekt ${options.selectedCity || 'USI Light'}`,
+      name: options.projectName || `Projekt ${options.selectedCity || 'Światło'}`,
       northAngleDeg: options.viewRotationDeg ?? 0,
     },
     viewport: {

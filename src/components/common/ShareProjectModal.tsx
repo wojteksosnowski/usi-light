@@ -15,6 +15,7 @@ import {
   useSceneStore,
   useSolarAnalysisStore,
   useCadToolStore,
+  useLicenseStore,
 } from '../../store';
 import {
   createSharedPayloadFromState,
@@ -57,9 +58,18 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
   const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
 
+  const licenseKey = useLicenseStore((s) => s.licenseKey);
+  const isPro = useLicenseStore((s) => s.isPro);
+  const licenseDays = useLicenseStore((s) => s.days);
+
+  // Ważność linku zależna od poziomu dostępu: free -> 7 dni, PRO 7d -> 14 dni, PRO 30d -> 30 dni
+  const SHARE_TTL_BY_LICENSE_DAYS: Record<number, number> = { 7: 14, 30: 30 };
+  const expectedTtlDays = (isPro && licenseDays && SHARE_TTL_BY_LICENSE_DAYS[licenseDays]) || 7;
+
   // Local Component State
   const [isLoading, setIsLoading] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [ttlDays, setTtlDays] = useState<number | null>(null);
   const [stats, setStats] = useState<CompressionStats | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
@@ -69,6 +79,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
     if (isOpen) {
       setErrorMessage(null);
       setIsCopied(false);
+      setTtlDays(null);
     }
   }, [isOpen]);
 
@@ -137,7 +148,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ compressedData }),
+        body: JSON.stringify({ compressedData, licenseKey }),
       });
 
       if (!response.ok) {
@@ -148,6 +159,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
       const result = (await response.json()) as ShareApiResponse;
       const fullUrl = `${window.location.origin}${result.url}`;
       setShareUrl(fullUrl);
+      setTtlDays(result.ttlDays ?? expectedTtlDays);
     } catch (err: any) {
       console.error('Błąd generowania linku udostępniania:', err);
       setErrorMessage(err.message || 'Nie udało się wygenerować linku do udostępnienia.');
@@ -344,7 +356,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Clock size={12} color="var(--accent-amber)" />
-                <span>Ważność linku: <strong>14 dni</strong></span>
+                <span>Ważność linku: <strong>{ttlDays ?? expectedTtlDays} dni</strong></span>
               </div>
               {stats && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -400,7 +412,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
             >
               <Globe size={16} color="var(--accent-indigo)" style={{ flexShrink: 0, marginTop: '2px' }} />
               <div>
-                Projekt zostanie skompresowany i zapisany w bezpiecznej chmurze, a po 14 dniach usunięty. Każdy posiadacz linku będzie mógł natychmiast załadować kopię projektu, całą geometrię i parametry nasłonecznienia.
+                Projekt zostanie skompresowany i zapisany w bezpiecznej chmurze, a po {expectedTtlDays} dniach usunięty. Każdy posiadacz linku będzie mógł natychmiast załadować kopię projektu, całą geometrię i parametry nasłonecznienia.
               </div>
             </div>
 

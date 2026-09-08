@@ -1,6 +1,6 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType } from '../../../types/geometry';
-import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180 } from '@/utils/math2d';
+import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180, getPolygonCentroid, getRotateHandleScreenPos } from '@/utils/math2d';
 import { useUiStore } from '../../../store/useUiStore';
 import {
   calculateDirectionSnap,
@@ -237,6 +237,7 @@ export function useCanvasInteraction({
   isLinkingMode = false,
   linkingSourceId = null,
   drawingMode = 'none',
+  onDrawingModeChange,
   sweepWidth = 5.0,
   sweepAlignment = 'center',
   onFinishDrawing,
@@ -262,6 +263,7 @@ export function useCanvasInteraction({
   dimensionType = 'linear',
   dimensionPendingRef = null,
   onDimensionClickEdge,
+  onAlignClickEdge,
   onDeleteDimension,
   layerSettings = {},
   viewRotationMode = false,
@@ -290,7 +292,6 @@ export function useCanvasInteraction({
   const [activeOsnapSnap, setActiveOsnapSnap] = useState<OsnapSnapResult | null>(null);
   const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | EdgeDragSnapResult | null>(null);
   const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
-  const [hoveredRotateVertexIndex, setHoveredRotateVertexIndex] = useState<number | null>(null);
 
   // Vertex edit state
   const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
@@ -300,14 +301,14 @@ export function useCanvasInteraction({
   const [dragVertexPreviewPt, setDragVertexPreviewPt] = useState<Point2D | null>(null);
   const dragVertexContextRef = useRef<DragVertexContext | null>(null);
 
-  // Object rotation tool state (with movable pivot)
-  const [customPivot, setCustomPivot] = useState<Point2D | null>(null);
-  const [isDraggingPivot, setIsDraggingPivot] = useState<boolean>(false);
-  const [isPivotHovered, setIsPivotHovered] = useState<boolean>(false);
+  // Per-object rotate handle (shown on plain selection, drags the object around its own centroid)
+  const [isRotateHandleHovered, setIsRotateHandleHovered] = useState<boolean>(false);
   const [isRotating, setIsRotating] = useState<boolean>(false);
   const [lastMouseAngleWorld, setLastMouseAngleWorld] = useState<number | null>(null);
-  const [rotStartAngleScreen, setRotStartAngleScreen] = useState<number>(0);
   const [rotAngleDeg, setRotAngleDeg] = useState<number>(0);
+
+  // Align tool (edge hover for two-click edge-to-edge alignment)
+  const [alignHoveredEdge, setAlignHoveredEdge] = useState<{ buildingId: string; segmentId: string } | null>(null);
 
   // Edge length editing state
   const [editingEdgeLength, setEditingEdgeLength] = useState<EditingEdgeLengthState | null>(null);
@@ -345,10 +346,9 @@ export function useCanvasInteraction({
   const [isDraggingBuilding, setIsDraggingBuilding] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  // Calculate effective rotation pivot (custom or group centroid)
+  // Effective pivot for keyboard step-rotation (group centroid, so linked buildings rotate together)
   const effectivePivot = useMemo<Point2D | null>(() => {
     if (!selectedBuildingId) return null;
-    if (customPivot) return customPivot;
     const bldg = buildings.find((b) => b.id === selectedBuildingId);
     if (!bldg || bldg.vertices.length === 0) return null;
 
@@ -365,7 +365,7 @@ export function useCanvasInteraction({
       }
     }
     return totalCount > 0 ? { x: cx / totalCount, y: cy / totalCount } : null;
-  }, [selectedBuildingId, customPivot, buildings]);
+  }, [selectedBuildingId, buildings]);
 
   // Znormalizowany bufor linii Ax + By + C = 0 dla wszystkich widocznych obiektów
   const lineBuffer = useMemo<CachedLineEquation[]>(() => {
@@ -539,10 +539,8 @@ export function useCanvasInteraction({
       setDrawingVertices([]);
       setCurrentMouseWorld(null);
     }
-    if (drawingMode !== 'rotate') {
-      setCustomPivot(null);
-      setIsRotating(false);
-      setIsDraggingPivot(false);
+    if (drawingMode !== 'align') {
+      setAlignHoveredEdge(null);
     }
     if (drawingMode !== 'vertexEdit') {
       setSelectedVertexIndex(null);
@@ -553,7 +551,6 @@ export function useCanvasInteraction({
   }, [drawingMode]);
 
   useEffect(() => {
-    setCustomPivot(null);
     setEditingEdgeLength(null);
     setHoveredEdge(null);
     setDraggingEdge(null);
@@ -605,7 +602,6 @@ export function useCanvasInteraction({
     isInteracting ||
     isPanning ||
     isDraggingBuilding ||
-    isDraggingPivot ||
     isRotating ||
     draggedVertexIndex !== null ||
     draggingEdge !== null ||
@@ -653,7 +649,6 @@ export function useCanvasInteraction({
         return;
       }
 
-      const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
 
       const currentPinnedResults = propPinnedPointResults && propPinnedPointResults.length > 0
         ? propPinnedPointResults
@@ -692,7 +687,7 @@ export function useCanvasInteraction({
         }
       }
 
-      if (selectedBuildingId && !isCreatingShape && !facadePointMode) {
+      if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && !isBuildingLocked(selBldg, layerSettings)) {
           const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
@@ -750,7 +745,7 @@ export function useCanvasInteraction({
         }
       }
 
-      if (selectedBuildingId && !isCreatingShape && !facadePointMode) {
+      if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && !isBuildingLocked(selBldg, layerSettings) && selBldg.segments) {
           for (let eIdx = 0; eIdx < selBldg.segments.length; eIdx++) {
@@ -806,36 +801,29 @@ export function useCanvasInteraction({
         return;
       }
 
-      if (drawingMode === 'rotate' && selectedBuildingId && effectivePivot) {
-        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
-        if (selBldg && isBuildingLocked(selBldg, layerSettings)) {
-          return;
+      if (drawingMode === 'align') {
+        if (alignHoveredEdge && selectedBuildingId) {
+          onAlignClickEdge?.(selectedBuildingId, alignHoveredEdge.buildingId, alignHoveredEdge.segmentId);
         }
-
-        const pS = worldToScreen(effectivePivot.x, effectivePivot.y);
-        if (Math.hypot(sx - pS.sx, sy - pS.sy) <= 14) {
-          setIsDraggingPivot(true);
-          onInteractionChange?.(true);
-          return;
-        }
-
-        let startAngleWorld = Math.atan2(world.wy - effectivePivot.y, world.wx - effectivePivot.x);
-        let startAngleScreen = Math.atan2(sy - pS.sy, sx - pS.sx);
-
-        if (selBldg && hoveredRotateVertexIndex !== null && selBldg.vertices[hoveredRotateVertexIndex]) {
-          const v = selBldg.vertices[hoveredRotateVertexIndex];
-          startAngleWorld = Math.atan2(v.y - effectivePivot.y, v.x - effectivePivot.x);
-          const vs = worldToScreen(v.x, v.y);
-          startAngleScreen = Math.atan2(vs.sy - pS.sy, vs.sx - pS.sx);
-        }
-
-        setIsRotating(true);
-        setLastMouseAngleWorld(startAngleWorld);
-        setRotStartAngleScreen(startAngleScreen);
-        setRotAngleDeg(0);
-        setActiveRotateAngleSnap(null);
-        onInteractionChange?.(true);
         return;
+      }
+
+      // Per-object rotate handle: shown above a plainly-selected (non-editing) building.
+      if (drawingMode === 'none' && selectedBuildingId && !facadePointMode) {
+        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg && !isBuildingLocked(selBldg, layerSettings) && selBldg.vertices.length >= 3) {
+          const centroid = getPolygonCentroid(selBldg.vertices);
+          const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale);
+          if (hS && Math.hypot(sx - hS.sx, sy - hS.sy) <= 10) {
+            const startAngleWorld = Math.atan2(world.wy - centroid.y, world.wx - centroid.x);
+            setIsRotating(true);
+            setLastMouseAngleWorld(startAngleWorld);
+            setRotAngleDeg(0);
+            setActiveRotateAngleSnap(null);
+            onInteractionChange?.(true);
+            return;
+          }
+        }
       }
 
       if (drawingMode === 'union') {
@@ -994,6 +982,26 @@ export function useCanvasInteraction({
     }
   };
 
+  const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0 || facadePointMode || isDimensionMode || viewRotationMode) return;
+    if (drawingMode !== 'none' && drawingMode !== 'vertexEdit') return;
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const world = screenToWorld(sx, sy);
+
+    const hits = getHoverCandidates({ x: world.wx, y: world.wy });
+    const targetId = hits[0];
+    if (!targetId) return;
+    const selBldg = buildings.find((b) => b.id === targetId);
+    if (!selBldg || isBuildingLocked(selBldg, layerSettings)) return;
+
+    onSelectBuilding(targetId);
+    onDrawingModeChange?.('vertexEdit');
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -1052,8 +1060,7 @@ export function useCanvasInteraction({
       }
     }
 
-    const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
-    if (selectedBuildingId && !isCreatingShape && !facadePointMode) {
+    if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       if (selBldg && !isBuildingLocked(selBldg, layerSettings)) {
         const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
@@ -1308,78 +1315,24 @@ export function useCanvasInteraction({
       if (hoveredMidpointIndex !== null) setHoveredMidpointIndex(null);
     }
 
-    if (drawingMode === 'rotate' && selectedBuildingId && effectivePivot) {
+    if (drawingMode === 'none' && selectedBuildingId) {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       const isBldgLocked = selBldg && isBuildingLocked(selBldg, layerSettings);
 
-      if (!isBldgLocked) {
-        const pS = worldToScreen(effectivePivot.x, effectivePivot.y);
-        const isPivot = Math.hypot(sx - pS.sx, sy - pS.sy) <= 14;
-        setIsPivotHovered(isPivot);
-
-        let foundRotateV: number | null = null;
-        if (selBldg && selBldg.vertices && !isRotating && !isDraggingPivot) {
-          for (let i = 0; i < selBldg.vertices.length; i++) {
-            const vs = worldToScreen(selBldg.vertices[i].x, selBldg.vertices[i].y);
-            if (Math.hypot(sx - vs.sx, sy - vs.sy) <= 10) {
-              foundRotateV = i;
-              break;
-            }
-          }
-        }
-        setHoveredRotateVertexIndex(foundRotateV);
-
-        if (isDraggingPivot) {
-          let pivotPt: Point2D = { x: world.wx, y: world.wy };
-          if (isOsnapActive) {
-            const osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
-              mouseWorld: pivotPt,
-              lineBuffer,
-              worldToScreen,
-              screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
-              excludeBuildingId: undefined,
-              previousSnapResult: activeOsnapSnap,
-            });
-            if (osnap) {
-              pivotPt = osnap.snappedPoint;
-              setActiveOsnapSnap(osnap);
-            } else {
-              setActiveOsnapSnap(null);
-            }
-          }
-          setCustomPivot(pivotPt);
-          return;
-        }
+      if (selBldg && !isBldgLocked && selBldg.vertices.length >= 3) {
+        const centroid = getPolygonCentroid(selBldg.vertices);
+        const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale);
+        setIsRotateHandleHovered(!!hS && Math.hypot(sx - hS.sx, sy - hS.sy) <= 10);
 
         if (isRotating && lastMouseAngleWorld !== null) {
-          let currWorldPos: Point2D = { x: world.wx, y: world.wy };
-          let osnapAngle: number | null = null;
           let snapInfo: { angleDeg: number; isCardinal?: boolean; label?: string } | null = null;
 
-          if (isOsnapActive) {
-            const osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
-              mouseWorld: currWorldPos,
-              lineBuffer,
-              worldToScreen,
-              screenSnapThresholdPx: APP_CONFIG.osnap?.snapRadiusPx || 14,
-              excludeBuildingId: selectedBuildingId,
-              previousSnapResult: activeOsnapSnap,
-            });
-            if (osnap) {
-              currWorldPos = osnap.snappedPoint;
-              setActiveOsnapSnap(osnap);
-              osnapAngle = Math.atan2(currWorldPos.y - effectivePivot.y, currWorldPos.x - effectivePivot.x);
-            } else {
-              setActiveOsnapSnap(null);
-            }
-          }
+          let currAngleWorld = Math.atan2(world.wy - centroid.y, world.wx - centroid.x);
 
-          let currAngleWorld = osnapAngle ?? Math.atan2(world.wy - effectivePivot.y, world.wx - effectivePivot.x);
-
-          if (isDirectionSnappingActive && osnapAngle === null) {
+          if (isDirectionSnappingActive) {
             const tentativeDeltaDeg = ((currAngleWorld - lastMouseAngleWorld) * 180) / Math.PI;
             const tentativeTotalDeg = rotAngleDeg + tentativeDeltaDeg;
-            
+
             interface RotateTarget {
               targetTotalDeg: number;
               label: string;
@@ -1457,22 +1410,45 @@ export function useCanvasInteraction({
           setRotAngleDeg((prev) => prev + deltaAngleDeg);
           setLastMouseAngleWorld(currAngleWorld);
 
-          if (selectedBuildingId) {
-            onBuildingRotate?.(selectedBuildingId, effectivePivot, deltaAngleWorld);
-          }
+          onBuildingRotate?.(selectedBuildingId, centroid, deltaAngleWorld);
           return;
         }
       } else {
-        setIsPivotHovered(false);
-        setHoveredRotateVertexIndex(null);
+        setIsRotateHandleHovered(false);
       }
     } else {
-      if (isPivotHovered) setIsPivotHovered(false);
-      if (hoveredRotateVertexIndex !== null) setHoveredRotateVertexIndex(null);
+      if (isRotateHandleHovered) setIsRotateHandleHovered(false);
       if (activeRotateAngleSnap !== null) setActiveRotateAngleSnap(null);
     }
 
-    if (selectedBuildingId && !facadePointMode && drawingMode !== 'vertexEdit' && drawingMode !== 'rotate') {
+    if (drawingMode === 'align' && selectedBuildingId) {
+      let closestSeg: { buildingId: string; segmentId: string } | null = null;
+      let minSegDist = 1.2;
+      for (const bldg of buildings) {
+        const lyr = bldg.layer || 'Domyślna (0)';
+        const lyrSetting = layerSettings[lyr] || {};
+        if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
+        for (const seg of bldg.segments) {
+          const dx = seg.p2.x - seg.p1.x;
+          const dy = seg.p2.y - seg.p1.y;
+          const lenSq = dx * dx + dy * dy;
+          if (lenSq < 1e-4) continue;
+          const u = Math.max(0, Math.min(1, ((world.wx - seg.p1.x) * dx + (world.wy - seg.p1.y) * dy) / lenSq));
+          const px = seg.p1.x + u * dx;
+          const py = seg.p1.y + u * dy;
+          const dist = Math.hypot(world.wx - px, world.wy - py);
+          if (dist < minSegDist) {
+            minSegDist = dist;
+            closestSeg = { buildingId: bldg.id, segmentId: seg.id };
+          }
+        }
+      }
+      setAlignHoveredEdge(closestSeg);
+    } else {
+      if (alignHoveredEdge) setAlignHoveredEdge(null);
+    }
+
+    if (selectedBuildingId && !facadePointMode && drawingMode !== 'vertexEdit' && drawingMode !== 'align') {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       let foundEdgeBadge: { buildingId: string; edgeIndex: number } | null = null;
       if (selBldg && !isBuildingLocked(selBldg, layerSettings) && selBldg.segments) {
@@ -1511,7 +1487,7 @@ export function useCanvasInteraction({
       if (hoveredEdgeLengthBadge) setHoveredEdgeLengthBadge(null);
     }
 
-    if (drawingMode !== 'none' && drawingMode !== 'vertexEdit' && drawingMode !== 'rotate') {
+    if (drawingMode !== 'none' && drawingMode !== 'vertexEdit' && drawingMode !== 'align') {
       let mousePos: Point2D = { x: world.wx, y: world.wy };
       let osnap: OsnapSnapResult | null = null;
 
@@ -1696,7 +1672,7 @@ export function useCanvasInteraction({
       if (dimHoveredEdge) setDimHoveredEdge(null);
     }
 
-    if (selectedBuildingId && !isCreatingShape && !facadePointMode) {
+    if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {
       const bldg = buildings.find((b) => b.id === selectedBuildingId);
       const isLocked = isBuildingLocked(bldg, layerSettings);
 
@@ -1853,7 +1829,6 @@ export function useCanvasInteraction({
       draggingFacadePoint ||
       draggingPinnedPointId ||
       draggedVertexIndex !== null ||
-      isDraggingPivot ||
       isRotating
     ) {
       onInteractionChange?.(false);
@@ -1891,7 +1866,6 @@ export function useCanvasInteraction({
     setDragVertexPreviewPt(null);
     setDraggedVertexIndex(null);
     dragVertexContextRef.current = null;
-    setIsDraggingPivot(false);
     setIsRotating(false);
     setLastMouseAngleWorld(null);
     setDragStart(null);
@@ -1901,7 +1875,6 @@ export function useCanvasInteraction({
     draggingFacadePoint,
     draggingPinnedPointId,
     draggedVertexIndex,
-    isDraggingPivot,
     isRotating,
     onInteractionChange,
     activeDirectionSnap,
@@ -1942,8 +1915,7 @@ export function useCanvasInteraction({
   }, [getHoverCandidates, screenToWorld, containerRef, handleMouseUp]);
 
   const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const isCreatingShape = ['rectangle', 'polyline', 'sweep', 'rotate', 'union'].includes(drawingMode);
-    if (selectedBuildingId && !isCreatingShape && !facadePointMode) {
+    if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {
       const selBldg = buildings.find((b) => b.id === selectedBuildingId);
       if (selBldg && !isBuildingLocked(selBldg, layerSettings)) {
         const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
@@ -1985,10 +1957,8 @@ export function useCanvasInteraction({
     }
     if (hoveredVertexIndex !== null || draggedVertexIndex !== null) return 'move';
     if (hoveredMidpointIndex !== null) return 'copy';
-    if (drawingMode === 'rotate') {
-      if (isDraggingPivot || isPivotHovered) return 'move';
-      if (isRotating) return 'grabbing';
-      return 'grab';
+    if (drawingMode === 'none' && (isRotateHandleHovered || isRotating)) {
+      return isRotating ? 'grabbing' : 'grab';
     }
     if (drawingMode !== 'none' && drawingMode !== 'vertexEdit') return 'crosshair';
     if (draggingEdge) return 'move';
@@ -2005,8 +1975,7 @@ export function useCanvasInteraction({
     draggedVertexIndex,
     hoveredMidpointIndex,
     drawingMode,
-    isDraggingPivot,
-    isPivotHovered,
+    isRotateHandleHovered,
     isRotating,
     draggingEdge,
     hoveredEdge,
@@ -2022,18 +1991,16 @@ export function useCanvasInteraction({
     activeOsnapSnap,
     activeBuildingDragSnap,
     activeRotateAngleSnap,
-    hoveredRotateVertexIndex,
     selectedVertexIndex,
     hoveredVertexIndex,
     hoveredMidpointIndex,
     draggedVertexIndex,
     dragVertexPreviewPt,
     effectivePivot,
-    isPivotHovered,
-    isDraggingPivot,
+    isRotateHandleHovered,
     isRotating,
-    rotStartAngleScreen,
     rotAngleDeg,
+    alignHoveredEdge,
     editingEdgeLength,
     hoveredEdgeLengthBadge,
     hoveredEdge,
@@ -2054,6 +2021,7 @@ export function useCanvasInteraction({
 
     handleWheel,
     handleMouseDown,
+    handleDoubleClick,
     handleMouseMove,
     handleMouseUp,
     handleContextMenu,
