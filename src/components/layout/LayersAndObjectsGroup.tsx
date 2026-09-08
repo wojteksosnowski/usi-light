@@ -8,26 +8,42 @@ import {
   Ghost,
   Lightbulb,
   LightbulbOff,
-  FileSpreadsheet,
-  Copy,
-  CheckSquare,
+  Circle,
+  CircleDot,
   ChevronDown,
   ChevronRight,
   Sun,
   Trees,
   Sliders,
 } from 'lucide-react';
-import { useSceneStore, useSolarAnalysisStore, useCadToolStore, useUiStore } from '../../store';
+import { useSceneStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 import {
   computePolygonArea,
   computeBuildingsUnionArea,
-  computeDistancesToBoundaries,
-  computePolygonIntersectionWithBoundaries,
 } from '@/utils/math2d';
 import { rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors, toRomanNumeral } from '../../utils/buildingFloorCalculator';
 import { analyzePlaygroundSunlight } from '../../engine/analysisEngine';
 import { computePlaygroundApartmentCapacity } from '../../utils/playgroundUtils';
+
+const CircleSelectionIcon: React.FC<{
+  status: 'all' | 'partial' | 'none';
+  size?: number;
+}> = ({ status, size = 12 }) => {
+  if (status === 'all') {
+    return <Circle size={size} fill="#38bdf8" color="#38bdf8" />;
+  }
+  if (status === 'partial') {
+    return (
+      <Circle
+        size={size}
+        color="#38bdf8"
+        fill="rgba(56, 189, 248, 0.4)"
+      />
+    );
+  }
+  return <Circle size={size} color="#64748b" />;
+};
 
 export const LayersAndObjectsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -53,17 +69,53 @@ export const LayersAndObjectsGroup: React.FC = () => {
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
 
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
-  const showCopiedToast = useUiStore((s) => s.showCopiedToast);
-  const copiedToast = useUiStore((s) => s.copiedToast);
 
   const [collapsedTreeGroups, setCollapsedTreeGroups] = useState<Record<string, boolean>>({});
 
+  // 1st level (cat_*) defaults to expanded (false), 2nd level (subgroups) defaults to collapsed (true)
+  const isGroupCollapsed = (groupKey: string) => {
+    if (collapsedTreeGroups[groupKey] !== undefined) {
+      return collapsedTreeGroups[groupKey];
+    }
+    return !groupKey.startsWith('cat_');
+  };
+
   const toggleTreeGroup = (groupKey: string) => {
+    const current = isGroupCollapsed(groupKey);
     setCollapsedTreeGroups((prev) => ({
       ...prev,
-      [groupKey]: !prev[groupKey],
+      [groupKey]: !current,
     }));
   };
+
+  const getSelectionStatus = (items: { id: string }[]): 'all' | 'partial' | 'none' => {
+    if (!items || items.length === 0) return 'none';
+    const selectedSet = new Set(selectedBuildingIds);
+    if (selectedBuildingId) selectedSet.add(selectedBuildingId);
+    const count = items.filter((b) => selectedSet.has(b.id)).length;
+    if (count === 0) return 'none';
+    if (count === items.length) return 'all';
+    return 'partial';
+  };
+
+  const toggleGroupSelection = (items: { id: string }[]) => {
+    const itemIds = items.map((b) => b.id);
+    const status = getSelectionStatus(items);
+    if (status === 'all') {
+      const remaining = selectedBuildingIds.filter((id) => !itemIds.includes(id));
+      setSelectedBuildingIds(remaining);
+      if (selectedBuildingId && itemIds.includes(selectedBuildingId)) {
+        setSelectedBuildingId(remaining.length > 0 ? remaining[0] : null);
+      }
+    } else {
+      const combined = Array.from(new Set([...selectedBuildingIds, ...itemIds]));
+      setSelectedBuildingIds(combined);
+      if (!selectedBuildingId && itemIds.length > 0) {
+        setSelectedBuildingId(itemIds[0]);
+      }
+    }
+  };
+
 
   // Active building object
   const selectedBuilding = useMemo(() => {
@@ -159,70 +211,9 @@ export const LayersAndObjectsGroup: React.FC = () => {
   }, [buildings]);
 
   // Działki z włączonym "Obiekt badany (isTested)" dla kalkulacji wskaźników
-  const testedBoundaryObjects = useMemo(() => {
-    return boundaryObjects.filter((b) => b.isTested);
-  }, [boundaryObjects]);
-
-  // Powierzchnia działek badanych (lub wszystkich jeśli żadna nie ma isTested)
-  const activePlotBoundaries = useMemo(() => {
-    return testedBoundaryObjects.length > 0 ? testedBoundaryObjects : boundaryObjects;
-  }, [testedBoundaryObjects, boundaryObjects]);
-
-  const totalBoundaryArea = useMemo(() => {
-    return activePlotBoundaries.reduce((sum, b) => sum + computePolygonArea(b.vertices), 0);
-  }, [activePlotBoundaries]);
-
-  // Distances from selected building to all boundaries
-  const distancesToBoundaries = useMemo(() => {
-    if (!selectedBuilding || selectedBuilding.category === 'boundary' || boundaryObjects.length === 0) return [];
-    return computeDistancesToBoundaries(selectedBuilding, boundaryObjects);
-  }, [selectedBuilding, boundaryObjects]);
-
-  // Summary of tested buildings (Projektowane)
-  // Kalkulacja wskaźników powierzchni zabudowy i intensywności dotyczy części budynków znajdujących się na działce z isTested
-  const testedBuildingsSummary = useMemo(() => {
-    const tested = buildings.filter(
-      (b) => b.isTested && b.category !== 'boundary' && b.isIncluded !== false && b.vertices?.length >= 3
-    );
-    const count = tested.length;
-    let totalPz = 0;
-    let totalPc = 0;
-    let totalVolume = 0;
-
-    const hasTestedPlot = activePlotBoundaries.length > 0;
-
-    for (const b of tested) {
-      // Jeśli mamy działki, liczymy powierzchnię zabudowy z przecięcia z działką badaną
-      const pz = hasTestedPlot
-        ? computePolygonIntersectionWithBoundaries(b.vertices, activePlotBoundaries)
-        : computePolygonArea(b.vertices);
-
-      const n = b.storeysCount || (b.defaultHeight > 3.0 ? 1 + Math.max(1, Math.round((b.defaultHeight - 3.0) / 3.0)) : 1);
-      const h = b.defaultHeight;
-      totalPz += pz;
-      totalPc += pz * n;
-      totalVolume += pz * h;
-    }
-
-    // Domyślna sprawność nadziemia = 0.70 (do obliczania PUM z PC)
-    const estimatedPUM = totalPc * 0.70;
-    const plotCoverageRatio = totalBoundaryArea > 0 ? (totalPz / totalBoundaryArea) * 100 : 0;
-    const intensityRatio = totalBoundaryArea > 0 ? totalPc / totalBoundaryArea : 0;
-
-    return {
-      count,
-      totalPz,
-      totalPc,
-      totalVolume,
-      estimatedPUM,
-      plotCoverageRatio,
-      intensityRatio,
-    };
-  }, [buildings, activePlotBoundaries, totalBoundaryArea]);
 
   // Obrót obiektu wokół centroidu
   const handleBuildingRotate = (id: string, pivot: { x: number; y: number }, deltaAngleRad: number) => {
-    setIsInteracting(true);
     rotateBuilding(id, pivot, deltaAngleRad);
   };
 
@@ -327,24 +318,29 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{ display: 'flex', alignItems: 'center', gap: '3px' }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      onClick={() => selectLayerBuildings(lyr.name)}
-                      title="Zaznacz wszystkie obiekty na tej warstwie"
-                      style={{
-                        padding: '4px',
-                        borderRadius: '5px',
-                        border: 'none',
-                        backgroundColor: 'transparent',
-                        color: '#38bdf8',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <CheckSquare size={13} />
-                    </button>
+                    {(() => {
+                      const layerBldgs = buildings.filter((b) => (b.layer || 'Domyślna (0)') === lyr.name);
+                      const selStatus = getSelectionStatus(layerBldgs);
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => toggleGroupSelection(layerBldgs)}
+                          title={selStatus === 'all' ? 'Odznacz obiekty na tej warstwie' : 'Zaznacz obiekty na tej warstwie'}
+                          style={{
+                            padding: '4px',
+                            borderRadius: '5px',
+                            border: 'none',
+                            backgroundColor: 'transparent',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <CircleSelectionIcon status={selStatus} size={13} />
+                        </button>
+                      );
+                    })()}
 
                     <button
                       type="button"
@@ -558,7 +554,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {collapsedTreeGroups['cat_buildings'] ? (
+                  {isGroupCollapsed('cat_buildings') ? (
                     <ChevronRight size={13} color="#818cf8" />
                   ) : (
                     <ChevronDown size={13} color="#818cf8" />
@@ -570,14 +566,19 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    title="Zaznacz wszystkie budynki"
-                    onClick={() => setSelectedBuildingIds(objectTree.buildingList.map((b) => b.id))}
-                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px 4px' }}
-                  >
-                    <CheckSquare size={13} />
-                  </button>
+                  {(() => {
+                    const bldgStatus = getSelectionStatus(objectTree.buildingList);
+                    return (
+                      <button
+                        type="button"
+                        title={bldgStatus === 'all' ? 'Odznacz wszystkie budynki' : 'Zaznacz wszystkie budynki'}
+                        onClick={() => toggleGroupSelection(objectTree.buildingList)}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <CircleSelectionIcon status={bldgStatus} size={13} />
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
                     title="Zablokuj/odblokuj wszystkie budynki"
@@ -615,11 +616,11 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 </div>
               </div>
 
-              {!collapsedTreeGroups['cat_buildings'] && (
+              {!isGroupCollapsed('cat_buildings') && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '8px' }}>
                   {objectTree.buildingSubgroups.map((subgroup) => {
                     const groupKey = `bldg_sub_${subgroup.key}`;
-                    const isSubCollapsed = !!collapsedTreeGroups[groupKey];
+                    const isSubCollapsed = isGroupCollapsed(groupKey);
                     const allSubLocked = subgroup.items.every((b) => b.isLocked);
                     const allSubGhosted = subgroup.items.every((b) => b.isGhosted);
 
@@ -648,14 +649,19 @@ export const LayersAndObjectsGroup: React.FC = () => {
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              title="Zaznacz obiekty w tej grupie parametrów"
-                              onClick={() => setSelectedBuildingIds(subgroup.items.map((b) => b.id))}
-                              style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px' }}
-                            >
-                              <CheckSquare size={12} />
-                            </button>
+                            {(() => {
+                              const subStatus = getSelectionStatus(subgroup.items);
+                              return (
+                                <button
+                                  type="button"
+                                  title={subStatus === 'all' ? 'Odznacz obiekty w tej grupie' : 'Zaznacz obiekty w tej grupie'}
+                                  onClick={() => toggleGroupSelection(subgroup.items)}
+                                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                >
+                                  <CircleSelectionIcon status={subStatus} size={12} />
+                                </button>
+                              );
+                            })()}
                             <button
                               type="button"
                               title={allSubLocked ? 'Odblokuj grupę' : 'Zablokuj grupę'}
@@ -734,12 +740,14 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                       style={{
                                         background: 'transparent',
                                         border: 'none',
-                                        color: isSelected ? '#38bdf8' : '#64748b',
                                         cursor: 'pointer',
                                         padding: '2px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
                                       }}
                                     >
-                                      <CheckSquare size={12} />
+                                      <CircleSelectionIcon status={isSelected ? 'all' : 'none'} size={12} />
                                     </button>
                                     <button
                                       type="button"
@@ -801,7 +809,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {collapsedTreeGroups['cat_areas'] ? (
+                  {isGroupCollapsed('cat_areas') ? (
                     <ChevronRight size={13} color="#fca5a5" />
                   ) : (
                     <ChevronDown size={13} color="#fca5a5" />
@@ -813,14 +821,19 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    title="Zaznacz wszystkie obszary"
-                    onClick={() => setSelectedBuildingIds(objectTree.areaList.map((b) => b.id))}
-                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px 4px' }}
-                  >
-                    <CheckSquare size={13} />
-                  </button>
+                  {(() => {
+                    const areaStatus = getSelectionStatus(objectTree.areaList);
+                    return (
+                      <button
+                        type="button"
+                        title={areaStatus === 'all' ? 'Odznacz wszystkie obszary' : 'Zaznacz wszystkie obszary'}
+                        onClick={() => toggleGroupSelection(objectTree.areaList)}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <CircleSelectionIcon status={areaStatus} size={13} />
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
                     title="Zablokuj/odblokuj wszystkie obszary"
@@ -858,7 +871,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 </div>
               </div>
 
-              {!collapsedTreeGroups['cat_areas'] && (
+              {!isGroupCollapsed('cat_areas') && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '8px' }}>
                   {/* Działki */}
                   {objectTree.plotList.length > 0 && (
@@ -875,11 +888,34 @@ export const LayersAndObjectsGroup: React.FC = () => {
                           cursor: 'pointer',
                         }}
                       >
-                        <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#fca5a5' }}>
-                          Działki ({objectTree.plotList.length})
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          {isGroupCollapsed('area_sub_plots') ? (
+                            <ChevronRight size={12} color="#fca5a5" />
+                          ) : (
+                            <ChevronDown size={12} color="#fca5a5" />
+                          )}
+                          <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#fca5a5' }}>
+                            Działki ({objectTree.plotList.length})
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                          {(() => {
+                            const plotStatus = getSelectionStatus(objectTree.plotList);
+                            return (
+                              <button
+                                type="button"
+                                title={plotStatus === 'all' ? 'Odznacz działki' : 'Zaznacz działki'}
+                                onClick={() => toggleGroupSelection(objectTree.plotList)}
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              >
+                                <CircleSelectionIcon status={plotStatus} size={12} />
+                              </button>
+                            );
+                          })()}
+                        </div>
                       </div>
-                      {!collapsedTreeGroups['area_sub_plots'] && (
+                      {!isGroupCollapsed('area_sub_plots') && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
                           {objectTree.plotList.map((b) => {
                             const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
@@ -915,10 +951,11 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
+                                    title={isSelected ? 'Odznacz' : 'Zaznacz'}
                                     onClick={() => selectBuilding(b.id, true)}
-                                    style={{ background: 'transparent', border: 'none', color: isSelected ? '#38bdf8' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                   >
-                                    <CheckSquare size={12} />
+                                    <CircleSelectionIcon status={isSelected ? 'all' : 'none'} size={12} />
                                   </button>
                                   <button
                                     type="button"
@@ -958,11 +995,34 @@ export const LayersAndObjectsGroup: React.FC = () => {
                           cursor: 'pointer',
                         }}
                       >
-                        <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#34d399' }}>
-                          Place zabaw ({objectTree.playgroundList.length})
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          {isGroupCollapsed('area_sub_playgrounds') ? (
+                            <ChevronRight size={12} color="#34d399" />
+                          ) : (
+                            <ChevronDown size={12} color="#34d399" />
+                          )}
+                          <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#34d399' }}>
+                            Place zabaw ({objectTree.playgroundList.length})
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
+                          {(() => {
+                            const pgStatus = getSelectionStatus(objectTree.playgroundList);
+                            return (
+                              <button
+                                type="button"
+                                title={pgStatus === 'all' ? 'Odznacz place zabaw' : 'Zaznacz place zabaw'}
+                                onClick={() => toggleGroupSelection(objectTree.playgroundList)}
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              >
+                                <CircleSelectionIcon status={pgStatus} size={12} />
+                              </button>
+                            );
+                          })()}
+                        </div>
                       </div>
-                      {!collapsedTreeGroups['area_sub_playgrounds'] && (
+                      {!isGroupCollapsed('area_sub_playgrounds') && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
                           {objectTree.playgroundList.map((b) => {
                             const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
@@ -998,10 +1058,11 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
+                                    title={isSelected ? 'Odznacz' : 'Zaznacz'}
                                     onClick={() => selectBuilding(b.id, true)}
-                                    style={{ background: 'transparent', border: 'none', color: isSelected ? '#38bdf8' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                   >
-                                    <CheckSquare size={12} />
+                                    <CircleSelectionIcon status={isSelected ? 'all' : 'none'} size={12} />
                                   </button>
                                   <button
                                     type="button"
@@ -1048,7 +1109,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {collapsedTreeGroups['cat_balconies'] ? (
+                  {isGroupCollapsed('cat_balconies') ? (
                     <ChevronRight size={13} color="#38bdf8" />
                   ) : (
                     <ChevronDown size={13} color="#38bdf8" />
@@ -1060,14 +1121,19 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    title="Zaznacz wszystkie balkony"
-                    onClick={() => setSelectedBuildingIds(objectTree.balconyList.map((b) => b.id))}
-                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: '2px 4px' }}
-                  >
-                    <CheckSquare size={13} />
-                  </button>
+                  {(() => {
+                    const balcStatus = getSelectionStatus(objectTree.balconyList);
+                    return (
+                      <button
+                        type="button"
+                        title={balcStatus === 'all' ? 'Odznacz wszystkie balkony' : 'Zaznacz wszystkie balkony'}
+                        onClick={() => toggleGroupSelection(objectTree.balconyList)}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <CircleSelectionIcon status={balcStatus} size={13} />
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
                     title="Zablokuj/odblokuj wszystkie balkony"
@@ -1105,7 +1171,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                 </div>
               </div>
 
-              {!collapsedTreeGroups['cat_balconies'] && (
+              {!isGroupCollapsed('cat_balconies') && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px' }}>
                   {objectTree.balconyList.map((b) => {
                     const isSelected = selectedBuildingIds.includes(b.id) || selectedBuildingId === b.id;
@@ -1141,10 +1207,11 @@ export const LayersAndObjectsGroup: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
+                            title={isSelected ? 'Odznacz' : 'Zaznacz'}
                             onClick={() => selectBuilding(b.id, true)}
-                            style={{ background: 'transparent', border: 'none', color: isSelected ? '#38bdf8' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           >
-                            <CheckSquare size={12} />
+                            <CircleSelectionIcon status={isSelected ? 'all' : 'none'} size={12} />
                           </button>
                           <button
                             type="button"
@@ -1168,6 +1235,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
               )}
             </div>
           )}
+
         </div>
       </div>
 
@@ -1934,19 +2002,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   );
                 })()}
 
-                {distancesToBoundaries.length > 0 && (
-                  <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.3)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                    <div style={{ color: '#fca5a5', fontWeight: 600 }}>Odległość od granicy działki:</div>
-                    {distancesToBoundaries.map((d) => (
-                      <div key={d.boundaryId} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#cbd5e1' }}>{d.boundaryName}:</span>
-                        <b style={{ color: d.minDistance < 3.0 ? '#f43f5e' : d.minDistance < 4.0 ? '#fbbf24' : '#6ee7b7', fontFamily: 'monospace' }}>
-                          {d.minDistance.toFixed(2)} m
-                        </b>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
@@ -2019,149 +2074,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
           Kliknij dowolny obiekt na rzucie CAD, aby edytować jego parametry.
         </div>
       )}
-
-      {/* 2.2 Kafelek Informacyjny: Bilans Powierzchni & Kubatury */}
-      <div className="ui-card">
-        <div className="ui-title">
-          <span>Informacje i bilans powierzchni</span>
-          <FileSpreadsheet size={14} color="#10b981" />
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px' }}>
-          {selectedBuilding && selectedBuilding.category !== 'boundary' && (() => {
-            const pz = selectedBuildingArea;
-            const n = selectedBuilding.storeysCount || (selectedBuilding.defaultHeight > (selectedBuilding.firstFloorHeight ?? 3.0) ? 1 + Math.max(1, Math.round((selectedBuilding.defaultHeight - (selectedBuilding.firstFloorHeight ?? 3.0)) / (selectedBuilding.typicalFloorHeight ?? 3.0))) : 1);
-              const pc = pz * n;
-              const vol = pz * selectedBuilding.defaultHeight;
-              const pum = pc * 0.70;
-
-              return (
-                <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div style={{ fontWeight: 700, color: '#e0e7ff', marginBottom: '2px', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Wybrany: {selectedBuilding.name}</span>
-                    <span style={{ color: '#38bdf8' }}>{n} kond.</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94a3b8' }}>Powierzchnia zabudowy (Pz):</span>
-                    <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{Math.round(pz)} m²</b>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94a3b8' }}>Powierzchnia całkowita (Pc):</span>
-                    <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{Math.round(pc)} m²</b>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94a3b8' }}>Kubatura brutto (V):</span>
-                    <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{Math.round(vol)} m³</b>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94a3b8' }}>Szacowany PUM (~70%):</span>
-                    <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{Math.round(pum)} m²</b>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Sekcja Podsumowania Budynków Projektowanych */}
-            <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ fontWeight: 700, color: '#a5b4fc', marginBottom: '2px' }}>
-                Łącznie obiekty badane ({testedBuildingsSummary.count} szt.)
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8' }}>Łączna pow. zabudowy (Pz):</span>
-                <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPz)} m²</b>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8' }}>Łączna pow. całkowita (Pc):</span>
-                <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPc)} m²</b>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8' }}>Łączna kubatura (V):</span>
-                <b style={{ color: '#c084fc', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalVolume)} m³</b>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8' }}>Łączny szacowany PUM:</span>
-                <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.estimatedPUM)} m²</b>
-              </div>
-            </div>
-
-            {/* Sekcja Działek i Wskaźników Urbanistycznych */}
-            <div style={{ padding: '8px', borderRadius: '6px', backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ fontWeight: 700, color: '#fca5a5', marginBottom: '2px' }}>
-                Działki ewidencyjne ({boundaryObjects.length} szt.
-                {testedBoundaryObjects.length > 0 ? `, w tym ${testedBoundaryObjects.length} badane` : ''})
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8' }}>Pow. działki badanej (Pdz):</span>
-                <b style={{ color: '#fca5a5', fontFamily: 'monospace' }}>
-                  {totalBoundaryArea > 0 ? `${Math.round(totalBoundaryArea)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak zdefiniowanych działek'}
-                </b>
-              </div>
-              {totalBoundaryArea > 0 && (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94a3b8' }}>Wskaźnik pow. zabudowy:</span>
-                    <b style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%</b>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#94a3b8' }}>Wskaźnik intensywności:</span>
-                    <b style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityRatio.toFixed(2)}</b>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                const lines: string[] = [
-                  '=== ZESTAWIENIE POWIERZCHNI I KUBATURY ===',
-                  `Projektowane budynki: ${testedBuildingsSummary.count}`,
-                  `Powierzchnia zabudowy (Pz): ${Math.round(testedBuildingsSummary.totalPz)} m²`,
-                  `Powierzchnia całkowita (Pc): ${Math.round(testedBuildingsSummary.totalPc)} m²`,
-                  `Kubatura brutto (V): ${Math.round(testedBuildingsSummary.totalVolume)} m³`,
-                  `Szacowany PUM (~70%): ${Math.round(testedBuildingsSummary.estimatedPUM)} m²`,
-                ];
-
-                if (totalBoundaryArea > 0) {
-                  lines.push(
-                    `Powierzchnia działki (Pdz): ${Math.round(totalBoundaryArea)} m²`,
-                    `Wskaźnik powierzchni zabudowy: ${testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%`,
-                    `Wskaźnik intensywności zabudowy: ${testedBuildingsSummary.intensityRatio.toFixed(2)}`
-                  );
-                }
-
-                navigator.clipboard.writeText(lines.join('\n')).then(() => {
-                  showCopiedToast('Skopiowano zestawienie do schowka!');
-                }).catch(() => {
-                  showCopiedToast('Nie udało się skopiować.');
-                });
-              }}
-              className="btn-tile active-indigo"
-              style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px', marginTop: '2px' }}
-              title="Skopiuj zestawienie danych powierzchniowych i kubaturowych do schowka"
-            >
-            <Copy size={13} />
-            <span style={{ fontWeight: 600 }}>Kopiuj do schowka</span>
-          </button>
-
-          {copiedToast && (
-            <div
-              style={{
-                textAlign: 'center',
-                color: '#6ee7b7',
-                fontSize: '11px',
-                fontWeight: 600,
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                padding: '4px',
-                borderRadius: '4px',
-                border: '1px solid rgba(16, 185, 129, 0.4)',
-              }}
-            >
-              {copiedToast}
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 };

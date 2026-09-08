@@ -4,6 +4,7 @@ import { CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiersPanel';
+import { ProjectParametersPanel } from './components/parameters/ProjectParametersPanel';
 import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
 import { ShareProjectModal } from './components/common/ShareProjectModal';
@@ -15,6 +16,7 @@ import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
 import { CadToolBar } from './components/layout/CadToolBar';
 import { CadLegendBottom } from './components/layout/CadLegendBottom';
+import { registerGeoLayers } from './modules/wfs-import/registerGeoLayers';
 import {
   useSceneStore,
   useCadToolStore,
@@ -118,6 +120,8 @@ export const App: React.FC = () => {
   const showShadowFill = useSolarAnalysisStore((s) => s.showShadowFill);
   const showSatelliteLayer = useSolarAnalysisStore((s) => s.showSatelliteLayer);
   const satelliteOpacity = useSolarAnalysisStore((s) => s.satelliteOpacity);
+  const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
+  const setShowProjectParameters = useSolarAnalysisStore((s) => s.setShowProjectParameters);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
   const accuracyStage = useSolarAnalysisStore((s) => s.accuracyStage);
   const setAccuracyStage = useSolarAnalysisStore((s) => s.setAccuracyStage);
@@ -168,6 +172,9 @@ export const App: React.FC = () => {
 
   const sceneHydratedRef = useRef(false);
 
+  // Geo module: register WMS/WFS layers in render pipeline
+  useEffect(() => registerGeoLayers(), []);
+
   // Progressive Accuracy Refinement Effect
   useEffect(() => {
     if (isInteracting) {
@@ -178,7 +185,7 @@ export const App: React.FC = () => {
       setAccuracyStage('final');
     }, 200);
     return () => clearTimeout(timer);
-  }, [buildings, isInteracting, setAccuracyStage]);
+  }, [isInteracting, setAccuracyStage]);
 
   // Automatyczne otwieranie panelu Modyfikatory 2.5D gdy zaznaczony obiekt posiada modyfikatory
   useEffect(() => {
@@ -334,8 +341,8 @@ export const App: React.FC = () => {
     return selectedBuildingPinnedPoints[0] ?? null;
   }, [selectedBuildingPinnedPoints, activePinnedPointId]);
 
-  // Exclusive accordion section: 'points' | 'modifiers' (only 1 section open at a time)
-  const [activeAccordionSection, setActiveAccordionSection] = React.useState<'points' | 'modifiers'>('modifiers');
+  // Exclusive accordion section: 'points' | 'modifiers' | 'parameters' (only 1 section open at a time)
+  const [activeAccordionSection, setActiveAccordionSection] = React.useState<'points' | 'modifiers' | 'parameters'>('parameters');
 
   // Switch to 'points' section when a pinned point is selected or added
   useEffect(() => {
@@ -350,6 +357,13 @@ export const App: React.FC = () => {
       setActiveAccordionSection('modifiers');
     }
   }, [showModifiersPanel, activePointResult]);
+
+  // Switch to 'parameters' when project parameters is toggled on and no other inspector is dominating
+  useEffect(() => {
+    if (showProjectParameters && !activePointResult && !showModifiersPanel) {
+      setActiveAccordionSection('parameters');
+    }
+  }, [showProjectParameters, activePointResult, showModifiersPanel]);
 
   // LocalStorage Persistence (Load on mount)
   useEffect(() => {
@@ -573,10 +587,9 @@ export const App: React.FC = () => {
 
   const handleBuildingRotate = useCallback(
     (id: string, pivot: Point2D, deltaAngleRad: number) => {
-      setIsInteracting(true);
       rotateBuilding(id, pivot, deltaAngleRad);
     },
-    [setIsInteracting, rotateBuilding]
+    [rotateBuilding]
   );
 
   const handleBooleanUnion = useCallback(
@@ -707,41 +720,62 @@ export const App: React.FC = () => {
         </div>
 
         {/* Floating Inspector Accordion (Right Side) */}
-        <FloatingInspectorAccordion>
-          {/* Section 1: Facade Point Inspector */}
-          {activePointResult && (
-            <PointInspectorModal
-              pointResult={activePointResult}
-              allPoints={selectedBuildingPinnedPoints}
-              activePointId={activePinnedPointId}
-              onSelectPointId={setActivePinnedPointId}
-              onDeletePointId={deletePinnedPoint}
-              activeMode={activePointMode}
-              sunlightMethod={sunlightMethod}
-              onModeChange={setActivePointMode}
-              onClose={() => {
-                selectedBuildingPinnedPoints.forEach((p) => deletePinnedPoint(p.id));
-              }}
-              isEmbedded={true}
-              isCollapsed={showModifiersPanel && selectedBuildingId ? activeAccordionSection !== 'points' : false}
-              onToggleCollapse={(collapsed) => {
-                setActiveAccordionSection(collapsed ? 'modifiers' : 'points');
-              }}
-            />
-          )}
+        {(() => {
+          const hasPoints = !!activePointResult;
+          const hasModifiers = !!(showModifiersPanel && selectedBuildingId);
+          const hasParameters = showProjectParameters;
+          const openSectionsCount = (hasPoints ? 1 : 0) + (hasModifiers ? 1 : 0) + (hasParameters ? 1 : 0);
 
-          {/* Section 2: Building 2.5D Modifiers Panel */}
-          {showModifiersPanel && selectedBuildingId && (
-            <BuildingModifiersPanel
-              onClose={() => setShowModifiersPanel(false)}
-              isEmbedded={true}
-              isCollapsed={activePointResult ? activeAccordionSection !== 'modifiers' : false}
-              onToggleCollapse={(collapsed) => {
-                setActiveAccordionSection(collapsed ? 'points' : 'modifiers');
-              }}
-            />
-          )}
-        </FloatingInspectorAccordion>
+          return (
+            <FloatingInspectorAccordion>
+              {/* Section 1: Facade Point Inspector */}
+              {hasPoints && (
+                <PointInspectorModal
+                  pointResult={activePointResult}
+                  allPoints={selectedBuildingPinnedPoints}
+                  activePointId={activePinnedPointId}
+                  onSelectPointId={setActivePinnedPointId}
+                  onDeletePointId={deletePinnedPoint}
+                  activeMode={activePointMode}
+                  sunlightMethod={sunlightMethod}
+                  onModeChange={setActivePointMode}
+                  onClose={() => {
+                    selectedBuildingPinnedPoints.forEach((p) => deletePinnedPoint(p.id));
+                  }}
+                  isEmbedded={true}
+                  isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'points' : false}
+                  onToggleCollapse={(collapsed) => {
+                    setActiveAccordionSection(collapsed ? (hasModifiers ? 'modifiers' : 'parameters') : 'points');
+                  }}
+                />
+              )}
+
+              {/* Section 2: Building 2.5D Modifiers Panel */}
+              {hasModifiers && (
+                <BuildingModifiersPanel
+                  onClose={() => setShowModifiersPanel(false)}
+                  isEmbedded={true}
+                  isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'modifiers' : false}
+                  onToggleCollapse={(collapsed) => {
+                    setActiveAccordionSection(collapsed ? (hasPoints ? 'points' : 'parameters') : 'modifiers');
+                  }}
+                />
+              )}
+
+              {/* Section 3: Project Parameters & Surface Balance Panel */}
+              {hasParameters && (
+                <ProjectParametersPanel
+                  onClose={() => setShowProjectParameters(false)}
+                  isEmbedded={true}
+                  isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'parameters' : false}
+                  onToggleCollapse={(collapsed) => {
+                    setActiveAccordionSection(collapsed ? (hasPoints ? 'points' : 'modifiers') : 'parameters');
+                  }}
+                />
+              )}
+            </FloatingInspectorAccordion>
+          );
+        })()}
 
         {/* Rotatable Compass Rose (Bottom-Right) */}
         <CompassRose

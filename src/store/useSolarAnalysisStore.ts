@@ -33,6 +33,8 @@ interface SolarAnalysisState {
   showShadowFill: boolean;
   showSatelliteLayer: boolean;
   satelliteOpacity: number;
+  satelliteProvider: 'google' | 'here';
+  showProjectParameters: boolean;
 
   // Analysis calculations & modes
   sunlightMethod: 'raycasting' | 'segments';
@@ -61,6 +63,8 @@ interface SolarAnalysisState {
   setShowShadowFill: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowSatelliteLayer: (show: boolean | ((prev: boolean) => boolean)) => void;
   setSatelliteOpacity: (opacity: number) => void;
+  setSatelliteProvider: (provider: 'google' | 'here') => void;
+  setShowProjectParameters: (show: boolean | ((prev: boolean) => boolean)) => void;
 
   setSunlightMethod: (method: 'raycasting' | 'segments') => void;
   setAccuracyStage: (stage: AccuracyStage) => void;
@@ -98,6 +102,8 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   showShadowFill: false,
   showSatelliteLayer: true,
   satelliteOpacity: 0.65,
+  satelliteProvider: 'google',
+  showProjectParameters: false,
 
   // Linijka Słońca jest domyślną metodą obliczeń w '56'
   sunlightMethod: 'segments',
@@ -170,6 +176,12 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
     })),
 
   setSatelliteOpacity: (opacity) => set({ satelliteOpacity: opacity }),
+  setSatelliteProvider: (provider) => set({ satelliteProvider: provider }),
+
+  setShowProjectParameters: (updater) =>
+    set((state) => ({
+      showProjectParameters: typeof updater === 'function' ? updater(state.showProjectParameters) : updater,
+    })),
 
   setSunlightMethod: (method) => set({ sunlightMethod: method }),
   setAccuracyStage: (stage) => set({ accuracyStage: stage }),

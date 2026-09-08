@@ -597,3 +597,60 @@ export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
 
   return bestPt;
 }
+
+/**
+ * Szacuje stosunek pola wielokąta znajdującego się wewnątrz okręgu do całkowitego pola wielokąta.
+ * Używa próbkowania siatki — wydajne dla wielokątów geodezyjnych w zasięgu 50–200 m.
+ *
+ * @param vertices  wierzchołki wielokąta w lokalnym układzie CAD (metry, środek projektu = 0,0)
+ * @param cx        środek okręgu X (zwykle 0 dla środka projektu)
+ * @param cy        środek okręgu Y (zwykle 0 dla środka projektu)
+ * @param radius    promień okręgu w metrach
+ * @returns         liczba z zakresu [0, 1] — udział pola wielokąta wewnątrz okręgu
+ */
+export function polygonCircleIntersectionRatio(
+  vertices: Point2D[],
+  cx: number,
+  cy: number,
+  radius: number
+): number {
+  if (!vertices || vertices.length < 3 || radius <= 0) return 0;
+
+  // Oblicz obwiednię wielokąta
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const v of vertices) {
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+  }
+
+  const STEPS = 20; // 20x20 = 400 punktów próbkowania
+  const dx = (maxX - minX) / STEPS;
+  const dy = (maxY - minY) / STEPS;
+  const r2 = radius * radius;
+
+  if (dx < 1e-9 || dy < 1e-9) {
+    // Zdegenerowany wielokąt — sprawdź sam środek
+    const pt = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    if (!isPointInPolygon(pt, vertices)) return 0;
+    const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2;
+    return dd <= r2 ? 1 : 0;
+  }
+
+  let inside = 0;
+  let total = 0;
+
+  for (let ix = 0; ix <= STEPS; ix++) {
+    for (let iy = 0; iy <= STEPS; iy++) {
+      const pt: Point2D = { x: minX + ix * dx, y: minY + iy * dy };
+      if (!isPointInPolygon(pt, vertices)) continue;
+      total++;
+      const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2;
+      if (dd <= r2) inside++;
+    }
+  }
+
+  if (total === 0) return 0;
+  return inside / total;
+}

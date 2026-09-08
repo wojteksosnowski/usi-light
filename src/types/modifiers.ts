@@ -1,6 +1,6 @@
 import { Point2D } from './geometry';
 
-export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window';
+export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window' | 'terrace' | 'donut';
 
 export interface BaseModifier {
   id: string;
@@ -34,14 +34,28 @@ export interface BayWindowModifier extends BaseModifier {
   positionRatio?: number;  // Położenie wzdłuż krawędzi: 0.0 (początek) .. 0.5 (środek) .. 1.0 (koniec)
 }
 
-export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier;
+export interface TerraceModifier extends BaseModifier {
+  type: 'terrace';
+  depth: number;           // Głębokość uskoku krawędzi (metry, domyślnie -4m, <0 cofnięcie, >0 nadwieszenie)
+  storiesCount: number;    // Kondygnacja: <0 od góry (np. -1 penthouse), >0 od dołu, 0 cała bryła
+  edgeIndex?: number;      // Indeks modyfikowanej krawędzi (domyślnie najdłuższa lub 0)
+}
+
+export interface DonutModifier extends BaseModifier {
+  type: 'donut';
+  offset: number;          // Odsunięcie otworu do wnętrza (metry, domyślnie -12m)
+  storiesCount: number;    // Kondygnacja: <0 od góry, >0 od dołu, 0 cała wysokość
+}
+
+export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier;
 
 
 export interface StoryFootprint {
   storyIndex: number;    // Indeks kondygnacji 0 .. K-1
   hBottom: number;       // Rzędna spodu kondygnacji (m)
   hTop: number;          // Rzędna wierzchu kondygnacji (m)
-  polygon: Point2D[];    // Obrys 2D danej kondygnacji po przejściu stosu modyfikatorów
+  polygon: Point2D[];    // Zewnętrzny obrys 2D danej kondygnacji
+  holes?: Point2D[][];   // Wewnętrzne otwory (np. dziedzińce / patio z modyfikatora Donat)
 }
 
 export interface ZoneFootprint {

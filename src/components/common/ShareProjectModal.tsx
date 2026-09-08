@@ -64,13 +64,28 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
-  // Reset state when modal is opened
+  // Reset state when modal is opened and listen for Escape key
   useEffect(() => {
     if (isOpen) {
       setErrorMessage(null);
       setIsCopied(false);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   const testedCount = useMemo(() => buildings.filter((b) => b.isTested).length, [buildings]);
   const obstaclesCount = useMemo(() => buildings.filter((b) => !b.isTested && b.category !== 'boundary').length, [buildings]);
@@ -385,7 +400,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
             >
               <Globe size={16} color="var(--accent-indigo)" style={{ flexShrink: 0, marginTop: '2px' }} />
               <div>
-                Projekt zostanie skompresowany i zapisany w bezpiecznej chmurze (Upstash Redis). Każdy posiadacz linku będzie mógł natychmiast załadować całą geometrię i parametry nasłonecznienia.
+                Projekt zostanie skompresowany i zapisany w bezpiecznej chmurze, a po 14 dniach usunięty. Każdy posiadacz linku będzie mógł natychmiast załadować kopię projektu, całą geometrię i parametry nasłonecznienia.
               </div>
             </div>
 

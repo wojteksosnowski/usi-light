@@ -108,3 +108,57 @@ export const BayWindowIcon: React.FC<IconProps> = ({
   </svg>
 );
 
+/**
+ * Ikona modyfikatora "Taras" (uskok pojedynczej krawędzi) (zgodna ze stylem Lucide)
+ */
+export const TerraceIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    {/* Obrys bazowy i uskok na jednej krawędzi */}
+    <path d="M3 21h18V9h-7V3H3v18z" />
+    <line x1="3" y1="9" x2="14" y2="9" strokeDasharray="2 2" strokeWidth="1.5" />
+  </svg>
+);
+
+/**
+ * Ikona modyfikatora "Donat" (wewnętrzny otwór / patio) (zgodna ze stylem Lucide)
+ */
+export const DonutIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <rect x="3" y="3" width="18" height="18" rx="3" />
+    <rect x="8.5" y="8.5" width="7" height="7" rx="1.5" />
+  </svg>
+);
+
+

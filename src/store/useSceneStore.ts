@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { temporal } from 'zundo';
 import { BuildingLoop, CadLayerSettings, Point2D, Modifier } from '../types/geometry';
 import { createSampleBuildings, createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
@@ -100,9 +101,21 @@ interface SceneState {
   // Bulk Load / Reset
   loadSceneData: (scene: Partial<SavedSceneData>) => void;
   resetScene: () => void;
+
+  // Interaction Transactions (Undo Batching)
+  startInteractionBatch: () => void;
+  commitInteractionBatch: () => void;
+  cancelInteractionBatch: () => void;
 }
 
-export const useSceneStore = create<SceneState>((set, get) => ({
+let interactionBatchSnapshot: {
+  buildings: BuildingLoop[];
+  layerSettings: Record<string, CadLayerSettings>;
+} | null = null;
+
+export const useSceneStore = create<SceneState>()(
+  temporal(
+    (set, get) => ({
   buildings: createSampleBuildings(),
   selectedBuildingId: 'bldg-1',
   selectedBuildingIds: ['bldg-1'],
@@ -903,6 +916,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   },
 
   resetScene: () => {
+    interactionBatchSnapshot = null;
     set({
       buildings: createSampleBuildings(),
       selectedBuildingId: 'bldg-1',
@@ -913,4 +927,65 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       linkingSourceId: null,
     });
   },
-}));
+
+  startInteractionBatch: () => {
+    if (!interactionBatchSnapshot) {
+      interactionBatchSnapshot = {
+        buildings: get().buildings,
+        layerSettings: get().layerSettings,
+      };
+    }
+    useSceneStore.temporal.getState().pause();
+  },
+
+  commitInteractionBatch: () => {
+    useSceneStore.temporal.getState().resume();
+    if (interactionBatchSnapshot) {
+      const initialSnapshot = interactionBatchSnapshot;
+      interactionBatchSnapshot = null;
+      const currentBuildings = get().buildings;
+      const currentLayerSettings = get().layerSettings;
+
+      const isBuildingsUnchanged = initialSnapshot.buildings === currentBuildings;
+      const isLayerSettingsUnchanged = initialSnapshot.layerSettings === currentLayerSettings;
+
+      if (!isBuildingsUnchanged || !isLayerSettingsUnchanged) {
+        const temporalStore = useSceneStore.temporal;
+        const limit = 50;
+        const currentPast = temporalStore.getState().pastStates;
+        let nextPast = [...currentPast, initialSnapshot];
+        if (nextPast.length > limit) {
+          nextPast = nextPast.slice(nextPast.length - limit);
+        }
+        temporalStore.setState({
+          pastStates: nextPast,
+          futureStates: [],
+        });
+      }
+    }
+  },
+
+  cancelInteractionBatch: () => {
+    if (interactionBatchSnapshot) {
+      const initialSnapshot = interactionBatchSnapshot;
+      interactionBatchSnapshot = null;
+      set({
+        buildings: initialSnapshot.buildings,
+        layerSettings: initialSnapshot.layerSettings,
+      });
+    }
+    useSceneStore.temporal.getState().resume();
+  },
+}),
+{
+  limit: 50,
+  partialize: (state) => ({
+    buildings: state.buildings,
+    layerSettings: state.layerSettings,
+  }),
+  equality: (pastState, currentState) =>
+    pastState.buildings === currentState.buildings &&
+    pastState.layerSettings === currentState.layerSettings,
+}
+)
+);

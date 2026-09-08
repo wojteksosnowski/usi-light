@@ -1,4 +1,5 @@
 import React from 'react';
+import { useStore } from 'zustand';
 import {
   Square,
   RotateCw,
@@ -7,12 +8,18 @@ import {
   MapPin,
   Copy,
   Trash2,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon } from '../common/CustomCadIcons';
+import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
 
 export const CadToolBar: React.FC = () => {
+  const { undo, redo, pastStates, futureStates } = useStore(useSceneStore.temporal, (state) => state);
+  const canUndo = pastStates.length > 0;
+  const canRedo = futureStates.length > 0;
+
   const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
   const selectedBuildingIds = useSceneStore((s) => s.selectedBuildingIds);
@@ -298,6 +305,70 @@ export const CadToolBar: React.FC = () => {
               <SetbackPenthouseIcon size={14} color={isStoryEligible ? '#c084fc' : '#94a3b8'} />
             </button>
 
+            {/* Przycisk Taras */}
+            <button
+              type="button"
+              disabled={!isStoryEligible}
+              style={{
+                ...buttonStyle(false),
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
+              }}
+              onClick={() => {
+                if (!isStoryEligible) return;
+                const newMod = {
+                  id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'terrace' as const,
+                  enabled: true,
+                  depth: -4.0,
+                  storiesCount: -1,
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
+                setShowModifiersPanel(true);
+              }}
+              title={
+                !selectedBuilding
+                  ? 'Modyfikator Taras (zaznacz budynek na scenie, aby dodać uskok krawędzi)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj taras (uskok wybranej krawędzi)'
+              }
+            >
+              <TerraceIcon size={14} color={isStoryEligible ? '#fed7aa' : '#94a3b8'} />
+            </button>
+
+            {/* Przycisk Donat */}
+            <button
+              type="button"
+              disabled={!isStoryEligible}
+              style={{
+                ...buttonStyle(false),
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
+              }}
+              onClick={() => {
+                if (!isStoryEligible) return;
+                const newMod = {
+                  id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                  type: 'donut' as const,
+                  enabled: true,
+                  offset: -12.0,
+                  storiesCount: 0,
+                };
+                addBuildingModifier(selectedBuilding.id, newMod);
+                setShowModifiersPanel(true);
+              }}
+              title={
+                !selectedBuilding
+                  ? 'Modyfikator Donat (zaznacz budynek na scenie, aby dodać wewnętrzny otwór)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj donata (otwór / dziedziniec wewnątrz obrysu)'
+              }
+            >
+              <DonutIcon size={14} color={isStoryEligible ? '#a7f3d0' : '#94a3b8'} />
+            </button>
+
             {/* Przycisk Strefa / Obszar */}
             <button
               type="button"
@@ -332,14 +403,14 @@ export const CadToolBar: React.FC = () => {
             {/* Przycisk Wykusz (Bay Window) */}
             <button
               type="button"
-              disabled={!isEligible}
+              disabled={!isStoryEligible}
               style={{
                 ...buttonStyle(false),
-                opacity: isEligible ? 1 : 0.35,
-                cursor: isEligible ? 'pointer' : 'not-allowed',
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
               }}
               onClick={() => {
-                if (!isEligible) return;
+                if (!isStoryEligible) return;
                 const newMod = {
                   id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                   type: 'bay_window' as const,
@@ -353,11 +424,13 @@ export const CadToolBar: React.FC = () => {
               }}
               title={
                 !selectedBuilding
-                  ? 'Modyfikator Wykusz (zaznacz obiekt na scenie, aby dodać wykusz)'
-                  : 'Dodaj / edytuj wykusz (Bay Window) na elewacji / obwodzie'
+                  ? 'Modyfikator Wykusz (zaznacz budynek na scenie, aby dodać wykusz)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj wykusz (Bay Window) na elewacji'
               }
             >
-              <BayWindowIcon size={14} color={isEligible ? '#fef08a' : '#94a3b8'} />
+              <BayWindowIcon size={14} color={isStoryEligible ? '#fef08a' : '#94a3b8'} />
             </button>
           </div>
         );
@@ -398,6 +471,38 @@ export const CadToolBar: React.FC = () => {
         title={hasSelection ? 'Usuń zaznaczone obiekty [Del / Backspace]' : 'Zaznacz obiekt, aby go usunąć'}
       >
         <Trash2 size={14} />
+      </button>
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+
+      {/* 11. Cofnij (Undo) */}
+      <button
+        type="button"
+        disabled={!canUndo}
+        style={{
+          ...buttonStyle(false),
+          opacity: canUndo ? 1 : 0.35,
+          cursor: canUndo ? 'pointer' : 'not-allowed',
+        }}
+        onClick={() => undo()}
+        title={canUndo ? 'Cofnij [Ctrl+Z / Cmd+Z]' : 'Brak wcześniejszych zmian do cofnięcia'}
+      >
+        <Undo2 size={14} />
+      </button>
+
+      {/* 12. Ponów (Redo) */}
+      <button
+        type="button"
+        disabled={!canRedo}
+        style={{
+          ...buttonStyle(false),
+          opacity: canRedo ? 1 : 0.35,
+          cursor: canRedo ? 'pointer' : 'not-allowed',
+        }}
+        onClick={() => redo()}
+        title={canRedo ? 'Ponów [Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y]' : 'Brak zmian do ponowienia'}
+      >
+        <Redo2 size={14} />
       </button>
     </div>
   );

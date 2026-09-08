@@ -13,10 +13,18 @@ import {
   Building,
 } from 'lucide-react';
 import { useSceneStore } from '../../store';
-import { StoryOffsetModifier, ZoneOffsetModifier, BayWindowModifier, StoryFootprint } from '../../types/modifiers';
+import {
+  StoryOffsetModifier,
+  ZoneOffsetModifier,
+  BayWindowModifier,
+  TerraceModifier,
+  DonutModifier,
+  StoryFootprint,
+} from '../../types/modifiers';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { BayWindowIcon } from '../common/CustomCadIcons';
+import { BayWindowIcon, TerraceIcon, DonutIcon, ZoneBufferIcon } from '../common/CustomCadIcons';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
+import { StoryRangeSelector } from './StoryRangeSelector';
 
 interface BuildingModifiersPanelProps {
   onClose?: () => void;
@@ -44,6 +52,37 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
     [buildings, selectedBuildingId]
   );
 
+  const modifiers = selectedBuilding?.modifiers || [];
+  const storyPolygons: StoryFootprint[] = selectedBuilding?.storyPolygons || [];
+  const segments = selectedBuilding?.segments || [];
+
+  const availableEdges = React.useMemo(() => {
+    if (!selectedBuilding) return [];
+    const outerCount = selectedBuilding.vertices?.length || 0;
+    const list: { value: number; label: string }[] = [];
+
+    // Zewnętrzne ściany
+    for (let i = 0; i < outerCount; i++) {
+      list.push({ value: i, label: `Ściana zewnętrzna #${i + 1}` });
+    }
+
+    // Ściany wewnętrznych otworów (Donut)
+    const sampleStoryWithHoles = storyPolygons.find((sp) => sp.holes && sp.holes.length > 0);
+    if (sampleStoryWithHoles && sampleStoryWithHoles.holes) {
+      let currGlobal = outerCount;
+      sampleStoryWithHoles.holes.forEach((hole, hIdx) => {
+        hole.forEach((_, lIdx) => {
+          list.push({
+            value: currGlobal,
+            label: `Dziedziniec #${hIdx + 1} - Krawędź #${lIdx + 1}`,
+          });
+          currGlobal++;
+        });
+      });
+    }
+    return list;
+  }, [selectedBuilding, storyPolygons]);
+
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -55,10 +94,6 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
   }, [onClose]);
 
   if (!selectedBuilding) return null;
-
-  const modifiers = selectedBuilding.modifiers || [];
-  const storyPolygons: StoryFootprint[] = selectedBuilding.storyPolygons || [];
-  const segments = selectedBuilding.segments || [];
 
   const handleAddStoryModifier = () => {
     const newMod: StoryOffsetModifier = {
@@ -95,6 +130,28 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
     addBuildingModifier(selectedBuilding.id, newMod);
   };
 
+  const handleAddTerraceModifier = () => {
+    const newMod: TerraceModifier = {
+      id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      type: 'terrace',
+      enabled: true,
+      depth: -4.0, // domyślnie -4m głębokość uskoku
+      storiesCount: -1, // domyślnie ostatnia kondygnacja (penthouse)
+    };
+    addBuildingModifier(selectedBuilding.id, newMod);
+  };
+
+  const handleAddDonutModifier = () => {
+    const newMod: DonutModifier = {
+      id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      type: 'donut',
+      enabled: true,
+      offset: -12.0, // domyślnie -12m offset otworu
+      storiesCount: 0, // domyślnie cała wysokość / bryła
+    };
+    addBuildingModifier(selectedBuilding.id, newMod);
+  };
+
   return (
     <FloatingInspectorCard
       title="Modyfikatory"
@@ -125,7 +182,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
       >
         <Info size={14} color="#c084fc" style={{ marginTop: '2px', flexShrink: 0 }} />
         <div>
-          Modyfikatory generują uskokowe poziomy kondygnacji, strefy o zadanym odsunięciu oraz wykusze fasad.
+          Modyfikatory generują uskokowe poziomy kondygnacji, strefy o zadanym odsunięciu, wykusze fasad, tarasy oraz wewnętrzne dziedzińce (donat).
         </div>
       </div>
 
@@ -167,14 +224,28 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
             const isStoryOffset = mod.type === 'story_offset';
             const isZoneOffset = mod.type === 'zone_offset';
             const isBayWindow = mod.type === 'bay_window';
+            const isTerrace = mod.type === 'terrace';
+            const isDonut = mod.type === 'donut';
             const offsetMod = mod as StoryOffsetModifier;
 
             const modTitle = isStoryOffset
               ? 'Uskok kondygnacji'
               : isZoneOffset
               ? 'Strefa (obszar)'
-              : 'Wykusz (Bay Window)';
-            const titleColor = isStoryOffset ? '#f3e8ff' : isZoneOffset ? '#bae6fd' : '#fef08a';
+              : isBayWindow
+              ? 'Wykusz (Bay Window)'
+              : isTerrace
+              ? 'Taras (uskok krawędzi)'
+              : 'Donat (otwór/patio)';
+            const titleColor = isStoryOffset
+              ? '#f3e8ff'
+              : isZoneOffset
+              ? '#bae6fd'
+              : isBayWindow
+              ? '#fef08a'
+              : isTerrace
+              ? '#fed7aa'
+              : '#a7f3d0';
 
             return (
               <div
@@ -293,41 +364,15 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                     </div>
 
                     {/* Stories Count */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                      <label style={{ fontSize: '10px', color: '#94a3b8' }}>
-                        Zakres kondygnacji:
-                      </label>
-                      <select
-                        value={offsetMod.storiesCount}
-                        onChange={(e) =>
-                          updateBuildingModifier(selectedBuilding.id, mod.id, {
-                            storiesCount: parseInt(e.target.value, 10),
-                          })
-                        }
-                        style={{
-                          width: '100%',
-                          backgroundColor: 'rgba(15, 23, 42, 0.8)',
-                          border: '1px solid #475569',
-                          borderRadius: '6px',
-                          color: '#f8fafc',
-                          padding: '4px 6px',
-                          fontSize: '11px',
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <option value="-1">Ostatnia kondygnacja (-1)</option>
-                        <option value="-2">2 ostatnie kondygnacje (-2)</option>
-                        <option value="-3">3 ostatnie kondygnacje (-3)</option>
-                        <option value="1">Parter (+1)</option>
-                        <option value="2">2 dolne kondygnacje (+2)</option>
-                      </select>
-                      <span style={{ fontSize: '9px', color: '#94a3b8' }}>
-                        {offsetMod.storiesCount < 0
-                          ? `${Math.abs(offsetMod.storiesCount)} od góry (poddasze)`
-                          : `${offsetMod.storiesCount} od dołu (podcień)`}
-                      </span>
-                    </div>
+                    <StoryRangeSelector
+                      value={offsetMod.storiesCount}
+                      allowWholeBuilding={false}
+                      onChange={(val) =>
+                        updateBuildingModifier(selectedBuilding.id, mod.id, {
+                          storiesCount: val,
+                        })
+                      }
+                    />
                   </div>
                 )}
 
@@ -438,36 +483,16 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                         </div>
 
                         {/* Stories Count */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
-                            Kondygnacja:
-                          </label>
-                          <select
-                            value={bayMod.storiesCount}
-                            onChange={(e) =>
-                              updateBuildingModifier(selectedBuilding.id, mod.id, {
-                                storiesCount: parseInt(e.target.value, 10) || 0,
-                              })
-                            }
-                            style={{
-                              width: '100%',
-                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
-                              border: '1px solid #475569',
-                              borderRadius: '6px',
-                              color: '#f8fafc',
-                              padding: '4px 4px',
-                              fontSize: '10.5px',
-                              fontWeight: 500,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            <option value="0">Całość (0)</option>
-                            <option value="1">Parter (+1)</option>
-                            <option value="2">2 dolne (+2)</option>
-                            <option value="-1">Góra (-1)</option>
-                            <option value="-2">2 górne (-2)</option>
-                          </select>
-                        </div>
+                        <StoryRangeSelector
+                          value={bayMod.storiesCount}
+                          label="Kondygnacja:"
+                          allowWholeBuilding={true}
+                          onChange={(val) =>
+                            updateBuildingModifier(selectedBuilding.id, mod.id, {
+                              storiesCount: val,
+                            })
+                          }
+                        />
                       </div>
 
                       {/* Kąt boków: 90°, 60°, 45°, 30° */}
@@ -513,7 +538,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                       </div>
 
                       {/* Pozycja wzdłuż krawędzi (suwak 0..1) oraz wybór krawędzi */}
-                      <div style={{ display: 'grid', gridTemplateColumns: numEdges > 3 ? '1.2fr 0.8fr' : '1fr', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: availableEdges.length > 1 ? '1.2fr 0.8fr' : '1fr', gap: '8px', alignItems: 'center' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <label style={{ fontSize: '10px', color: '#94a3b8' }}>
@@ -543,7 +568,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                           />
                         </div>
 
-                        {numEdges > 3 && (
+                        {availableEdges.length > 1 && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                             <label style={{ fontSize: '10px', color: '#94a3b8' }}>
                               Krawędź:
@@ -568,9 +593,9 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                               }}
                             >
                               <option value="-1">Domyślna (najdłuższa)</option>
-                              {Array.from({ length: numEdges }).map((_, eIdx) => (
-                                <option key={eIdx} value={eIdx}>
-                                  Krawędź #{eIdx + 1}
+                              {availableEdges.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
                                 </option>
                               ))}
                             </select>
@@ -591,6 +616,144 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                           ? `${Math.abs(bayMod.storiesCount)} od góry`
                           : `${bayMod.storiesCount} od dołu`}
                       </span>
+                    </div>
+                  );
+                })()}
+
+                {isTerrace && (() => {
+                  const terraceMod = mod as TerraceModifier;
+
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        {/* Depth [m] */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <label style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                            Uskok kaskady (m):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            value={terraceMod.depth}
+                            onChange={(e) =>
+                              updateBuildingModifier(selectedBuilding.id, mod.id, {
+                                depth: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'var(--bg-input)',
+                              border: '1px solid var(--border-light)',
+                              borderRadius: '6px',
+                              color: 'var(--text-primary)',
+                              padding: '4px 6px',
+                              fontSize: '11px',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
+                            }}
+                          />
+                          <span style={{ fontSize: '9px', color: terraceMod.depth < 0 ? '#fed7aa' : 'var(--accent-blue)' }}>
+                            {terraceMod.depth < 0 ? 'Cofnięcie ściany (-)' : 'Nadwieszenie ściany (+)'}
+                          </span>
+                        </div>
+
+                        {/* Stories Count */}
+                        <StoryRangeSelector
+                          value={terraceMod.storiesCount}
+                          allowWholeBuilding={true}
+                          onChange={(val) =>
+                            updateBuildingModifier(selectedBuilding.id, mod.id, {
+                              storiesCount: val,
+                            })
+                          }
+                        />
+                      </div>
+
+                      {/* Wybór krawędzi */}
+                      {availableEdges.length > 1 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                            Modyfikowana krawędź ściany:
+                          </label>
+                          <select
+                            value={terraceMod.edgeIndex !== undefined ? terraceMod.edgeIndex : -1}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              updateBuildingModifier(selectedBuilding.id, mod.id, {
+                                edgeIndex: val >= 0 ? val : undefined,
+                              });
+                            }}
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              border: '1px solid #475569',
+                              borderRadius: '6px',
+                              color: '#f8fafc',
+                              padding: '3px 4px',
+                              fontSize: '10px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <option value="-1">Domyślna (najdłuższa krawędź)</option>
+                            {availableEdges.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {isDonut && (() => {
+                  const donutMod = mod as DonutModifier;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        {/* Offset [m] */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                            Offset otworu (m):
+                          </label>
+                          <input
+                            type="number"
+                            step="1.0"
+                            value={donutMod.offset}
+                            onChange={(e) =>
+                              updateBuildingModifier(selectedBuilding.id, mod.id, {
+                                offset: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              border: '1px solid #475569',
+                              borderRadius: '6px',
+                              color: '#f8fafc',
+                              padding: '4px 6px',
+                              fontSize: '11px',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
+                            }}
+                          />
+                          <span style={{ fontSize: '9px', color: '#a7f3d0' }}>
+                            Wcięcie do środka: {donutMod.offset}m
+                          </span>
+                        </div>
+
+                        {/* Stories Count */}
+                        <StoryRangeSelector
+                          value={donutMod.storiesCount}
+                          allowWholeBuilding={true}
+                          onChange={(val) =>
+                            updateBuildingModifier(selectedBuilding.id, mod.id, {
+                              storiesCount: val,
+                            })
+                          }
+                        />
+                      </div>
                     </div>
                   );
                 })()}

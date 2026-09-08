@@ -153,14 +153,17 @@ function drawLucideGhostIcon(ctx: CanvasRenderingContext2D, cx: number, cy: numb
 }
 
 function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
-  // If building has storyPolygons (e.g. from modifiers like bay_window), use storyPolygons[0] for base interior rendering
-  const activeVertices =
+  // If building has storyPolygons (e.g. from modifiers like bay_window, terrace, donut), use storyPolygons[0]
+  const activeFootprint =
     bldg.category !== 'boundary' &&
     Array.isArray(bldg.storyPolygons) &&
     bldg.storyPolygons.length > 0 &&
     bldg.storyPolygons[0].polygon?.length >= 3
-      ? bldg.storyPolygons[0].polygon
-      : bldg.vertices;
+      ? bldg.storyPolygons[0]
+      : null;
+
+  const activeVertices = activeFootprint ? activeFootprint.polygon : bldg.vertices;
+  const activeHoles = activeFootprint?.holes || [];
 
   if (!activeVertices || !Array.isArray(activeVertices) || activeVertices.length < 3) return null;
 
@@ -194,6 +197,17 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
     validCount++;
   }
   path.closePath();
+
+  // Dodaj podścieżki dla otworów (Donut holes / dziedzińce)
+  for (const hole of activeHoles) {
+    if (Array.isArray(hole) && hole.length >= 3) {
+      path.moveTo(hole[0].x, hole[0].y);
+      for (let h = 1; h < hole.length; h++) {
+        path.lineTo(hole[h].x, hole[h].y);
+      }
+      path.closePath();
+    }
+  }
 
   if (validCount < 3) return null;
 
@@ -350,9 +364,9 @@ export function renderBuildings(
     } else {
       ctx.fillStyle = isIncluded ? 'rgba(51, 65, 85, 0.25)' : 'rgba(30, 41, 59, 0.15)';
     }
-    ctx.fill(geo.path);
+    ctx.fill(geo.path, 'evenodd');
 
-    // 1.1 Render 2.5D Story Polygons / Footprints (Warstwice kondygnacji uskokowych)
+    // 1.1 Render 2.5D Story Polygons / Footprints (Warstwice kondygnacji uskokowych oraz otwory)
     if (Array.isArray(bldg.storyPolygons) && bldg.storyPolygons.length > 1) {
       for (const sf of bldg.storyPolygons) {
         if (!sf.polygon || sf.polygon.length < 3) continue;
@@ -374,6 +388,25 @@ export function renderBuildings(
           ctx.setLineDash([4 / s, 2 / s]);
           ctx.stroke(storyPath);
           ctx.setLineDash([]);
+        }
+
+        // Warstwice otworów wewnętrznych (dziedzińce)
+        if (sf.holes && sf.holes.length > 0) {
+          for (const hole of sf.holes) {
+            if (hole.length < 3) continue;
+            const holePath = new Path2D();
+            holePath.moveTo(hole[0].x, hole[0].y);
+            for (let h = 1; h < hole.length; h++) {
+              holePath.lineTo(hole[h].x, hole[h].y);
+            }
+            holePath.closePath();
+
+            ctx.lineWidth = 1.2 / s;
+            ctx.strokeStyle = isSelected ? 'rgba(52, 211, 153, 0.85)' : 'rgba(16, 185, 129, 0.6)';
+            ctx.setLineDash([4 / s, 2 / s]);
+            ctx.stroke(holePath);
+            ctx.setLineDash([]);
+          }
         }
       }
     }

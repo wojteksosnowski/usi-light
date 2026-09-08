@@ -7,6 +7,7 @@ import {
   FolderKanban,
   Layers,
   Wrench,
+  Map,
 } from 'lucide-react';
 import { useUiStore } from '../../store';
 import { ProBadge } from '../license/ProBadge';

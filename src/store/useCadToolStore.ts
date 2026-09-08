@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { DimensionItem, DimensionReference, DimensionType, Point2D } from '../types/geometry';
 import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
+import { useSceneStore } from './useSceneStore';
 
 interface CadToolState {
   // Drawing Tools
@@ -187,5 +188,12 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   },
 
   triggerFit: () => set((state) => ({ fitTrigger: state.fitTrigger + 1 })),
-  setIsInteracting: (interacting) => set({ isInteracting: interacting }),
+  setIsInteracting: (interacting) => {
+    set({ isInteracting: interacting });
+    if (interacting) {
+      useSceneStore.getState().startInteractionBatch();
+    } else {
+      useSceneStore.getState().commitInteractionBatch();
+    }
+  },
 }));

@@ -6,11 +6,13 @@ import {
   RotateCw,
   Move,
   Magnet,
-  Compass,
   Globe,
   Share2,
+  FileSpreadsheet,
+  Layers,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
+import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
 
 export const CadTopHud: React.FC = () => {
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
@@ -30,6 +32,8 @@ export const CadTopHud: React.FC = () => {
   const setShowShadowRange = useSolarAnalysisStore((s) => s.setShowShadowRange);
   const showSatelliteLayer = useSolarAnalysisStore((s) => s.showSatelliteLayer);
   const setShowSatelliteLayer = useSolarAnalysisStore((s) => s.setShowSatelliteLayer);
+  const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
+  const setShowProjectParameters = useSolarAnalysisStore((s) => s.setShowProjectParameters);
 
   const triggerFit = useCadToolStore((s) => s.triggerFit);
   const viewRotationMode = useCadToolStore((s) => s.viewRotationMode);
@@ -38,8 +42,72 @@ export const CadTopHud: React.FC = () => {
   const toggleUcsRotation = useCadToolStore((s) => s.toggleUcsRotation);
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
-  const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
-  const toggleDirectionSnapping = useCadToolStore((s) => s.toggleDirectionSnapping);
+
+  // Timer bezczynności: 30s bezczynności -> 1. błyśnięcie (1s), kolejne 15s bezczynności -> 2. błyśnięcie (1s), potem stop
+  const [isShareGlinting, setIsShareGlinting] = React.useState(false);
+
+  React.useEffect(() => {
+    let timer1: NodeJS.Timeout | null = null;
+    let timer2: NodeJS.Timeout | null = null;
+    let glintOffTimer: NodeJS.Timeout | null = null;
+
+    const triggerGlint = () => {
+      setIsShareGlinting(true);
+      if (glintOffTimer) clearTimeout(glintOffTimer);
+      glintOffTimer = setTimeout(() => {
+        setIsShareGlinting(false);
+      }, 1000);
+    };
+
+    const resetIdleTimers = () => {
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      setIsShareGlinting(false);
+
+      // 1. błysk po 30 sekundach bezczynności
+      timer1 = setTimeout(() => {
+        triggerGlint();
+      }, 30000);
+
+      // 2. błysk po kolejnych 15 sekundach bezczynności (łącznie 45s)
+      timer2 = setTimeout(() => {
+        triggerGlint();
+      }, 45000);
+
+      // Po 45s już nie błyska
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'pointermove'];
+    const handleActivity = () => {
+      resetIdleTimers();
+    };
+
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleActivity, { passive: true });
+    });
+
+    // Inicjalne wystartowanie timerów
+    resetIdleTimers();
+
+    // Czyszczenie ewentualnych starych kluczy licencyjnych z wersji eksperymentalnych
+    try {
+      if (localStorage.getItem('usi_license_key')) {
+        localStorage.removeItem('usi_license_key');
+      }
+    } catch {
+      // Ignoruj błędy dostępu do localStorage
+    }
+
+    return () => {
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      if (glintOffTimer) clearTimeout(glintOffTimer);
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleActivity);
+      });
+    };
+  }, []);
+
 
   return (
     <div className="cad-hud-top">
@@ -68,30 +136,29 @@ export const CadTopHud: React.FC = () => {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          padding: '4px 10px',
+          gap: '5px',
+          padding: '4px 8px',
           borderRadius: '6px',
           backgroundColor: 'rgba(15, 23, 42, 0.85)',
           border: '1px solid #334155',
           fontSize: '11px',
           color: '#f8fafc',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
         }}
         title={`Lokalizacja projektu: ${selectedCity} (${settings.latitude.toFixed(2)}°N, ${settings.longitude.toFixed(2)}°E)`}
       >
         <MapPin size={13} color="#f59e0b" />
         <span style={{ fontWeight: 600, color: '#f8fafc' }}>{selectedCity}</span>
-        <span style={{ fontSize: '10px', color: '#94a3b8' }}>
-          ({settings.latitude.toFixed(2)}°N)
-        </span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       <button
         onClick={() => setShowShadowingLines((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -103,6 +170,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showShadowingLines ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
           color: showShadowingLines ? '#6ee7b7' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
       >
         § 12
@@ -111,7 +179,7 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShowSunlightLines((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -123,6 +191,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showSunlightLines ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
           color: showSunlightLines ? '#fcd34d' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
       >
         § 56
@@ -131,7 +200,7 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShowAnalysisPoints((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -143,6 +212,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showAnalysisPoints ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
           color: showAnalysisPoints ? '#38bdf8' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz punkty kontrolne na fasadzie oraz nasłonecznienie placu zabaw"
       >
@@ -152,7 +222,7 @@ export const CadTopHud: React.FC = () => {
         onClick={() => setShowShadowRange((prev) => !prev)}
         style={{
           height: '28px',
-          padding: '0 9px',
+          padding: '0 7px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -164,6 +234,7 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showShadowRange ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
           color: showShadowRange ? '#c7d2fe' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz widoczność obwiedni maksymalnego zasięgu cienia rzucanego przez obiekty badane w równonoc"
       >
@@ -176,8 +247,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '5px',
-          padding: '0 9px',
+          gap: '4px',
+          padding: '0 8px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -186,27 +257,93 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
           color: showSatelliteLayer ? '#38bdf8' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
         title="Włącz / wyłącz podkład z mapy satelitarnej Google Maps pod sceną CAD"
       >
         <Globe size={13} />
-        <span>Satelita</span>
+        <span className="hud-btn-label">Satelita</span>
+      </button>
+      <button
+        onClick={() => setShowProjectParameters((prev) => !prev)}
+        style={{
+          height: '28px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '4px',
+          padding: '0 8px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: 'none',
+          backgroundColor: showProjectParameters ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+          color: showProjectParameters ? 'var(--accent-emerald, #34d399)' : '#94a3b8',
+          transition: 'all 0.15s ease',
+          flexShrink: 0,
+        }}
+        title="Włącz / wyłącz panel analityczny: Parametry projektu i bilans powierzchni"
+      >
+        <FileSpreadsheet size={13} />
+        <span className="hud-btn-label">Parametry</span>
       </button>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      {/* Podkłady GEO (PRO) button */}
+      <button
+        onClick={() => {
+          const s = useWfsStore.getState();
+          const anyActive = s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer;
+          if (anyActive) {
+            s.setShowOrthophotoLayer(false);
+            s.setShowKiutLayer(false);
+            s.setShowMpzpLayer(false);
+            s.setShowBdotLayer(false);
+            s.setShowTerrainLayer(false);
+            s.setShowEgibLayer(false);
+          } else {
+            s.setShowOrthophotoLayer(true);
+            s.setShowKiutLayer(true);
+          }
+        }}
+        style={{
+          height: '28px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '4px',
+          padding: '0 8px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          border: 'none',
+          backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+            ? 'rgba(99, 102, 241, 0.2)'
+            : 'transparent',
+          color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+            ? '#a5b4fc'
+            : '#94a3b8',
+          transition: 'all 0.15s ease',
+          flexShrink: 0,
+        }}
+        title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT / BDOT / MPZP) [Wersja PRO]"
+      >
+        <Layers size={13} />
+        <span className="hud-btn-label">Podkład GEO</span>
+      </button>
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       {/* Grupa Widok: centruj, obrót, przełącz */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
+          gap: '4px',
+          flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', paddingRight: '2px' }}>
-          Widok:
-        </span>
-
         <button
           onClick={triggerFit}
           title="Dopasuj widok do obiektów (Zoom Extents)"
@@ -215,8 +352,8 @@ export const CadTopHud: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '5px',
-            padding: '0 10px',
+            gap: '4px',
+            padding: '0 8px',
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: 600,
@@ -228,7 +365,7 @@ export const CadTopHud: React.FC = () => {
           }}
         >
           <Maximize2 size={13} />
-          <span>Centruj</span>
+          <span className="hud-btn-label">Centruj</span>
         </button>
 
         <button
@@ -239,8 +376,8 @@ export const CadTopHud: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '5px',
-            padding: '0 10px',
+            gap: '4px',
+            padding: '0 8px',
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: 600,
@@ -252,7 +389,7 @@ export const CadTopHud: React.FC = () => {
           }}
         >
           <RotateCw size={13} />
-          <span>Obrót</span>
+          <span className="hud-btn-label">Obrót</span>
         </button>
 
         <button
@@ -267,8 +404,8 @@ export const CadTopHud: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '5px',
-            padding: '0 10px',
+            gap: '4px',
+            padding: '0 8px',
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: 600,
@@ -286,22 +423,22 @@ export const CadTopHud: React.FC = () => {
               transition: 'transform 0.2s ease',
             }}
           />
-          <span>Przełącz</span>
+          <span className="hud-btn-label">Przełącz</span>
         </button>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       <button
         onClick={toggleOsnap}
-        title="Włącz / wyłącz dociąganie geometryczne [F3] (wierzchołki, środki, krawędzie, przecięcia OTRACK)"
+        title="Włącz / wyłącz przyciąganie geometryczne [S / F3] (przytrzymaj SHIFT podczas rysowania aby wymusić kąty kardynalne i dominujące)"
         style={{
           height: '28px',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '5px',
-          padding: '0 10px',
+          gap: '4px',
+          padding: '0 8px',
           borderRadius: '6px',
           fontSize: '11px',
           fontWeight: 600,
@@ -310,41 +447,19 @@ export const CadTopHud: React.FC = () => {
           backgroundColor: isOsnapActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(30, 41, 59, 0.8)',
           color: isOsnapActive ? '#6ee7b7' : '#94a3b8',
           transition: 'all 0.15s ease',
+          flexShrink: 0,
         }}
       >
         <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
-        <span>Dociąganie</span>
+        <span className="hud-btn-label">Przyciąganie</span>
       </button>
 
-      <button
-        onClick={toggleDirectionSnapping}
-        title="Włącz / wyłącz inteligentne śledzenie kątowe i kierunków (równoległe i prostopadłe)"
-        style={{
-          height: '28px',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '5px',
-          padding: '0 10px',
-          borderRadius: '6px',
-          fontSize: '11px',
-          fontWeight: 600,
-          cursor: 'pointer',
-          border: isDirectionSnappingActive ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid #334155',
-          backgroundColor: isDirectionSnappingActive ? 'rgba(99, 102, 241, 0.25)' : 'rgba(30, 41, 59, 0.8)',
-          color: isDirectionSnappingActive ? '#a5b4fc' : '#94a3b8',
-          transition: 'all 0.15s ease',
-        }}
-      >
-        <Compass size={13} color={isDirectionSnappingActive ? '#818cf8' : '#94a3b8'} />
-        <span>Śledzenie</span>
-      </button>
-
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       <button
         onClick={() => setShareModalOpen(true)}
         title="Udostępnij projekt online za pomocą linku (Upstash Redis, 14 dni)"
+        className={`cad-publish-btn ${isShareGlinting ? 'glinting' : ''}`}
         style={{
           height: '28px',
           display: 'inline-flex',
@@ -354,17 +469,22 @@ export const CadTopHud: React.FC = () => {
           padding: '0 10px',
           borderRadius: '6px',
           fontSize: '11px',
-          fontWeight: 600,
+          fontWeight: 700,
           cursor: 'pointer',
-          border: '1px solid rgba(99, 102, 241, 0.4)',
-          backgroundColor: 'rgba(99, 102, 241, 0.2)',
-          color: '#c7d2fe',
-          transition: 'all 0.15s ease',
+          border: '1px solid rgba(168, 85, 247, 0.7)',
+          background: 'linear-gradient(135deg, rgba(147, 51, 234, 0.45), rgba(99, 102, 241, 0.5))',
+          color: '#ffffff',
+          boxShadow: '0 2px 10px rgba(147, 51, 234, 0.25)',
+          transition: 'all 0.2s ease',
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
         }}
       >
-        <Share2 size={13} color="#a5b4fc" />
+        <Share2 size={13} />
         <span>Udostępnij</span>
       </button>
+
     </div>
   );
 };
+

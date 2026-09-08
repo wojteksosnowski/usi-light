@@ -17,12 +17,13 @@ describe('geoTransform', () => {
     ];
     const res = detectCoordinateSystem(points);
     expect(res.crs).toBe('EPSG:2180');
+    expect(res.geodeticLabel).toBe('ETRF2000-PL / CS1992');
     expect(res.isGeodetic).toBe(true);
   });
 
   it('transforms PL-1992 point to WGS84 accurately for Krakow', () => {
     const pt = { x: 573256.92, y: 246143.37 };
-    const crs = { crs: 'EPSG:2180' as const, description: 'PL-1992', isGeodetic: true };
+    const crs = { crs: 'EPSG:2180' as const, description: 'PL-1992', geodeticLabel: 'ETRF2000-PL / CS1992', isGeodetic: true };
     const wgs = cadPointToWgs84(pt, crs);
 
     // Krakow Czyzyny / Nowa Huta latitude ~ 50.078, longitude ~ 20.024
@@ -30,7 +31,7 @@ describe('geoTransform', () => {
     expect(wgs.lon).toBeCloseTo(20.024, 2);
   });
 
-  it('detects PL-2000 zone 7 (EPSG:2178)', () => {
+  it('detects PL-2000 zone 7 (EPSG:2178) and assigns ETRF2000-PL / CS2000 / 21', () => {
     // Warsaw PL-2000 zone 7 (Easting ~ 7 500 000, Northing ~ 5 790 000)
     const points = [
       { x: 7500000, y: 5790000 },
@@ -38,19 +39,23 @@ describe('geoTransform', () => {
     ];
     const res = detectCoordinateSystem(points);
     expect(res.crs).toBe('EPSG:2178');
+    expect(res.geodeticLabel).toBe('ETRF2000-PL / CS2000 / 21');
     expect(res.zone).toBe(7);
   });
 
-  it('detects local CAD coordinates for origin-centered project', () => {
+  it('detects local CAD coordinates with project center returning proper ETRF2000-PL zone', () => {
     const points = [
       { x: 0, y: 0 },
       { x: 25, y: 0 },
       { x: 25, y: 15 },
       { x: 0, y: 15 },
     ];
-    const res = detectCoordinateSystem(points);
-    expect(res.crs).toBe('LOCAL');
-    expect(res.isGeodetic).toBe(false);
+    // Warsaw center: 52.2297 N, 21.0122 E -> zone 7 (21° E)
+    const res = detectCoordinateSystem(points, { lat: 52.2297, lon: 21.0122 });
+    expect(res.crs).toBe('EPSG:2178');
+    expect(res.geodeticLabel).toBe('ETRF2000-PL / CS2000 / 21');
+    expect(res.isGeodetic).toBe(true);
+    expect(res.zone).toBe(7);
   });
 
   it('computes Web Mercator pixels and tile coordinates correctly at zoom 18', () => {

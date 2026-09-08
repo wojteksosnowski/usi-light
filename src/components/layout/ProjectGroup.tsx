@@ -12,6 +12,15 @@ import {
   FileCode,
   Crown,
   Sparkles,
+  FileSpreadsheet,
+  Lock,
+  Unlock,
+  Crosshair,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Layers,
+  Map,
 } from 'lucide-react';
 import {
   useSceneStore,
@@ -21,11 +30,17 @@ import {
   useLicenseStore,
   POLISH_CITIES,
 } from '../../store';
+import { useWfsStore, ProjectRadius } from '../../modules/wfs-import/store/useWfsStore';
+import { fetchParcelsInRadius } from '../../modules/wfs-import/services/uldkClient';
+import { fetchWarsawBuildings } from '../../modules/wfs-import/services/wfsWarsawClient';
+import { importBuildingsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
+import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
+import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
 import { parseDxfWithMetadata, DxfUnitOption, createSampleBuildings } from '../../utils/dxfParser';
 import { exportAnalysisToPdf } from '../../utils/pdfExport';
 import { exportSceneToDxf } from '../../utils/dxfExport';
-import { PinnedFacadePoint } from '../../types/geometry';
+import { PinnedFacadePoint, BuildingLoop } from '../../types/geometry';
 
 export const ProjectGroup: React.FC = () => {
   // Scene Store
@@ -73,6 +88,10 @@ export const ProjectGroup: React.FC = () => {
   const setShowSatelliteLayer = useSolarAnalysisStore((s) => s.setShowSatelliteLayer);
   const satelliteOpacity = useSolarAnalysisStore((s) => s.satelliteOpacity);
   const setSatelliteOpacity = useSolarAnalysisStore((s) => s.setSatelliteOpacity);
+  const satelliteProvider = useSolarAnalysisStore((s) => s.satelliteProvider);
+  const setSatelliteProvider = useSolarAnalysisStore((s) => s.setSatelliteProvider);
+  const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
+  const setShowProjectParameters = useSolarAnalysisStore((s) => s.setShowProjectParameters);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
   const setSunlightMethod = useSolarAnalysisStore((s) => s.setSunlightMethod);
   const pinnedPoints = useSolarAnalysisStore((s) => s.pinnedPoints);
@@ -124,6 +143,95 @@ export const ProjectGroup: React.FC = () => {
       buildings,
       pinnedPoints,
     });
+  };
+
+  // WFS Store & Geo Data
+  const projectRadius = useWfsStore((s) => s.projectRadius);
+  const setProjectRadius = useWfsStore((s) => s.setProjectRadius);
+  const isProjectCenterLocked = useWfsStore((s) => s.isProjectCenterLocked);
+  const setIsProjectCenterLocked = useWfsStore((s) => s.setIsProjectCenterLocked);
+  const showOrthophotoLayer = useWfsStore((s) => s.showOrthophotoLayer);
+  const setShowOrthophotoLayer = useWfsStore((s) => s.setShowOrthophotoLayer);
+  const orthophotoOpacity = useWfsStore((s) => s.orthophotoOpacity);
+  const setOrthophotoOpacity = useWfsStore((s) => s.setOrthophotoOpacity);
+  const showKiutLayer = useWfsStore((s) => s.showKiutLayer);
+  const setShowKiutLayer = useWfsStore((s) => s.setShowKiutLayer);
+  const kiutOpacity = useWfsStore((s) => s.kiutOpacity);
+  const setKiutOpacity = useWfsStore((s) => s.setKiutOpacity);
+  const showMpzpLayer = useWfsStore((s) => s.showMpzpLayer);
+  const setShowMpzpLayer = useWfsStore((s) => s.setShowMpzpLayer);
+  const mpzpOpacity = useWfsStore((s) => s.mpzpOpacity);
+  const setMpzpOpacity = useWfsStore((s) => s.setMpzpOpacity);
+  const showBdotLayer = useWfsStore((s) => s.showBdotLayer);
+  const setShowBdotLayer = useWfsStore((s) => s.setShowBdotLayer);
+  const bdotOpacity = useWfsStore((s) => s.bdotOpacity);
+  const setBdotOpacity = useWfsStore((s) => s.setBdotOpacity);
+  const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
+  const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
+  const showEgibLayer = useWfsStore((s) => s.showEgibLayer);
+  const setShowEgibLayer = useWfsStore((s) => s.setShowEgibLayer);
+  const status = useWfsStore((s) => s.status);
+  const setStatus = useWfsStore((s) => s.setStatus);
+
+  const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
+
+  const handleSyncGeoData = async () => {
+    setStatus({ isFetching: true, error: null, info: null });
+    setSyncFeedback(null);
+    try {
+      const centerLat = settings.latitude;
+      const centerLon = settings.longitude;
+      const radius = projectRadius;
+      const projectCenter = { lat: centerLat, lon: centerLon };
+      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
+
+      // 1. Działki ewidencyjne z ULDK (ogólnopolskie wektory)
+      const parcels = await fetchParcelsInRadius(centerLat, centerLon, radius, projectCrs, projectCenter);
+
+      // 2. Budynki wektorowe (dla Warszawy WFS, dla innych miast serwisy lokalne)
+      const bbox = latLonToBbox(centerLat, centerLon, radius);
+      let importedBuildings: BuildingLoop[] = [];
+      const WARSAW_BBOX = [20.85, 52.09, 21.27, 52.37];
+      const isWarsaw = centerLon >= WARSAW_BBOX[0] && centerLon <= WARSAW_BBOX[2] && centerLat >= WARSAW_BBOX[1] && centerLat <= WARSAW_BBOX[3];
+
+      if (isWarsaw) {
+        try {
+          const bldGeoJson = await fetchWarsawBuildings(bbox);
+          const sourceCrs = { crs: 'EPSG:2178' as const, description: 'PL-2000 strefa 7', geodeticLabel: 'ETRF2000-PL / CS2000 / 21', isGeodetic: true, zone: 7 };
+          const res = importBuildingsFromGeoJson(bldGeoJson, sourceCrs, projectCrs, projectCenter, radius);
+          importedBuildings = res.buildings;
+        } catch {
+          // kontynuuj z działkami
+        }
+      }
+
+      // 3. Synchronizacja do sceny
+      const existingUserBuildings = buildings.filter((b) => !b.id.startsWith('uldk-') && !b.id.startsWith('wfs-'));
+      const combined = [...existingUserBuildings, ...parcels, ...importedBuildings];
+      setBuildings(combined);
+
+      setStatus({
+        isFetching: false,
+        error: null,
+        info: null,
+        parcelsCount: parcels.length,
+        buildingsCount: importedBuildings.length,
+      });
+      setSyncFeedback(`Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków`);
+
+      // 5. Prefetch kafelków satelitarnych w obszarze zasięgu projektu
+      window.dispatchEvent(new CustomEvent('geo-prefetch-satellite', {
+        detail: { lat: centerLat, lon: centerLon, radius },
+      }));
+
+      triggerFit();
+    } catch (err) {
+      setStatus({
+        isFetching: false,
+        error: err instanceof Error ? err.message : 'Błąd synchronizacji',
+        info: null,
+      });
+    }
   };
 
   const handleMapsInputChange = (val: string) => {
@@ -306,13 +414,48 @@ export const ProjectGroup: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const isLocalhost = React.useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const host = window.location.host;
+    const hostname = window.location.hostname;
+    return (
+      host === 'localhost:3000' ||
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      Boolean((import.meta as any).env?.DEV)
+    );
+  }, []);
+
   return (
     <div className="sidebar-group-content">
-      {/* 1.1 Lokalizacja (Kąt słońca § 56) */}
+      {/* 1.1 Środek projektu (Punkt bazowy & Kąt słońca § 56) */}
       <div className="ui-card">
-        <div className="ui-title">
-          <span>Lokalizacja (Kąt słońca § 56)</span>
-          <MapPin size={14} color="#f59e0b" />
+        <div className="ui-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <MapPin size={14} color="#f59e0b" />
+            <span>Środek projektu</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsProjectCenterLocked(!isProjectCenterLocked)}
+            style={{
+              background: isProjectCenterLocked ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+              border: `1px solid ${isProjectCenterLocked ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+              borderRadius: '6px',
+              padding: '2px 6px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              color: isProjectCenterLocked ? '#6ee7b7' : '#fcd34d',
+              fontSize: '10px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+            title={isProjectCenterLocked ? 'Środek projektu zablokowany (kliknij, aby odblokować edycję)' : 'Środek projektu odblokowany (kliknij, aby zablokować)'}
+          >
+            {isProjectCenterLocked ? <Lock size={11} /> : <Unlock size={11} />}
+            <span>{isProjectCenterLocked ? 'Zablokowany' : 'Odblokowany'}</span>
+          </button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -325,12 +468,14 @@ export const ProjectGroup: React.FC = () => {
               padding: '6px 8px',
               borderRadius: '8px',
               border: `1px solid ${mapsParseError ? 'rgba(244, 63, 94, 0.5)' : 'var(--border-light)'}`,
+              opacity: isProjectCenterLocked ? 0.75 : 1,
             }}
           >
             <Link size={13} color={mapsParseError ? '#f43f5e' : '#f59e0b'} style={{ flexShrink: 0 }} />
             <input
               type="text"
               value={mapsInput}
+              disabled={isProjectCenterLocked}
               onChange={(e) => handleMapsInputChange(e.target.value)}
               placeholder="Wklej link Google Maps / współrzędne..."
               style={{
@@ -341,10 +486,11 @@ export const ProjectGroup: React.FC = () => {
                 fontSize: '11px',
                 color: '#f8fafc',
                 minWidth: 0,
+                cursor: isProjectCenterLocked ? 'not-allowed' : 'text',
               }}
-              title="Wklej link z Google Maps lub współrzędne (np. 52.23, 21.01)"
+              title={isProjectCenterLocked ? 'Odblokuj kłódkę, aby zmienić środek projektu' : 'Wklej link z Google Maps lub współrzędne (np. 52.23, 21.01)'}
             />
-            {mapsInput && (
+            {mapsInput && !isProjectCenterLocked && (
               <button
                 type="button"
                 onClick={() => handleMapsInputChange('')}
@@ -365,7 +511,7 @@ export const ProjectGroup: React.FC = () => {
           </div>
           {mapsParseError && (
             <div style={{ fontSize: '10px', color: '#f43f5e', paddingLeft: '4px' }}>
-              Nie rozpoznano współrzędnych. Wklej link lub np. 52.23, 21.01
+              Nie rozpoznano współrzędnych. Wklej link Google Maps lub np. 52.23, 21.01
             </div>
           )}
 
@@ -379,6 +525,8 @@ export const ProjectGroup: React.FC = () => {
               padding: '4px',
               borderRadius: '10px',
               border: '1px solid var(--border-light)',
+              opacity: isProjectCenterLocked ? 0.7 : 1,
+              pointerEvents: isProjectCenterLocked ? 'none' : 'auto',
             }}
           >
             {POLISH_CITIES.map((city) => {
@@ -416,25 +564,142 @@ export const ProjectGroup: React.FC = () => {
             })}
           </div>
 
-          {/* Coordinates info pill */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              fontSize: '11px',
-              color: '#94a3b8',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(245, 158, 11, 0.08)',
-              border: '1px solid rgba(245, 158, 11, 0.2)',
-            }}
-          >
-            <span>Współrzędne:</span>
-            <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
-              {settings.latitude.toFixed(4)}° N, {settings.longitude.toFixed(4)}° E
-            </span>
+          {/* Coordinates info pill & Center Action Button */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '11px',
+                color: '#94a3b8',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+              }}
+            >
+              <span>Punkt bazowy:</span>
+              <span style={{ color: '#fbbf24', fontWeight: 600, fontFamily: 'monospace' }}>
+                {settings.latitude.toFixed(4)}° N, {settings.longitude.toFixed(4)}° E
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={triggerFit}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '6px 8px',
+                borderRadius: '8px',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                color: '#38bdf8',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+              title="Centruj i dopasuj widok na środku projektu"
+            >
+              <Crosshair size={13} />
+              <span>Centruj</span>
+            </button>
           </div>
+
+          {/* Promień zasięgu projektu */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '2px' }}>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>Zasięg projektu:</span>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: '4px',
+                backgroundColor: 'var(--bg-input)',
+                padding: '3px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-light)',
+              }}
+            >
+              {([50, 100, 200, 300] as const).map((r) => {
+                const isActive = projectRadius === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setProjectRadius(r)}
+                    style={{
+                      padding: '3px 6px',
+                      fontSize: '10px',
+                      fontWeight: isActive ? 700 : 500,
+                      borderRadius: '5px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      backgroundColor: isActive ? 'var(--accent-indigo)' : 'transparent',
+                      color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                    }}
+                    title={`Obszar analizy i synchronizacji: okrąg o promieniu ${r} m`}
+                  >
+                    {r} m
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Przycisk Pobierz i Synchronizuj (PRO) */}
+          <button
+            type="button"
+            onClick={handleSyncGeoData}
+            disabled={status.isFetching}
+            style={{
+              marginTop: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px solid rgba(168, 85, 247, 0.6)',
+              background: 'linear-gradient(135deg, rgba(147, 51, 234, 0.35), rgba(99, 102, 241, 0.45))',
+              color: '#ffffff',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: status.isFetching ? 'not-allowed' : 'pointer',
+              boxShadow: '0 2px 8px rgba(147, 51, 234, 0.2)',
+            }}
+            title="Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK) oraz budynki wewnątrz okręgu projektu (Wersja PRO)"
+          >
+            {status.isFetching ? <RefreshCw size={13} className="spin" /> : <Sparkles size={13} color="#c084fc" />}
+            <span>{status.isFetching ? 'Synchronizacja danych...' : 'Pobierz i synchronizuj'}</span>
+            <span
+              style={{
+                fontSize: '9px',
+                fontWeight: 800,
+                backgroundColor: '#9333ea',
+                color: '#ffffff',
+                padding: '1px 4px',
+                borderRadius: '4px',
+                marginLeft: '2px',
+              }}
+            >
+              PRO
+            </span>
+          </button>
+
+          {syncFeedback && (
+            <div style={{ fontSize: '10.5px', color: '#34d399', textAlign: 'center', fontWeight: 600 }}>
+              {syncFeedback}
+            </div>
+          )}
+          {status.error && (
+            <div style={{ fontSize: '10.5px', color: '#f43f5e', textAlign: 'center' }}>
+              {status.error}
+            </div>
+          )}
         </div>
       </div>
 
@@ -458,70 +723,91 @@ export const ProjectGroup: React.FC = () => {
         <span>Udostępnij projekt</span>
       </button>
 
-      {/* Przyciski importu i eksportu sceny/DXF - leżą obok siebie (Grid 3-kolumnowy) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+      {/* Przyciski importu i eksportu sceny/DXF */}
+      {isLocalhost ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+          <label
+            className="btn-primary"
+            style={{
+              margin: 0,
+              padding: '8px 4px',
+              fontSize: '10.5px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              textAlign: 'center',
+              cursor: 'pointer',
+            }}
+            title="Wgraj plik DXF"
+          >
+            <Upload size={14} />
+            <span>Wgraj DXF</span>
+            <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
+          </label>
+
+          <label
+            className="btn-primary"
+            style={{
+              margin: 0,
+              padding: '8px 4px',
+              fontSize: '10.5px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              textAlign: 'center',
+              cursor: 'pointer',
+            }}
+            title="Wgraj scenę JSON"
+          >
+            <Upload size={14} />
+            <span>Wgraj scenę</span>
+            <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
+          </label>
+
+          <button
+            type="button"
+            onClick={handleSceneDownload}
+            className="btn-secondary"
+            style={{
+              padding: '8px 4px',
+              fontSize: '10.5px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              textAlign: 'center',
+            }}
+            title="Zapisz scenę JSON"
+          >
+            <Download size={14} />
+            <span>Zapisz JSON</span>
+          </button>
+        </div>
+      ) : (
         <label
           className="btn-primary"
           style={{
             margin: 0,
-            padding: '8px 4px',
-            fontSize: '10.5px',
+            padding: '9px 12px',
+            fontSize: '12px',
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '4px',
-            textAlign: 'center',
+            gap: '8px',
             cursor: 'pointer',
           }}
           title="Wgraj plik DXF"
         >
-          <Upload size={14} />
-          <span>Wgraj DXF</span>
+          <Upload size={15} />
+          <span>Wgraj plik DXF</span>
           <input type="file" accept=".dxf" onChange={handleFileUpload} style={{ display: 'none' }} />
         </label>
-
-        <label
-          className="btn-primary"
-          style={{
-            margin: 0,
-            padding: '8px 4px',
-            fontSize: '10.5px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            textAlign: 'center',
-            cursor: 'pointer',
-          }}
-          title="Wgraj scenę JSON"
-        >
-          <Upload size={14} />
-          <span>Wgraj scenę</span>
-          <input type="file" accept=".json" onChange={handleSceneFileUpload} style={{ display: 'none' }} />
-        </label>
-
-        <button
-          type="button"
-          onClick={handleSceneDownload}
-          className="btn-secondary"
-          style={{
-            padding: '8px 4px',
-            fontSize: '10.5px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            textAlign: 'center',
-          }}
-          title="Zapisz scenę JSON"
-        >
-          <Download size={14} />
-          <span>Zapisz JSON</span>
-        </button>
-      </div>
+      )}
 
       {/* Eksporty PRO: Raport PDF oraz Rysunek DXF */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
@@ -1145,7 +1431,7 @@ export const ProjectGroup: React.FC = () => {
             )}
           </div>
 
-          {/* 5. Podkład satelitarny Google Maps */}
+          {/* 5. Podkład satelitarny */}
           <div
             style={{
               padding: '8px 10px',
@@ -1175,7 +1461,7 @@ export const ProjectGroup: React.FC = () => {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Globe size={14} color={showSatelliteLayer ? '#38bdf8' : '#64748b'} />
-                <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny Google</span>
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Podkład satelitarny</span>
               </div>
               <div
                 style={{
@@ -1205,7 +1491,61 @@ export const ProjectGroup: React.FC = () => {
             </button>
 
             {showSatelliteLayer && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                {/* Dostawca map satelitarnych: Google vs HERE */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '10px', color: '#94a3b8' }}>Dostawca mapy:</span>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '2px',
+                      backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                      borderRadius: '7px',
+                      padding: '2px',
+                      border: '1px solid #334155',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSatelliteProvider('google')}
+                      title="Google Maps Satellite (Aktywny)"
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: 'none',
+                        backgroundColor: satelliteProvider === 'google' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                        color: satelliteProvider === 'google' ? '#38bdf8' : '#64748b',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      Google
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      title="HERE Satellite (Zablokowane — integracja wkrótce)"
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        cursor: 'not-allowed',
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: '#475569',
+                        opacity: 0.6,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      HERE
+                    </button>
+                  </div>
+                </div>
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8' }}>
                   <span>Krycie podkładu:</span>
                   <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(satelliteOpacity * 100)}%</span>
@@ -1221,6 +1561,504 @@ export const ProjectGroup: React.FC = () => {
                 />
               </div>
             )}
+          </div>
+
+          {/* 6. Parametry projektu (Bilans powierzchni i kubatury) */}
+          <div
+            style={{
+              padding: '8px 10px',
+              borderRadius: '10px',
+              backgroundColor: showProjectParameters ? 'rgba(16, 185, 129, 0.08)' : 'rgba(15, 23, 42, 0.5)',
+              border: showProjectParameters ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #1e293b',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowProjectParameters((prev) => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'none',
+                border: 'none',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                padding: 0,
+                width: '100%',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileSpreadsheet size={14} color={showProjectParameters ? 'var(--accent-emerald, #34d399)' : '#64748b'} />
+                <span style={{ fontSize: '11px', fontWeight: 600 }}>Parametry projektu (Bilans i wskaźniki)</span>
+              </div>
+              <div
+                style={{
+                  width: '28px',
+                  height: '16px',
+                  borderRadius: '999px',
+                  backgroundColor: showProjectParameters ? '#10b981' : '#334155',
+                  position: 'relative',
+                  transition: 'background-color 0.2s ease',
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ffffff',
+                    position: 'absolute',
+                    top: '2px',
+                    left: showProjectParameters ? '14px' : '2px',
+                    transition: 'left 0.2s ease',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                  }}
+                />
+              </div>
+            </button>
+          </div>
+
+          {/* 7. Podkłady geodezyjne i branżowe (PRO) */}
+          <div
+            style={{
+              padding: '8px 10px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(99, 102, 241, 0.05)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Layers size={14} color="#818cf8" />
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#e0e7ff' }}>
+                  Podkłady geodezyjne i branżowe
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 800,
+                  backgroundColor: 'var(--accent-indigo)',
+                  color: '#ffffff',
+                  padding: '1px 5px',
+                  borderRadius: '4px',
+                }}
+              >
+                PRO
+              </span>
+            </div>
+
+            {/* A. Ortofotomapa HR GUGiK */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <button
+                type="button"
+                onClick={() => setShowOrthophotoLayer(!showOrthophotoLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  color: '#f8fafc',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#64748b',
+                      boxShadow: showOrthophotoLayer ? '0 0 6px rgba(56, 189, 248, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Ortofotomapa HR (&le;10 cm)</span>
+                </div>
+                <div
+                  style={{
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '999px',
+                    backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showOrthophotoLayer ? '14px' : '2px',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                    }}
+                  />
+                </div>
+              </button>
+              {showOrthophotoLayer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(orthophotoOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={orthophotoOpacity}
+                    onChange={(e) => setOrthophotoOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* B. Sieci uzbrojenia terenu GESUT (KIUT) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <button
+                type="button"
+                onClick={() => setShowKiutLayer(!showKiutLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  color: '#f8fafc',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showKiutLayer ? '#fbbf24' : '#64748b',
+                      boxShadow: showKiutLayer ? '0 0 6px rgba(251, 191, 36, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Uzbrojenie GESUT (KIUT)</span>
+                </div>
+                <div
+                  style={{
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '999px',
+                    backgroundColor: showKiutLayer ? '#f59e0b' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showKiutLayer ? '14px' : '2px',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                    }}
+                  />
+                </div>
+              </button>
+              {showKiutLayer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(kiutOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={kiutOpacity}
+                    onChange={(e) => setKiutOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* C. Miejscowe plany MPZP (KIMPZP) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <button
+                type="button"
+                onClick={() => setShowMpzpLayer(!showMpzpLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  color: '#f8fafc',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showMpzpLayer ? '#818cf8' : '#64748b',
+                      boxShadow: showMpzpLayer ? '0 0 6px rgba(129, 140, 248, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Plany miejscowe (MPZP)</span>
+                </div>
+                <div
+                  style={{
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '999px',
+                    backgroundColor: showMpzpLayer ? '#818cf8' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showMpzpLayer ? '14px' : '2px',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                    }}
+                  />
+                </div>
+              </button>
+              {showMpzpLayer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(mpzpOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={mpzpOpacity}
+                    onChange={(e) => setMpzpOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#818cf8', cursor: 'pointer' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* D. Obiekty topograficzne BDOT10k */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <button
+                type="button"
+                onClick={() => setShowBdotLayer(!showBdotLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'none',
+                  border: 'none',
+                  color: '#f8fafc',
+                  cursor: 'pointer',
+                  padding: 0,
+                  width: '100%',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      backgroundColor: showBdotLayer ? '#34d399' : '#64748b',
+                      boxShadow: showBdotLayer ? '0 0 6px rgba(52, 211, 153, 0.6)' : 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Topografia BDOT10k</span>
+                </div>
+                <div
+                  style={{
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '999px',
+                    backgroundColor: showBdotLayer ? '#10b981' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showBdotLayer ? '14px' : '2px',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                    }}
+                  />
+                </div>
+              </button>
+              {showBdotLayer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
+                    <span>Krycie:</span>
+                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(bdotOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.05"
+                    value={bdotOpacity}
+                    onChange={(e) => setBdotOpacity(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: '#34d399', cursor: 'pointer' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* E. Cieniowanie rzeźby terenu (NMT) */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: showTerrainLayer ? '#34d399' : '#64748b',
+                    boxShadow: showTerrainLayer ? '0 0 6px rgba(52, 211, 153, 0.6)' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: '11px', fontWeight: 500, color: '#f8fafc' }}>Cieniowanie rzeźby (NMT)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTerrainLayer(!showTerrainLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '999px',
+                    backgroundColor: showTerrainLayer ? '#10b981' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showTerrainLayer ? '14px' : '2px',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                    }}
+                  />
+                </div>
+              </button>
+            </div>
+
+            {/* F. Ewidencja gruntów i budynków (KIEG) */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: showEgibLayer ? '#f43f5e' : '#64748b',
+                    boxShadow: showEgibLayer ? '0 0 6px rgba(244, 63, 94, 0.6)' : 'none',
+                  }}
+                />
+                <span style={{ fontSize: '11px', fontWeight: 500, color: '#f8fafc' }}>Ewidencja gruntów (KIEG)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEgibLayer(!showEgibLayer)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: '28px',
+                    height: '16px',
+                    borderRadius: '999px',
+                    backgroundColor: showEgibLayer ? '#f43f5e' : '#334155',
+                    position: 'relative',
+                    transition: 'background-color 0.2s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showEgibLayer ? '14px' : '2px',
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+                    }}
+                  />
+                </div>
+              </button>
+            </div>
           </div>
         </div>
       </div>

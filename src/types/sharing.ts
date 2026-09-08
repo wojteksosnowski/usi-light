@@ -34,6 +34,7 @@ export interface SharedProjectPayload {
     showShadowFill?: boolean;
     showSatelliteLayer?: boolean;
     satelliteOpacity?: number;
+    showProjectParameters?: boolean;
     mapsInput?: string;
   };
   // Warstwy, obiekty i modyfikatory
