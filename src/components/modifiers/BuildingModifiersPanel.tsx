@@ -8,7 +8,6 @@ import {
   X,
   Sliders,
   CheckCircle2,
-  Info,
   ChevronDown,
   Building,
 } from 'lucide-react';
@@ -35,6 +34,7 @@ import {
 } from '../common/CustomCadIcons';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
 import { StoryRangeSelector } from './StoryRangeSelector';
+import { BuildingIsoPreview } from '../preview/BuildingIsoPreview';
 
 interface GlobalIndexOption {
   value: number;
@@ -220,44 +220,13 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
       onToggleCollapse={onToggleCollapse}
     >
 
-      {/* Info Banner */}
-      <div
-        style={{
-          backgroundColor: 'rgba(168, 85, 247, 0.08)',
-          border: '1px solid rgba(168, 85, 247, 0.25)',
-          borderRadius: '8px',
-          padding: '8px 10px',
-          fontSize: '11px',
-          color: '#e9d5ff',
-          display: 'flex',
-          gap: '8px',
-          alignItems: 'flex-start',
-          marginBottom: '14px',
-        }}
-      >
-        <Info size={14} color="#c084fc" style={{ marginTop: '2px', flexShrink: 0 }} />
-        <div>
-          Modyfikatory generują uskokowe poziomy kondygnacji, strefy o zadanym odsunięciu, wykusze fasad, tarasy oraz wewnętrzne dziedzińce (donat).
-        </div>
+      {/* 1:1 Isometric Preview */}
+      <div style={{ marginBottom: '14px' }}>
+        <BuildingIsoPreview building={selectedBuilding} />
       </div>
 
       {/* Modifier Stack List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontSize: '11px',
-            fontWeight: 700,
-            color: '#cbd5e1',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}
-        >
-          <span>Stos modyfikatorów ({modifiers.length})</span>
-        </div>
-
         {modifiers.length === 0 ? (
           <div
             style={{
@@ -857,8 +826,6 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                   const cutMod = mod as CornerCutModifier;
                   const modeOptions = CORNER_CUT_MODE_OPTIONS;
                   const scopeOptions = CORNER_CUT_SCOPE_OPTIONS;
-                  const selectedModeLabel = modeOptions.find((m) => m.value === cutMod.mode)?.label;
-                  const selectedScopeLabel = scopeOptions.find((s) => s.value === cutMod.scope)?.label;
 
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
@@ -1045,12 +1012,6 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                           </select>
                         </div>
                       )}
-
-                      <span style={{ fontSize: '9px', color: '#7dd3fc' }}>
-                        d = {cutMod.depth}m • {selectedModeLabel}
-                        {' • '}
-                        {selectedScopeLabel}
-                      </span>
                     </div>
                   );
                 })()}
