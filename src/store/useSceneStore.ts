@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
 import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference } from '../types/geometry';
-import { createSampleBuildings, createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
+import { createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
@@ -117,9 +117,9 @@ let interactionBatchSnapshot: {
 export const useSceneStore = create<SceneState>()(
   temporal(
     (set, get) => ({
-  buildings: createSampleBuildings(),
-  selectedBuildingId: 'bldg-1',
-  selectedBuildingIds: ['bldg-1'],
+  buildings: [],
+  selectedBuildingId: null,
+  selectedBuildingIds: [],
   layerSettings: {},
   selectedLayerName: null,
   isLinkingMode: false,
@@ -928,7 +928,7 @@ export const useSceneStore = create<SceneState>()(
 
   loadSceneData: (scene) => {
     set({
-      buildings: scene.buildings ?? createSampleBuildings(),
+      buildings: scene.buildings ?? [],
       selectedBuildingId: scene.selectedBuildingId ?? null,
       selectedBuildingIds: scene.selectedBuildingId ? [scene.selectedBuildingId] : [],
       layerSettings: scene.layerSettings ?? {},
@@ -943,9 +943,9 @@ export const useSceneStore = create<SceneState>()(
   resetScene: () => {
     interactionBatchSnapshot = null;
     set({
-      buildings: createSampleBuildings(),
-      selectedBuildingId: 'bldg-1',
-      selectedBuildingIds: ['bldg-1'],
+      buildings: [],
+      selectedBuildingId: null,
+      selectedBuildingIds: [],
       layerSettings: {},
       selectedLayerName: null,
       isLinkingMode: false,

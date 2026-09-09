@@ -1,4 +1,5 @@
 import { CadRenderFrameContext, CadRenderLayer } from './types';
+import { PerfMonitor } from '../../../engine/perf/PerfMonitor';
 import {
   SatelliteMapLayer,
   GridLayer,
@@ -92,6 +93,7 @@ export class CadRenderPipeline {
    * Renderuje główny stos warstw sceny CAD (0..80)
    */
   public renderMain(context: CadRenderFrameContext): void {
+    const mainStart = performance.now();
     const { renderContext } = context;
     const { ctx, width, height } = renderContext;
 
@@ -106,7 +108,7 @@ export class CadRenderPipeline {
       if (layer.shouldRender(context)) {
         try {
           ctx.save();
-          layer.render(context);
+          PerfMonitor.time(`render.layer.${layer.id}`, () => layer.render(context));
         } catch (err) {
           console.error(`[CadRenderPipeline] Błąd podczas renderowania warstwy [${layer.id}]:`, err);
         } finally {
@@ -114,12 +116,16 @@ export class CadRenderPipeline {
         }
       }
     }
+
+    PerfMonitor.mark('render.main.total', performance.now() - mainStart);
+    PerfMonitor.flushIfDue();
   }
 
   /**
    * Renderuje stos warstw nakładki interaktywnej CAD (90)
    */
   public renderOverlay(context: CadRenderFrameContext): void {
+    const overlayStart = performance.now();
     const { renderContext } = context;
     const { ctx, width, height } = renderContext;
 
@@ -130,7 +136,7 @@ export class CadRenderPipeline {
       if (layer.shouldRender(context)) {
         try {
           ctx.save();
-          layer.render(context);
+          PerfMonitor.time(`render.overlayLayer.${layer.id}`, () => layer.render(context));
         } catch (err) {
           console.error(`[CadRenderPipeline] Błąd podczas renderowania nakładki [${layer.id}]:`, err);
         } finally {
@@ -138,6 +144,8 @@ export class CadRenderPipeline {
         }
       }
     }
+
+    PerfMonitor.mark('render.overlay.total', performance.now() - overlayStart);
   }
 
   // --------------------------------------------------------------------------

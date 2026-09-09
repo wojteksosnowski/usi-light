@@ -813,7 +813,7 @@ export function useCanvasInteraction({
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && !isBuildingLocked(selBldg, layerSettings) && selBldg.vertices.length >= 3) {
           const centroid = getPolygonCentroid(selBldg.vertices);
-          const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale);
+          const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale, viewRotationDeg);
           if (hS && Math.hypot(sx - hS.sx, sy - hS.sy) <= 10) {
             const startAngleWorld = Math.atan2(world.wy - centroid.y, world.wx - centroid.x);
             setIsRotating(true);
@@ -1321,7 +1321,7 @@ export function useCanvasInteraction({
 
       if (selBldg && !isBldgLocked && selBldg.vertices.length >= 3) {
         const centroid = getPolygonCentroid(selBldg.vertices);
-        const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale);
+        const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale, viewRotationDeg);
         setIsRotateHandleHovered(!!hS && Math.hypot(sx - hS.sx, sy - hS.sy) <= 10);
 
         if (isRotating && lastMouseAngleWorld !== null) {

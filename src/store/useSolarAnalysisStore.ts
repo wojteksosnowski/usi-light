@@ -79,6 +79,7 @@ interface SolarAnalysisState {
   addPinnedPoint: (pt: { buildingId: string; segmentId: string; offsetRatio: number }) => void;
   deletePinnedPoint: (id: string) => void;
   updatePinnedPoint: (id: string, buildingId: string, segmentId: string, offsetRatio: number) => void;
+  updatePinnedPointStorey: (id: string, storeyIndex: number | undefined) => void;
   clearPinnedPoints: () => void;
 }
 
@@ -241,6 +242,14 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
     set((state) => ({
       pinnedPoints: state.pinnedPoints.map((p) =>
         p.id === id ? { ...p, buildingId, segmentId, offsetRatio } : p
+      ),
+    }));
+  },
+
+  updatePinnedPointStorey: (id, storeyIndex) => {
+    set((state) => ({
+      pinnedPoints: state.pinnedPoints.map((p) =>
+        p.id === id ? { ...p, storeyIndex } : p
       ),
     }));
   },

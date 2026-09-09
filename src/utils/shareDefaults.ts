@@ -1,7 +1,7 @@
 export const SHARE_V2_BUILDING_DEFAULTS = {
   category: 'building' as const,
   elevation: 0.0,
-  firstFloorHeight: 3.5,
+  firstFloorHeight: 3.0,
   typicalFloorHeight: 3.0,
   hWindowBottom: 0.85,
   isCityCentre: false,

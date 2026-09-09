@@ -16,17 +16,32 @@ export class EdgeSnapStrategy implements SnapStrategy {
     const thresholdPx = context.thresholdPx ?? 12;
     const minEdgeLength = context.minEdgeLengthMeters ?? 0.05;
 
-    const activeEdges = (
-      context.excludeBuildingId
-        ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
-        : context.lineBuffer
-    ).filter((e) => e.length >= minEdgeLength);
-
-    if (activeEdges.length === 0) return null;
-
     const sRef = context.worldToScreen(point.x + 1, point.y);
     const pxPerMeter = Math.hypot(sRef.sx - context.mouseScreen.sx, sRef.sy - context.mouseScreen.sy) || 20;
     const snapRadiusWorld = (thresholdPx * 2) / pxPerMeter + 0.5;
+
+    // Snap do przedłużenia krawędzi wymaga pełnego skanu (punkt może być daleko od
+    // własnego AABB segmentu, ale blisko jego nieskończonego przedłużenia) - świadoma
+    // decyzja zakresu: indeks przestrzenny używany tylko gdy przedłużenia są wyłączone.
+    let candidateEdges: CachedLineEquation[];
+    if (context.spatialIndex && !allowExtension) {
+      candidateEdges = context.spatialIndex.queryBBox(
+        point.x - snapRadiusWorld,
+        point.y - snapRadiusWorld,
+        point.x + snapRadiusWorld,
+        point.y + snapRadiusWorld
+      );
+      if (context.excludeBuildingId) {
+        candidateEdges = candidateEdges.filter((e) => e.objectId !== context.excludeBuildingId);
+      }
+    } else {
+      candidateEdges = context.excludeBuildingId
+        ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
+        : context.lineBuffer;
+    }
+    const activeEdges = candidateEdges.filter((e) => e.length >= minEdgeLength);
+
+    if (activeEdges.length === 0) return null;
 
     let best: {
       edge: CachedLineEquation;

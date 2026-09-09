@@ -727,6 +727,14 @@ export function renderDrawingToolPreview(
       }
 
       // 2. Vertex handles (draggable and selectable)
+      // Perf: przy dużej liczbie wierzchołków większość to "zwykłe" uchwyty (nie selected/hovered/dragged) -
+      // rysujemy je wszystkie jako jeden batchowany Path2D (jedno fill + jedno stroke) zamiast N par arc/fill/stroke.
+      // Pojedyncze wyróżnione wierzchołki (selected/hovered) są rzadkie i rysowane indywidualnie jak dotychczas.
+      const plainHandleR = 5.5;
+      const batchedPlainPath = new Path2D();
+      let hasBatchedPlain = false;
+      const plainLabels: { sx: number; sy: number; text: string }[] = [];
+
       for (let i = 0; i < verts.length; i++) {
         const v = verts[i];
         const { sx, sy } = worldToScreen(v.x, v.y);
@@ -734,7 +742,16 @@ export function renderDrawingToolPreview(
 
         const isSelected = selectedVertexIndex === i;
         const isHovered = hoveredVertexIndex === i || draggedVertexIndex === i;
-        const r = isSelected ? 8.5 : isHovered ? 7.5 : 5.5;
+
+        if (!isSelected && !isHovered) {
+          batchedPlainPath.moveTo(sx + plainHandleR, sy);
+          batchedPlainPath.arc(sx, sy, plainHandleR, 0, Math.PI * 2);
+          hasBatchedPlain = true;
+          plainLabels.push({ sx, sy, text: `${i + 1}` });
+          continue;
+        }
+
+        const r = isSelected ? 8.5 : 7.5;
 
         if (isSelected) {
           ctx.beginPath();
@@ -746,7 +763,7 @@ export function renderDrawingToolPreview(
           ctx.fill();
           ctx.stroke();
           ctx.setLineDash([]);
-        } else if (isHovered) {
+        } else {
           ctx.beginPath();
           ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
           ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
@@ -756,21 +773,33 @@ export function renderDrawingToolPreview(
 
         ctx.beginPath();
         ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected
-          ? (isSweep ? '#38bdf8' : '#f59e0b')
-          : isHovered
-          ? '#38bdf8'
-          : (isSweep ? '#0369a1' : '#0f172a');
-        ctx.strokeStyle = isSelected ? '#ffffff' : isHovered ? '#ffffff' : '#38bdf8';
+        ctx.fillStyle = isSelected ? (isSweep ? '#38bdf8' : '#f59e0b') : '#38bdf8';
+        ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = isSelected ? 2.5 : 2;
         ctx.fill();
         ctx.stroke();
 
         ctx.font = isSelected ? 'bold 9px monospace' : 'bold 8.5px monospace';
-        ctx.fillStyle = isSelected ? '#020617' : isHovered ? '#020617' : '#f8fafc';
+        ctx.fillStyle = '#020617';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(`${i + 1}`, sx, sy);
+      }
+
+      if (hasBatchedPlain) {
+        ctx.fillStyle = isSweep ? '#0369a1' : '#0f172a';
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.fill(batchedPlainPath);
+        ctx.stroke(batchedPlainPath);
+
+        ctx.font = 'bold 8.5px monospace';
+        ctx.fillStyle = '#f8fafc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const label of plainLabels) {
+          ctx.fillText(label.text, label.sx, label.sy);
+        }
       }
 
       ctx.restore();
@@ -785,7 +814,7 @@ export function renderDrawingToolPreview(
     const handleRotAngleDeg = (selectedBuilding as any).rotAngleDeg || 0;
 
     const centroid = getPolygonCentroid(selectedBuilding.vertices);
-    const handlePos = getRotateHandleScreenPos(selectedBuilding, worldToScreen, rc.viewState.scale);
+    const handlePos = getRotateHandleScreenPos(selectedBuilding, worldToScreen, rc.viewState.scale, rc.viewRotationDeg);
     const centroidScreen = worldToScreen(centroid.x, centroid.y);
 
     if (handlePos && Number.isFinite(centroidScreen.sx)) {

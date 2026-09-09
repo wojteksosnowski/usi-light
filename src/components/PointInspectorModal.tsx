@@ -3,6 +3,7 @@ import { AnalysisPointResult } from '../types/geometry';
 import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
 import { FloatingInspectorCard } from './common/FloatingInspectorCard';
 import { useSceneStore } from '../store';
+import { calculateBuildingFloors } from '../utils/buildingFloorCalculator';
 
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
@@ -10,6 +11,7 @@ interface PointInspectorModalProps {
   activePointId?: string | null;
   onSelectPointId?: (id: string) => void;
   onDeletePointId?: (id: string) => void;
+  onStoreyChange?: (id: string, storeyIndex: number | undefined) => void;
   activeMode?: 'shadowing' | 'sunlight';
   sunlightMethod?: 'raycasting' | 'segments';
   onModeChange?: (mode: 'shadowing' | 'sunlight') => void;
@@ -25,6 +27,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
   activePointId,
   onSelectPointId,
   onDeletePointId,
+  onStoreyChange,
   activeMode = 'shadowing',
   sunlightMethod = 'raycasting',
   onModeChange,
@@ -45,6 +48,16 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
 
   const associatedBuilding = buildings.find((b) => b.id === pointResult.buildingId);
   const buildingLabel = associatedBuilding ? associatedBuilding.name : `Budynek ${pointResult.buildingId}`;
+
+  const storeyIntervals = associatedBuilding
+    ? calculateBuildingFloors(
+        associatedBuilding.defaultHeight,
+        associatedBuilding.firstFloorHeight,
+        associatedBuilding.typicalFloorHeight,
+        associatedBuilding.elevation,
+        associatedBuilding.storeysCount
+      ).intervals
+    : [];
 
   return (
     <FloatingInspectorCard
@@ -123,6 +136,41 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Storey (kondygnacja) selector for the active point */}
+      {storeyIntervals.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '12px' }}>
+          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+            Kondygnacja pomiaru:
+          </label>
+          <select
+            value={pointResult.storeyIndex ?? 'auto'}
+            onChange={(e) => {
+              const v = e.target.value;
+              onStoreyChange?.(pointResult.id, v === 'auto' ? undefined : parseInt(v, 10));
+            }}
+            disabled={!onStoreyChange}
+            style={{
+              width: '100%',
+              backgroundColor: '#0f172a',
+              border: '1px solid #1e293b',
+              borderRadius: '6px',
+              color: '#e2e8f0',
+              padding: '4px 6px',
+              fontSize: '11px',
+              fontWeight: 500,
+              cursor: onStoreyChange ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <option value="auto">Auto (na podstawie geometrii)</option>
+            {storeyIntervals.map((iv) => (
+              <option key={iv.index} value={iv.index}>
+                {iv.isFirst ? 'Parter' : iv.label} ({iv.hBottom.toFixed(2)}–{iv.hTop.toFixed(2)} m)
+              </option>
+            ))}
+          </select>
         </div>
       )}
 

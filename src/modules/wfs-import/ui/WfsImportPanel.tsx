@@ -18,7 +18,7 @@ import {
 } from '../services/geoJsonImporter';
 import { detectCoordinateSystem, CrsDetectionResult } from '../../../utils/geoTransform';
 
-const RADIUS_OPTIONS = [100, 200, 500];
+const RADIUS_OPTIONS = [100, 200, 300, 500];
 const WARSAW_BBOX = [20.85, 52.09, 21.27, 52.37];
 
 function isInWarsaw(lat: number, lon: number): boolean {

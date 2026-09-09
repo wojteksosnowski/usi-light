@@ -104,7 +104,7 @@ export const useWfsStore = create<WfsState>((set) => ({
     egibOverlay: false,
   },
 
-  projectRadius: 100,
+  projectRadius: 200,
   isProjectCenterLocked: true,
 
   showGeoOverlayGroup: false,

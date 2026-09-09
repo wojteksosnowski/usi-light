@@ -36,6 +36,7 @@ import {
   prefilterShadowingObstacles,
   prefilterSunlightObstacles,
 } from './engine/analysisEngine';
+import { computeStoryHeightIntervals } from './engine/modifiers/modifierPipeline';
 import { Point2D, AnalysisPointResult } from './types/geometry';
 import { createBuildingFromVertices } from './utils/dxfParser';
 import { analyzeSegmentsStatistics } from './utils/segmentStatistics';
@@ -138,6 +139,7 @@ export const App: React.FC = () => {
   const addPinnedPoint = useSolarAnalysisStore((s) => s.addPinnedPoint);
   const deletePinnedPoint = useSolarAnalysisStore((s) => s.deletePinnedPoint);
   const updatePinnedPoint = useSolarAnalysisStore((s) => s.updatePinnedPoint);
+  const updatePinnedPointStorey = useSolarAnalysisStore((s) => s.updatePinnedPointStorey);
   const setAnalysisOutput = useSolarAnalysisStore((s) => s.setAnalysisOutput);
 
   // UI Store & Sharing
@@ -202,6 +204,14 @@ export const App: React.FC = () => {
       setShowModifiersPanel(false);
     }
   }, [selectedBuildingId, buildings, setShowModifiersPanel]);
+
+  // Wyjście z edycji wierzchołków, gdy edytowany obiekt przestaje być zaznaczony
+  // (klik na puste pole, usunięcie budynku, ukrycie warstwy, wczytanie nowej scenerii itd.)
+  useEffect(() => {
+    if (!selectedBuildingId && drawingMode === 'vertexEdit') {
+      setDrawingMode('none');
+    }
+  }, [selectedBuildingId, drawingMode, setDrawingMode]);
 
   const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
     switch (accuracyStage) {
@@ -282,6 +292,12 @@ export const App: React.FC = () => {
         const prefilteredShadowing = prefilterShadowingObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
         const prefilteredSunlight = prefilterSunlightObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
 
+        let baseHeightOverride: number | undefined;
+        if (pt.storeyIndex !== undefined) {
+          const intervals = computeStoryHeightIntervals(bldg);
+          baseHeightOverride = intervals[pt.storeyIndex]?.hBottom;
+        }
+
         const shadowRes = analyzeShadowingAtPoint(
           exactPoint,
           seg,
@@ -289,7 +305,9 @@ export const App: React.FC = () => {
           effectiveBuildings,
           bldg.id,
           currentAccuracyOptions.angleStepDeg,
-          prefilteredShadowing
+          prefilteredShadowing,
+          undefined,
+          baseHeightOverride
         );
 
         const sunRes =
@@ -301,7 +319,10 @@ export const App: React.FC = () => {
                 effectiveBuildings,
                 bldg.id,
                 settings,
-                prefilteredSunlight
+                prefilteredSunlight,
+                undefined,
+                undefined,
+                baseHeightOverride
               )
             : analyzeSunlightAtPoint(
                 exactPoint,
@@ -312,7 +333,10 @@ export const App: React.FC = () => {
                 settings,
                 currentAccuracyOptions.sunlightStepMinutes,
                 undefined,
-                prefilteredSunlight
+                prefilteredSunlight,
+                undefined,
+                undefined,
+                baseHeightOverride
               );
 
         return {
@@ -322,6 +346,7 @@ export const App: React.FC = () => {
           buildingId: bldg.id,
           segmentId: seg.id,
           label: pt.label || `P${pIdx + 1}`,
+          storeyIndex: pt.storeyIndex,
           shadowing: shadowRes,
           sunlight: sunRes,
         };
@@ -367,8 +392,27 @@ export const App: React.FC = () => {
     }
   }, [showProjectParameters, activePointResult, showModifiersPanel]);
 
+  // Dev-only: ładowanie sceny testowej z URL (?perfScene=/perf-scene.json) - do testów
+  // wydajnościowych na dużych scenach, bez limitu rozmiaru localStorage.
+  useEffect(() => {
+    const perfSceneUrl = new URLSearchParams(window.location.search).get('perfScene');
+    if (!perfSceneUrl) return;
+    (async () => {
+      try {
+        const res = await fetch(perfSceneUrl);
+        const scene = (await res.json()) as SavedSceneData;
+        loadSceneData(scene);
+        sceneHydratedRef.current = true;
+        console.log(`[perfScene] Załadowano ${scene.buildings?.length ?? 0} obiektów z ${perfSceneUrl}`);
+      } catch (err) {
+        console.error('[perfScene] Błąd ładowania sceny testowej:', err);
+      }
+    })();
+  }, [loadSceneData]);
+
   // LocalStorage Persistence (Load on mount)
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('perfScene')) return;
     try {
       const raw = localStorage.getItem(SCENE_STORAGE_KEY);
       if (!raw) return;
@@ -388,6 +432,7 @@ export const App: React.FC = () => {
   // LocalStorage Persistence (Save on update)
   useEffect(() => {
     if (!sceneHydratedRef.current) return;
+    if (new URLSearchParams(window.location.search).get('perfScene')) return;
     const scene: SavedSceneData = {
       version: 1,
       buildings,
@@ -731,6 +776,7 @@ export const App: React.FC = () => {
                   activePointId={activePinnedPointId}
                   onSelectPointId={setActivePinnedPointId}
                   onDeletePointId={deletePinnedPoint}
+                  onStoreyChange={updatePinnedPointStorey}
                   activeMode={activePointMode}
                   sunlightMethod={sunlightMethod}
                   onModeChange={setActivePointMode}

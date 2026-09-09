@@ -174,6 +174,7 @@ export interface PinnedFacadePoint {
   segmentId: string;
   offsetRatio: number;
   label?: string; // e.g. "P1", "P2", "P3"
+  storeyIndex?: number; // 0-based kondygnacja; undefined = auto (segment.hBase)
 }
 
 export interface AnalysisPointResult {
@@ -185,6 +186,7 @@ export interface AnalysisPointResult {
   shadowing: ShadowingResult;
   sunlight: SunlightResult;
   label?: string;
+  storeyIndex?: number;
 }
 
 export interface ProjectSettings {

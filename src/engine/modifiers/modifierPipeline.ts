@@ -290,7 +290,7 @@ export function generateBayWindowPolygon(
 export function computeStoryHeightIntervals(building: BuildingLoop): { hBottom: number; hTop: number }[] {
   const elevation = building.elevation ?? 0.0;
   const totalHeight = building.defaultHeight || 15.0;
-  const firstH = building.firstFloorHeight ?? 3.5;
+  const firstH = building.firstFloorHeight ?? 3.0;
   const typicalH = building.typicalFloorHeight ?? 3.0;
 
   const floorCalc = calculateBuildingFloors(totalHeight, firstH, typicalH, elevation, building.storeysCount);

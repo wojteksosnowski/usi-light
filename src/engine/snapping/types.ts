@@ -1,6 +1,7 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import { CachedLineEquation } from '../../utils/lineBufferEngine';
 import { DominantDirection } from '../../utils/segmentStatistics';
+import { SpatialLineIndex } from './SpatialLineIndex';
 
 export type SnapType =
   | 'vertex'
@@ -87,6 +88,9 @@ export interface SnapContext {
   hysteresisBonusPx?: number;
   minEdgeLengthMeters?: number;
   activeSnapTypes?: Partial<Record<SnapType, boolean>>;
+  /** Indeks przestrzenny (rbush) nad lineBuffer, wstrzykiwany przez SnapCoordinator.
+   *  Gdy undefined, strategie korzystają z liniowego skanu (kompatybilność wsteczna). */
+  spatialIndex?: SpatialLineIndex;
 }
 
 export interface SnapStrategy {

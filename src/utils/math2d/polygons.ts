@@ -39,35 +39,39 @@ export function getPolygonCentroid(vertices: Point2D[]): Point2D {
 const ROTATE_HANDLE_MARGIN_PX = 28;
 
 /**
- * Screen position of the per-object rotate handle. Anchored to the vertex
- * farthest from the centroid (a rotation-invariant choice, since rotation
- * preserves distances), so the handle orbits the centroid rigidly with the
- * shape instead of jumping around like an axis-aligned bounding box would.
+ * Screen position of the per-object rotate handle. Points at "12 o'clock"
+ * relative to the object: straight up on screen when the building's own
+ * rotation (`transform.rotationDeg`) is 0 and the view isn't rotated, then
+ * turns rigidly with the building as it's rotated. The farthest-vertex
+ * distance is kept only to size the offset so the handle clears the shape.
  */
 export function getRotateHandleScreenPos(
-  bldg: { vertices: Point2D[] },
+  bldg: { vertices: Point2D[]; transform?: { rotationDeg?: number } },
   worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
-  scale: number
+  scale: number,
+  viewRotationDeg: number = 0
 ): { sx: number; sy: number } | null {
   if (!bldg.vertices || bldg.vertices.length === 0) return null;
   const centroid = getPolygonCentroid(bldg.vertices);
-  let apex = bldg.vertices[0];
   let maxDistSq = -Infinity;
   for (const v of bldg.vertices) {
     const d = (v.x - centroid.x) ** 2 + (v.y - centroid.y) ** 2;
-    if (d > maxDistSq) {
-      maxDistSq = d;
-      apex = v;
-    }
+    if (d > maxDistSq) maxDistSq = d;
   }
   const dist = Math.sqrt(maxDistSq);
-  const dx = apex.x - centroid.x;
-  const dy = apex.y - centroid.y;
-  const len = Math.hypot(dx, dy) || 1;
+
+  // worldToScreen rotates world vectors by +viewRotationDeg before flipping Y,
+  // so to land straight up on screen at rotationDeg=0 we need to counter-rotate
+  // by viewRotationDeg here, then add the building's own rotation on top.
+  const rotationDeg = bldg.transform?.rotationDeg || 0;
+  const angleRad = ((rotationDeg - viewRotationDeg) * Math.PI) / 180;
+  const dirX = Math.sin(angleRad);
+  const dirY = Math.cos(angleRad);
+
   const marginWorld = ROTATE_HANDLE_MARGIN_PX / (scale || 1);
   const worldPos = {
-    x: centroid.x + (dx / len) * (dist + marginWorld),
-    y: centroid.y + (dy / len) * (dist + marginWorld),
+    x: centroid.x + dirX * (dist + marginWorld),
+    y: centroid.y + dirY * (dist + marginWorld),
   };
   const s = worldToScreen(worldPos.x, worldPos.y);
   if (!Number.isFinite(s.sx) || !Number.isFinite(s.sy)) return null;

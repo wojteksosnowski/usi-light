@@ -13,17 +13,29 @@ export class MidpointSnapStrategy implements SnapStrategy {
     const thresholdPx = context.thresholdPx ?? 12;
     const minEdgeLength = context.minEdgeLengthMeters ?? 0.05;
 
-    const activeEdges = (
-      context.excludeBuildingId
-        ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
-        : context.lineBuffer
-    ).filter((e) => e.length >= minEdgeLength);
-
-    if (activeEdges.length === 0) return null;
-
     const sRef = context.worldToScreen(point.x + 1, point.y);
     const pxPerMeter = Math.hypot(sRef.sx - context.mouseScreen.sx, sRef.sy - context.mouseScreen.sy) || 20;
     const snapRadiusWorld = (thresholdPx * 2) / pxPerMeter + 0.5;
+
+    let candidateEdges: CachedLineEquation[];
+    if (context.spatialIndex) {
+      candidateEdges = context.spatialIndex.queryBBox(
+        point.x - snapRadiusWorld,
+        point.y - snapRadiusWorld,
+        point.x + snapRadiusWorld,
+        point.y + snapRadiusWorld
+      );
+      if (context.excludeBuildingId) {
+        candidateEdges = candidateEdges.filter((e) => e.objectId !== context.excludeBuildingId);
+      }
+    } else {
+      candidateEdges = context.excludeBuildingId
+        ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
+        : context.lineBuffer;
+    }
+    const activeEdges = candidateEdges.filter((e) => e.length >= minEdgeLength);
+
+    if (activeEdges.length === 0) return null;
 
     const midpointsList: { point: Point2D; edge: CachedLineEquation }[] = [];
     for (const edge of activeEdges) {
