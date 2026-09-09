@@ -20,9 +20,17 @@ import { useSceneStore, useCadToolStore } from '../../store';
 import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
+import { TrapezoidIcon, BrokenLineIcon } from '../common/CustomCadIcons';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon, CornerCutIcon } from '../common/CustomCadIcons';
-import { createDefaultCornerCutModifier } from '../../types/modifiers';
+import { MODIFIER_DESCRIPTORS } from '../modifiers/modifierDescriptors';
+import { ModifierType } from '../../types/modifiers';
+
+/** Układ przycisków "dodaj modyfikator" — jeden wiersz = jeden rząd siatki w kolejności deklaracji. */
+const ADD_MODIFIER_ROWS: ModifierType[][] = [
+  ['story_offset', 'terrace', 'donut'],
+  ['zone_offset', 'bay_window'],
+  ['corner_cut'],
+];
 
 export const ToolsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -732,251 +740,45 @@ export const ToolsGroup: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {selectedBuilding ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'story_offset' as const,
-                      enabled: true,
-                      distance: -2.0,
-                      storiesCount: -1,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title={
-                    selectedBuilding.category === 'boundary'
-                      ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji wysokościowych'
-                      : 'Dodaj modyfikator uskoku kondygnacji (penthouse / podcień)'
-                  }
-                >
-                  <SetbackPenthouseIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#c084fc'} />
-                  <span style={{ fontWeight: 600 }}>+ Uskok</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'terrace' as const,
-                      enabled: true,
-                      depth: -4.0,
-                      storiesCount: -1,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title="Dodaj modyfikator tarasu (uskok wybranej krawędzi)"
-                >
-                  <TerraceIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#fed7aa'} />
-                  <span style={{ fontWeight: 600 }}>+ Taras</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'donut' as const,
-                      enabled: true,
-                      offset: -12.0,
-                      storiesCount: 0,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title="Dodaj modyfikator donata (wewnętrzny otwór / patio)"
-                >
-                  <DonutIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#a7f3d0'} />
-                  <span style={{ fontWeight: 600 }}>+ Donat</span>
-                </button>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const newMod = {
-                      id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'zone_offset' as const,
-                      enabled: true,
-                      distance: 4.0,
-                      areaType: 'plot' as const,
-                      name: 'Strefa buforowa',
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    cursor: 'pointer',
-                  }}
-                  title="Dodaj modyfikator strefy / bufora obszaru o zadanym offsecie"
-                >
-                  <ZoneBufferIcon size={12} color="#38bdf8" />
-                  <span style={{ fontWeight: 600 }}>+ Strefa</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'bay_window' as const,
-                      enabled: true,
-                      width: 4.0,
-                      projection: 1.5,
-                      storiesCount: 0,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title={
-                    selectedBuilding.category === 'boundary'
-                      ? 'Obiekty geodezyjne (granica/obszar) nie posiadają elewacji'
-                      : 'Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi'
-                  }
-                >
-                  <BayWindowIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#fef08a'} />
-                  <span style={{ fontWeight: 600 }}>+ Wykusz</span>
-                </button>
-              </div>
-
-              <button
-                type="button"
-                disabled={selectedBuilding.category === 'boundary'}
-                onClick={() => {
-                  if (selectedBuilding.category === 'boundary') return;
-                  addBuildingModifier(selectedBuilding.id, createDefaultCornerCutModifier());
-                  setShowModifiersPanel(true);
-                }}
-                className="btn-tile active-indigo"
-                style={{
-                  width: '100%',
-                  justifyContent: 'center',
-                  gap: '4px',
-                  padding: '7px 4px',
-                  fontSize: '10px',
-                  opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                  cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                }}
-                title={
-                  selectedBuilding.category === 'boundary'
-                    ? 'Obiekty geodezyjne (granica/obszar) nie posiadają narożników kondygnacji'
-                    : 'Dodaj modyfikator ścięcia narożnika (ukos / zaokrąglenie / karo)'
-                }
-              >
-                <CornerCutIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#7dd3fc'} />
-                <span style={{ fontWeight: 600 }}>+ Ścięcie narożnika</span>
-              </button>
+              {ADD_MODIFIER_ROWS.map((row, rowIdx) => (
+                <div key={rowIdx} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: '4px' }}>
+                  {row.map((type) => {
+                    const descriptor = MODIFIER_DESCRIPTORS[type];
+                    const disabled = type !== 'zone_offset' && selectedBuilding.category === 'boundary';
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          addBuildingModifier(selectedBuilding.id, descriptor.createDefault());
+                          setShowModifiersPanel(true);
+                        }}
+                        className="btn-tile active-indigo"
+                        style={{
+                          justifyContent: 'center',
+                          gap: '4px',
+                          padding: '7px 4px',
+                          fontSize: '10px',
+                          opacity: disabled ? 0.4 : 1,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                        }}
+                        title={disabled ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji ani elewacji' : `Dodaj modyfikator: ${descriptor.title}`}
+                      >
+                        <descriptor.Icon size={12} color={disabled ? 'var(--text-secondary)' : descriptor.accentVar} />
+                        <span style={{ fontWeight: 600 }}>+ {descriptor.title.split(' ')[0]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
 
               {/* Quick list of modifiers */}
               {selectedBuilding.modifiers && selectedBuilding.modifiers.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
                   {selectedBuilding.modifiers.map((m, idx) => {
-                    const isStory = m.type === 'story_offset';
-                    const isZone = m.type === 'zone_offset';
-                    const isBay = m.type === 'bay_window';
-                    const isTerrace = m.type === 'terrace';
-                    const isDonut = m.type === 'donut';
-                    const isCornerCut = m.type === 'corner_cut';
-                    const offMod = m as any;
-                    const accentColor = isStory
-                      ? '#c084fc'
-                      : isZone
-                      ? '#38bdf8'
-                      : isBay
-                      ? '#fef08a'
-                      : isTerrace
-                      ? '#fed7aa'
-                      : isDonut
-                      ? '#a7f3d0'
-                      : '#7dd3fc';
-                    const bgAccent = isStory
-                      ? 'rgba(168, 85, 247, 0.15)'
-                      : isZone
-                      ? 'rgba(56, 189, 248, 0.15)'
-                      : isBay
-                      ? 'rgba(234, 179, 8, 0.15)'
-                      : isTerrace
-                      ? 'rgba(249, 115, 22, 0.15)'
-                      : isDonut
-                      ? 'rgba(16, 185, 129, 0.15)'
-                      : 'rgba(56, 189, 248, 0.15)';
-                    const borderAccent = isStory
-                      ? 'rgba(168, 85, 247, 0.35)'
-                      : isZone
-                      ? 'rgba(56, 189, 248, 0.35)'
-                      : isBay
-                      ? 'rgba(234, 179, 8, 0.35)'
-                      : isTerrace
-                      ? 'rgba(249, 115, 22, 0.35)'
-                      : isDonut
-                      ? 'rgba(16, 185, 129, 0.35)'
-                      : 'rgba(125, 211, 252, 0.35)';
-
-                    const typeName = isStory
-                      ? 'Uskok'
-                      : isZone
-                      ? 'Strefa'
-                      : isBay
-                      ? 'Wykusz'
-                      : isTerrace
-                      ? 'Taras'
-                      : isDonut
-                      ? 'Donat'
-                      : 'Ścięcie';
+                    const descriptor = MODIFIER_DESCRIPTORS[m.type];
 
                     return (
                       <div
@@ -987,8 +789,8 @@ export const ToolsGroup: React.FC = () => {
                           justifyContent: 'space-between',
                           padding: '4px 8px',
                           borderRadius: '6px',
-                          backgroundColor: m.enabled ? bgAccent : 'rgba(15, 23, 42, 0.6)',
-                          border: `1px solid ${m.enabled ? borderAccent : 'rgba(255, 255, 255, 0.08)'}`,
+                          backgroundColor: m.enabled ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.6)',
+                          border: `1px solid ${m.enabled ? descriptor.accentVar : 'rgba(255, 255, 255, 0.08)'}`,
                           fontSize: '10.5px',
                         }}
                       >
@@ -997,25 +799,11 @@ export const ToolsGroup: React.FC = () => {
                             type="checkbox"
                             checked={m.enabled}
                             onChange={() => toggleBuildingModifier(selectedBuilding.id, m.id)}
-                            style={{ cursor: 'pointer', accentColor }}
+                            style={{ cursor: 'pointer', accentColor: descriptor.accentVar }}
                           />
-                          <span style={{ color: m.enabled ? '#f3e8ff' : '#94a3b8', fontWeight: 600 }}>
-                            #{idx + 1} {typeName}{' '}
-                            {isStory && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
-                            {isZone && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
-                            {isBay && `(${offMod.width}m × ${offMod.projection > 0 ? `+${offMod.projection}m` : `${offMod.projection}m`})`}
-                            {isTerrace && `${offMod.depth}m`}
-                            {isDonut && `${offMod.offset}m`}
-                            {isCornerCut && `d=${offMod.depth}m`}
-                            {(isStory || isTerrace || isDonut || isCornerCut) && (
-                              <span style={{ opacity: 0.8, fontSize: '9.5px', marginLeft: '3px' }}>
-                                ({offMod.storiesCount === 0
-                                  ? 'całość'
-                                  : offMod.storiesCount < 0
-                                  ? `${offMod.storiesCount} góra`
-                                  : `+${offMod.storiesCount} dół`})
-                              </span>
-                            )}
+                          <span style={{ color: m.enabled ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: 600 }}>
+                            #{idx + 1} {descriptor.title}{' '}
+                            <span style={{ opacity: 0.85 }}>{descriptor.formatSummary(m)}</span>
                           </span>
                         </div>
                         <button
@@ -1024,7 +812,7 @@ export const ToolsGroup: React.FC = () => {
                           style={{
                             background: 'transparent',
                             border: 'none',
-                            color: '#fb7185',
+                            color: 'var(--accent-rose)',
                             cursor: 'pointer',
                             padding: '2px',
                           }}
@@ -1037,7 +825,7 @@ export const ToolsGroup: React.FC = () => {
                   })}
                 </div>
               ) : (
-                <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '4px 0' }}>
+                <div style={{ fontSize: '10.5px', color: 'var(--text-secondary)', textAlign: 'center', padding: '4px 0' }}>
                   Brak modyfikatorów na obiekcie.
                 </div>
               )}

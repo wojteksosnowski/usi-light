@@ -72,7 +72,7 @@ export const StoryRangeSelector: React.FC<StoryRangeSelectorProps> = ({
                 cursor: disabled ? 'not-allowed' : 'pointer',
                 border: 'none',
                 backgroundColor: isSelected ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
-                color: isSelected ? '#c084fc' : '#64748b',
+                color: isSelected ? 'var(--accent-purple)' : 'var(--text-muted)',
                 letterSpacing: '0.02em',
                 transition: 'all 0.15s ease',
               }}

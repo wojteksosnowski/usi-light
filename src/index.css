@@ -16,6 +16,11 @@
   --accent-rose: #f43f5e;
   --accent-cyan: #38bdf8;
   --accent-cyan-light: #7dd3fc;
+  --accent-purple: #c084fc;
+  --accent-purple-soft: #f3e8ff;
+  --accent-yellow: #fef08a;
+  --accent-orange: #fed7aa;
+  --accent-emerald-light: #a7f3d0;
 }
 
 *, *::before, *::after {

@@ -65,12 +65,73 @@ export interface CornerCutModifier extends BaseModifier {
 
 export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier | CornerCutModifier;
 
+function newModifierId(prefix: string): string {
+  return `mod-${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+}
+
+/**
+ * Fabryki domyślnych wartości modyfikatorów — jedyne źródło prawdy dla wartości startowych,
+ * używane zarówno przez panel modyfikatorów, jak i przyciski "dodaj" w pasku narzędzi (ToolsGroup).
+ */
+export function createDefaultStoryOffsetModifier(): StoryOffsetModifier {
+  return {
+    id: newModifierId('story'),
+    type: 'story_offset',
+    enabled: true,
+    distance: -2.0, // domyślnie 2m cofnięcia
+    storiesCount: -1, // domyślnie ostatnia kondygnacja (penthouse)
+  };
+}
+
+export function createDefaultZoneOffsetModifier(): ZoneOffsetModifier {
+  return {
+    id: newModifierId('zone'),
+    type: 'zone_offset',
+    enabled: true,
+    distance: 4.0, // domyślnie 4m bufora na zewnątrz
+    areaType: 'plot',
+    cornerType: 'miter',
+    name: 'Strefa buforowa',
+  };
+}
+
+export function createDefaultBayWindowModifier(): BayWindowModifier {
+  return {
+    id: newModifierId('bay'),
+    type: 'bay_window',
+    enabled: true,
+    width: 4.0, // domyślnie 4m szerokości
+    projection: 1.5, // domyślnie 1.5m wysunięcia
+    storiesCount: 0, // domyślnie cała wysokość / obszar
+  };
+}
+
+export function createDefaultTerraceModifier(): TerraceModifier {
+  return {
+    id: newModifierId('terrace'),
+    type: 'terrace',
+    enabled: true,
+    depth: -4.0, // domyślnie -4m głębokość uskoku
+    storiesCount: -1, // domyślnie ostatnia kondygnacja (penthouse)
+  };
+}
+
+export function createDefaultDonutModifier(): DonutModifier {
+  return {
+    id: newModifierId('donut'),
+    type: 'donut',
+    enabled: true,
+    offset: -12.0, // domyślnie -12m offset otworu
+    storiesCount: 0, // domyślnie cała wysokość / bryła
+  };
+}
+
 /**
  * Tworzy domyślny modyfikator "Ścięcie narożnika" (używane przez pasek narzędzi i panel boczny)
  */
 export function createDefaultCornerCutModifier(): CornerCutModifier {
   return {
-    id: `mod-cut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    id: newModifierId('cut'),
     type: 'corner_cut',
     enabled: true,
     depth: 1.0,
