@@ -108,24 +108,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // 2. Pobranie i walidacja danych
+      // 2. Pobranie i walidacja danych (E2EE: serwer widzi tylko IV + szyfrogram, nigdy klucz ani treść)
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      const { compressedData, licenseKey } = body || {};
+      const { version, iv, ciphertext, licenseKey } = body || {};
 
-      if (!compressedData || typeof compressedData !== 'string') {
+      if (version !== 1 || typeof iv !== 'string' || typeof ciphertext !== 'string' || !iv || !ciphertext) {
         return res.status(400).json({ error: 'Nieprawidłowy format danych projektu.' });
       }
 
-      // Limit wielkości: 256 KB w Base64 (po kompresji to ogromna scena na kilkaset brył)
-      if (compressedData.length > 256 * 1024) {
-        return res.status(413).json({ error: 'Projekt przekracza maksymalny dopuszczalny rozmiar (256 KB).' });
+      // Limit wielkości: 256 KB w Base64 (po szyfrowaniu/kompresji to ogromna scena na kilkaset brył)
+      if (iv.length + ciphertext.length > 256 * 1024) {
+        return res.status(413).json({ error: 'Projekt przekracza maksymalny dopuszczalny rozmiar (256 KB po szyfrowaniu).' });
       }
 
       // 3. Zapis w Upstash Redis — TTL zależny od poziomu dostępu (nigdy nie ufamy TTL z klienta)
       const shareId = nanoid(10);
       const TTL_SECONDS = await resolveShareTtlSeconds(redis, licenseKey);
 
-      await redis.set(`project:${shareId}`, compressedData, { ex: TTL_SECONDS });
+      const record = { version: 1, iv, ciphertext, createdAt: Date.now() };
+      await redis.set(`project:${shareId}`, JSON.stringify(record), { ex: TTL_SECONDS });
 
       return res.status(200).json({
         shareId,
@@ -147,15 +148,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const sanitizedId = id.trim();
-      const compressedData = await redis.get<string>(`project:${sanitizedId}`);
+      const raw = await redis.get<string>(`project:${sanitizedId}`);
 
-      if (!compressedData) {
+      if (!raw) {
         return res.status(404).json({
           error: 'Projekt wygasł lub nie istnieje. Poproś o nowy link udostępniania.',
         });
       }
 
-      return res.status(200).json({ compressedData });
+      // Nowy format (E2EE): JSON { version, iv, ciphertext }. Format legacy (linki utworzone
+      // przed wdrożeniem szyfrowania): surowy ciąg base64-gzip — nie parsuje się jako JSON.
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.version === 1 && parsed.iv && parsed.ciphertext) {
+          return res.status(200).json({ version: 1, iv: parsed.iv, ciphertext: parsed.ciphertext });
+        }
+      } catch {
+        // nie JSON -> format legacy, kontynuuj poniżej
+      }
+
+      return res.status(200).json({ compressedData: raw });
     } catch (err: any) {
       console.error('Błąd przy pobieraniu projektu z Redis:', err);
       return res.status(500).json({ error: 'Wystąpił błąd podczas odczytu projektu.' });
