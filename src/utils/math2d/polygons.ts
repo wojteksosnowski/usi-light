@@ -65,7 +65,10 @@ export function getRotateHandleScreenPos(
   // by viewRotationDeg here, then add the building's own rotation on top.
   const rotationDeg = bldg.transform?.rotationDeg || 0;
   const angleRad = ((rotationDeg - viewRotationDeg) * Math.PI) / 180;
-  const dirX = Math.sin(angleRad);
+  // (-sin, cos) is the "up" vector (0,1) rotated by angleRad using the same
+  // CCW math convention as rotateBuilding (atan2-based deltas); using
+  // (sin, cos) here would spin the handle opposite to the object/mouse.
+  const dirX = -Math.sin(angleRad);
   const dirY = Math.cos(angleRad);
 
   const marginWorld = ROTATE_HANDLE_MARGIN_PX / (scale || 1);
