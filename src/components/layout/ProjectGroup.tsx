@@ -576,7 +576,7 @@ export const ProjectGroup: React.FC = () => {
             </div>
             <button
               type="button"
-              onClick={triggerFit}
+              onClick={() => triggerFit({ ignoreSelection: true })}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -588,7 +588,7 @@ export const ProjectGroup: React.FC = () => {
                 color: 'var(--accent-cyan)',
                 cursor: 'pointer',
               }}
-              title="Centruj i dopasuj widok na środku projektu"
+              title="Centruj i dopasuj widok na środku projektu (niezależnie od zaznaczenia)"
             >
               <Crosshair size={13} />
             </button>

@@ -21,7 +21,8 @@ import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d'
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
+import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon, CornerCutIcon } from '../common/CustomCadIcons';
+import { createDefaultCornerCutModifier } from '../../types/modifiers';
 
 export const ToolsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -892,6 +893,34 @@ export const ToolsGroup: React.FC = () => {
                 </button>
               </div>
 
+              <button
+                type="button"
+                disabled={selectedBuilding.category === 'boundary'}
+                onClick={() => {
+                  if (selectedBuilding.category === 'boundary') return;
+                  addBuildingModifier(selectedBuilding.id, createDefaultCornerCutModifier());
+                  setShowModifiersPanel(true);
+                }}
+                className="btn-tile active-indigo"
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  padding: '7px 4px',
+                  fontSize: '10px',
+                  opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
+                  cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
+                }}
+                title={
+                  selectedBuilding.category === 'boundary'
+                    ? 'Obiekty geodezyjne (granica/obszar) nie posiadają narożników kondygnacji'
+                    : 'Dodaj modyfikator ścięcia narożnika (ukos / zaokrąglenie / karo)'
+                }
+              >
+                <CornerCutIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#7dd3fc'} />
+                <span style={{ fontWeight: 600 }}>+ Ścięcie narożnika</span>
+              </button>
+
               {/* Quick list of modifiers */}
               {selectedBuilding.modifiers && selectedBuilding.modifiers.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
@@ -901,6 +930,7 @@ export const ToolsGroup: React.FC = () => {
                     const isBay = m.type === 'bay_window';
                     const isTerrace = m.type === 'terrace';
                     const isDonut = m.type === 'donut';
+                    const isCornerCut = m.type === 'corner_cut';
                     const offMod = m as any;
                     const accentColor = isStory
                       ? '#c084fc'
@@ -910,7 +940,9 @@ export const ToolsGroup: React.FC = () => {
                       ? '#fef08a'
                       : isTerrace
                       ? '#fed7aa'
-                      : '#a7f3d0';
+                      : isDonut
+                      ? '#a7f3d0'
+                      : '#7dd3fc';
                     const bgAccent = isStory
                       ? 'rgba(168, 85, 247, 0.15)'
                       : isZone
@@ -919,7 +951,9 @@ export const ToolsGroup: React.FC = () => {
                       ? 'rgba(234, 179, 8, 0.15)'
                       : isTerrace
                       ? 'rgba(249, 115, 22, 0.15)'
-                      : 'rgba(16, 185, 129, 0.15)';
+                      : isDonut
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : 'rgba(56, 189, 248, 0.15)';
                     const borderAccent = isStory
                       ? 'rgba(168, 85, 247, 0.35)'
                       : isZone
@@ -928,7 +962,9 @@ export const ToolsGroup: React.FC = () => {
                       ? 'rgba(234, 179, 8, 0.35)'
                       : isTerrace
                       ? 'rgba(249, 115, 22, 0.35)'
-                      : 'rgba(16, 185, 129, 0.35)';
+                      : isDonut
+                      ? 'rgba(16, 185, 129, 0.35)'
+                      : 'rgba(125, 211, 252, 0.35)';
 
                     const typeName = isStory
                       ? 'Uskok'
@@ -938,7 +974,9 @@ export const ToolsGroup: React.FC = () => {
                       ? 'Wykusz'
                       : isTerrace
                       ? 'Taras'
-                      : 'Donat';
+                      : isDonut
+                      ? 'Donat'
+                      : 'Ścięcie';
 
                     return (
                       <div
@@ -968,7 +1006,8 @@ export const ToolsGroup: React.FC = () => {
                             {isBay && `(${offMod.width}m × ${offMod.projection > 0 ? `+${offMod.projection}m` : `${offMod.projection}m`})`}
                             {isTerrace && `${offMod.depth}m`}
                             {isDonut && `${offMod.offset}m`}
-                            {(isStory || isTerrace || isDonut) && (
+                            {isCornerCut && `d=${offMod.depth}m`}
+                            {(isStory || isTerrace || isDonut || isCornerCut) && (
                               <span style={{ opacity: 0.8, fontSize: '9.5px', marginLeft: '3px' }}>
                                 ({offMod.storiesCount === 0
                                   ? 'całość'

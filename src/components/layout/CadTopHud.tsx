@@ -298,8 +298,8 @@ export const CadTopHud: React.FC = () => {
         }}
       >
         <button
-          onClick={triggerFit}
-          title="Dopasuj widok do obiektów (Zoom Extents)"
+          onClick={() => triggerFit()}
+          title="Dopasuj widok do zaznaczonego obiektu (jeśli zaznaczony) lub do całego projektu (Zoom Extents)"
           style={{
             height: '28px',
             display: 'inline-flex',

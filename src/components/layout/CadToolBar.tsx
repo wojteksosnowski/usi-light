@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
+import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon, CornerCutIcon } from '../common/CustomCadIcons';
+import { createDefaultCornerCutModifier } from '../../types/modifiers';
 
 export const CadToolBar: React.FC = () => {
   const { undo, redo, pastStates, futureStates } = useStore(useSceneStore.temporal, (state) => state);
@@ -418,6 +419,31 @@ export const CadToolBar: React.FC = () => {
               }
             >
               <BayWindowIcon size={14} color={isStoryEligible ? '#fef08a' : '#94a3b8'} />
+            </button>
+
+            {/* Przycisk Ścięcie narożnika */}
+            <button
+              type="button"
+              disabled={!isStoryEligible}
+              style={{
+                ...buttonStyle(false),
+                opacity: isStoryEligible ? 1 : 0.35,
+                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
+              }}
+              onClick={() => {
+                if (!isStoryEligible) return;
+                addBuildingModifier(selectedBuilding.id, createDefaultCornerCutModifier());
+                setShowModifiersPanel(true);
+              }}
+              title={
+                !selectedBuilding
+                  ? 'Modyfikator Ścięcie narożnika (zaznacz budynek na scenie, aby dodać ścięcie)'
+                  : selectedBuilding.category === 'boundary'
+                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
+                  : 'Dodaj / edytuj ścięcie narożnika (ukos / zaokrąglenie / karo)'
+              }
+            >
+              <CornerCutIcon size={14} color={isStoryEligible ? '#7dd3fc' : '#94a3b8'} />
             </button>
           </div>
         );

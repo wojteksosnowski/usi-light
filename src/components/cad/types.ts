@@ -57,7 +57,7 @@ export interface CadCanvasProps {
   latitude?: number;
   longitude?: number;
   equinoxDate?: 'spring' | 'autumn';
-  fitTrigger?: number;
+  fitRequest?: { nonce: number; ignoreSelection: boolean };
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;
   linkingSourceId?: string | null;

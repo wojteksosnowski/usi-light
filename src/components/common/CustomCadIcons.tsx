@@ -161,4 +161,84 @@ export const DonutIcon: React.FC<IconProps> = ({
   </svg>
 );
 
+/**
+ * Ikona modyfikatora "Ścięcie narożnika" - tryb ukośny (Chamfer)
+ */
+export const ChamferIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path d="M14 3H21V10L10 21H3V14L14 3Z" />
+  </svg>
+);
 
+/**
+ * Ikona modyfikatora "Ścięcie narożnika" - tryb zaokrąglony (Fillet)
+ */
+export const FilletIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path d="M21 21H10C10 14.9249 14.9249 10 21 10V21Z" />
+    <path d="M3 3V21" />
+    <path d="M3 3H21" />
+  </svg>
+);
+
+/**
+ * Ikona modyfikatora "Ścięcie narożnika" - tryb karo (Notch)
+ */
+export const NotchIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path d="M14 3H21V10L15 15L10 21H3V14L14 3Z" />
+  </svg>
+);
+
+/**
+ * Ikona narzędzia paska "Ścięcie narożnika" (ten sam kształt co tryb Chamfer)
+ */
+export const CornerCutIcon: React.FC<IconProps> = ChamferIcon;

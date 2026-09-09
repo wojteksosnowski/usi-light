@@ -232,7 +232,6 @@ export function useCanvasInteraction({
   latitude = 52.23,
   longitude = 21.01,
   equinoxDate = 'spring',
-  fitTrigger,
   onInteractionChange,
   isLinkingMode = false,
   linkingSourceId = null,

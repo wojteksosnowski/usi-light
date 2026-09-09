@@ -16,15 +16,77 @@ import { useSceneStore } from '../../store';
 import {
   StoryOffsetModifier,
   ZoneOffsetModifier,
+  ZoneCornerType,
   BayWindowModifier,
   TerraceModifier,
   DonutModifier,
+  CornerCutModifier,
   StoryFootprint,
 } from '../../types/modifiers';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { BayWindowIcon, TerraceIcon, DonutIcon, ZoneBufferIcon } from '../common/CustomCadIcons';
+import {
+  BayWindowIcon,
+  TerraceIcon,
+  DonutIcon,
+  ZoneBufferIcon,
+  ChamferIcon,
+  FilletIcon,
+  NotchIcon,
+} from '../common/CustomCadIcons';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
 import { StoryRangeSelector } from './StoryRangeSelector';
+
+interface GlobalIndexOption {
+  value: number;
+  label: string;
+}
+
+/**
+ * Buduje listę opcji indeksowanych globalnie (obrys zewnętrzny 0..n-1, następnie kolejne otwory dziedzińca),
+ * zgodnie z konwencją indeksowania używaną przez modyfikatory (bay_window/terrace/corner_cut).
+ */
+function buildGlobalIndexOptions(
+  outerCount: number,
+  storyPolygons: StoryFootprint[],
+  outerLabel: (i: number) => string,
+  holeLabel: (holeIdx: number, localIdx: number) => string
+): GlobalIndexOption[] {
+  const list: GlobalIndexOption[] = [];
+
+  for (let i = 0; i < outerCount; i++) {
+    list.push({ value: i, label: outerLabel(i) });
+  }
+
+  const sampleStoryWithHoles = storyPolygons.find((sp) => sp.holes && sp.holes.length > 0);
+  if (sampleStoryWithHoles && sampleStoryWithHoles.holes) {
+    let currGlobal = outerCount;
+    sampleStoryWithHoles.holes.forEach((hole, hIdx) => {
+      hole.forEach((_, lIdx) => {
+        list.push({ value: currGlobal, label: holeLabel(hIdx, lIdx) });
+        currGlobal++;
+      });
+    });
+  }
+  return list;
+}
+
+const CORNER_CUT_MODE_OPTIONS: { value: CornerCutModifier['mode']; label: string; Icon: React.FC<{ size?: number; color?: string }> }[] = [
+  { value: 'chamfer', label: 'Ukośne', Icon: ChamferIcon },
+  { value: 'fillet', label: 'Zaokrąglenie', Icon: FilletIcon },
+  { value: 'notch', label: 'Karo', Icon: NotchIcon },
+];
+
+const ZONE_CORNER_OPTIONS: { value: ZoneCornerType; label: string }[] = [
+  { value: 'miter', label: 'Proste' },
+  { value: 'round', label: 'Zaokrąglone' },
+  { value: 'chamfer', label: 'Ścięte' },
+];
+
+const CORNER_CUT_SCOPE_OPTIONS: { value: CornerCutModifier['scope']; label: string }[] = [
+  { value: 'all', label: 'Wszystkie narożniki' },
+  { value: 'edge', label: 'Narożniki krawędzi' },
+  { value: 'vertex', label: 'Jeden narożnik' },
+];
 
 interface BuildingModifiersPanelProps {
   onClose?: () => void;
@@ -54,33 +116,25 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
 
   const modifiers = selectedBuilding?.modifiers || [];
   const storyPolygons: StoryFootprint[] = selectedBuilding?.storyPolygons || [];
-  const segments = selectedBuilding?.segments || [];
 
   const availableEdges = React.useMemo(() => {
     if (!selectedBuilding) return [];
-    const outerCount = selectedBuilding.vertices?.length || 0;
-    const list: { value: number; label: string }[] = [];
+    return buildGlobalIndexOptions(
+      selectedBuilding.vertices?.length || 0,
+      storyPolygons,
+      (i) => `Ściana zewnętrzna #${i + 1}`,
+      (hIdx, lIdx) => `Dziedziniec #${hIdx + 1} - Krawędź #${lIdx + 1}`
+    );
+  }, [selectedBuilding, storyPolygons]);
 
-    // Zewnętrzne ściany
-    for (let i = 0; i < outerCount; i++) {
-      list.push({ value: i, label: `Ściana zewnętrzna #${i + 1}` });
-    }
-
-    // Ściany wewnętrznych otworów (Donut)
-    const sampleStoryWithHoles = storyPolygons.find((sp) => sp.holes && sp.holes.length > 0);
-    if (sampleStoryWithHoles && sampleStoryWithHoles.holes) {
-      let currGlobal = outerCount;
-      sampleStoryWithHoles.holes.forEach((hole, hIdx) => {
-        hole.forEach((_, lIdx) => {
-          list.push({
-            value: currGlobal,
-            label: `Dziedziniec #${hIdx + 1} - Krawędź #${lIdx + 1}`,
-          });
-          currGlobal++;
-        });
-      });
-    }
-    return list;
+  const availableVertices = React.useMemo(() => {
+    if (!selectedBuilding) return [];
+    return buildGlobalIndexOptions(
+      selectedBuilding.vertices?.length || 0,
+      storyPolygons,
+      (i) => `Narożnik zewnętrzny #${i + 1}`,
+      (hIdx, lIdx) => `Dziedziniec #${hIdx + 1} - Narożnik #${lIdx + 1}`
+    );
   }, [selectedBuilding, storyPolygons]);
 
   React.useEffect(() => {
@@ -113,6 +167,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
       enabled: true,
       distance: 4.0, // domyślnie 4m bufora na zewnątrz
       areaType: 'plot',
+      cornerType: 'miter',
       name: 'Strefa buforowa',
     };
     addBuildingModifier(selectedBuilding.id, newMod);
@@ -226,6 +281,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
             const isBayWindow = mod.type === 'bay_window';
             const isTerrace = mod.type === 'terrace';
             const isDonut = mod.type === 'donut';
+            const isCornerCut = mod.type === 'corner_cut';
             const offsetMod = mod as StoryOffsetModifier;
 
             const modTitle = isStoryOffset
@@ -236,7 +292,9 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
               ? 'Wykusz (Bay Window)'
               : isTerrace
               ? 'Taras (uskok krawędzi)'
-              : 'Donat (otwór/patio)';
+              : isDonut
+              ? 'Donat (otwór/patio)'
+              : 'Ścięcie narożnika';
             const titleColor = isStoryOffset
               ? '#f3e8ff'
               : isZoneOffset
@@ -245,7 +303,9 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
               ? '#fef08a'
               : isTerrace
               ? '#fed7aa'
-              : '#a7f3d0';
+              : isDonut
+              ? '#a7f3d0'
+              : '#7dd3fc';
 
             return (
               <div
@@ -412,6 +472,41 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                           </span>
                         </div>
                       </div>
+
+                      {/* Typ naroża pasa strefy: miter / round / chamfer */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          Typ naroży:
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                          {ZONE_CORNER_OPTIONS.map(({ value, label }) => {
+                            const currentCorner = zoneMod.cornerType ?? 'miter';
+                            const isSelectedCorner = currentCorner === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                  updateBuildingModifier(selectedBuilding.id, mod.id, { cornerType: value })
+                                }
+                                style={{
+                                  padding: '5px 0',
+                                  fontSize: '9.5px',
+                                  fontWeight: isSelectedCorner ? 700 : 500,
+                                  borderRadius: '4px',
+                                  border: isSelectedCorner ? '1px solid #7dd3fc' : '1px solid rgba(255, 255, 255, 0.1)',
+                                  backgroundColor: isSelectedCorner ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+                                  color: isSelectedCorner ? '#7dd3fc' : '#94a3b8',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}
@@ -424,7 +519,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
 
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                         {/* Width [m] */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                           <label style={{ fontSize: '10px', color: '#94a3b8' }}>
@@ -481,19 +576,19 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                             }}
                           />
                         </div>
-
-                        {/* Stories Count */}
-                        <StoryRangeSelector
-                          value={bayMod.storiesCount}
-                          label="Kondygnacja:"
-                          allowWholeBuilding={true}
-                          onChange={(val) =>
-                            updateBuildingModifier(selectedBuilding.id, mod.id, {
-                              storiesCount: val,
-                            })
-                          }
-                        />
                       </div>
+
+                      {/* Stories Count */}
+                      <StoryRangeSelector
+                        value={bayMod.storiesCount}
+                        label="Kondygnacja:"
+                        allowWholeBuilding={true}
+                        onChange={(val) =>
+                          updateBuildingModifier(selectedBuilding.id, mod.id, {
+                            storiesCount: val,
+                          })
+                        }
+                      />
 
                       {/* Kąt boków: 90°, 60°, 45°, 30° */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -757,85 +852,214 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
                     </div>
                   );
                 })()}
+
+                {isCornerCut && (() => {
+                  const cutMod = mod as CornerCutModifier;
+                  const modeOptions = CORNER_CUT_MODE_OPTIONS;
+                  const scopeOptions = CORNER_CUT_SCOPE_OPTIONS;
+                  const selectedModeLabel = modeOptions.find((m) => m.value === cutMod.mode)?.label;
+                  const selectedScopeLabel = scopeOptions.find((s) => s.value === cutMod.scope)?.label;
+
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        {/* Depth 'd' [m] */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                            Wartość d (m):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0.1"
+                            value={cutMod.depth}
+                            onChange={(e) =>
+                              updateBuildingModifier(selectedBuilding.id, mod.id, {
+                                depth: Math.max(0.1, parseFloat(e.target.value) || 0.1),
+                              })
+                            }
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              border: '1px solid #475569',
+                              borderRadius: '6px',
+                              color: '#f8fafc',
+                              padding: '4px 6px',
+                              fontSize: '11px',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
+                            }}
+                          />
+                        </div>
+
+                        {/* Stories Count */}
+                        <StoryRangeSelector
+                          value={cutMod.storiesCount}
+                          allowWholeBuilding={true}
+                          onChange={(val) =>
+                            updateBuildingModifier(selectedBuilding.id, mod.id, {
+                              storiesCount: val,
+                            })
+                          }
+                        />
+                      </div>
+
+                      {/* Tryb ścięcia: chamfer / fillet / notch */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          Tryb ścięcia:
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                          {modeOptions.map(({ value, label, Icon }) => {
+                            const isSelectedMode = cutMod.mode === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                  updateBuildingModifier(selectedBuilding.id, mod.id, { mode: value })
+                                }
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  gap: '2px',
+                                  padding: '5px 0',
+                                  fontSize: '9.5px',
+                                  fontWeight: isSelectedMode ? 700 : 500,
+                                  borderRadius: '4px',
+                                  border: isSelectedMode ? '1px solid #7dd3fc' : '1px solid rgba(255, 255, 255, 0.1)',
+                                  backgroundColor: isSelectedMode ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+                                  color: isSelectedMode ? '#7dd3fc' : '#94a3b8',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                <Icon size={14} color={isSelectedMode ? '#7dd3fc' : '#94a3b8'} />
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Zakres: wszystkie / krawędź / jeden narożnik */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          Zakres ścięcia:
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                          {scopeOptions.map(({ value, label }) => {
+                            const isSelectedScope = cutMod.scope === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                  updateBuildingModifier(selectedBuilding.id, mod.id, { scope: value })
+                                }
+                                style={{
+                                  padding: '4px 2px',
+                                  fontSize: '9.5px',
+                                  fontWeight: isSelectedScope ? 700 : 500,
+                                  borderRadius: '4px',
+                                  border: isSelectedScope ? '1px solid #7dd3fc' : '1px solid rgba(255, 255, 255, 0.1)',
+                                  backgroundColor: isSelectedScope ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+                                  color: isSelectedScope ? '#7dd3fc' : '#94a3b8',
+                                  cursor: 'pointer',
+                                  textAlign: 'center',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {cutMod.scope === 'edge' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                            Krawędź:
+                          </label>
+                          <select
+                            value={cutMod.edgeIndex !== undefined ? cutMod.edgeIndex : -1}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              updateBuildingModifier(selectedBuilding.id, mod.id, {
+                                edgeIndex: val >= 0 ? val : undefined,
+                              });
+                            }}
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              border: '1px solid #475569',
+                              borderRadius: '6px',
+                              color: '#f8fafc',
+                              padding: '3px 4px',
+                              fontSize: '10px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <option value="-1">Domyślna (pierwsza)</option>
+                            {availableEdges.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {cutMod.scope === 'vertex' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
+                            Narożnik:
+                          </label>
+                          <select
+                            value={cutMod.vertexIndex !== undefined ? cutMod.vertexIndex : -1}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              updateBuildingModifier(selectedBuilding.id, mod.id, {
+                                vertexIndex: val >= 0 ? val : undefined,
+                              });
+                            }}
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+                              border: '1px solid #475569',
+                              borderRadius: '6px',
+                              color: '#f8fafc',
+                              padding: '3px 4px',
+                              fontSize: '10px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <option value="-1">Domyślny (pierwszy)</option>
+                            {availableVertices.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <span style={{ fontSize: '9px', color: '#7dd3fc' }}>
+                        d = {cutMod.depth}m • {selectedModeLabel}
+                        {' • '}
+                        {selectedScopeLabel}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })
         )}
       </div>
 
-      {/* 2.5D Story Levels Summary (Tylko dla budynków) */}
-      {selectedBuilding.category !== 'boundary' && storyPolygons.length > 0 && (
-        <div
-          style={{
-            borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-            paddingTop: '10px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '10.5px',
-              fontWeight: 700,
-              color: '#94a3b8',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span>Generowane warstwy ({storyPolygons.length} kond., {segments.length} ścian)</span>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '4px',
-              maxHeight: '140px',
-              overflowY: 'auto',
-              backgroundColor: 'rgba(15, 23, 42, 0.5)',
-              borderRadius: '6px',
-              padding: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
-            }}
-          >
-            {storyPolygons.map((sf) => {
-              const isBaseLevel = sf.storyIndex === 0;
-              const hasRecess =
-                sf.polygon.length > 0 &&
-                selectedBuilding.vertices.length > 0 &&
-                Math.hypot(
-                  sf.polygon[0].x - selectedBuilding.vertices[0].x,
-                  sf.polygon[0].y - selectedBuilding.vertices[0].y
-                ) > 0.01;
-
-              return (
-                <div
-                  key={sf.storyIndex}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '10px',
-                    padding: '2px 4px',
-                    borderRadius: '4px',
-                    backgroundColor: hasRecess ? 'rgba(168, 85, 247, 0.15)' : 'transparent',
-                  }}
-                >
-                  <span style={{ color: '#cbd5e1', fontWeight: 600 }}>
-                    Kondygnacja #{sf.storyIndex + 1}
-                  </span>
-                  <span style={{ fontFamily: 'monospace', color: hasRecess ? '#e9d5ff' : '#94a3b8' }}>
-                    [{sf.hBottom.toFixed(1)}m - {sf.hTop.toFixed(1)}m]
-                    {hasRecess ? ' (Uskok)' : ''}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </FloatingInspectorCard>
   );
 });

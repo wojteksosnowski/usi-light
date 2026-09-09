@@ -105,7 +105,7 @@ export const App: React.FC = () => {
   const setViewRotationDeg = useCadToolStore((s) => s.setViewRotationDeg);
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
-  const fitTrigger = useCadToolStore((s) => s.fitTrigger);
+  const fitRequest = useCadToolStore((s) => s.fitRequest);
   const isInteracting = useCadToolStore((s) => s.isInteracting);
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
 
@@ -713,7 +713,7 @@ export const App: React.FC = () => {
             latitude={settings.latitude}
             longitude={settings.longitude}
             equinoxDate={settings.equinoxDate}
-            fitTrigger={fitTrigger}
+            fitRequest={fitRequest}
             onInteractionChange={setIsInteracting}
             isLinkingMode={isLinkingMode}
             linkingSourceId={linkingSourceId}

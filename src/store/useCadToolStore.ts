@@ -35,7 +35,9 @@ interface CadToolState {
   viewRotationMode: boolean;
   viewRotationDeg: number;
   savedViewRotationDeg: number;
-  fitTrigger: number;
+  // Żądanie dopasowania widoku (Zoom Extents): nonce inkrementowany przy każdym wywołaniu,
+  // ignoreSelection: true wymusza dopasowanie do całego projektu z pominięciem zaznaczenia
+  fitRequest: { nonce: number; ignoreSelection: boolean };
 
   // Interaction accuracy flag
   isInteracting: boolean;
@@ -75,7 +77,7 @@ interface CadToolState {
   setViewRotationDeg: (deg: number | ((prev: number) => number)) => void;
   setSavedViewRotationDeg: (deg: number | ((prev: number) => number)) => void;
   toggleUcsRotation: () => void;
-  triggerFit: () => void;
+  triggerFit: (options?: { ignoreSelection?: boolean }) => void;
 
   setIsInteracting: (interacting: boolean) => void;
 }
@@ -104,7 +106,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   viewRotationMode: false,
   viewRotationDeg: 0,
   savedViewRotationDeg: 0,
-  fitTrigger: 0,
+  fitRequest: { nonce: 0, ignoreSelection: false },
 
   isInteracting: false,
 
@@ -218,7 +220,10 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
     });
   },
 
-  triggerFit: () => set((state) => ({ fitTrigger: state.fitTrigger + 1 })),
+  triggerFit: (options) =>
+    set((state) => ({
+      fitRequest: { nonce: state.fitRequest.nonce + 1, ignoreSelection: options?.ignoreSelection ?? false },
+    })),
   setIsInteracting: (interacting) => {
     set({ isInteracting: interacting });
     if (interacting) {

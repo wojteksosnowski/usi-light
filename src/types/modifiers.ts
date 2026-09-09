@@ -1,6 +1,6 @@
 import { Point2D } from './geometry';
 
-export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window' | 'terrace' | 'donut';
+export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window' | 'terrace' | 'donut' | 'corner_cut';
 
 export interface BaseModifier {
   id: string;
@@ -15,10 +15,13 @@ export interface StoryOffsetModifier extends BaseModifier {
   storiesCount: number;  // < 0: N kondygnacji od góry (poddasze/penthouse); > 0: N kondygnacji od dołu (podcień)
 }
 
+export type ZoneCornerType = 'miter' | 'round' | 'chamfer';
+
 export interface ZoneOffsetModifier extends BaseModifier {
   type: 'zone_offset';
   distance: number;      // metry (+ na zewnątrz bufor, - do wnętrza obiektu)
   areaType?: 'plot' | 'playground';
+  cornerType?: ZoneCornerType; // proste (miter) | zaokrąglone (round, r=|distance|) | ścięte (chamfer, d=|distance|); domyślnie 'miter'
   name?: string;
 }
 
@@ -47,7 +50,35 @@ export interface DonutModifier extends BaseModifier {
   storiesCount: number;    // Kondygnacja: <0 od góry, >0 od dołu, 0 cała wysokość
 }
 
-export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier;
+export type CornerCutMode = 'chamfer' | 'fillet' | 'notch';
+export type CornerCutScope = 'all' | 'edge' | 'vertex';
+
+export interface CornerCutModifier extends BaseModifier {
+  type: 'corner_cut';
+  depth: number;           // 'd' - wielkość ścięcia (metry)
+  storiesCount: number;    // Kondygnacja: <0 od góry, >0 od dołu, 0 cała bryła
+  mode: CornerCutMode;      // chamfer (ukośne ścięcie) | fillet (zaokrąglenie) | notch (wycięcie karo)
+  scope: CornerCutScope;    // all (wszystkie narożniki) | edge (narożniki krawędzi) | vertex (jeden narożnik)
+  edgeIndex?: number;      // Indeks krawędzi gdy scope === 'edge' (konwencja jak w bay_window/terrace: zewnętrzne 0..n-1, potem otwory)
+  vertexIndex?: number;    // Indeks wierzchołka gdy scope === 'vertex' (ta sama konwencja globalnego indeksu, dla wierzchołków)
+}
+
+export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier | CornerCutModifier;
+
+/**
+ * Tworzy domyślny modyfikator "Ścięcie narożnika" (używane przez pasek narzędzi i panel boczny)
+ */
+export function createDefaultCornerCutModifier(): CornerCutModifier {
+  return {
+    id: `mod-cut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    type: 'corner_cut',
+    enabled: true,
+    depth: 1.0,
+    storiesCount: 0,
+    mode: 'chamfer',
+    scope: 'all',
+  };
+}
 
 
 export interface StoryFootprint {
@@ -62,6 +93,7 @@ export interface ZoneFootprint {
   id: string;
   areaType?: 'plot' | 'playground';
   distance: number;
-  polygon: Point2D[];
+  polygon: Point2D[];    // zewnętrzna granica pasa strefy
+  holes?: Point2D[][];   // wewnętrzna granica pasa strefy (jak StoryFootprint.holes); brak = pełny wielokąt, fallback
 }
 

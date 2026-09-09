@@ -35,7 +35,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     latitude = 52.23,
     longitude = 21.01,
     equinoxDate = 'spring',
-    fitTrigger,
+    fitRequest,
     onCancelDrawing,
     onFinishDrawing,
     drawingMode = 'none',
@@ -106,7 +106,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const projectRadius = useWfsStore((s) => s.projectRadius);
 
   useEffect(() => {
-    if (fitTrigger === undefined || fitTrigger === 0) return;
+    if (fitRequest === undefined || fitRequest.nonce === 0) return;
 
     // Cancel any running animation
     if (circleAnimRef.current !== null) {
@@ -140,7 +140,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         circleAnimRef.current = null;
       }
     };
-  }, [fitTrigger, projectRadius]);
+  }, [fitRequest, projectRadius]);
 
   // Detekcja układu współrzędnych sceny CAD
   const crsInfo = useMemo<CrsDetectionResult>(() => {
@@ -158,7 +158,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     containerRef,
     buildings,
     viewRotationDeg,
-    fitTrigger,
+    fitRequest,
     selectedBuildingId,
     layerSettings,
     projectRadius

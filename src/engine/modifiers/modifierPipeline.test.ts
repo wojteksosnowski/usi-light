@@ -3,13 +3,16 @@ import {
   applyBuildingModifiers,
   computeStoryHeightIntervals,
   generateZonePolygon,
+  generateZoneBand,
   generateBayWindowPolygon,
   generateTerracePolygon,
   generateDonutHoles,
+  generateCornerCutPolygon,
   resolveStoryModifierSteps,
   sanitizeStoryFootprint,
 } from './modifierPipeline';
 import { BuildingLoop, Point2D } from '../../types/geometry';
+import { calculateSignedArea, isPolygonCCW } from '../../utils/math2d/polygons';
 
 describe('modifierPipeline', () => {
   const baseBuilding: BuildingLoop = {
@@ -76,6 +79,7 @@ describe('modifierPipeline', () => {
     expect(res.storyPolygons.length).toBe(0);
     expect(res.zonePolygons.length).toBe(1);
     expect(res.zonePolygons[0].polygon.length).toBe(4);
+    expect(res.zonePolygons[0].holes?.[0]?.length).toBe(4);
     expect(res.segments.length).toBe(4);
     for (const seg of res.segments) {
       expect(seg.hBase).toBe(0);
@@ -187,6 +191,49 @@ describe('modifierPipeline', () => {
     expect(inward[0].y).toBeCloseTo(2, 2);
     expect(inward[2].x).toBeCloseTo(8, 2);
     expect(inward[2].y).toBeCloseTo(8, 2);
+  });
+
+  it('generateZoneBand: builds the band between the original edge and the offset line', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // Positive distance -> outer boundary is the offset polygon, inner is the original edge
+    const outwardBand = generateZoneBand(squareVertices, 4.0, 'miter');
+    expect(outwardBand.outer[0].x).toBeCloseTo(-4, 2);
+    expect(outwardBand.outer[0].y).toBeCloseTo(-4, 2);
+    expect(outwardBand.inner).toEqual(squareVertices);
+
+    // Negative distance -> outer boundary is the original edge, inner is the offset polygon
+    const inwardBand = generateZoneBand(squareVertices, -2.0, 'miter');
+    expect(inwardBand.outer).toEqual(squareVertices);
+    expect(inwardBand.inner[0].x).toBeCloseTo(2, 2);
+    expect(inwardBand.inner[0].y).toBeCloseTo(2, 2);
+  });
+
+  it('generateZoneBand: chamfer corner type bevels each corner into two points', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    const band = generateZoneBand(squareVertices, 2.0, 'chamfer');
+    expect(band.outer.length).toBe(8);
+  });
+
+  it('generateZoneBand: round corner type adds arc segments at each corner', () => {
+    const squareVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    const band = generateZoneBand(squareVertices, 2.0, 'round');
+    expect(band.outer.length).toBeGreaterThan(4);
   });
 
   it('populates zonePolygons in applyBuildingModifiers when zone_offset modifier is present', () => {
@@ -746,6 +793,125 @@ describe('modifierPipeline', () => {
         expect(isNaN(seg.normal.x)).toBe(false);
         expect(isNaN(seg.normal.y)).toBe(false);
         expect(seg.hTop ?? 0).toBeGreaterThanOrEqual(seg.hBase ?? 0);
+      }
+    });
+  });
+
+  describe('Corner cut modifier', () => {
+    const square: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    it('chamfer on a single vertex replaces it with 2 points and reduces area by d*d/2', () => {
+      const d = 1;
+      const result = generateCornerCutPolygon(square, d, 'chamfer', 'vertex', 0);
+      expect(result.length).toBe(5);
+      const origArea = Math.abs(calculateSignedArea(square));
+      const newArea = Math.abs(calculateSignedArea(result));
+      expect(origArea - newArea).toBeCloseTo((d * d) / 2, 5);
+      expect(isPolygonCCW(result)).toBe(true);
+    });
+
+    it('fillet on a corner samples an arc and stays within d of the original vertex', () => {
+      const d = 1;
+      const result = generateCornerCutPolygon(square, d, 'fillet', 'vertex', 0);
+      expect(result.length).toBeGreaterThan(5);
+      const curr = square[0];
+      const arcPointCount = result.length - 3; // total - (3 untouched vertices)
+      for (let i = 0; i < arcPointCount; i++) {
+        const p = result[i];
+        const dist = Math.hypot(p.x - curr.x, p.y - curr.y);
+        expect(dist).toBeLessThanOrEqual(d + 1e-6);
+      }
+    });
+
+    it('notch/rhombus replaces vertex with 3 points, all 4 sides equal to d', () => {
+      const d = 1;
+      const result = generateCornerCutPolygon(square, d, 'notch', 'vertex', 0);
+      expect(result.length).toBe(6);
+      // result: [A, M, B, orig1, orig2, orig3] since vertex 0 replaced
+      const [A, M, B] = result;
+      const curr = square[0];
+      const dist = (p1: Point2D, p2: Point2D) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      expect(dist(curr, A)).toBeCloseTo(d, 5);
+      expect(dist(A, M)).toBeCloseTo(d, 5);
+      expect(dist(M, B)).toBeCloseTo(d, 5);
+      expect(dist(B, curr)).toBeCloseTo(d, 5);
+    });
+
+    it('scope=edge cuts both endpoints of the target edge only', () => {
+      const d = 1;
+      const result = generateCornerCutPolygon(square, d, 'chamfer', 'edge', 0);
+      // vertices 0 and 1 are endpoints of edge 0 -> each replaced by 2 points = 4, plus untouched 2, 3
+      expect(result.length).toBe(6);
+    });
+
+    it('scope=all cuts every vertex of the square', () => {
+      const d = 1;
+      const result = generateCornerCutPolygon(square, d, 'chamfer', 'all');
+      expect(result.length).toBe(8);
+    });
+
+    it('clamps d to half the adjacent edge length to avoid self-intersection', () => {
+      const small: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 1, y: 1 },
+        { x: 0, y: 1 },
+      ];
+      const result = generateCornerCutPolygon(small, 10, 'chamfer', 'all');
+      for (const p of result) {
+        expect(isNaN(p.x)).toBe(false);
+        expect(isNaN(p.y)).toBe(false);
+      }
+      expect(isPolygonCCW(result)).toBe(true);
+      const newArea = Math.abs(calculateSignedArea(result));
+      expect(newArea).toBeGreaterThan(0);
+      expect(newArea).toBeLessThan(1.0);
+    });
+
+    it('returns an unchanged copy when d <= 0', () => {
+      const result = generateCornerCutPolygon(square, 0, 'chamfer', 'all');
+      expect(result).toEqual(square);
+    });
+
+    it('applies through the pipeline and reflects the cut in storyPolygons', () => {
+      const building: BuildingLoop = {
+        id: 'bldg-cut',
+        name: 'Budynek ciecie',
+        layer: '0',
+        isTested: true,
+        isCityCentre: false,
+        buildingType: 'residential',
+        defaultHeight: 6.0,
+        firstFloorHeight: 3.0,
+        typicalFloorHeight: 3.0,
+        storeysCount: 2,
+        hWindowBottom: 0.85,
+        vertices: square,
+        segments: [],
+        isClockwise: false,
+        transform: { tx: 0, ty: 0, rotationDeg: 0 },
+        modifiers: [
+          {
+            id: 'mod-cut-test',
+            type: 'corner_cut',
+            enabled: true,
+            depth: 1.0,
+            storiesCount: 0,
+            mode: 'chamfer',
+            scope: 'all',
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(building);
+      expect(res.storyPolygons.length).toBe(2);
+      for (const sf of res.storyPolygons) {
+        expect(sf.polygon.length).toBe(8);
       }
     });
   });

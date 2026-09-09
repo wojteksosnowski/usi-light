@@ -2,17 +2,21 @@ import polygonClipping from 'polygon-clipping';
 import { BuildingLoop, FacadeSegment, Point2D } from '../../types/geometry';
 import {
   BayWindowModifier,
+  CornerCutModifier,
+  CornerCutMode,
+  CornerCutScope,
   DonutModifier,
   Modifier,
   StoryFootprint,
   StoryOffsetModifier,
   TerraceModifier,
+  ZoneCornerType,
   ZoneFootprint,
   ZoneOffsetModifier,
 } from '../../types/modifiers';
-import { miterOffsetPolygon } from '../../utils/math2d/miterOffset';
+import { miterOffsetPolygon, offsetPolygonWithJoin, PolygonJoinType } from '../../utils/math2d/miterOffset';
 import { calculateSignedArea, isPolygonCCW } from '../../utils/math2d/polygons';
-import { calculateOutwardNormal } from '../../utils/math2d/vec2';
+import { calculateOutwardNormal, distance } from '../../utils/math2d/vec2';
 import { computeLineEquation, rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors } from '../../utils/buildingFloorCalculator';
 
@@ -30,6 +34,29 @@ export function generateZonePolygon(vertices: Point2D[], distance: number): Poin
     return vertices ? vertices.map((p) => ({ ...p })) : [];
   }
   return miterOffsetPolygon(vertices, distance);
+}
+
+function zoneJoinTypeFor(cornerType: ZoneCornerType | undefined): PolygonJoinType {
+  if (cornerType === 'round') return 'round';
+  if (cornerType === 'chamfer') return 'bevel';
+  return 'miter';
+}
+
+/**
+ * Generuje pas strefy (obszar między krawędzią obiektu a linią offsetu) na podstawie
+ * bazowego obrysu i modyfikatora 'zone_offset'. Zwraca zewnętrzną i wewnętrzną granicę pasa.
+ */
+export function generateZoneBand(
+  vertices: Point2D[],
+  distance: number,
+  cornerType?: ZoneCornerType
+): { outer: Point2D[]; inner: Point2D[] } {
+  const base = vertices ? vertices.map((p) => ({ ...p })) : [];
+  if (!vertices || vertices.length < 3 || Math.abs(distance) < 1e-4) {
+    return { outer: base, inner: base };
+  }
+  const offset = offsetPolygonWithJoin(vertices, distance, zoneJoinTypeFor(cornerType));
+  return distance >= 0 ? { outer: offset, inner: base } : { outer: base, inner: offset };
 }
 
 /**
@@ -284,6 +311,98 @@ export function generateBayWindowPolygon(
   return result;
 }
 
+const CORNER_CUT_ARC_SEGMENTS = 8;
+
+/**
+ * Generuje wielokąt ze ściętym narożnikiem / narożnikami (Ścięcie narożnika)
+ * Tryby: chamfer (ukośne ścięcie), fillet (zaokrąglenie), notch (wycięcie karo)
+ */
+export function generateCornerCutPolygon(
+  vertices: Point2D[],
+  d: number,
+  mode: CornerCutMode,
+  scope: CornerCutScope,
+  targetIndex?: number
+): Point2D[] {
+  if (!vertices || vertices.length < 3 || d <= 1e-4) {
+    return vertices ? vertices.map((p) => ({ ...p })) : [];
+  }
+
+  const n = vertices.length;
+  const origSignedArea = calculateSignedArea(vertices);
+  const isCCW = origSignedArea > 0;
+
+  const targetIndices = new Set<number>();
+  if (scope === 'all') {
+    for (let i = 0; i < n; i++) targetIndices.add(i);
+  } else if (scope === 'edge') {
+    const e = targetIndex !== undefined && targetIndex >= 0 && targetIndex < n ? targetIndex : 0;
+    targetIndices.add(e);
+    targetIndices.add((e + 1) % n);
+  } else {
+    const v = targetIndex !== undefined && targetIndex >= 0 && targetIndex < n ? targetIndex : 0;
+    targetIndices.add(v);
+  }
+
+  const result: Point2D[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!targetIndices.has(i)) {
+      result.push({ ...vertices[i] });
+      continue;
+    }
+
+    const prev = vertices[(i - 1 + n) % n];
+    const curr = vertices[i];
+    const next = vertices[(i + 1) % n];
+
+    const lenPrev = distance(curr, prev);
+    const lenNext = distance(curr, next);
+    const dEff = Math.min(d, lenPrev / 2, lenNext / 2);
+
+    if (dEff <= 1e-4) {
+      result.push({ ...curr });
+      continue;
+    }
+
+    const uPrevX = (prev.x - curr.x) / lenPrev;
+    const uPrevY = (prev.y - curr.y) / lenPrev;
+    const uNextX = (next.x - curr.x) / lenNext;
+    const uNextY = (next.y - curr.y) / lenNext;
+
+    const A: Point2D = { x: curr.x + uPrevX * dEff, y: curr.y + uPrevY * dEff };
+    const B: Point2D = { x: curr.x + uNextX * dEff, y: curr.y + uNextY * dEff };
+
+    if (mode === 'chamfer') {
+      result.push(A, B);
+    } else if (mode === 'fillet') {
+      result.push(A);
+      for (let s = 1; s < CORNER_CUT_ARC_SEGMENTS; s++) {
+        const t = s / CORNER_CUT_ARC_SEGMENTS;
+        const omt = 1 - t;
+        result.push({
+          x: omt * omt * A.x + 2 * t * omt * curr.x + t * t * B.x,
+          y: omt * omt * A.y + 2 * t * omt * curr.y + t * t * B.y,
+        });
+      }
+      result.push(B);
+    } else {
+      // notch: wycięcie karo (romb) - M jest odbiciem curr przez środek A-B
+      const M: Point2D = { x: A.x + B.x - curr.x, y: A.y + B.y - curr.y };
+      result.push(A, M, B);
+    }
+  }
+
+  const origArea = Math.abs(origSignedArea);
+  const newArea = calculateSignedArea(result);
+  const orientationKept = isCCW ? newArea > 0 : newArea < 0;
+
+  if (!orientationKept || Math.abs(newArea) < 0.01 || Math.abs(newArea) > origArea * 1.05) {
+    return vertices.map((p) => ({ ...p }));
+  }
+
+  return result;
+}
+
 /**
  * Oblicza liczbę kondygnacji oraz wysokości spodu i wierzchu dla każdej kondygnacji
  */
@@ -367,6 +486,32 @@ export function resolveStoryModifierSteps(
   }
 
   return result;
+}
+
+interface IndexTargetResolution {
+  isHole: boolean;
+  holeIndex?: number;
+  localIndex?: number;
+}
+
+/**
+ * Rozwiązuje globalny indeks (krawędzi lub wierzchołka) na obrys zewnętrzny lub konkretny otwór
+ * dziedzińca danej kondygnacji, zgodnie z konwencją: zewnętrzne 0..n-1, następnie kolejne otwory.
+ */
+function resolveIndexTarget(footprint: StoryFootprint, globalIndex: number | undefined): IndexTargetResolution {
+  const outerLen = footprint.polygon.length;
+  if (globalIndex === undefined || globalIndex < outerLen || !footprint.holes) {
+    return { isHole: false };
+  }
+  let offset = outerLen;
+  for (let h = 0; h < footprint.holes.length; h++) {
+    const hLen = footprint.holes[h].length;
+    if (globalIndex < offset + hLen) {
+      return { isHole: true, holeIndex: h, localIndex: globalIndex - offset };
+    }
+    offset += hLen;
+  }
+  return { isHole: false };
 }
 
 function toClosedRing(pts: Point2D[]): [number, number][] {
@@ -538,13 +683,14 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     for (const modifier of activeModifiers) {
       if (modifier.type === 'zone_offset') {
         const zoneMod = modifier as ZoneOffsetModifier;
-        const poly = generateZonePolygon(baseVertices, zoneMod.distance);
-        if (poly && poly.length >= 3) {
+        const band = generateZoneBand(baseVertices, zoneMod.distance, zoneMod.cornerType);
+        if (band.outer && band.outer.length >= 3) {
           zoneFootprints.push({
             id: zoneMod.id,
             areaType: zoneMod.areaType || building.areaType || 'plot',
             distance: zoneMod.distance,
-            polygon: poly,
+            polygon: band.outer,
+            holes: [band.inner],
           });
         }
       }
@@ -599,13 +745,14 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
       }
     } else if (modifier.type === 'zone_offset') {
       const zoneMod = modifier as ZoneOffsetModifier;
-      const poly = generateZonePolygon(baseVertices, zoneMod.distance);
-      if (poly && poly.length >= 3) {
+      const band = generateZoneBand(baseVertices, zoneMod.distance, zoneMod.cornerType);
+      if (band.outer && band.outer.length >= 3) {
         zoneFootprints.push({
           id: zoneMod.id,
           areaType: zoneMod.areaType || 'plot',
           distance: zoneMod.distance,
-          polygon: poly,
+          polygon: band.outer,
+          holes: [band.inner],
         });
       }
     } else if (modifier.type === 'bay_window') {
@@ -615,29 +762,20 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
 
       const steps = resolveStoryModifierSteps(K, storiesCount);
       for (const { storyIndex } of steps) {
-        const outerLen = storyFootprints[storyIndex].polygon.length;
-        if (edgeIndex !== undefined && edgeIndex >= outerLen && storyFootprints[storyIndex].holes) {
-          // Krawędź otworu dziedzińca
-          let offset = outerLen;
-          for (let h = 0; h < storyFootprints[storyIndex].holes!.length; h++) {
-            const hLen = storyFootprints[storyIndex].holes![h].length;
-            if (edgeIndex < offset + hLen) {
-              const localEdgeIdx = edgeIndex - offset;
-              storyFootprints[storyIndex].holes![h] = generateBayWindowPolygon(
-                storyFootprints[storyIndex].holes![h],
-                width,
-                projection,
-                localEdgeIdx,
-                sideAngle ?? 45,
-                positionRatio ?? 0.5
-              );
-              break;
-            }
-            offset += hLen;
-          }
+        const footprint = storyFootprints[storyIndex];
+        const target = resolveIndexTarget(footprint, edgeIndex);
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generateBayWindowPolygon(
+            footprint.holes![target.holeIndex!],
+            width,
+            projection,
+            target.localIndex,
+            sideAngle ?? 45,
+            positionRatio ?? 0.5
+          );
         } else {
-          storyFootprints[storyIndex].polygon = generateBayWindowPolygon(
-            storyFootprints[storyIndex].polygon,
+          footprint.polygon = generateBayWindowPolygon(
+            footprint.polygon,
             width,
             projection,
             edgeIndex,
@@ -655,30 +793,17 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
       const steps = resolveStoryModifierSteps(K, storiesCount, { cascade: true });
       for (const { storyIndex, stepMultiplier } of steps) {
         const storyDepth = depth * stepMultiplier;
-        const outerLen = storyFootprints[storyIndex].polygon.length;
+        const footprint = storyFootprints[storyIndex];
+        const target = resolveIndexTarget(footprint, edgeIndex);
 
-        if (edgeIndex !== undefined && edgeIndex >= outerLen && storyFootprints[storyIndex].holes) {
-          // Krawędź otworu dziedzińca
-          let offset = outerLen;
-          for (let h = 0; h < storyFootprints[storyIndex].holes!.length; h++) {
-            const hLen = storyFootprints[storyIndex].holes![h].length;
-            if (edgeIndex < offset + hLen) {
-              const localEdgeIdx = edgeIndex - offset;
-              storyFootprints[storyIndex].holes![h] = generateTerracePolygon(
-                storyFootprints[storyIndex].holes![h],
-                storyDepth,
-                localEdgeIdx
-              );
-              break;
-            }
-            offset += hLen;
-          }
-        } else {
-          storyFootprints[storyIndex].polygon = generateTerracePolygon(
-            storyFootprints[storyIndex].polygon,
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generateTerracePolygon(
+            footprint.holes![target.holeIndex!],
             storyDepth,
-            edgeIndex
+            target.localIndex
           );
+        } else {
+          footprint.polygon = generateTerracePolygon(footprint.polygon, storyDepth, edgeIndex);
         }
       }
     } else if (modifier.type === 'donut') {
@@ -691,6 +816,31 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
         const holes = generateDonutHoles(storyFootprints[storyIndex].polygon, offset);
         if (holes && holes.length > 0) {
           storyFootprints[storyIndex].holes = [...(storyFootprints[storyIndex].holes || []), ...holes];
+        }
+      }
+    } else if (modifier.type === 'corner_cut') {
+      const cutMod = modifier as CornerCutModifier;
+      const { depth, storiesCount, mode, scope, edgeIndex, vertexIndex } = cutMod;
+      if (depth <= 1e-4) continue;
+
+      // Dla scope 'edge'/'vertex' oba pola są wzajemnie wykluczające się - tylko jedno jest aktywne
+      const targetIdx = scope === 'vertex' ? vertexIndex : scope === 'edge' ? edgeIndex : undefined;
+
+      const steps = resolveStoryModifierSteps(K, storiesCount);
+      for (const { storyIndex } of steps) {
+        const footprint = storyFootprints[storyIndex];
+        const target = resolveIndexTarget(footprint, targetIdx);
+
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generateCornerCutPolygon(
+            footprint.holes![target.holeIndex!],
+            depth,
+            mode,
+            scope,
+            target.localIndex
+          );
+        } else {
+          footprint.polygon = generateCornerCutPolygon(footprint.polygon, depth, mode, scope, targetIdx);
         }
       }
     }

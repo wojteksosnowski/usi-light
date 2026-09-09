@@ -3,7 +3,6 @@ import {
   X,
   Check,
   Zap,
-  Crown,
   ShieldCheck,
   FileSpreadsheet,
   Download,
@@ -139,23 +138,9 @@ export const PricingModal: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div
-              style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
-                background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(234, 88, 12, 0.3))',
-                border: '1px solid rgba(245, 158, 11, 0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Crown size={20} color="#fbbf24" />
-            </div>
             <div>
               <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Rozszerz Pełne Możliwości Światło PRO
+                Rozszerz możliwości Światło
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                 Wybierz dostęp czasowy dopasowany do Twojego projektu. Czas biegnie od momentu aktywacji.
@@ -196,177 +181,6 @@ export const PricingModal: React.FC = () => {
               {error}
             </div>
           )}
-
-          {/* Pricing Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            {/* Plan 7 Dni */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '14px',
-                padding: '18px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                gap: '14px',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Dostęp 7 Dni
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      padding: '2px 8px',
-                      borderRadius: '999px',
-                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                      color: '#38bdf8',
-                      border: '1px solid rgba(56, 189, 248, 0.3)',
-                    }}
-                  >
-                    Projektowy
-                  </span>
-                </div>
-
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: '1.4' }}>
-                  Szybki dostęp na pojedynczą ekspertyzę lub weryfikację nasłonecznienia.
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11.5px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Import działek geodezyjnych i obrysów budynków (ULDK)</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Eksport geometrii do DXF</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
-                    <Check size={14} color="#64748b" style={{ flexShrink: 0 }} />
-                    <span>Linki współdzielenia ważne 14 dni</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleCheckout('7d')}
-                disabled={loadingPlan !== null || PREVIEW_MODE}
-                className="btn-secondary"
-                style={{
-                  padding: '10px 14px',
-                  fontWeight: 600,
-                  fontSize: '12.5px',
-                  gap: '8px',
-                  opacity: PREVIEW_MODE ? 0.5 : 1,
-                  cursor: PREVIEW_MODE ? 'not-allowed' : loadingPlan !== null ? 'not-allowed' : 'pointer',
-                }}
-                title={PREVIEW_MODE ? 'Dostępne wkrótce — trwa okres zapoznawczy' : undefined}
-              >
-                {loadingPlan === '7d' ? (
-                  <>
-                    <Loader2 size={15} className="animate-spin" />
-                    <span>Przygotowywanie...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap size={14} color="#38bdf8" />
-                    <span>{PREVIEW_MODE ? 'Dostępne wkrótce' : 'Wybierz pakiet 7 dni'}</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Plan 30 Dni (Polecany) */}
-            <div
-              style={{
-                backgroundColor: 'rgba(19, 29, 56, 0.95)',
-                border: '2px solid rgba(245, 158, 11, 0.6)',
-                borderRadius: '14px',
-                padding: '18px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                gap: '14px',
-                position: 'relative',
-                boxShadow: '0 8px 24px rgba(245, 158, 11, 0.15)',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Dostęp 30 Dni
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      padding: '2px 8px',
-                      borderRadius: '999px',
-                      backgroundColor: 'rgba(245, 158, 11, 0.2)',
-                      color: '#fbbf24',
-                      border: '1px solid rgba(245, 158, 11, 0.4)',
-                    }}
-                  >
-                    Pełny Miesiąc
-                  </span>
-                </div>
-
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: '1.4' }}>
-                  Kompletny pakiet do stałej pracy nad projektami architektonicznymi.
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11.5px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Import działek geodezyjnych i obrysów budynków (ULDK)</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
-                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span>Eksport DXF do CAD</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontWeight: 600 }}>
-                    <Check size={14} color="#fbbf24" style={{ flexShrink: 0 }} />
-                    <span>Linki współdzielenia ważne 30 dni</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleCheckout('30d')}
-                disabled={loadingPlan !== null || PREVIEW_MODE}
-                className="btn-primary"
-                style={{
-                  padding: '10px 14px',
-                  fontWeight: 700,
-                  fontSize: '12.5px',
-                  gap: '8px',
-                  opacity: PREVIEW_MODE ? 0.5 : 1,
-                  cursor: PREVIEW_MODE ? 'not-allowed' : loadingPlan !== null ? 'not-allowed' : 'pointer',
-                  background: 'linear-gradient(135deg, #f59e0b, #ea580c)',
-                }}
-                title={PREVIEW_MODE ? 'Dostępne wkrótce — trwa okres zapoznawczy' : undefined}
-              >
-                {loadingPlan === '30d' ? (
-                  <>
-                    <Loader2 size={15} className="animate-spin" />
-                    <span>Przygotowywanie...</span>
-                  </>
-                ) : (
-                  <>
-                    <Crown size={15} color="#ffffff" />
-                    <span>{PREVIEW_MODE ? 'Dostępne wkrótce' : 'Kup dostęp 30 dni'}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
 
           {/* Tryb zapoznawczy: darmowy klucz dostępu na 7 dni */}
           {PREVIEW_MODE && (
@@ -499,6 +313,175 @@ export const PricingModal: React.FC = () => {
               )}
             </div>
           )}
+
+          {/* Pricing Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            {/* Plan 7 Dni */}
+            <div
+              style={{
+                backgroundColor: 'var(--bg-card)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '14px',
+                padding: '18px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '14px',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Dostęp 7 Dni
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                      color: '#38bdf8',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                    }}
+                  >
+                    Projektowy
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: '1.4' }}>
+                  Szybki dostęp na pojedynczą ekspertyzę lub weryfikację nasłonecznienia.
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11.5px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
+                    <span>Import działek geodezyjnych i obrysów budynków (ULDK)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
+                    <span>Eksport geometrii do DXF</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+                    <Check size={14} color="#64748b" style={{ flexShrink: 0 }} />
+                    <span>Linki współdzielenia ważne 14 dni</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleCheckout('7d')}
+                disabled={loadingPlan !== null || PREVIEW_MODE}
+                className="btn-secondary"
+                style={{
+                  padding: '10px 14px',
+                  fontWeight: 600,
+                  fontSize: '12.5px',
+                  gap: '8px',
+                  opacity: PREVIEW_MODE ? 0.5 : 1,
+                  cursor: PREVIEW_MODE ? 'not-allowed' : loadingPlan !== null ? 'not-allowed' : 'pointer',
+                }}
+                title={PREVIEW_MODE ? 'Dostępne wkrótce — trwa okres zapoznawczy' : undefined}
+              >
+                {loadingPlan === '7d' ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    <span>Przygotowywanie...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap size={14} color="#38bdf8" />
+                    <span>{PREVIEW_MODE ? 'Dostępne wkrótce' : 'Wybierz pakiet 7 dni'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Plan 30 Dni (Polecany) */}
+            <div
+              style={{
+                backgroundColor: 'rgba(19, 29, 56, 0.95)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '14px',
+                padding: '18px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '14px',
+                position: 'relative',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Dostęp 30 Dni
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                      color: '#fbbf24',
+                      border: '1px solid rgba(245, 158, 11, 0.4)',
+                    }}
+                  >
+                    Pełny Miesiąc
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: '1.4' }}>
+                  Kompletny pakiet do stałej pracy nad projektami architektonicznymi.
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11.5px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
+                    <span>Import działek geodezyjnych i obrysów budynków (ULDK)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                    <Check size={14} color="#10b981" style={{ flexShrink: 0 }} />
+                    <span>Eksport DXF do CAD</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontWeight: 600 }}>
+                    <Check size={14} color="#fbbf24" style={{ flexShrink: 0 }} />
+                    <span>Linki współdzielenia ważne 30 dni</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleCheckout('30d')}
+                disabled={loadingPlan !== null || PREVIEW_MODE}
+                className={PREVIEW_MODE ? 'btn-secondary' : 'btn-primary'}
+                style={{
+                  padding: '10px 14px',
+                  fontWeight: 700,
+                  fontSize: '12.5px',
+                  gap: '8px',
+                  opacity: PREVIEW_MODE ? 0.5 : 1,
+                  cursor: PREVIEW_MODE ? 'not-allowed' : loadingPlan !== null ? 'not-allowed' : 'pointer',
+                }}
+                title={PREVIEW_MODE ? 'Dostępne wkrótce — trwa okres zapoznawczy' : undefined}
+              >
+                {loadingPlan === '30d' ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    <span>Przygotowywanie...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap size={14} color={PREVIEW_MODE ? 'var(--text-primary)' : '#ffffff'} />
+                    <span>{PREVIEW_MODE ? 'Dostępne wkrótce' : 'Kup dostęp 30 dni'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
 
           {/* Footer information & Activate existing key button */}
           <div

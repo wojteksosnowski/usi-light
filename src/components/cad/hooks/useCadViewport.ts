@@ -6,7 +6,7 @@ export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
   buildings: BuildingLoop[],
   viewRotationDeg: number,
-  fitTrigger?: number,
+  fitRequest?: { nonce: number; ignoreSelection: boolean },
   selectedBuildingId?: string | null,
   layerSettings?: Record<string, any>,
   projectRadius?: number
@@ -87,9 +87,11 @@ export function useCadViewport(
     [viewState, viewRotationDeg]
   );
 
-  const fitToExtents = useCallback(() => {
+  const fitToExtents = useCallback((ignoreSelection: boolean = false) => {
     const container = containerRef.current;
     if (!container) return;
+
+    const effectiveSelectedBuildingId = ignoreSelection ? null : selectedBuildingId;
 
     const rect = container.getBoundingClientRect();
     const width = rect.width > 50 ? rect.width : window.innerWidth - 380;
@@ -112,8 +114,8 @@ export function useCadViewport(
     // 1. Ustalenie obiektów docelowych do wycentrowania
     let targetBuildings: BuildingLoop[] = [];
 
-    if (selectedBuildingId) {
-      targetBuildings = buildings.filter((b) => b.id === selectedBuildingId);
+    if (effectiveSelectedBuildingId) {
+      targetBuildings = buildings.filter((b) => b.id === effectiveSelectedBuildingId);
     }
 
     // Jeśli brak zaznaczenia lub obiekt nie istnieje, bierzemy obiekty z włączonych (widocznych) warstw
@@ -182,7 +184,7 @@ export function useCadViewport(
     const rotatedCenterX = (rMinX + rMaxX) / 2;
     const rotatedCenterY = (rMinY + rMaxY) / 2;
 
-    const scaleFactor = selectedBuildingId ? 0.70 : 0.80;
+    const scaleFactor = effectiveSelectedBuildingId ? 0.70 : 0.80;
     const scaleX = (width * scaleFactor) / rBboxWidth;
     const scaleY = (height * scaleFactor) / rBboxHeight;
     let newScale = Math.max(0.001, Math.min(100, Math.min(scaleX, scaleY)));
@@ -205,10 +207,11 @@ export function useCadViewport(
   }, [buildings, viewRotationDeg, containerRef, selectedBuildingId, layerSettings, projectRadius]);
 
   useEffect(() => {
-    fitToExtents();
-    const t = setTimeout(fitToExtents, 100);
+    const ignoreSelection = fitRequest?.ignoreSelection ?? false;
+    fitToExtents(ignoreSelection);
+    const t = setTimeout(() => fitToExtents(ignoreSelection), 100);
     return () => clearTimeout(t);
-  }, [fitTrigger]);
+  }, [fitRequest?.nonce]);
 
   return {
     viewState,
