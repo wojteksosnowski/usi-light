@@ -14,5 +14,5 @@ export function getStripe(): Stripe {
   return cachedStripe;
 }
 
-export { getRedisAndRatelimit, formatLicenseKey } from './serverRedis';
-export type { LicenseRecord } from './serverRedis';
+export { getRedisAndRatelimit, formatLicenseKey } from './serverRedis.js';
+export type { LicenseRecord } from './serverRedis.js';

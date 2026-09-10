@@ -2,7 +2,7 @@ import { Redis } from '@upstash/redis';
 import { Ratelimit } from '@upstash/ratelimit';
 import { nanoid } from 'nanoid';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { LicenseRecord } from './lib/serverStripe.ts';
+import type { LicenseRecord } from './lib/serverStripe.js';
 
 // Czas ważności linku współdzielenia w zależności od poziomu dostępu:
 // brak licencji (free) -> 7 dni, PRO 7-dniowe -> 14 dni, PRO 30-dniowe -> 30 dni
