@@ -1,4 +1,5 @@
 import { Point2D } from '../../types/geometry';
+import polygonClipping from 'polygon-clipping';
 
 export type SweepAlignment = 'center' | 'left' | 'right';
 
@@ -163,7 +164,100 @@ export function generateSweepPolygon(
     result.push(rightPoints[i]);
   }
 
-  return result;
+  return hasSelfIntersection(result) ? repairSelfIntersectingRibbon(result) : result;
+}
+
+/** Wykrywa, czy jakiekolwiek dwie niesąsiadujące krawędzi zamkniętego wielokąta się przecinają. */
+export function hasSelfIntersectionForTest(points: Point2D[]): boolean {
+  return hasSelfIntersection(points);
+}
+
+function hasSelfIntersection(points: Point2D[]): boolean {
+  const n = points.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++) {
+    const a1 = points[i];
+    const a2 = points[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      if (j === i || j === (i + 1) % n || (j + 1) % n === i) continue;
+      const b1 = points[j];
+      const b2 = points[(j + 1) % n];
+      if (segmentsIntersect(a1, a2, b1, b2)) return true;
+    }
+  }
+  return false;
+}
+
+function segmentsIntersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D): boolean {
+  const d1x = a2.x - a1.x, d1y = a2.y - a1.y;
+  const d2x = b2.x - b1.x, d2y = b2.y - b1.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-12) return false;
+  const t = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
+  const u = ((b1.x - a1.x) * d1y - (b1.y - a1.y) * d1x) / denom;
+  const eps = 1e-9;
+  return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
+}
+
+/**
+ * Naprawia samoprzecinający się obrys wstęgi (np. przy ostrych zakrętach polilinii bazowej,
+ * gdzie naiwny miter-offset lewej/prawej krawędzi tworzy pętlę typu bowtie).
+ *
+ * Wykorzystuje sztuczkę z polygon-clipping: unia samoprzecinającego się pierścienia sama ze
+ * sobą rozdziela go na zbiór prostych (nie-samoprzecinających) wielokątów wg reguły non-zero.
+ * Dla poprawnego (nie-samoprzecinającego się) wejścia to no-op — zwraca wejście niezmienione.
+ * Zwracamy pojedynczą pętlę o największym polu (dominujący obrys wstęgi); drobne odcięte
+ * fragmenty przy pinch-poincie zakrętu są odrzucane jako artefakt offsetu, nie realny kształt drogi.
+ */
+function repairSelfIntersectingRibbon(points: Point2D[]): Point2D[] {
+  if (points.length < 4) return points;
+
+  const ring: [number, number][] = points.map((p) => [p.x, p.y]);
+  ring.push([points[0].x, points[0].y]);
+
+  let unionResult: polygonClipping.MultiPolygon;
+  try {
+    unionResult = polygonClipping.union([ring]);
+  } catch {
+    return points;
+  }
+
+  if (!unionResult || unionResult.length === 0) return points;
+  if (unionResult.length === 1 && unionResult[0].length === 1) {
+    // Pojedyncza pętla bez otworów — brak samoprzecięcia (lub naprawa nic nie zmieniła topologicznie).
+    const ringOut = unionResult[0][0];
+    const isClosed =
+      ringOut.length > 1 &&
+      ringOut[0][0] === ringOut[ringOut.length - 1][0] &&
+      ringOut[0][1] === ringOut[ringOut.length - 1][1];
+    const pts = (isClosed ? ringOut.slice(0, -1) : ringOut).map(([x, y]) => ({ x, y }));
+    return pts.length >= 3 ? pts : points;
+  }
+
+  // Wiele rozłącznych wielokątów — samoprzecięcie rozdzieliło wstęgę. Wybieramy zewnętrzny
+  // pierścień o największym polu jako dominujący obrys.
+  let best: Point2D[] | null = null;
+  let bestArea = -Infinity;
+  for (const poly of unionResult) {
+    const outer = poly[0];
+    if (!outer || outer.length < 4) continue;
+    const isClosed = outer[0][0] === outer[outer.length - 1][0] && outer[0][1] === outer[outer.length - 1][1];
+    const pts = (isClosed ? outer.slice(0, -1) : outer).map(([x, y]) => ({ x, y }));
+    if (pts.length < 3) continue;
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      area += a.x * b.y - b.x * a.y;
+    }
+    area = Math.abs(area) / 2;
+    if (area > bestArea) {
+      bestArea = area;
+      best = pts;
+    }
+  }
+
+  return best && best.length >= 3 ? best : points;
 }
 
 /**

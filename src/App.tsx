@@ -606,7 +606,11 @@ export const App: React.FC = () => {
         // później przez użytkownika, bez wpływu na solver — tożsamość generatora to roadPointA/B).
         const newBldg = createBuildingFromVertices([pointA, pointB, pointA], `Droga ${count}`, 0, false, 'boundary');
         newBldg.areaType = 'utwardzenie';
-        const geometry = solveRoadObjectGeometry({ pointA, pointB, width: roadWidth, obstacles, plot }, newBldg.id);
+        newBldg.storeysCount = 0;
+        const geometry = solveRoadObjectGeometry(
+          { pointA, pointB, width: roadWidth, obstacles, plot, strategy: 'shortest' },
+          newBldg.id
+        );
         newBldg.vertices = geometry.vertices;
         newBldg.segments = geometry.segments;
         newBldg.sweepPath = geometry.sweepPath;

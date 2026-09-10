@@ -87,11 +87,26 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
                 ? 'rgba(234, 179, 8, 0.2)'
                 : status === 'no_path'
                 ? 'rgba(239, 68, 68, 0.2)'
+                : status === 'partial_radius'
+                ? 'rgba(234, 179, 8, 0.2)'
                 : 'rgba(16, 185, 129, 0.2)',
-            color: status === 'pending' ? '#facc15' : status === 'no_path' ? '#f87171' : '#34d399',
+            color:
+              status === 'pending'
+                ? '#facc15'
+                : status === 'no_path'
+                ? '#f87171'
+                : status === 'partial_radius'
+                ? '#facc15'
+                : '#34d399',
           }}
         >
-          {status === 'pending' ? 'Liczy trasę...' : status === 'no_path' ? 'Brak trasy - przeszkody blokują połączenie' : 'Trasa OK'}
+          {status === 'pending'
+            ? 'Liczy trasę...'
+            : status === 'no_path'
+            ? 'Brak trasy - przeszkody blokują połączenie'
+            : status === 'partial_radius'
+            ? 'Trasa OK - promień skrętu lokalnie zmniejszony (przeszkody)'
+            : 'Trasa OK'}
         </div>
 
         <SegmentedControl
@@ -100,7 +115,7 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
           onChange={(roadStrategy) => updateSelectedBuilding({ roadStrategy })}
           options={[
             { value: 'shortest', label: 'Najkrótsza' },
-            { value: 'centered_smooth', label: 'Wygładzona (wkrótce)' },
+            { value: 'centered_smooth', label: 'Wygładzona' },
           ]}
           accentVar="#94a3b8"
         />
@@ -118,16 +133,16 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
           value={selectedBuilding.roadMinTurnRadius ?? 6.0}
           step={0.5}
           min={0}
-          hint="Używany tylko przez strategię 'Wygładzona' (jeszcze nieaktywna)"
+          hint="Używany tylko przez strategię 'Wygładzona'"
           onChange={(roadMinTurnRadius) => updateSelectedBuilding({ roadMinTurnRadius })}
         />
 
         <button
           type="button"
-          disabled={status !== 'solved'}
+          disabled={status !== 'solved' && status !== 'partial_radius'}
           onClick={() => bakeRoad(selectedBuilding.id)}
           title={
-            status !== 'solved'
+            status === 'no_path' || status === 'pending'
               ? 'Dostępne tylko gdy trasa jest rozwiązana'
               : 'Zamienia obiekt Drogi na zwykły, statyczny obrys (koniec zarządzania przez solver)'
           }
@@ -135,11 +150,11 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
             padding: '8px 10px',
             borderRadius: '8px',
             border: '1px solid var(--border-light)',
-            backgroundColor: status === 'solved' ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-input)',
-            color: status === 'solved' ? '#34d399' : '#64748b',
+            backgroundColor: status === 'solved' || status === 'partial_radius' ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-input)',
+            color: status === 'solved' || status === 'partial_radius' ? '#34d399' : '#64748b',
             fontWeight: 700,
             fontSize: '11px',
-            cursor: status === 'solved' ? 'pointer' : 'not-allowed',
+            cursor: status === 'solved' || status === 'partial_radius' ? 'pointer' : 'not-allowed',
           }}
         >
           Zapisz jako obrys (Bake)

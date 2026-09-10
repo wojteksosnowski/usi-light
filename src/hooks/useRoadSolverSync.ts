@@ -46,7 +46,15 @@ export function useRoadSolverSync(
 
       for (const road of roads) {
         const geometry = solveRoadObjectGeometry(
-          { pointA: road.roadPointA!, pointB: road.roadPointB!, width: road.sweepWidth ?? 5.0, obstacles, plot },
+          {
+            pointA: road.roadPointA!,
+            pointB: road.roadPointB!,
+            width: road.sweepWidth ?? 5.0,
+            obstacles,
+            plot,
+            strategy: road.roadStrategy ?? 'shortest',
+            minTurnRadius: road.roadMinTurnRadius,
+          },
           road.id
         );
 

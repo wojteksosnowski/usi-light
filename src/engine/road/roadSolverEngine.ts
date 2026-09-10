@@ -1,8 +1,10 @@
+import { Point2D } from '../../types/geometry';
 import { generateSweepPolygon } from '../../utils/math2d/sweep';
 import { isPointInPolygon } from '../../utils/math2d/polygons';
 import { dilateObstacles, insetPlot, isSegmentClear } from './obstacleZone';
 import { buildVisibilityGraph } from './visibilityGraph';
 import { findShortestPath } from './pathfind';
+import { smoothCenterlineWithArcs } from './smoothPath';
 import { RoadSolveInput, RoadSolveResult } from './types';
 
 /**
@@ -11,7 +13,7 @@ import { RoadSolveInput, RoadSolveResult } from './types';
  * przeszkód jako węzły grafu, Dijkstra po krawędziach nieprzecinających przeszkód.
  */
 export function solveRoad(input: RoadSolveInput): RoadSolveResult {
-  const { pointA, pointB, width, obstacles, plot } = input;
+  const { pointA, pointB, width, obstacles, plot, strategy, minTurnRadius } = input;
   const halfWidth = width / 2;
 
   const dilatedObstacles = dilateObstacles(obstacles, halfWidth);
@@ -28,19 +30,27 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
     }
   }
 
+  let centerline: Point2D[] | null;
+
   // Szybka ścieżka: gdy odcinek A->B jest już wolny, unikamy budowy pełnego grafu.
   if (isSegmentClear(pointA, pointB, dilatedObstacles, plotInset)) {
-    const centerline = [pointA, pointB];
-    return { centerline, polygon: generateSweepPolygon(centerline, width, 'center'), success: true };
+    centerline = [pointA, pointB];
+  } else {
+    const graph = buildVisibilityGraph(pointA, pointB, dilatedObstacles, plotInset);
+    centerline = findShortestPath(graph, 0, 1);
   }
-
-  const graph = buildVisibilityGraph(pointA, pointB, dilatedObstacles, plotInset);
-  const centerline = findShortestPath(graph, 0, 1);
 
   if (!centerline || centerline.length < 2) {
     return { centerline: [], polygon: [], success: false, reason: 'no_path' };
   }
 
+  let radiusFullyMet: boolean | undefined;
+  if (strategy === 'centered_smooth' && minTurnRadius && minTurnRadius > 1e-6) {
+    const smoothed = smoothCenterlineWithArcs(centerline, minTurnRadius, obstacles, halfWidth, plotInset);
+    centerline = smoothed.path;
+    radiusFullyMet = smoothed.fullyMet;
+  }
+
   const polygon = generateSweepPolygon(centerline, width, 'center');
-  return { centerline, polygon, success: true };
+  return { centerline, polygon, success: true, radiusFullyMet };
 }
