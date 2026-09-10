@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Point2D } from '../../../types/geometry';
 import { useCadToolStore, useSceneStore } from '../../../store';
+import type { DrawingMode } from '../../../store/useCadToolStore';
 
 export function useCadHotkeys({
   drawingMode,
@@ -23,7 +24,7 @@ export function useCadHotkeys({
   onToggleOsnap,
   onStepRotateBuilding,
 }: {
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+  drawingMode: DrawingMode;
   drawingVertices: Point2D[];
   hoveredBuildings: string[];
   selectedVertexIndex?: number | null;

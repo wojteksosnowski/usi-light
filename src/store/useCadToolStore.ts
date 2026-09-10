@@ -4,9 +4,11 @@ import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 import { useSceneStore } from './useSceneStore';
 
+export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+
 interface CadToolState {
   // Drawing Tools
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+  drawingMode: DrawingMode;
   drawingVerticesCount: number;
 
   // Sweep (Wstęga) settings
@@ -43,7 +45,7 @@ interface CadToolState {
   isInteracting: boolean;
 
   // Actions
-  setDrawingMode: (mode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union') => void;
+  setDrawingMode: (mode: DrawingMode) => void;
   setDrawingVerticesCount: (count: number) => void;
   setSweepWidth: (width: number) => void;
   setSweepAlignment: (alignment: SweepAlignment) => void;

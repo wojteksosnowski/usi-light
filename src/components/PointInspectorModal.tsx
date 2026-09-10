@@ -2,8 +2,16 @@ import React from 'react';
 import { AnalysisPointResult } from '../types/geometry';
 import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
 import { FloatingInspectorCard } from './common/FloatingInspectorCard';
+import { IndexPillSelector } from './modifiers/controls/IndexPillSelector';
 import { useSceneStore } from '../store';
 import { calculateBuildingFloors } from '../utils/buildingFloorCalculator';
+
+function formatHoursAsClock(totalMinutes: number): string {
+  const rounded = Math.round(totalMinutes);
+  const hh = Math.floor(rounded / 60);
+  const mm = rounded % 60;
+  return `${hh}:${String(mm).padStart(2, '0')} h`;
+}
 
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
@@ -141,36 +149,19 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
 
       {/* Storey (kondygnacja) selector for the active point */}
       {storeyIntervals.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '12px' }}>
-          <label style={{ fontSize: '10px', color: '#94a3b8' }}>
-            Kondygnacja pomiaru:
-          </label>
-          <select
-            value={pointResult.storeyIndex ?? 'auto'}
-            onChange={(e) => {
-              const v = e.target.value;
-              onStoreyChange?.(pointResult.id, v === 'auto' ? undefined : parseInt(v, 10));
-            }}
+        <div style={{ marginBottom: '12px' }}>
+          <IndexPillSelector
+            label="Kondygnacja pomiaru:"
+            value={pointResult.storeyIndex ?? -1}
+            placeholderValue={-1}
+            placeholderLabel="Auto (na podstawie geometrii)"
+            options={storeyIntervals.map((iv) => ({
+              value: iv.index,
+              label: `${iv.isFirst ? 'Parter' : iv.label} (${iv.hBottom.toFixed(2)}–${iv.hTop.toFixed(2)} m)`,
+            }))}
+            onChange={(storeyIndex) => onStoreyChange?.(pointResult.id, storeyIndex)}
             disabled={!onStoreyChange}
-            style={{
-              width: '100%',
-              backgroundColor: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '6px',
-              color: '#e2e8f0',
-              padding: '4px 6px',
-              fontSize: '11px',
-              fontWeight: 500,
-              cursor: onStoreyChange ? 'pointer' : 'not-allowed',
-            }}
-          >
-            <option value="auto">Auto (na podstawie geometrii)</option>
-            {storeyIntervals.map((iv) => (
-              <option key={iv.index} value={iv.index}>
-                {iv.isFirst ? 'Parter' : iv.label} ({iv.hBottom.toFixed(2)}–{iv.hTop.toFixed(2)} m)
-              </option>
-            ))}
-          </select>
+          />
         </div>
       )}
 
@@ -269,7 +260,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
             <span>Czas słońca:</span>
           </div>
           <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#fcd34d' }}>
-            {sunlight.totalHours.toFixed(2)} h ({sunlight.totalMinutes} min)
+            {formatHoursAsClock(sunlight.totalMinutes)}
           </div>
         </div>
 
@@ -300,7 +291,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
               return (
                 <div
                   key={idx}
-                  title={`${sec.startTimeStr} - ${sec.endTimeStr} (${sec.hours.toFixed(2)}h) — ${
+                  title={`${sec.startTimeStr} - ${sec.endTimeStr} (${formatHoursAsClock(sec.hours * 60)}) — ${
                     sec.isDirectSunlight ? 'Bezpośrednie słońce (Kąt ≥ 12°)' : 'Zacienione'
                   }`}
                   style={{

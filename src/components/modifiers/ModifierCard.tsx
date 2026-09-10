@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Eye, EyeOff } from 'lucide-react';
 import { Modifier } from '../../types/modifiers';
 import { ModifierDescriptor, ModifierFieldContext } from './modifierDescriptorTypes';
 
@@ -50,31 +50,31 @@ export const ModifierCard: React.FC<ModifierCardProps> = ({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <input
-            type="checkbox"
-            checked={modifier.enabled}
-            onChange={onToggle}
-            style={{ cursor: 'pointer', accentColor: 'var(--accent-purple)' }}
-            title="Włącz / wyłącz ten modyfikator"
-          />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <descriptor.Icon size={13} color={descriptor.accentVar} />
           <span style={{ fontWeight: 700, fontSize: '11.5px', color: descriptor.accentVar }}>
-            #{index + 1} {descriptor.title}
+            {descriptor.title}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <button
+            type="button"
+            onClick={onToggle}
+            className="modifier-card-icon-btn"
+            style={{
+              color: modifier.enabled ? 'var(--accent-purple)' : 'var(--text-muted)',
+              borderColor: modifier.enabled ? 'var(--accent-purple)' : 'var(--border-light)',
+            }}
+            title={modifier.enabled ? 'Wyłącz ten modyfikator' : 'Włącz ten modyfikator'}
+          >
+            {modifier.enabled ? <Eye size={12} /> : <EyeOff size={12} />}
+          </button>
           <button
             type="button"
             disabled={isFirst}
             onClick={onMoveUp}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: isFirst ? 'var(--border-light)' : 'var(--text-primary)',
-              cursor: isFirst ? 'default' : 'pointer',
-              padding: '2px 4px',
-            }}
+            className="modifier-card-icon-btn"
             title="Przesuń wyżej w stosie"
           >
             <ArrowUp size={12} />
@@ -83,13 +83,7 @@ export const ModifierCard: React.FC<ModifierCardProps> = ({
             type="button"
             disabled={isLast}
             onClick={onMoveDown}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: isLast ? 'var(--border-light)' : 'var(--text-primary)',
-              cursor: isLast ? 'default' : 'pointer',
-              padding: '2px 4px',
-            }}
+            className="modifier-card-icon-btn"
             title="Przesuń niżej w stosie"
           >
             <ArrowDown size={12} />
@@ -97,14 +91,8 @@ export const ModifierCard: React.FC<ModifierCardProps> = ({
           <button
             type="button"
             onClick={onRemove}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--accent-rose)',
-              cursor: 'pointer',
-              padding: '2px 4px',
-              marginLeft: '4px',
-            }}
+            className="modifier-card-icon-btn"
+            style={{ color: 'var(--accent-rose)', borderColor: 'rgba(244, 63, 94, 0.4)', marginLeft: '4px' }}
             title="Usuń ten modyfikator"
           >
             <Trash2 size={12} />
