@@ -18,6 +18,13 @@ export function distance(p1: Point2D, p2: Point2D): number {
 }
 
 /**
+ * Whether two points are within `epsilon` of each other (default 1e-4).
+ */
+export function pointsEqual(p1: Point2D, p2: Point2D, epsilon: number = 1e-4): boolean {
+  return distance(p1, p2) < epsilon;
+}
+
+/**
  * 2D Dot product of two vectors.
  */
 export function dotProduct2D(v1: Vector2D, v2: Vector2D): number {

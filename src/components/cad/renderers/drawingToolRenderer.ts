@@ -3,13 +3,14 @@ import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { generateSweepPolygon, SweepAlignment, getPolygonCentroid, getRotateHandleScreenPos } from '../../../utils/math2d';
 import { OsnapSnapResult, BuildingDragSnapResult, EdgeDragSnapResult, DirectionSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
+import { isLiveRoad } from '../../../engine/road/gatherObstacles';
 
 /**
  * Renders CAD OSNAP glyphs, Target Snap Halo, and OTRACK guidelines
  */
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union',
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union' | 'road',
   drawingVertices: Point2D[],
   currentMouseWorld: Point2D | null,
   selectedBuilding?: BuildingLoop | null,
@@ -24,7 +25,8 @@ export function renderDrawingToolPreview(
   sweepAlignment: SweepAlignment = 'center',
   allBuildings?: BuildingLoop[],
   alignPendingRef?: { buildingId: string; segmentId: string } | null,
-  alignHoveredEdge?: { buildingId: string; segmentId: string } | null
+  alignHoveredEdge?: { buildingId: string; segmentId: string } | null,
+  roadWidth: number = 5.0
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -671,8 +673,107 @@ export function renderDrawingToolPreview(
     ctx.restore();
   }
 
+  // 5.6. Road (Droga) Preview: kliknięto punkt A, podgląd wstęgi śledzi kursor do punktu B
+  if (drawingMode === 'road' && drawingVertices.length === 1 && currentMouseWorld) {
+    const pointA = drawingVertices[0];
+    const pointB = currentMouseWorld;
+    if (Number.isFinite(pointA.x) && Number.isFinite(pointA.y) && Number.isFinite(pointB.x) && Number.isFinite(pointB.y)) {
+      ctx.save();
+
+      const roadPolygon = generateSweepPolygon([pointA, pointB], roadWidth, 'center');
+      if (roadPolygon.length >= 3) {
+        ctx.beginPath();
+        const p0 = worldToScreen(roadPolygon[0].x, roadPolygon[0].y);
+        ctx.moveTo(p0.sx, p0.sy);
+        for (let i = 1; i < roadPolygon.length; i++) {
+          const pt = worldToScreen(roadPolygon[i].x, roadPolygon[i].y);
+          ctx.lineTo(pt.sx, pt.sy);
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(75, 85, 99, 0.35)';
+        ctx.fill();
+        ctx.strokeStyle = '#9ca3af';
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Oś A -> B
+      const sA = worldToScreen(pointA.x, pointA.y);
+      const sB = worldToScreen(pointB.x, pointB.y);
+      ctx.beginPath();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([4, 3]);
+      ctx.moveTo(sA.sx, sA.sy);
+      ctx.lineTo(sB.sx, sB.sy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Znacznik punktu A
+      ctx.beginPath();
+      ctx.arc(sA.sx, sA.sy, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Badge z informacją o narzędziu
+      const badgeText = `Droga: szer. ${roadWidth.toFixed(1)}m | kliknij punkt B`;
+      ctx.font = 'bold 10.5px Inter, sans-serif';
+      const tw = ctx.measureText(badgeText).width;
+      const bx = sB.sx + 14;
+      const by = sB.sy + 20;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(bx, by - 10, tw + 14, 22, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#e5e7eb';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(badgeText, bx + 7, by + 1);
+
+      ctx.restore();
+    }
+  }
+
+  // 5.7. Road (Droga) A/B endpoint handles in vertex-edit mode — jedyne przeciągalne punkty,
+  // resztę trasy pomiędzy nimi dyktuje solver (nie jest ręcznie edytowalna).
+  if (selectedBuilding && drawingMode === 'vertexEdit' && isLiveRoad(selectedBuilding)) {
+    ctx.save();
+    const endpoints: { pt: Point2D; label: string }[] = [
+      { pt: selectedBuilding.roadPointA!, label: 'A' },
+      { pt: selectedBuilding.roadPointB!, label: 'B' },
+    ];
+
+    for (const { pt, label } of endpoints) {
+      const { sx, sy } = worldToScreen(pt.x, pt.y);
+      if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = 'bold 10px monospace';
+      ctx.fillStyle = '#020617';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, sx, sy);
+    }
+    ctx.restore();
+  }
+
   // 6. Vertex Edit Mode handles and midpoint [+] insertions (including Sweep spine path if present)
-  if (selectedBuilding && drawingMode === 'vertexEdit') {
+  if (selectedBuilding && drawingMode === 'vertexEdit' && !isLiveRoad(selectedBuilding)) {
     const isSweep = Array.isArray(selectedBuilding.sweepPath) && selectedBuilding.sweepPath.length >= 2;
     const verts = isSweep ? selectedBuilding.sweepPath! : selectedBuilding.vertices;
 

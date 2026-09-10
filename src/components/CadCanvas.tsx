@@ -43,6 +43,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     drawingMode = 'none',
     sweepWidth = 5.0,
     sweepAlignment = 'center',
+    roadWidth = 5.0,
     pinnedPoints = [],
     pinnedPointResults: propPinnedPointResults,
     activePinnedPointId = null,
@@ -508,6 +509,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       activeBuildingDragSnap: interaction.activeBuildingDragSnap,
       sweepWidth,
       sweepAlignment,
+      roadWidth,
     });
   }, [
     canvasDimensions,
@@ -541,6 +543,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     interaction.activeBuildingDragSnap,
     sweepWidth,
     sweepAlignment,
+    roadWidth,
     interaction.effectiveIsInteracting,
   ]);
 

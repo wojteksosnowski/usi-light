@@ -2,6 +2,7 @@ import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react'
 import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType } from '../../../types/geometry';
 import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180, getPolygonCentroid, getRotateHandleScreenPos } from '@/utils/math2d';
 import { useUiStore } from '../../../store/useUiStore';
+import { isLiveRoad } from '../../../engine/road/gatherObstacles';
 import {
   calculateDirectionSnap,
   DirectionSnapResult,
@@ -53,6 +54,10 @@ interface DragVertexContext {
   initialVertices: Point2D[];
   currentTargetPt?: Point2D;
   isSweep: boolean;
+  /** Gdy true: przeciągany punkt to roadPointA (vertexIndex 0) lub roadPointB (vertexIndex 1) obiektu
+   * Droga — solver dyktuje resztę trasy, więc zapis idzie przez onUpdateRoadEndpoint, nie
+   * onUpdateBuildingVertices/onUpdateBuildingSweepPath. */
+  isRoadEndpoint?: boolean;
   incidentAxes: {
     origin: Point2D;
     angleDeg: number;
@@ -245,6 +250,7 @@ export function useCanvasInteraction({
   onDrawingVerticesCountChange,
   onUpdateBuildingVertices,
   onUpdateBuildingSweepPath,
+  onUpdateRoadEndpoint,
   onBuildingRotate,
   onBooleanUnion,
   pinnedPoints = [],
@@ -690,6 +696,31 @@ export function useCanvasInteraction({
 
       if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg && isLiveRoad(selBldg) && !isBuildingLocked(selBldg, layerSettings)) {
+          // Droga: jedyne przeciągalne uchwyty to punkty A i B — resztę trasy dyktuje solver.
+          const roadEndpoints = [selBldg.roadPointA, selBldg.roadPointB].filter(Boolean) as Point2D[];
+          for (let i = 0; i < roadEndpoints.length; i++) {
+            const s = worldToScreen(roadEndpoints[i].x, roadEndpoints[i].y);
+            if (Math.hypot(sx - s.sx, sy - s.sy) <= 12) {
+              setDraggedVertexIndex(i);
+              setSelectedVertexIndex(i);
+              setDragVertexPreviewPt(roadEndpoints[i]);
+              dragVertexContextRef.current = {
+                buildingId: selBldg.id,
+                vertexIndex: i,
+                initialVertices: roadEndpoints,
+                currentTargetPt: { ...roadEndpoints[i] },
+                isSweep: false,
+                isRoadEndpoint: true,
+                incidentAxes: [],
+              };
+              onInteractionChange?.(true);
+              return;
+            }
+          }
+          return;
+        }
+
         if (selBldg && !isBuildingLocked(selBldg, layerSettings)) {
           const isSweep = Array.isArray(selBldg.sweepPath) && selBldg.sweepPath.length >= 2;
           const verts = isSweep ? selBldg.sweepPath! : selBldg.vertices;
@@ -869,6 +900,24 @@ export function useCanvasInteraction({
               { x: p1.x + h * vx, y: p1.y + h * vy },
             ];
             onFinishDrawing?.(rectVertices, 'rectangle');
+          }
+          setDrawingVertices([]);
+          setCurrentMouseWorld(null);
+          setActiveDirectionSnap(null);
+          setActiveOsnapSnap(null);
+        }
+        return;
+      }
+
+      if (drawingMode === 'road') {
+        const effectiveWorldPt = activeOsnapSnap?.snappedPoint || activeDirectionSnap?.snappedPoint || { x: world.wx, y: world.wy };
+        if (drawingVertices.length === 0) {
+          setDrawingVertices([effectiveWorldPt]);
+        } else {
+          const pointA = drawingVertices[0];
+          const pointB = effectiveWorldPt;
+          if (Math.hypot(pointB.x - pointA.x, pointB.y - pointA.y) >= 0.5) {
+            onFinishDrawing?.([pointA, pointB], 'road');
           }
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
@@ -1266,13 +1315,17 @@ export function useCanvasInteraction({
             if (dragVertexContextRef.current) {
               dragVertexContextRef.current.currentTargetPt = targetPt;
               const dragCtx = dragVertexContextRef.current;
-              const currVerts = dragCtx.initialVertices.map((v, idx) =>
-                idx === dragCtx.vertexIndex ? targetPt : v
-              );
-              if (dragCtx.isSweep) {
-                onUpdateBuildingSweepPath?.(dragCtx.buildingId, currVerts);
+              if (dragCtx.isRoadEndpoint) {
+                onUpdateRoadEndpoint?.(dragCtx.buildingId, dragCtx.vertexIndex === 0 ? 'A' : 'B', targetPt);
               } else {
-                onUpdateBuildingVertices?.(dragCtx.buildingId, currVerts);
+                const currVerts = dragCtx.initialVertices.map((v, idx) =>
+                  idx === dragCtx.vertexIndex ? targetPt : v
+                );
+                if (dragCtx.isSweep) {
+                  onUpdateBuildingSweepPath?.(dragCtx.buildingId, currVerts);
+                } else {
+                  onUpdateBuildingVertices?.(dragCtx.buildingId, currVerts);
+                }
               }
             }
             return;
@@ -1866,13 +1919,17 @@ export function useCanvasInteraction({
       const dragCtx = dragVertexContextRef.current;
       const finalPt = dragCtx.currentTargetPt || dragVertexPreviewPt;
       if (finalPt) {
-        const finalVerts = dragCtx.initialVertices.map((v, idx) =>
-          idx === dragCtx.vertexIndex ? finalPt : v
-        );
-        if (dragCtx.isSweep) {
-          onUpdateBuildingSweepPath?.(dragCtx.buildingId, finalVerts);
+        if (dragCtx.isRoadEndpoint) {
+          onUpdateRoadEndpoint?.(dragCtx.buildingId, dragCtx.vertexIndex === 0 ? 'A' : 'B', finalPt);
         } else {
-          onUpdateBuildingVertices?.(dragCtx.buildingId, finalVerts);
+          const finalVerts = dragCtx.initialVertices.map((v, idx) =>
+            idx === dragCtx.vertexIndex ? finalPt : v
+          );
+          if (dragCtx.isSweep) {
+            onUpdateBuildingSweepPath?.(dragCtx.buildingId, finalVerts);
+          } else {
+            onUpdateBuildingVertices?.(dragCtx.buildingId, finalVerts);
+          }
         }
       }
     }
@@ -1896,6 +1953,7 @@ export function useCanvasInteraction({
     dragVertexPreviewPt,
     onUpdateBuildingSweepPath,
     onUpdateBuildingVertices,
+    onUpdateRoadEndpoint,
     onLabelClick,
   ]);
 

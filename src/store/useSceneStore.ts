@@ -5,6 +5,7 @@ import { createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
+import { pendingRoadObjectGeometry } from '../engine/road/roadObjectGeometry';
 
 export interface SavedSceneData {
   version: 1;
@@ -64,6 +65,8 @@ interface SceneState {
   adjustSelectedBuildingHeight: (deltaMeters: number) => void;
   updateBuildingVertices: (buildingId: string, newVertices: Point2D[]) => void;
   updateBuildingSweepPath: (buildingId: string, newSweepPath: Point2D[], width?: number, alignment?: 'center' | 'left' | 'right') => void;
+  updateRoadEndpoint: (buildingId: string, endpoint: 'A' | 'B', point: Point2D) => void;
+  bakeRoad: (buildingId: string) => void;
   moveBuilding: (id: string, dx: number, dy: number) => void;
   moveBuildings: (ids: string[], dx: number, dy: number) => void;
   moveBuildingEdge: (buildingId: string, edgeIndex: number, dx: number, dy: number) => void;
@@ -119,6 +122,15 @@ function deriveStoreysCount(height: number, firstFloorHeight: number, typicalFlo
   return height > firstFloorHeight
     ? 1 + Math.max(1, Math.round((height - firstFloorHeight) / typicalFloorHeight))
     : 1;
+}
+
+/** Przesuwa punkty A/B Drogi (jeśli obiekt je ma) o ten sam wektor co reszta geometrii —
+ * wspólny helper dla moveBuilding/moveBuildings, żeby nie duplikować tej samej pary ternary. */
+function shiftRoadPoints(bldg: BuildingLoop, dx: number, dy: number): Pick<BuildingLoop, 'roadPointA' | 'roadPointB'> {
+  return {
+    roadPointA: bldg.roadPointA ? { x: bldg.roadPointA.x + dx, y: bldg.roadPointA.y + dy } : undefined,
+    roadPointB: bldg.roadPointB ? { x: bldg.roadPointB.x + dx, y: bldg.roadPointB.y + dy } : undefined,
+  };
 }
 
 export const useSceneStore = create<SceneState>()(
@@ -403,6 +415,51 @@ export const useSceneStore = create<SceneState>()(
     }));
   },
 
+  updateRoadEndpoint: (buildingId, endpoint, point) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId) return bldg;
+        const newPointA = endpoint === 'A' ? { ...point } : bldg.roadPointA;
+        const newPointB = endpoint === 'B' ? { ...point } : bldg.roadPointB;
+        if (!newPointA || !newPointB) {
+          return { ...bldg, roadPointA: newPointA, roadPointB: newPointB };
+        }
+        // Placeholder natychmiastowy (bez pełnego solve) - obiekt podąża za kursorem w czasie
+        // rzeczywistym; useRoadSolverSync przeliczy ostateczną trasę po zakończeniu przeciągania.
+        const geometry = pendingRoadObjectGeometry(newPointA, newPointB, bldg.id);
+        return {
+          ...bldg,
+          roadPointA: newPointA,
+          roadPointB: newPointB,
+          vertices: geometry.vertices,
+          segments: geometry.segments,
+          sweepPath: geometry.sweepPath,
+          roadSolveStatus: geometry.roadSolveStatus,
+        };
+      }),
+    }));
+  },
+
+  bakeRoad: (buildingId) => {
+    set((state) => ({
+      buildings: state.buildings.map((bldg) => {
+        if (bldg.id !== buildingId || bldg.roadSolveStatus !== 'solved') return bldg;
+        // Bake zamraża geometrię i usuwa pola generatora, ale NIE nadpisuje category/areaType —
+        // zostają dokładnie takie, jakie użytkownik aktualnie ustawił na obiekcie.
+        const baked: BuildingLoop = { ...bldg };
+        delete baked.roadPointA;
+        delete baked.roadPointB;
+        delete baked.roadStrategy;
+        delete baked.roadMinTurnRadius;
+        delete baked.roadSolveStatus;
+        delete baked.sweepPath;
+        delete baked.sweepWidth;
+        delete baked.sweepAlignment;
+        return baked;
+      }),
+    }));
+  },
+
   updateBuildingSweepPath: (buildingId, newSweepPath, width, alignment) => {
     set((state) => ({
       buildings: state.buildings.map((bldg) => {
@@ -456,6 +513,7 @@ export const useSceneStore = create<SceneState>()(
             vertices: newVertices,
             sweepPath: newSweepPath,
             storyPolygons: newStoryPolygons,
+            ...shiftRoadPoints(bldg, dx, dy),
           };
 
           if (withMoved.modifiers && withMoved.modifiers.length > 0) {
@@ -513,6 +571,7 @@ export const useSceneStore = create<SceneState>()(
             vertices: newVertices,
             sweepPath: newSweepPath,
             storyPolygons: newStoryPolygons,
+            ...shiftRoadPoints(bldg, dx, dy),
           };
 
           if (withMoved.modifiers && withMoved.modifiers.length > 0) {
@@ -609,6 +668,8 @@ export const useSceneStore = create<SceneState>()(
           const rebuilt = rebuildBuildingSegments(bldg, newVertices);
           rebuilt.transform = updatedTransform;
           rebuilt.sweepPath = newSweepPath;
+          rebuilt.roadPointA = bldg.roadPointA ? rotate(bldg.roadPointA) : undefined;
+          rebuilt.roadPointB = bldg.roadPointB ? rotate(bldg.roadPointB) : undefined;
           if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
             const modRes = applyBuildingModifiers(rebuilt);
             rebuilt.storyPolygons = modRes.storyPolygons;

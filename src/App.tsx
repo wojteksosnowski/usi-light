@@ -4,6 +4,7 @@ import { CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
 import { CadCanvas } from './components/CadCanvas';
 import { PointInspectorModal } from './components/PointInspectorModal';
 import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiersPanel';
+import { RoadSolverPanel } from './components/road/RoadSolverPanel';
 import { ProjectParametersPanel } from './components/parameters/ProjectParametersPanel';
 import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
@@ -41,6 +42,9 @@ import { Point2D, AnalysisPointResult } from './types/geometry';
 import { createBuildingFromVertices } from './utils/dxfParser';
 import { analyzeSegmentsStatistics } from './utils/segmentStatistics';
 import { generateSweepPolygon } from '@/utils/math2d';
+import { gatherRoadObstacles, findPlotBoundary, isLiveRoad } from './engine/road/gatherObstacles';
+import { solveRoadObjectGeometry } from './engine/road/roadObjectGeometry';
+import { useRoadSolverSync } from './hooks/useRoadSolverSync';
 
 const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
 
@@ -53,6 +57,7 @@ export const App: React.FC = () => {
   const setSelectedBuildingId = useSceneStore((s) => s.setSelectedBuildingId);
   const selectBuilding = useSceneStore((s) => s.selectBuilding);
   const addBuilding = useSceneStore((s) => s.addBuilding);
+  const updateBuilding = useSceneStore((s) => s.updateBuilding);
   const deleteBuildings = useSceneStore((s) => s.deleteBuildings);
   const moveBuilding = useSceneStore((s) => s.moveBuilding);
   const moveBuildings = useSceneStore((s) => s.moveBuildings);
@@ -60,6 +65,7 @@ export const App: React.FC = () => {
   const rotateBuilding = useSceneStore((s) => s.rotateBuilding);
   const updateBuildingVertices = useSceneStore((s) => s.updateBuildingVertices);
   const updateBuildingSweepPath = useSceneStore((s) => s.updateBuildingSweepPath);
+  const updateRoadEndpoint = useSceneStore((s) => s.updateRoadEndpoint);
   const booleanUnion = useSceneStore((s) => s.booleanUnion);
   const layerSettings = useSceneStore((s) => s.layerSettings);
   const setSelectedLayerName = useSceneStore((s) => s.setSelectedLayerName);
@@ -78,6 +84,7 @@ export const App: React.FC = () => {
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
   const sweepWidth = useCadToolStore((s) => s.sweepWidth);
   const sweepAlignment = useCadToolStore((s) => s.sweepAlignment);
+  const roadWidth = useCadToolStore((s) => s.roadWidth);
   const isEditMode = useCadToolStore((s) => s.isEditMode);
   const setIsEditMode = useCadToolStore((s) => s.setIsEditMode);
   const facadePointMode = useCadToolStore((s) => s.facadePointMode);
@@ -256,6 +263,8 @@ export const App: React.FC = () => {
     enabledAnalyses
   );
 
+  useRoadSolverSync(buildings, updateBuilding, isInteracting);
+
   const analysisResults = analysisOutput?.results || [];
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
 
@@ -369,7 +378,7 @@ export const App: React.FC = () => {
   }, [selectedBuildingPinnedPoints, activePinnedPointId]);
 
   // Exclusive accordion section: 'points' | 'modifiers' | 'parameters' (only 1 section open at a time)
-  const [activeAccordionSection, setActiveAccordionSection] = React.useState<'points' | 'modifiers' | 'parameters'>('parameters');
+  const [activeAccordionSection, setActiveAccordionSection] = React.useState<'points' | 'modifiers' | 'parameters' | 'road'>('parameters');
 
   // Switch to 'points' section when a pinned point is selected or added
   useEffect(() => {
@@ -585,7 +594,35 @@ export const App: React.FC = () => {
 
   // Handlers for CadCanvas
   const handleFinishDrawing = useCallback(
-    (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => {
+    (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep' | 'road') => {
+      if (shapeType === 'road') {
+        if (vertices.length < 2) return;
+        const [pointA, pointB] = vertices;
+        const obstacles = gatherRoadObstacles(buildings);
+        const plot = findPlotBoundary(buildings);
+
+        const count = buildings.length + 1;
+        // Droga jest od razu obiektem Obszar/Utwardzenie (klasyfikacja swobodnie zmienialna
+        // później przez użytkownika, bez wpływu na solver — tożsamość generatora to roadPointA/B).
+        const newBldg = createBuildingFromVertices([pointA, pointB, pointA], `Droga ${count}`, 0, false, 'boundary');
+        newBldg.areaType = 'utwardzenie';
+        const geometry = solveRoadObjectGeometry({ pointA, pointB, width: roadWidth, obstacles, plot }, newBldg.id);
+        newBldg.vertices = geometry.vertices;
+        newBldg.segments = geometry.segments;
+        newBldg.sweepPath = geometry.sweepPath;
+        newBldg.sweepWidth = roadWidth;
+        newBldg.sweepAlignment = 'center';
+        newBldg.roadPointA = pointA;
+        newBldg.roadPointB = pointB;
+        newBldg.roadStrategy = 'shortest';
+        newBldg.roadSolveStatus = geometry.roadSolveStatus;
+
+        addBuilding(newBldg);
+        setDrawingMode('none');
+        setDrawingVerticesCount(0);
+        return;
+      }
+
       let effectiveVertices = vertices;
       if (shapeType === 'sweep') {
         if (vertices.length < 2) return;
@@ -611,7 +648,7 @@ export const App: React.FC = () => {
       setDrawingMode('none');
       setDrawingVerticesCount(0);
     },
-    [buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, sweepWidth, sweepAlignment]
+    [buildings, addBuilding, setDrawingMode, setDrawingVerticesCount, sweepWidth, sweepAlignment, roadWidth]
   );
 
   const handleCancelDrawing = useCallback(() => {
@@ -721,11 +758,13 @@ export const App: React.FC = () => {
             onDrawingModeChange={setDrawingMode}
             sweepWidth={sweepWidth}
             sweepAlignment={sweepAlignment}
+            roadWidth={roadWidth}
             onFinishDrawing={handleFinishDrawing}
             onCancelDrawing={handleCancelDrawing}
             onDrawingVerticesCountChange={setDrawingVerticesCount}
             onUpdateBuildingVertices={updateBuildingVertices}
             onUpdateBuildingSweepPath={updateBuildingSweepPath}
+            onUpdateRoadEndpoint={updateRoadEndpoint}
             onBuildingRotate={handleBuildingRotate}
             onBooleanUnion={handleBooleanUnion}
             facadePointMode={facadePointMode}
@@ -761,10 +800,14 @@ export const App: React.FC = () => {
 
         {/* Floating Inspector Accordion (Right Side) */}
         {(() => {
+          const selectedBuildingForRoad = buildings.find((b) => b.id === selectedBuildingId);
           const hasPoints = !!activePointResult;
           const hasModifiers = !!(showModifiersPanel && selectedBuildingId);
           const hasParameters = showProjectParameters;
-          const openSectionsCount = (hasPoints ? 1 : 0) + (hasModifiers ? 1 : 0) + (hasParameters ? 1 : 0);
+          const hasRoad = !!(selectedBuildingForRoad && isLiveRoad(selectedBuildingForRoad));
+          const openSectionsCount =
+            (hasPoints ? 1 : 0) + (hasModifiers ? 1 : 0) + (hasParameters ? 1 : 0) + (hasRoad ? 1 : 0);
+          const otherSection = () => (hasPoints ? 'points' : hasModifiers ? 'modifiers' : hasRoad ? 'road' : 'parameters');
 
           return (
             <FloatingInspectorAccordion>
@@ -786,7 +829,7 @@ export const App: React.FC = () => {
                   isEmbedded={true}
                   isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'points' : false}
                   onToggleCollapse={(collapsed) => {
-                    setActiveAccordionSection(collapsed ? (hasModifiers ? 'modifiers' : 'parameters') : 'points');
+                    setActiveAccordionSection(collapsed ? (hasModifiers ? 'modifiers' : hasRoad ? 'road' : 'parameters') : 'points');
                   }}
                 />
               )}
@@ -798,19 +841,31 @@ export const App: React.FC = () => {
                   isEmbedded={true}
                   isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'modifiers' : false}
                   onToggleCollapse={(collapsed) => {
-                    setActiveAccordionSection(collapsed ? (hasPoints ? 'points' : 'parameters') : 'modifiers');
+                    setActiveAccordionSection(collapsed ? (hasPoints ? 'points' : hasRoad ? 'road' : 'parameters') : 'modifiers');
                   }}
                 />
               )}
 
-              {/* Section 3: Project Parameters & Surface Balance Panel */}
+              {/* Section 3: Road Solver Panel */}
+              {hasRoad && (
+                <RoadSolverPanel
+                  onClose={() => setSelectedBuildingId(null)}
+                  isEmbedded={true}
+                  isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'road' : false}
+                  onToggleCollapse={(collapsed) => {
+                    setActiveAccordionSection(collapsed ? otherSection() : 'road');
+                  }}
+                />
+              )}
+
+              {/* Section 4: Project Parameters & Surface Balance Panel */}
               {hasParameters && (
                 <ProjectParametersPanel
                   onClose={() => setShowProjectParameters(false)}
                   isEmbedded={true}
                   isCollapsed={openSectionsCount > 1 ? activeAccordionSection !== 'parameters' : false}
                   onToggleCollapse={(collapsed) => {
-                    setActiveAccordionSection(collapsed ? (hasPoints ? 'points' : 'modifiers') : 'parameters');
+                    setActiveAccordionSection(collapsed ? (hasPoints ? 'points' : hasModifiers ? 'modifiers' : 'road') : 'parameters');
                   }}
                 />
               )}

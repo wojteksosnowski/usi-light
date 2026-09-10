@@ -35,6 +35,7 @@ export class DrawingToolLayer implements CadRenderLayer {
       activeBuildingDragSnap = null,
       sweepWidth = 6.0,
       sweepAlignment = 'center',
+      roadWidth = 5.0,
     } = context;
 
     const effectiveBuildings =
@@ -81,7 +82,8 @@ export class DrawingToolLayer implements CadRenderLayer {
       sweepAlignment,
       effectiveBuildings,
       alignPendingRef,
-      alignHoveredEdge
+      alignHoveredEdge,
+      roadWidth
     );
   }
 }

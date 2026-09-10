@@ -5,5 +5,6 @@ export * from './transforms';
 export * from './dimensions';
 export * from './shadowEnvelope';
 export * from './boundaryIntersection';
+export { offsetPolygonRobust } from './offsetPolygon';
 export * from './miterOffset';
 export * from './sweep';

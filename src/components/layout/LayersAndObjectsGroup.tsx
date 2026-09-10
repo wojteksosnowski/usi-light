@@ -1333,7 +1333,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
                     Typ obszaru
                   </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
                     <button
                       type="button"
                       onClick={() => updateSelectedBuilding({ areaType: 'plot' })}
@@ -1374,6 +1374,27 @@ export const LayersAndObjectsGroup: React.FC = () => {
                       }}
                     >
                       Plac zabaw
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedBuilding({ areaType: 'utwardzenie' })}
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '6px',
+                        border: selectedBuilding.areaType === 'utwardzenie'
+                          ? '1px solid #a8a29e'
+                          : '1px solid var(--border-light)',
+                        backgroundColor: selectedBuilding.areaType === 'utwardzenie'
+                          ? 'rgba(168, 162, 158, 0.25)'
+                          : 'var(--bg-input)',
+                        color: selectedBuilding.areaType === 'utwardzenie' ? '#d6d3d1' : '#94a3b8',
+                        fontWeight: selectedBuilding.areaType === 'utwardzenie' ? 700 : 500,
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Utwardzenie
                     </button>
                   </div>
                 </div>
@@ -1763,8 +1784,8 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   />
                 </div>
 
-                {/* Parametry Wstęgi (jeśli obiekt został utworzony jako Wstęga) */}
-                {selectedBuilding.sweepPath && selectedBuilding.sweepPath.length >= 2 && (
+                {/* Parametry Wstęgi (jeśli obiekt został utworzony jako Wstęga; Droga ma własną sekcję poniżej) */}
+                {selectedBuilding.category !== 'road' && selectedBuilding.sweepPath && selectedBuilding.sweepPath.length >= 2 && (
                   <div
                     style={{
                       padding: '8px 10px',

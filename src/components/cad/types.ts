@@ -10,7 +10,7 @@ import {
 import { DominantDirection } from '../../utils/segmentStatistics';
 
 
-export type CadDrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+export type CadDrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union' | 'road';
 
 export interface ViewportState {
   panX: number;
@@ -65,13 +65,15 @@ export interface CadCanvasProps {
   linkingSourceId?: string | null;
   drawingMode?: CadDrawingMode;
   onDrawingModeChange?: (mode: CadDrawingMode) => void;
-  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => void;
+  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep' | 'road') => void;
   onCancelDrawing?: () => void;
   sweepWidth?: number;
   sweepAlignment?: import('../../utils/math2d/sweep').SweepAlignment;
+  roadWidth?: number;
   onDrawingVerticesCountChange?: (count: number) => void;
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
   onUpdateBuildingSweepPath?: (buildingId: string, newSweepPath: Point2D[], width?: number, alignment?: 'center' | 'left' | 'right') => void;
+  onUpdateRoadEndpoint?: (buildingId: string, endpoint: 'A' | 'B', point: Point2D) => void;
   onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
   onBooleanUnion?: (bldgIdA: string, bldgIdB: string) => void;
   pinnedPoints?: import('../../types/geometry').PinnedFacadePoint[];

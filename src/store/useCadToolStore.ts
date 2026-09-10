@@ -4,7 +4,7 @@ import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 import { useSceneStore } from './useSceneStore';
 
-export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union' | 'road';
 
 interface CadToolState {
   // Drawing Tools
@@ -14,6 +14,9 @@ interface CadToolState {
   // Sweep (Wstęga) settings
   sweepWidth: number;
   sweepAlignment: SweepAlignment;
+
+  // Road (Droga) settings
+  roadWidth: number;
 
   // Edge editing & facade point mode
   isEditMode: boolean;
@@ -49,6 +52,7 @@ interface CadToolState {
   setDrawingVerticesCount: (count: number) => void;
   setSweepWidth: (width: number) => void;
   setSweepAlignment: (alignment: SweepAlignment) => void;
+  setRoadWidth: (width: number) => void;
   setIsEditMode: (active: boolean) => void;
   setFacadePointMode: (active: boolean) => void;
   setShowModifiersPanel: (show: boolean | ((prev: boolean) => boolean)) => void;
@@ -91,6 +95,8 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   sweepWidth: 5.0,
   sweepAlignment: 'center',
 
+  roadWidth: 5.0,
+
   isEditMode: false,
   facadePointMode: false,
   showModifiersPanel: false,
@@ -116,6 +122,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
   setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : 5.0) }),
   setSweepAlignment: (alignment) => set({ sweepAlignment: alignment }),
+  setRoadWidth: (width) => set({ roadWidth: Math.max(0.5, Number.isFinite(width) ? width : 5.0) }),
   setIsEditMode: (active) => set({ isEditMode: active }),
   setFacadePointMode: (active) => set({ facadePointMode: active }),
   setShowModifiersPanel: (show) =>

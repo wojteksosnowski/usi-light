@@ -1,5 +1,5 @@
 import React from 'react';
-import { Square, Combine } from 'lucide-react';
+import { Square, Combine, Route } from 'lucide-react';
 import type { DrawingMode } from '../../store/useCadToolStore';
 import { IrregularPentagonIcon, BrokenLineIcon, AlignDirectionIcon } from '../common/CustomCadIcons';
 
@@ -27,6 +27,7 @@ export const DRAWING_TOOLS: DrawingToolDescriptor[] = [
   { mode: 'rectangle', label: 'Prostokąt', Icon: Square, title: 'Rysuj nowy prostokąt' },
   { mode: 'polyline', label: 'Polilinia', Icon: IrregularPentagonIcon, title: 'Rysuj nową polilinię' },
   { mode: 'sweep', label: 'Wstęga', Icon: BrokenLineIcon, title: 'Rysuj wstęgę z odsunięciem (sweep)' },
+  { mode: 'road', label: 'Droga', Icon: Route, title: 'Rysuj drogę: kliknij punkt A, potem punkt B (omija przeszkody)' },
   {
     mode: 'align',
     label: 'Wyrównaj',

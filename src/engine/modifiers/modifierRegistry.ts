@@ -57,7 +57,7 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
     if (band.outer && band.outer.length >= 3) {
       ctx.zoneFootprints.push({
         id: modifier.id,
-        areaType: modifier.areaType || ctx.building.areaType || 'plot',
+        areaType: modifier.areaType || (ctx.building.areaType === 'playground' ? 'playground' : 'plot'),
         distance: modifier.distance,
         polygon: band.outer,
         holes: [band.inner],

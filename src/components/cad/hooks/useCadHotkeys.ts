@@ -31,7 +31,7 @@ export function useCadHotkeys({
   onDeleteSelectedVertex?: () => void;
   onCycleVertexSelection?: (direction: 'prev' | 'next') => void;
   onCancelDrawing?: () => void;
-  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => void;
+  onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep' | 'road') => void;
   setDrawingVertices: React.Dispatch<React.SetStateAction<Point2D[]>>;
   setCurrentMouseWorld: React.Dispatch<React.SetStateAction<Point2D | null>>;
   setHoveredBuildingIndex: React.Dispatch<React.SetStateAction<number>>;

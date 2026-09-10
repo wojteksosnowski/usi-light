@@ -497,17 +497,16 @@ export function createSampleBuildings(): BuildingLoop[] {
 }
 
 /**
- * Creates a valid BuildingLoop from user-drawn vertices (Rectangle or Polyline).
+ * Przelicza segmenty fasadowe (FacadeSegment[]) dla obrysu wielokąta - wydzielone z
+ * createBuildingFromVertices, żeby móc przeliczać segmenty także dla obiektów, których
+ * geometria jest wynikiem solvera (np. Droga) i zmienia się po utworzeniu obiektu.
  */
-export function createBuildingFromVertices(
+export function rebuildSegmentsForPolygon(
   vertices: Point2D[],
-  name?: string,
-  defaultHeight: number = 15.0,
-  isTested: boolean = false,
-  category: import('../types/geometry').ObjectCategory = 'building'
-): BuildingLoop {
+  buildingId: string,
+  defaultHeight: number = 15.0
+): FacadeSegment[] {
   const isCCW = isPolygonCCW(vertices);
-  const newId = `bldg-${Date.now()}`;
   const segments: FacadeSegment[] = [];
 
   for (let i = 0; i < vertices.length; i++) {
@@ -521,7 +520,7 @@ export function createBuildingFromVertices(
     const normal = calculateOutwardNormal(p1, p2, isCCW);
 
     segments.push({
-      id: `${newId}-seg-${segments.length + 1}`,
+      id: `${buildingId}-seg-${segments.length + 1}`,
       p1,
       p2,
       normal,
@@ -535,6 +534,23 @@ export function createBuildingFromVertices(
       lineEquation: computeLineEquation(p1, p2, normal),
     });
   }
+
+  return segments;
+}
+
+/**
+ * Creates a valid BuildingLoop from user-drawn vertices (Rectangle or Polyline).
+ */
+export function createBuildingFromVertices(
+  vertices: Point2D[],
+  name?: string,
+  defaultHeight: number = 15.0,
+  isTested: boolean = false,
+  category: import('../types/geometry').ObjectCategory = 'building'
+): BuildingLoop {
+  const isCCW = isPolygonCCW(vertices);
+  const newId = `bldg-${Date.now()}`;
+  const segments = rebuildSegmentsForPolygon(vertices, newId, defaultHeight);
 
   const count = defaultHeight > 3.5 ? 1 + Math.max(1, Math.round((defaultHeight - 3.5) / 2.875)) : 1;
 

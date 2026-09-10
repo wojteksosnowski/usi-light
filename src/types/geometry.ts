@@ -40,8 +40,9 @@ export * from './modifiers';
 import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
 
 
-export type ObjectCategory = 'building' | 'boundary' | 'balcony';
-export type AreaType = 'plot' | 'playground';
+export type ObjectCategory = 'building' | 'boundary' | 'balcony' | 'road';
+export type AreaType = 'plot' | 'playground' | 'utwardzenie';
+export type RoadStrategy = 'shortest' | 'centered_smooth';
 
 export interface PlaygroundSamplePoint {
   point: Point2D;
@@ -88,6 +89,11 @@ export interface BuildingLoop {
   sweepPath?: Point2D[]; // Otwarta polilinia bazowa dla obiektów typu Wstęga (Sweep)
   sweepWidth?: number; // Szerokość wstęgi w metrach
   sweepAlignment?: 'center' | 'left' | 'right'; // Wyrównanie wstęgi: oś / lewo / prawo
+  roadPointA?: Point2D; // Punkt startowy drogi (category === 'road')
+  roadPointB?: Point2D; // Punkt docelowy drogi (category === 'road')
+  roadStrategy?: RoadStrategy; // Strategia solvera drogi
+  roadMinTurnRadius?: number; // Minimalny promień skrętu (m), używany przez strategię 'centered_smooth'
+  roadSolveStatus?: 'pending' | 'solved' | 'no_path'; // Status ostatniego przeliczenia solvera drogi
   playgroundVoronoi?: boolean; // Czy generować komórki Voronoi dla placu zabaw (domyślnie true)
   playgroundParams?: PlaygroundVoronoiConfig; // Opcjonalne parametry gęstości siatki Voronoi (faza testowa)
   groupId?: string; // Group ID for linked / grouped buildings that move together

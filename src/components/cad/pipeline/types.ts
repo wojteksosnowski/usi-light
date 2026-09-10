@@ -46,7 +46,7 @@ export interface CadRenderFrameContext {
     ratio: number;
   } | null;
   readonly facadePointMode?: boolean;
-  readonly drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+  readonly drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union' | 'road';
   readonly showAnalysisPoints?: boolean;
   readonly showShadowRange?: boolean;
   readonly showShadowFill?: boolean;
@@ -88,6 +88,7 @@ export interface CadRenderFrameContext {
   readonly activeBuildingDragSnap?: BuildingDragSnapResult | EdgeDragSnapResult | null;
   readonly sweepWidth?: number;
   readonly sweepAlignment?: SweepAlignment;
+  readonly roadWidth?: number;
 }
 
 export interface CadRenderLayer {
