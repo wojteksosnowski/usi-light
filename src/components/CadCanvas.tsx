@@ -7,6 +7,8 @@ import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { useCanvasInteraction, isBuildingLocked, getBuildingTopElevation } from './cad/hooks/useCanvasInteraction';
 import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
+import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
+import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { APP_CONFIG } from '../config/appConfig';
@@ -65,6 +67,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [expandedLabelBuildingId, setExpandedLabelBuildingId] = useState<string | null>(null);
+  const handleLabelClick = (id: string | null) => {
+    setExpandedLabelBuildingId((prev) => (id && prev === id ? null : id));
+  };
 
   // Menedżer kafelków satelitarnych Google Maps
   const [tileRenderTick, setTileRenderTick] = useState<number>(0);
@@ -173,6 +180,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     setViewState,
     worldToScreen,
     screenToWorld,
+    onLabelClick: handleLabelClick,
   });
 
   // Hotkeys hook
@@ -536,6 +544,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     interaction.effectiveIsInteracting,
   ]);
 
+  const expandedLabelBuilding = expandedLabelBuildingId
+    ? buildings.find((b) => b.id === expandedLabelBuildingId) || null
+    : null;
+  const expandedLabelAnchor = expandedLabelBuilding
+    ? getBuildingLabelScreenAnchor(expandedLabelBuilding, worldToScreen)
+    : null;
+
   return (
     <div
       ref={containerRef}
@@ -580,6 +595,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           pointerEvents: 'none',
         }}
       />
+      {expandedLabelBuilding && expandedLabelAnchor && (
+        <BuildingLabelMiniPanel
+          building={expandedLabelBuilding}
+          anchor={{ sx: expandedLabelAnchor.sx, sy: expandedLabelAnchor.bottomSy }}
+          onClose={() => setExpandedLabelBuildingId(null)}
+        />
+      )}
     </div>
   );
 };

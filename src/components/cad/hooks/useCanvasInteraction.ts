@@ -214,6 +214,7 @@ export function useCanvasInteraction({
   selectedBuildingId,
   selectedBuildingIds = [],
   onSelectBuilding,
+  onLabelClick,
   onBuildingMove,
   onBuildingsMove,
   analysisResults,
@@ -299,6 +300,7 @@ export function useCanvasInteraction({
   const [draggedVertexIndex, setDraggedVertexIndex] = useState<number | null>(null);
   const [dragVertexPreviewPt, setDragVertexPreviewPt] = useState<Point2D | null>(null);
   const dragVertexContextRef = useRef<DragVertexContext | null>(null);
+  const labelClickStartRef = useRef<{ buildingId: string; sx: number; sy: number } | null>(null);
 
   // Per-object rotate handle (shown on plain selection, drags the object around its own centroid)
   const [isRotateHandleHovered, setIsRotateHandleHovered] = useState<boolean>(false);
@@ -947,8 +949,7 @@ export function useCanvasInteraction({
       );
       if (hitLabelBldgId) {
         onSelectBuilding(hitLabelBldgId, e.shiftKey);
-        useUiStore.getState().setSidebarOpen(true);
-        useUiStore.getState().setOpenSidebarGroup('layers');
+        labelClickStartRef.current = { buildingId: hitLabelBldgId, sx, sy };
 
         const clickedBldg = buildings.find((b) => b.id === hitLabelBldgId);
         const isLocked = isBuildingLocked(clickedBldg, layerSettings);
@@ -964,6 +965,7 @@ export function useCanvasInteraction({
       if (hits.length > 0) {
         const nextId = hits[hoveredBuildingIndex % hits.length];
         onSelectBuilding(nextId, e.shiftKey);
+        onLabelClick?.(null);
 
         const clickedBldg = buildings.find((b) => b.id === nextId);
         const isLocked = isBuildingLocked(clickedBldg, layerSettings);
@@ -975,6 +977,7 @@ export function useCanvasInteraction({
         }
       } else {
         onSelectBuilding(null);
+        onLabelClick?.(null);
         setIsPanning(true);
         setDragStart({ x: sx, y: sy });
       }
@@ -1821,7 +1824,18 @@ export function useCanvasInteraction({
     }
   };
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e?: { clientX: number; clientY: number }) => {
+    if (labelClickStartRef.current) {
+      const start = labelClickStartRef.current;
+      labelClickStartRef.current = null;
+      const rect = e ? canvasRef.current?.getBoundingClientRect() : null;
+      const moveDist = rect
+        ? Math.hypot(e!.clientX - rect.left - start.sx, e!.clientY - rect.top - start.sy)
+        : 0;
+      if (moveDist <= 4) {
+        onLabelClick?.(start.buildingId);
+      }
+    }
     if (
       isDraggingBuilding ||
       draggingEdge ||
@@ -1882,6 +1896,7 @@ export function useCanvasInteraction({
     dragVertexPreviewPt,
     onUpdateBuildingSweepPath,
     onUpdateBuildingVertices,
+    onLabelClick,
   ]);
 
   useEffect(() => {

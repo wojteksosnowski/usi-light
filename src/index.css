@@ -13,6 +13,7 @@
   --accent-indigo: #6366f1;
   --accent-emerald: #10b981;
   --accent-amber: #f59e0b;
+  --accent-lock: #fbbf24;
   --accent-rose: #f43f5e;
   --accent-cyan: #38bdf8;
   --accent-cyan-light: #7dd3fc;
@@ -297,6 +298,30 @@ html, body, #root {
   transform: skewX(-20deg);
   pointer-events: none;
   animation: publish-sweep-glint 1s ease-in-out forwards;
+}
+
+.modifier-card-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--border-light);
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.modifier-card-icon-btn:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+  background-color: var(--bg-card);
+}
+.modifier-card-icon-btn:disabled {
+  color: var(--border-light);
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* Błysk bezczynności w tonacji cyan, spójny z własnym akcentem przycisku (w przeciwieństwie do różowo-fioletowego publish-border-glint) */

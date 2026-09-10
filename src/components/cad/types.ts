@@ -38,6 +38,8 @@ export interface CadCanvasProps {
   selectedBuildingId: string | null;
   selectedBuildingIds?: string[];
   onSelectBuilding: (id: string | null, isMultiSelect?: boolean) => void;
+  /** Wywoływane przy "czystym" kliknięciu (bez przeciągnięcia) w etykietę budynku - przełącza minipanel rozwiniętej etykiety. `null` zamyka minipanel. */
+  onLabelClick?: (id: string | null) => void;
   onBuildingMove: (id: string, dx: number, dy: number) => void;
   onBuildingsMove?: (ids: string[], dx: number, dy: number) => void;
   analysisResults: AnalysisPointResult[];
