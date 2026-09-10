@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useLicenseStore, useUiStore } from '../../store';
+import { fetchJson } from '../../utils/apiFetch';
 
 export const PaymentSuccessModal: React.FC = () => {
   const isPaymentSuccessModalOpen = useUiStore((s) => s.isPaymentSuccessModalOpen);
@@ -50,11 +51,10 @@ export const PaymentSuccessModal: React.FC = () => {
 
     const fetchSession = async () => {
       try {
-        const res = await fetch(`/api/stripe/verify-session?session_id=${encodeURIComponent(paymentSuccessSessionId)}`);
-        const data = await res.json();
+        const { ok: resOk, data } = await fetchJson(`/api/stripe/verify-session?session_id=${encodeURIComponent(paymentSuccessSessionId)}`);
 
         if (isMounted) {
-          if (res.ok && data.success && data.licenseKey) {
+          if (resOk && data.success && data.licenseKey) {
             setLicenseKey(data.licenseKey);
             setDays(data.days);
             setCustomerEmail(data.customerEmail);

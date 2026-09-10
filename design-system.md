@@ -103,7 +103,14 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
    - Zaokrąglenie: `border-radius: 6px`, `font-size: 11px`, `font-weight: 700`
    - Używany jako statyczny wariant (przycisk "Udostępnij projekt" w sidebarze).
    - Wariant rozszerzony `.cad-publish-btn` (canvas, floating topbar) dodaje do tej samej bazy wizualnej efekt odblasku ramki: krótki (~1s) odblask i refleks świetlny (`.glinting`), wyzwalany po **30 sekundach** bezczynności użytkownika, a następnie powtórzony po kolejnych **15 sekundach** (45s łącznie), po czym zatrzymywany do czasu kolejnej aktywności użytkownika (mechanizm: `useIdleGlint` hook, `src/hooks/useIdleGlint.ts`).
-4. **Kafle przełączników warstw (`.btn-tile`)**:
+4. **Przycisk premium / upgrade (`.btn-gold`)**:
+   - Tło: dwuwarstwowe — pas odblasku `linear-gradient(180deg, rgba(255,255,255,0.4), rgba(255,255,255,0) 55%)` nad `linear-gradient(135deg, var(--accent-yellow), var(--accent-amber))`
+   - Obramowanie: `1px solid rgba(245, 158, 11, 0.6)`, cień `0 2px 8px rgba(245, 158, 11, 0.45)`
+   - Tekst: `var(--bg-sidebar)` (ciemny, dla kontrastu na złotym tle), `font-weight: 700`, `font-size: 11px`
+   - Zaokrąglenie: `border-radius: 8px` (skala `.btn-tile`, **nie** pigułka — na wniosek użytkownika przyciski w tej apce nie mają kształtu pill)
+   - Odblask przy hover: `::after` z ukośnym sweepem, reużywa `@keyframes publish-sweep-glint` z `.cad-publish-btn.glinting` (patrz pkt 3)
+   - Użycie: przycisk "Rozszerz" w `ProBadge.tsx` (stan free, otwiera `PricingModal`)
+5. **Kafle przełączników warstw (`.btn-tile`)**:
    - Zaokrąglenie: `border-radius: 8px`, `font-size: 11.5px`
    - Stan nieaktywny (`.inactive`): tło `rgba(6, 11, 24, 0.6)`, obramowanie `var(--border-color)`, kolor `var(--text-secondary)`
    - Stan aktywny emerald (`.active-emerald`): tło `rgba(16, 185, 129, 0.15)`, ramka `rgba(16, 185, 129, 0.4)`, tekst `#6ee7b7`
@@ -128,6 +135,7 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
 1. **Hardcodowane `#fff` lub `#ffffff` w stylach inline JSX** zamiast `var(--text-primary)` lub dedykowanej klasy.
 2. **Ręczne wartości paddingów/marginesów** w niektórych podkomponentach zamiast standardowych odstępów (4px, 8px, 12px, 16px).
 3. **Mieszanie styli inline ze stylami klasowymi** w nagłówkach i przyciskach HUD.
+4. **Wariant PRO w `ProBadge.tsx`** (stan `isPro`) nadal używa kształtu pigułki (`border-radius: 999px`) i stylu inline — niespójne z decyzją o braku kształtu pill dla przycisków (patrz 4.1 pkt 4, `.btn-gold`). Do ujednolicenia przy najbliższej pracy nad tym komponentem.
 
 ### 5.2. Procedura Dopytywania przy Wątpliwościach
 > [!IMPORTANT]

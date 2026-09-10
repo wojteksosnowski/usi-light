@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useUiStore, useLicenseStore } from '../../store';
 import { APP_CONFIG } from '../../config/appConfig';
+import { fetchJson } from '../../utils/apiFetch';
 
 const PREVIEW_MODE = APP_CONFIG.previewMode.enabled;
 
@@ -40,10 +41,9 @@ export const PricingModal: React.FC = () => {
       setTrialLoading(true);
       setTrialError(null);
 
-      const res = await fetch('/api/license/trial', { method: 'POST' });
-      const data = await res.json();
+      const { ok: resOk, data } = await fetchJson('/api/license/trial', { method: 'POST' });
 
-      if (!res.ok || !data.licenseKey) {
+      if (!resOk || !data.licenseKey) {
         throw new Error(data.error || 'Nie udało się wygenerować klucza próbnego.');
       }
 
@@ -75,14 +75,13 @@ export const PricingModal: React.FC = () => {
       setLoadingPlan(plan);
       setError(null);
 
-      const res = await fetch('/api/stripe/checkout', {
+      const { ok: resOk, data } = await fetchJson('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.url) {
+      if (!resOk || !data.url) {
         throw new Error(data.error || 'Nie udało się zainicjalizować płatności Stripe.');
       }
 

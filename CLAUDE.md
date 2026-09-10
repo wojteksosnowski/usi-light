@@ -31,11 +31,12 @@ Stack: React 19, TypeScript strict, Vite 8, Tailwind CSS 3.4, Zustand 5 + zundo 
 
 Both are driven by a **`CadRenderPipeline`** (`src/components/cad/pipeline/CadRenderPipeline.ts`) — an ordered stack of `CadRenderLayer` instances sorted by `zIndex`. To add a render layer, implement `CadRenderLayer` and register it in the pipeline constructor or via `registerGeoLayers()` for geo overlays.
 
-### State — Four Zustand Stores (`src/store/`)
+### State — Five Zustand Stores (`src/store/`)
 - **`useSceneStore`** — buildings, layers, DXF import state, undo history (via zundo temporal)
 - **`useCadToolStore`** — active drawing tool, OSNAP, dimensions, view rotation
 - **`useSolarAnalysisStore`** — analysis settings, pinned facade points, analysis output
 - **`useUiStore`** — share modal open state
+- **`useLicenseStore`** — Pro license key/status, persisted to `localStorage` (`usi_license_key`)
 
 Scene is persisted to `localStorage` under key `usi-light.scene.v1`.
 

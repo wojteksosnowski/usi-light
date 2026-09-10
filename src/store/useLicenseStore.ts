@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { LicenseState } from '../types/license';
+import { fetchJson } from '../utils/apiFetch';
 
 const STORAGE_KEY = 'usi_license_key';
 
@@ -55,10 +56,9 @@ export const useLicenseStore = create<LicenseState>((set, get) => ({
 
     try {
       set({ isLoading: true, error: null });
-      const res = await fetch(`/api/license/check?key=${encodeURIComponent(key)}`);
-      const data = await res.json();
+      const { ok: resOk, data } = await fetchJson(`/api/license/check?key=${encodeURIComponent(key)}`);
 
-      if (res.ok && data.valid && data.status === 'active') {
+      if (resOk && data.valid && data.status === 'active') {
         set({
           licenseKey: key,
           isPro: true,
@@ -120,15 +120,13 @@ export const useLicenseStore = create<LicenseState>((set, get) => ({
     try {
       set({ isLoading: true, error: null });
 
-      const res = await fetch('/api/license/activate', {
+      const { ok: resOk, data } = await fetchJson('/api/license/activate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ licenseKey: sanitized }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
+      if (!resOk) {
         set({ isLoading: false, error: data.error || 'Błąd aktywacji licencji.' });
         return { success: false, error: data.error || 'Nieprawidłowy klucz licencyjny.' };
       }

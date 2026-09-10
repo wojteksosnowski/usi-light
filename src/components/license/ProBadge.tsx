@@ -39,23 +39,8 @@ export const ProBadge: React.FC = () => {
   return (
     <button
       type="button"
+      className="btn-gold"
       onClick={() => setPricingModalOpen(true)}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '5px',
-        padding: '4px 9px',
-        borderRadius: '999px',
-        background: 'linear-gradient(135deg, var(--accent-indigo), var(--accent-blue))',
-        border: '1px solid rgba(99, 102, 241, 0.6)',
-        color: '#ffffff',
-        fontSize: '11px',
-        fontWeight: 700,
-        cursor: 'pointer',
-        boxShadow: '0 2px 8px rgba(99, 102, 241, 0.35)',
-        letterSpacing: '0.02em',
-        transition: 'all 0.2s ease',
-      }}
       title="Rozszerz o import działek geodezyjnych i obrysów budynków oraz eksport DXF"
     >
       <span>Rozszerz</span>

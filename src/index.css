@@ -16,6 +16,7 @@
   --accent-rose: #f43f5e;
   --accent-cyan: #38bdf8;
   --accent-cyan-light: #7dd3fc;
+  --accent-yellow: #fef08a;
 }
 
 *, *::before, *::after {
@@ -504,6 +505,42 @@ html, body, #root {
 
 
 
+
+/* Gold CTA button (np. "Rozszerz") — spójna z .btn-tile skala promienia,
+   reużywa istniejący efekt połysku @keyframes publish-sweep-glint */
+.btn-gold {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(135deg, var(--accent-yellow), var(--accent-amber));
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  color: var(--bg-sidebar);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.45);
+  transition: all 0.2s ease;
+}
+.btn-gold::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+.btn-gold:hover::after {
+  animation: publish-sweep-glint 1s ease-in-out forwards;
+}
 
 .btn-tile {
   width: 100%;
