@@ -52,8 +52,8 @@ export function useRoadSolverSync(
             width: road.sweepWidth ?? 5.0,
             obstacles,
             plot,
-            strategy: road.roadStrategy ?? 'shortest',
-            minTurnRadius: road.roadMinTurnRadius,
+            strategy: road.roadStrategy ?? 'centered_smooth',
+            minTurnRadius: road.roadMinTurnRadius ?? 6.0,
           },
           road.id
         );

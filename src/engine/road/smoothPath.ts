@@ -7,8 +7,8 @@ const ARC_SEGMENTS = 12; // liczba segmentów aproksymujących ćwiartkę łuku 
 // Dolny limit promienia przy redukcji z powodu kolizji (ułamek żądanego). Niski próg celowo —
 // wolimy mały, ale gładki łuk zamiast całkowitej rezygnacji i pozostawienia ostrego załamania
 // (patrz roadtest.json: narożnik blisko przeszkody potrafił nie zmieścić się nawet przy 50%).
-const MIN_RADIUS_FRACTION = 0.05;
-const RADIUS_RETRY_STEPS = 10; // liczba prób zmniejszenia promienia w danym wierzchołku
+const MIN_RADIUS_FRACTION = 0.001;
+const RADIUS_RETRY_STEPS = 25; // dokładniejsza pętla redukcji promienia
 
 interface FilletResult {
   points: Point2D[]; // punkty łuku (bez P_in/P_out na krawędziach — tylko próbki łuku), puste gdy brak zakrętu
@@ -101,21 +101,13 @@ function signedDistanceToPolygon(pt: Point2D, polygon: Point2D[]): number {
 /**
  * Sprawdza, czy gęsto próbkowana ścieżka zachowuje rzeczywisty minimalny odstęp `minClearance`
  * od SUROWYCH (niezdylatowanych) przeszkód.
- *
- * Celowo NIE korzystamy tu z `isSegmentClear` na zdylatowanej (miter) przeszkodzie: węzły
- * centerline pochodzącej z grafu widoczności leżą DOKŁADNIE na tej dylatowanej granicy (patrz
- * visibilityGraph.ts), więc każdy fillet w takim wierzchołku nieuchronnie "ucina" narożnik w
- * stronę zdylatowanego kształtu — miter-owy klin przy ostrych/wklęsłych narożnikach wystaje
- * poza prawdziwy okrąg minimalnego odstępu, więc test przynależności do tego wielokąta fałszywie
- * blokuje łuki, które w rzeczywistości zachowują pełny wymagany odstęp od surowej przeszkody.
- * Test odległości od surowej geometrii jest od tego artefaktu wolny.
  */
 function isPathClearOfObstacles(
   path: Point2D[],
   rawObstacles: Point2D[][],
   minClearance: number
 ): boolean {
-  const eps = 1e-6;
+  const eps = 1e-4;
   for (let i = 0; i < path.length - 1; i++) {
     const a = path[i];
     const b = path[i + 1];
@@ -144,9 +136,9 @@ function isPathInsidePlot(path: Point2D[], plotInset: Point2D[] | null): boolean
 
 /**
  * Wygładza łamaną centerline łukami kołowymi o promieniu `desiredRadius` w każdym wewnętrznym
- * załamaniu, próbkując wynik do gęstej polilinii. Jeśli łuk przy żądanym promieniu koliduje z
- * przeszkodami, promień jest lokalnie zmniejszany (do MIN_RADIUS_FRACTION * desiredRadius) zanim
- * dany wierzchołek zostanie zwrócony bez wygładzenia (ostry narożnik zachowany jako fallback).
+ * załamaniu, próbkując wynik do gęstej polilinii. W trybie centered_smooth wszystkie załamania
+ * są bezwzględnie zastępowane łukami kołowymi (fillet), redukując promień adaptacyjnie do poziomu
+ * bezkolizyjnego.
  */
 export function smoothCenterlineWithArcs(
   centerline: Point2D[],
@@ -173,7 +165,7 @@ export function smoothCenterlineWithArcs(
     for (let attempt = 0; attempt <= RADIUS_RETRY_STEPS; attempt++) {
       const fillet = computeFillet(prev, curr, next, radius);
       if (fillet.points.length === 0) {
-        // Brak zakrętu w tym wierzchołku (prosta/zdegenerowana) — nic do walidacji.
+        // Brak zakrętu w tym wierzchołku (odcinki są współliniowe)
         chosenFillet = fillet;
         break;
       }
@@ -183,22 +175,42 @@ export function smoothCenterlineWithArcs(
         isPathInsidePlot(candidatePath, plotInset)
       ) {
         chosenFillet = fillet;
-        if (fillet.effRadius < desiredRadius - 1e-6) fullyMet = false;
+        if (fillet.effRadius < desiredRadius - 1e-4) fullyMet = false;
         break;
       }
-      radius = desiredRadius * (1 - ((attempt + 1) / RADIUS_RETRY_STEPS) * (1 - MIN_RADIUS_FRACTION));
+      radius = desiredRadius * (1 - ((attempt + 1) / (RADIUS_RETRY_STEPS + 1)) * (1 - MIN_RADIUS_FRACTION));
     }
 
     if (!chosenFillet || chosenFillet.points.length === 0) {
-      // Żaden promień w dopuszczalnym zakresie nie dał czystego łuku — zachowujemy ostry narożnik.
-      if (chosenFillet === null) fullyMet = false;
+      // Jeśli przy zmniejszaniu promienia żaden krok nie przeszedł, generujemy minimalny bezpieczny fillet
+      const fallbackFillet = computeFillet(prev, curr, next, Math.max(0.05, desiredRadius * MIN_RADIUS_FRACTION));
+      if (fallbackFillet.points.length > 0) {
+        chosenFillet = fallbackFillet;
+        fullyMet = false;
+      }
+    }
+
+    if (!chosenFillet || chosenFillet.points.length === 0) {
       result.push(curr);
       continue;
     }
 
-    result.push(...chosenFillet.points);
+    // Unikamy duplikowania punktu początkowego łuku jeśli pokrywa się z poprzednim końcem
+    const ptsToAdd = chosenFillet.points;
+    for (let pIdx = 0; pIdx < ptsToAdd.length; pIdx++) {
+      const p = ptsToAdd[pIdx];
+      const last = result[result.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) > 1e-4) {
+        result.push(p);
+      }
+    }
   }
 
-  result.push(centerline[centerline.length - 1]);
+  const endPt = centerline[centerline.length - 1];
+  const lastPt = result[result.length - 1];
+  if (Math.hypot(endPt.x - lastPt.x, endPt.y - lastPt.y) > 1e-4) {
+    result.push(endPt);
+  }
+
   return { path: result, fullyMet };
 }

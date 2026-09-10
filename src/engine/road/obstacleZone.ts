@@ -2,7 +2,7 @@ import { Point2D } from '../../types/geometry';
 import { offsetPolygonWithJoin } from '../../utils/math2d/miterOffset';
 import { offsetPolygonRobust } from '../../utils/math2d/offsetPolygon';
 import { unionPolygonLoops, differencePolygonLoops, isPointInPolygon } from '../../utils/math2d/polygons';
-import { segmentSegmentIntersectionParam } from '../../utils/math2d/segments';
+import { segmentSegmentIntersectionParam, distancePointToSegment } from '../../utils/math2d/segments';
 import { pointsEqual } from '../../utils/math2d/vec2';
 
 /**
@@ -54,6 +54,27 @@ export function computeFreeZone(
 }
 
 /**
+ * Sprawdza, czy punkt leży ściśle we wnętrzu poligonu (poza pasem brzegowym o szerokości tolerance).
+ * Zapobiega błędnemu odrzucaniu punktów środkowych leżących dokładnie na krawędzi poligonu.
+ */
+export function isPointStrictlyInsidePolygon(
+  point: Point2D,
+  vertices: Point2D[],
+  tolerance: number = 1e-4
+): boolean {
+  if (!point || !vertices || vertices.length < 3) return false;
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % n];
+    if (distancePointToSegment(point, p1, p2) <= tolerance) {
+      return false;
+    }
+  }
+  return isPointInPolygon(point, vertices);
+}
+
+/**
  * Sprawdza, czy odcinek a->b nie przecina żadnej z dylatowanych przeszkód
  * i (opcjonalnie) pozostaje w obrębie insetowanej działki.
  */
@@ -68,7 +89,7 @@ export function isSegmentClear(
     // Cięcie (chord) łączące dwa styczne punkty tego samego zaokrąglonego narożnika
     // przechodzi wewnątrz przeszkody bez transversalnego przecięcia żadnej krawędzi
     // (wchodzi/wychodzi dokładnie w wierzchołkach) — łapiemy ten przypadek testem środka.
-    if (isPointInPolygon(mid, obstacle)) {
+    if (isPointStrictlyInsidePolygon(mid, obstacle, 1e-4)) {
       return false;
     }
   }

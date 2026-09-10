@@ -608,7 +608,7 @@ export const App: React.FC = () => {
         newBldg.areaType = 'utwardzenie';
         newBldg.storeysCount = 0;
         const geometry = solveRoadObjectGeometry(
-          { pointA, pointB, width: roadWidth, obstacles, plot, strategy: 'shortest' },
+          { pointA, pointB, width: roadWidth, obstacles, plot, strategy: 'centered_smooth', minTurnRadius: 6.0 },
           newBldg.id
         );
         newBldg.vertices = geometry.vertices;
@@ -618,7 +618,8 @@ export const App: React.FC = () => {
         newBldg.sweepAlignment = 'center';
         newBldg.roadPointA = pointA;
         newBldg.roadPointB = pointB;
-        newBldg.roadStrategy = 'shortest';
+        newBldg.roadStrategy = 'centered_smooth';
+        newBldg.roadMinTurnRadius = 6.0;
         newBldg.roadSolveStatus = geometry.roadSolveStatus;
 
         addBuilding(newBldg);

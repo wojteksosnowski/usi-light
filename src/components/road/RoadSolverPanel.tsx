@@ -111,7 +111,7 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
 
         <SegmentedControl
           label="Strategia"
-          value={selectedBuilding.roadStrategy ?? 'shortest'}
+          value={selectedBuilding.roadStrategy ?? 'centered_smooth'}
           onChange={(roadStrategy) => updateSelectedBuilding({ roadStrategy })}
           options={[
             { value: 'shortest', label: 'Najkrótsza' },

@@ -31,17 +31,20 @@ export function gatherRoadObstacles(buildings: BuildingLoop[]): Point2D[][] {
     const isPlayground = building.category === 'boundary' && building.areaType === 'playground';
     const isObstacleBuilding = building.category === 'building' || building.category === undefined;
 
-    if (isObstacleBuilding || isPlayground) {
-      if (building.vertices && building.vertices.length >= 3) {
-        obstacles.push(building.vertices);
-      }
-    }
+    const hasValidZones =
+      Boolean(building.zonePolygons && building.zonePolygons.some((z) => z.polygon && z.polygon.length >= 3));
 
-    if (building.zonePolygons) {
-      for (const zone of building.zonePolygons) {
+    if (hasValidZones) {
+      // Gdy budynek posiada aktywną strefę buforową (zone_offset), to zewnętrzny bufor
+      // wyznacza strefę ochronną i zastępuje obrys budynku, zapobiegając zdublowanej dylatacji.
+      for (const zone of building.zonePolygons!) {
         if (zone.polygon && zone.polygon.length >= 3) {
           obstacles.push(zone.polygon);
         }
+      }
+    } else if (isObstacleBuilding || isPlayground) {
+      if (building.vertices && building.vertices.length >= 3) {
+        obstacles.push(building.vertices);
       }
     }
   }

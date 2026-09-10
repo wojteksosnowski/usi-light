@@ -45,8 +45,11 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
   }
 
   let radiusFullyMet: boolean | undefined;
-  if (strategy === 'centered_smooth' && minTurnRadius && minTurnRadius > 1e-6) {
-    const smoothed = smoothCenterlineWithArcs(centerline, minTurnRadius, obstacles, halfWidth, plotInset);
+  const effectiveStrategy = strategy ?? 'centered_smooth';
+  const effectiveRadius = minTurnRadius ?? 6.0;
+
+  if (effectiveStrategy === 'centered_smooth' && effectiveRadius > 1e-6) {
+    const smoothed = smoothCenterlineWithArcs(centerline, effectiveRadius, obstacles, halfWidth, plotInset);
     centerline = smoothed.path;
     radiusFullyMet = smoothed.fullyMet;
   }
