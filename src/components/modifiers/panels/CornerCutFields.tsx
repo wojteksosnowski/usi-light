@@ -3,7 +3,7 @@ import { CornerCutModifier } from '../../../types/modifiers';
 import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { SegmentedControl } from '../controls/SegmentedControl';
-import { LabeledSelect } from '../controls/LabeledSelect';
+import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 import { ChamferIcon, FilletIcon, NotchIcon } from '../../common/CustomCadIcons';
 
@@ -53,24 +53,26 @@ export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> =
     />
 
     {modifier.scope === 'edge' && (
-      <LabeledSelect
+      <IndexPillSelector
         label="Krawędź:"
         value={modifier.edgeIndex ?? -1}
         placeholderValue={-1}
         placeholderLabel="Domyślna (pierwsza)"
         options={context.availableEdges}
         onChange={(edgeIndex) => onChange({ edgeIndex })}
+        accentVar="var(--accent-cyan-light)"
       />
     )}
 
     {modifier.scope === 'vertex' && (
-      <LabeledSelect
+      <IndexPillSelector
         label="Narożnik:"
         value={modifier.vertexIndex ?? -1}
         placeholderValue={-1}
         placeholderLabel="Domyślny (pierwszy)"
         options={context.availableVertices}
         onChange={(vertexIndex) => onChange({ vertexIndex })}
+        accentVar="var(--accent-cyan-light)"
       />
     )}
   </div>

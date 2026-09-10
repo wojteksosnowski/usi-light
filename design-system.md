@@ -117,6 +117,12 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
    - Stan aktywny amber (`.active-amber`): tło `rgba(245, 158, 11, 0.15)`, ramka `rgba(245, 158, 11, 0.4)`, tekst `#fcd34d`
    - Stan aktywny indigo (`.active-indigo`): tło `rgba(99, 102, 241, 0.15)`, ramka `rgba(99, 102, 241, 0.4)`, tekst `#a5b4fc`
    - Stan aktywny cyan (`.active-cyan`) — akcent PRO / eksport CAD: tło `rgba(56, 189, 248, 0.15)`, ramka `rgba(56, 189, 248, 0.4)`, tekst `#7dd3fc`
+5. **Mały oprawiony przycisk ikony (`.modifier-card-icon-btn`)**:
+   - Rozmiar: `20×20px`, `border-radius: 5px`, `padding: 0`
+   - Obramowanie: `1px solid var(--border-light)`, tło `var(--bg-input)`, kolor ikony `var(--text-primary)`
+   - Hover: obramowanie `var(--text-secondary)`, tło `var(--bg-card)`
+   - Disabled: kolor `var(--border-light)`, `opacity: 0.6`
+   - Używany w klastrze ikon sterujących karty modyfikatora (`ModifierCard.tsx`: toggle włącz/wyłącz, reorder góra/dół, usuń) — kolor/obramowanie nadpisywane inline per stan (np. `var(--accent-purple)` gdy aktywny toggle, `var(--accent-rose)` dla usuwania).
 
 ### 4.2. Promienie Zaokrągleń (Border Radius Scale)
 - **Tagi / Małe badge**: `border-radius: 4px` - `6px`

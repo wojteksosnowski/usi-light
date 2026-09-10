@@ -2,7 +2,7 @@ import React from 'react';
 import { TerraceModifier } from '../../../types/modifiers';
 import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
-import { LabeledSelect } from '../controls/LabeledSelect';
+import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 import { signHint } from './signHint';
 
@@ -27,8 +27,8 @@ export const TerraceFields: React.FC<ModifierFieldsProps<TerraceModifier>> = ({ 
     </div>
 
     {context.availableEdges.length > 1 && (
-      <LabeledSelect
-        label="Modyfikowana krawędź ściany:"
+      <IndexPillSelector
+        label="Krawędź:"
         value={modifier.edgeIndex ?? -1}
         placeholderValue={-1}
         placeholderLabel="Domyślna (najdłuższa krawędź)"

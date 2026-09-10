@@ -33,6 +33,31 @@ export const TrapezoidIcon: React.FC<IconProps> = ({
 );
 
 /**
+ * Ikona nieregularnego pięciokąta dla narzędzia 'Polilinia' (zgodna ze stylem Lucide)
+ */
+export const IrregularPentagonIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <polygon points="9 3 20 8 21 17 12 21 3 13" />
+  </svg>
+);
+
+/**
  * Ikona krzywej łamanej dla narzędzia 'Wstęga' (zgodna ze stylem Lucide)
  */
 export const BrokenLineIcon: React.FC<IconProps> = ({
@@ -242,3 +267,35 @@ export const NotchIcon: React.FC<IconProps> = ({
  * Ikona narzędzia paska "Ścięcie narożnika" (ten sam kształt co tryb Chamfer)
  */
 export const CornerCutIcon: React.FC<IconProps> = ChamferIcon;
+
+/**
+ * Ikona narzędzia 'Wyrównaj': prosta odniesienia (stała) i druga prosta obracana
+ * strzałką łuku, aby dopasować kierunek do prostej odniesienia.
+ */
+export const AlignDirectionIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    {/* Prosta odniesienia (pozioma, stała) */}
+    <line x1="3" y1="18" x2="21" y2="18" />
+    {/* Prosta obracana (ukośna) */}
+    <line x1="5" y1="10" x2="16" y2="3" />
+    {/* Strzałka łuku obrotu doprowadzająca kierunek do prostej odniesienia */}
+    <path d="M15 3.5a8 8 0 0 1 3.5 9" />
+    <polyline points="15.5 8.5 18.5 12.5 21.5 9" />
+  </svg>
+);

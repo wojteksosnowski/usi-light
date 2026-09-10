@@ -4,7 +4,7 @@ import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { SegmentedControl } from '../controls/SegmentedControl';
 import { LabeledSlider } from '../controls/LabeledSlider';
-import { LabeledSelect } from '../controls/LabeledSelect';
+import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 
 const BAY_WINDOW_ANGLE_OPTIONS: { value: BayWindowAngle; label: string }[] = [
@@ -64,13 +64,14 @@ export const BayWindowFields: React.FC<ModifierFieldsProps<BayWindowModifier>> =
         />
 
         {availableEdges.length > 1 && (
-          <LabeledSelect
+          <IndexPillSelector
             label="Krawędź:"
             value={modifier.edgeIndex ?? -1}
             placeholderValue={-1}
             placeholderLabel="Domyślna (najdłuższa)"
             options={availableEdges}
             onChange={(edgeIndex) => onChange({ edgeIndex })}
+            accentVar="var(--accent-yellow)"
           />
         )}
       </div>

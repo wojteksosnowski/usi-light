@@ -304,24 +304,8 @@ const IsoScene: React.FC<{
   );
 };
 
-// The camera's `orientation` state names the side it is placed on (it then
-// looks back at the building from there), so the direction actually facing
-// the viewer is the opposite side, mirrored across the diagonal camera axis.
-// Empirically this maps each state to the letter two steps further round the
-// 8-point cycle than a plain opposite (180°) would give — see COMPASS_LABEL.
-const COMPASS_LABEL: Record<IsoOrientation, IsoOrientation> = {
-  N: 'NW',
-  NE: 'W',
-  E: 'SW',
-  SE: 'S',
-  S: 'SE',
-  SW: 'E',
-  W: 'NE',
-  NW: 'N',
-};
-
 const CompassStrip: React.FC<{ orientation: IsoOrientation }> = ({ orientation }) => {
-  const currentIndex = ORIENTATION_CYCLE.indexOf(COMPASS_LABEL[orientation]);
+  const currentIndex = ORIENTATION_CYCLE.indexOf(orientation);
   // Render a wider band of ticks/labels than fits, offset so the current
   // direction sits centered — mimicking a scrolling compass tape.
   const TRACK_STEPS = 9; // -4..+4 relative to current

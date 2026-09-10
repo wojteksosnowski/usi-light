@@ -2,9 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Wrench,
   Magnet,
-  Square,
-  AlignCenterVertical,
-  Combine,
   Ruler,
   MapPin,
   Trash2,
@@ -20,17 +17,23 @@ import { useSceneStore, useCadToolStore } from '../../store';
 import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
-import { TrapezoidIcon, BrokenLineIcon } from '../common/CustomCadIcons';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
 import { MODIFIER_DESCRIPTORS } from '../modifiers/modifierDescriptors';
 import { ModifierType } from '../../types/modifiers';
+import { DRAWING_TOOLS } from '../toolbar/drawingToolDescriptors';
+
+const ALIGN_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'align')!;
+const UNION_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'union')!;
 
 /** Układ przycisków "dodaj modyfikator" — jeden wiersz = jeden rząd siatki w kolejności deklaracji. */
 const ADD_MODIFIER_ROWS: ModifierType[][] = [
   ['story_offset', 'terrace', 'donut'],
-  ['zone_offset', 'bay_window'],
+  ['bay_window'],
   ['corner_cut'],
 ];
+
+/** Modyfikatory obszarów (działają też na obiektach kategorii 'boundary') — osobna sekcja w toolbarze. */
+const AREA_MODIFIER_ROWS: ModifierType[][] = [['zone_offset']];
 
 export const ToolsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -131,56 +134,27 @@ export const ToolsGroup: React.FC = () => {
           </div>
 
 
-          {/* Rząd 1: Prostokąt, Polilinia, Wstęga */}
+          {/* Rząd 1: Prostokąt, Polilinia, Wstęga — zarejestrowane w DRAWING_TOOLS (współdzielone z CadToolBar) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Rysuj nowy prostokąt"
-            >
-              <Square size={13} />
-              <span style={{ fontWeight: 600 }}>Prostokąt</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Rysuj nową polilinię"
-            >
-              <TrapezoidIcon size={13} />
-              <span style={{ fontWeight: 600 }}>Polilinia</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'sweep' ? 'none' : 'sweep');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-                setIsEditMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'sweep' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Rysuj wstęgę z odsunięciem (sweep)"
-            >
-              <BrokenLineIcon size={13} />
-              <span style={{ fontWeight: 600 }}>Wstęga</span>
-            </button>
+            {DRAWING_TOOLS.filter((t) => t.mode === 'rectangle' || t.mode === 'polyline' || t.mode === 'sweep').map((tool) => (
+              <button
+                key={tool.mode}
+                type="button"
+                onClick={() => {
+                  setDrawingMode(drawingMode === tool.mode ? 'none' : tool.mode);
+                  setDrawingVerticesCount(0);
+                  setIsDimensionToolActive(false);
+                  setFacadePointMode(false);
+                  setIsEditMode(false);
+                }}
+                className={`btn-tile ${drawingMode === tool.mode ? 'active-indigo' : 'inactive'}`}
+                style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                title={tool.title}
+              >
+                <tool.Icon size={13} />
+                <span style={{ fontWeight: 600 }}>{tool.label}</span>
+              </button>
+            ))}
           </div>
 
           {/* Pasek opcji Wstęgi (gdy aktywny tryb sweep) */}
@@ -278,58 +252,6 @@ export const ToolsGroup: React.FC = () => {
               </div>
             </div>
           )}
-
-          {/* Rząd 2: Wyrównaj, Suma */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
-            <button
-              type="button"
-              disabled={!selectedBuildingId}
-              onClick={() => {
-                if (!selectedBuildingId) return;
-                if (drawingMode === 'align') {
-                  cancelAlign();
-                  setDrawingMode('none');
-                } else {
-                  cancelAlign();
-                  setDrawingMode('align');
-                  setDrawingVerticesCount(0);
-                  setIsDimensionToolActive(false);
-                  setFacadePointMode(false);
-                  setIsEditMode(false);
-                }
-              }}
-              className={`btn-tile ${drawingMode === 'align' ? 'active-indigo' : 'inactive'}`}
-              style={{
-                justifyContent: 'center',
-                gap: '4px',
-                padding: '8px 4px',
-                fontSize: '11px',
-                opacity: selectedBuildingId ? 1 : 0.4,
-                cursor: selectedBuildingId ? 'pointer' : 'not-allowed',
-              }}
-              title={selectedBuildingId ? 'Wyrównaj krawędzie: kliknij krawędź obiektu, potem krawędź obiektu odniesienia' : 'Zaznacz obiekt, aby wyrównać jego krawędź'}
-            >
-              <AlignCenterVertical size={13} />
-              <span style={{ fontWeight: 600 }}>Wyrównaj</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-                setIsEditMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'union' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Suma (Boolean Union)"
-            >
-              <Combine size={13} />
-              <span style={{ fontWeight: 600 }}>Suma</span>
-            </button>
-          </div>
 
           {/* Rząd 3: Wymiar, Punkt fasady */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
@@ -559,6 +481,48 @@ export const ToolsGroup: React.FC = () => {
                 >
                   <Copy size={13} />
                   <span style={{ fontWeight: 600 }}>Duplikuj</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!selectedBuildingId}
+                  onClick={() => {
+                    if (!selectedBuildingId) return;
+                    if (drawingMode === 'align') {
+                      cancelAlign();
+                      setDrawingMode('none');
+                    } else {
+                      cancelAlign();
+                      setDrawingMode('align');
+                      setDrawingVerticesCount(0);
+                      setIsDimensionToolActive(false);
+                      setFacadePointMode(false);
+                      setIsEditMode(false);
+                    }
+                  }}
+                  className={`btn-tile ${drawingMode === 'align' ? 'active-indigo' : 'inactive'}`}
+                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                  title={ALIGN_TOOL.title}
+                >
+                  <ALIGN_TOOL.Icon size={13} />
+                  <span style={{ fontWeight: 600 }}>{ALIGN_TOOL.label}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
+                    setDrawingVerticesCount(0);
+                    setIsDimensionToolActive(false);
+                    setFacadePointMode(false);
+                    setIsEditMode(false);
+                  }}
+                  className={`btn-tile ${drawingMode === 'union' ? 'active-indigo' : 'inactive'}`}
+                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                  title={UNION_TOOL.title}
+                >
+                  <UNION_TOOL.Icon size={13} />
+                  <span style={{ fontWeight: 600 }}>{UNION_TOOL.label}</span>
                 </button>
 
                 <button
@@ -833,6 +797,46 @@ export const ToolsGroup: React.FC = () => {
           ) : (
             <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '6px 0' }}>
               Zaznacz budynek na scenie, aby zarządzać modyfikatorami.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3.3 Kafel Modyfikatory obszarów */}
+      <div className="ui-card">
+        <div className="ui-title">
+          <span>Modyfikatory obszarów</span>
+          <Layers size={14} color="#a855f7" />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {selectedBuilding ? (
+            AREA_MODIFIER_ROWS.map((row, rowIdx) => (
+              <div key={rowIdx} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: '4px' }}>
+                {row.map((type) => {
+                  const descriptor = MODIFIER_DESCRIPTORS[type];
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => {
+                        addBuildingModifier(selectedBuilding.id, descriptor.createDefault());
+                        setShowModifiersPanel(true);
+                      }}
+                      className="btn-tile active-indigo"
+                      style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
+                      title={`Dodaj modyfikator: ${descriptor.title}`}
+                    >
+                      <descriptor.Icon size={12} color={descriptor.accentVar} />
+                      <span style={{ fontWeight: 600 }}>+ {descriptor.title.split(' ')[0]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '6px 0' }}>
+              Zaznacz budynek lub obszar, aby zarządzać modyfikatorami obszaru.
             </div>
           )}
         </div>
