@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Ratelimit } from '@upstash/ratelimit';
 import { nanoid } from 'nanoid';
-import { getRedisAndRatelimit, formatLicenseKey, LicenseRecord } from '../lib/serverStripe';
+import { getRedisAndRatelimit, formatLicenseKey } from '../lib/serverRedis';
+import type { LicenseRecord } from '../lib/serverRedis';
 
 // Tryb zapoznawczy: darmowy klucz PRO na 7 dni, jedno kliknięcie, bez podawania danych.
 // Limitowany rate-limitem per IP, by ograniczyć nadużycia w czasie promocji.
