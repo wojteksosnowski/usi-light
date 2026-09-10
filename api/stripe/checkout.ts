@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getStripe, getRedisAndRatelimit } from '../lib/serverStripe';
+import { getStripe, getRedisAndRatelimit } from '../lib/serverStripe.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
