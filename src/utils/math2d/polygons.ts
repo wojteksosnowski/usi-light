@@ -36,6 +36,22 @@ export function getPolygonCentroid(vertices: Point2D[]): Point2D {
   return { x: x / vertices.length, y: y / vertices.length };
 }
 
+/**
+ * Rotates a point by `angleRad` (CCW, standard math convention) around `pivot`.
+ * Shared by every place that needs to replicate a building's own rotation
+ * math (rotate handle, `rotateBuilding`, canonical/local-space normalization).
+ */
+export function rotatePointAroundPivot(pt: Point2D, pivot: Point2D, angleRad: number): Point2D {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const rx = pt.x - pivot.x;
+  const ry = pt.y - pivot.y;
+  return {
+    x: rx * cos - ry * sin,
+    y: rx * sin + ry * cos,
+  };
+}
+
 const ROTATE_HANDLE_MARGIN_PX = 28;
 
 /**

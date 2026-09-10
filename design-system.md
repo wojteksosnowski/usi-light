@@ -27,6 +27,13 @@ Zdefiniowane w [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.c
 | `--accent-rose` | `#f43f5e` (Rose 500) | Niezgodność § 12, błędy, przecięcia OSNAP |
 | `--accent-cyan` | `#38bdf8` (Sky 400) | Akcent PRO / eksport CAD (`.btn-tile.active-cyan`, `.cad-control-point-btn`, przycisk "Centruj") |
 | `--accent-cyan-light` | `#7dd3fc` (Sky 300) | Jaśniejszy wariant akcentu cyan (stan aktywny/hover) |
+| `--accent-purple` | `#c084fc` (Purple 400) | Akcent modyfikatora Uskok kondygnacji |
+| `--accent-purple-soft` | `#f3e8ff` (Purple 100) | Jaśniejszy tekst tytułu na akcencie purple |
+| `--accent-yellow` | `#fef08a` (Yellow 200) | Akcent modyfikatora Wykusz (Bay Window) |
+| `--accent-orange` | `#fed7aa` (Orange 200) | Akcent modyfikatora Taras |
+| `--accent-emerald-light` | `#a7f3d0` (Emerald 200) | Akcent modyfikatora Donat |
+
+Powyższe 5 tokenów zasila deskryptory modyfikatorów 2.5D (`src/components/modifiers/modifierDescriptors.tsx`) — zone_offset korzysta z `--accent-cyan`, corner_cut z `--accent-cyan-light`. Zob. [[modifier-architecture-guide]].
 
 ### 1.2. Pływające Powierzchnie Szklane (Glassmorphism Surfaces)
 Pływające panele nad rzutem CAD wykorzystują efekt rozmycia tła:

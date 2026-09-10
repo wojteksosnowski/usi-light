@@ -1,24 +1,18 @@
 import polygonClipping from 'polygon-clipping';
 import { BuildingLoop, FacadeSegment, Point2D } from '../../types/geometry';
 import {
-  BayWindowModifier,
-  CornerCutModifier,
   CornerCutMode,
   CornerCutScope,
-  DonutModifier,
-  Modifier,
   StoryFootprint,
-  StoryOffsetModifier,
-  TerraceModifier,
   ZoneCornerType,
   ZoneFootprint,
-  ZoneOffsetModifier,
 } from '../../types/modifiers';
 import { miterOffsetPolygon, offsetPolygonWithJoin, PolygonJoinType } from '../../utils/math2d/miterOffset';
 import { calculateSignedArea, isPolygonCCW } from '../../utils/math2d/polygons';
 import { calculateOutwardNormal, distance } from '../../utils/math2d/vec2';
 import { computeLineEquation, rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors } from '../../utils/buildingFloorCalculator';
+import { applyModifier, ModifierApplyContext } from './modifierRegistry';
 
 export interface ModifierPipelineResult {
   storyPolygons: StoryFootprint[];
@@ -488,32 +482,6 @@ export function resolveStoryModifierSteps(
   return result;
 }
 
-interface IndexTargetResolution {
-  isHole: boolean;
-  holeIndex?: number;
-  localIndex?: number;
-}
-
-/**
- * Rozwiązuje globalny indeks (krawędzi lub wierzchołka) na obrys zewnętrzny lub konkretny otwór
- * dziedzińca danej kondygnacji, zgodnie z konwencją: zewnętrzne 0..n-1, następnie kolejne otwory.
- */
-function resolveIndexTarget(footprint: StoryFootprint, globalIndex: number | undefined): IndexTargetResolution {
-  const outerLen = footprint.polygon.length;
-  if (globalIndex === undefined || globalIndex < outerLen || !footprint.holes) {
-    return { isHole: false };
-  }
-  let offset = outerLen;
-  for (let h = 0; h < footprint.holes.length; h++) {
-    const hLen = footprint.holes[h].length;
-    if (globalIndex < offset + hLen) {
-      return { isHole: true, holeIndex: h, localIndex: globalIndex - offset };
-    }
-    offset += hLen;
-  }
-  return { isHole: false };
-}
-
 function toClosedRing(pts: Point2D[]): [number, number][] {
   if (!pts || pts.length === 0) return [];
   const ring: [number, number][] = pts.map((p) => [p.x, p.y]);
@@ -677,22 +645,15 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
 
   const activeModifiers = (building.modifiers || []).filter((m) => m.enabled);
 
-  // 1. Obiekty typu Obszar (boundary) nie posiadają kondygnacji 3D ani modyfikatorów budynkowych
+  // 1. Obiekty typu Obszar (boundary) nie posiadają kondygnacji 3D ani modyfikatorów budynkowych —
+  //    obsługują wyłącznie zone_offset, ale samą aplikację delegują do rejestru (modifierRegistry.ts),
+  //    tak samo jak budynki, zamiast duplikować logikę generateZoneBand tutaj.
   if (building.category === 'boundary') {
     const zoneFootprints: ZoneFootprint[] = [];
+    const boundaryCtx: ModifierApplyContext = { storyFootprints: [], zoneFootprints, baseVertices, K: 0, building };
     for (const modifier of activeModifiers) {
       if (modifier.type === 'zone_offset') {
-        const zoneMod = modifier as ZoneOffsetModifier;
-        const band = generateZoneBand(baseVertices, zoneMod.distance, zoneMod.cornerType);
-        if (band.outer && band.outer.length >= 3) {
-          zoneFootprints.push({
-            id: zoneMod.id,
-            areaType: zoneMod.areaType || building.areaType || 'plot',
-            distance: zoneMod.distance,
-            polygon: band.outer,
-            holes: [band.inner],
-          });
-        }
+        applyModifier(modifier, boundaryCtx);
       }
     }
     const rebuilt = rebuildBuildingSegments(building, baseVertices);
@@ -727,123 +688,10 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
 
   const zoneFootprints: ZoneFootprint[] = [];
 
-  // 2. Aplikacja modyfikatorów
+  // 2. Aplikacja modyfikatorów — dispatch przez rejestr (modifierRegistry.ts), nie if/else po typie.
+  const applyCtx: ModifierApplyContext = { storyFootprints, zoneFootprints, baseVertices, K, building };
   for (const modifier of activeModifiers) {
-    if (modifier.type === 'story_offset') {
-      const { distance, storiesCount } = modifier as StoryOffsetModifier;
-      if (Math.abs(distance) < 1e-4) continue;
-
-      const steps = resolveStoryModifierSteps(K, storiesCount);
-      for (const { storyIndex } of steps) {
-        storyFootprints[storyIndex].polygon = miterOffsetPolygon(storyFootprints[storyIndex].polygon, distance);
-        // Systemowa obsługa otworów dziedzińca (Donut)
-        if (storyFootprints[storyIndex].holes && storyFootprints[storyIndex].holes!.length > 0) {
-          storyFootprints[storyIndex].holes = storyFootprints[storyIndex].holes!.map(
-            (hole) => miterOffsetPolygon(hole, -distance)
-          );
-        }
-      }
-    } else if (modifier.type === 'zone_offset') {
-      const zoneMod = modifier as ZoneOffsetModifier;
-      const band = generateZoneBand(baseVertices, zoneMod.distance, zoneMod.cornerType);
-      if (band.outer && band.outer.length >= 3) {
-        zoneFootprints.push({
-          id: zoneMod.id,
-          areaType: zoneMod.areaType || 'plot',
-          distance: zoneMod.distance,
-          polygon: band.outer,
-          holes: [band.inner],
-        });
-      }
-    } else if (modifier.type === 'bay_window') {
-      const bayMod = modifier as BayWindowModifier;
-      const { width, projection, storiesCount, edgeIndex, sideAngle, positionRatio } = bayMod;
-      if (Math.abs(projection) < 1e-4 || width <= 1e-3) continue;
-
-      const steps = resolveStoryModifierSteps(K, storiesCount);
-      for (const { storyIndex } of steps) {
-        const footprint = storyFootprints[storyIndex];
-        const target = resolveIndexTarget(footprint, edgeIndex);
-        if (target.isHole) {
-          footprint.holes![target.holeIndex!] = generateBayWindowPolygon(
-            footprint.holes![target.holeIndex!],
-            width,
-            projection,
-            target.localIndex,
-            sideAngle ?? 45,
-            positionRatio ?? 0.5
-          );
-        } else {
-          footprint.polygon = generateBayWindowPolygon(
-            footprint.polygon,
-            width,
-            projection,
-            edgeIndex,
-            sideAngle ?? 45,
-            positionRatio ?? 0.5
-          );
-        }
-      }
-    } else if (modifier.type === 'terrace') {
-      const terraceMod = modifier as TerraceModifier;
-      const { depth, storiesCount, edgeIndex } = terraceMod;
-      if (Math.abs(depth) < 1e-4) continue;
-
-      // Taras wykorzystuje resolver z cascade: true dla schodkowego skalowania głębokości per piętro
-      const steps = resolveStoryModifierSteps(K, storiesCount, { cascade: true });
-      for (const { storyIndex, stepMultiplier } of steps) {
-        const storyDepth = depth * stepMultiplier;
-        const footprint = storyFootprints[storyIndex];
-        const target = resolveIndexTarget(footprint, edgeIndex);
-
-        if (target.isHole) {
-          footprint.holes![target.holeIndex!] = generateTerracePolygon(
-            footprint.holes![target.holeIndex!],
-            storyDepth,
-            target.localIndex
-          );
-        } else {
-          footprint.polygon = generateTerracePolygon(footprint.polygon, storyDepth, edgeIndex);
-        }
-      }
-    } else if (modifier.type === 'donut') {
-      const donutMod = modifier as DonutModifier;
-      const { offset, storiesCount } = donutMod;
-      if (Math.abs(offset) < 1e-4) continue;
-
-      const steps = resolveStoryModifierSteps(K, storiesCount);
-      for (const { storyIndex } of steps) {
-        const holes = generateDonutHoles(storyFootprints[storyIndex].polygon, offset);
-        if (holes && holes.length > 0) {
-          storyFootprints[storyIndex].holes = [...(storyFootprints[storyIndex].holes || []), ...holes];
-        }
-      }
-    } else if (modifier.type === 'corner_cut') {
-      const cutMod = modifier as CornerCutModifier;
-      const { depth, storiesCount, mode, scope, edgeIndex, vertexIndex } = cutMod;
-      if (depth <= 1e-4) continue;
-
-      // Dla scope 'edge'/'vertex' oba pola są wzajemnie wykluczające się - tylko jedno jest aktywne
-      const targetIdx = scope === 'vertex' ? vertexIndex : scope === 'edge' ? edgeIndex : undefined;
-
-      const steps = resolveStoryModifierSteps(K, storiesCount);
-      for (const { storyIndex } of steps) {
-        const footprint = storyFootprints[storyIndex];
-        const target = resolveIndexTarget(footprint, targetIdx);
-
-        if (target.isHole) {
-          footprint.holes![target.holeIndex!] = generateCornerCutPolygon(
-            footprint.holes![target.holeIndex!],
-            depth,
-            mode,
-            scope,
-            target.localIndex
-          );
-        } else {
-          footprint.polygon = generateCornerCutPolygon(footprint.polygon, depth, mode, scope, targetIdx);
-        }
-      }
-    }
+    applyModifier(modifier, applyCtx);
   }
 
   // 2.5 Sanityzacja i uniwersalne docinanie boolowskie kondygnacji
