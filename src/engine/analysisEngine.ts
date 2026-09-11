@@ -389,7 +389,8 @@ export function analyzeShadowingAtPoint(
   targetBuildingId: string,
   angleStepDeg: number = 0.5,
   prefilteredObstacles?: PrefilteredObstacle[],
-  buildingMap?: Map<string, BuildingLoop>
+  buildingMap?: Map<string, BuildingLoop>,
+  baseHeightOverride?: number
 ): ShadowingResult {
   const normal = segment.normal;
   const normalAngleRad = Math.atan2(normal.y, normal.x);
@@ -409,7 +410,7 @@ export function analyzeShadowingAtPoint(
 
   const bldgMap = buildingMap ?? new Map<string, BuildingLoop>(allBuildings.map((b) => [b.id, b]));
 
-  const pointBaseH = segment.hBase ?? 0.0;
+  const pointBaseH = baseHeightOverride ?? segment.hBase ?? 0.0;
 
   for (const { seg, bldgId } of baseObstacles) {
     const bldg = bldgMap.get(bldgId);
@@ -801,7 +802,8 @@ export function analyzeSunlightAtPoint(
   precomputedTrajectory?: SolarTrajectorySlot[],
   prefilteredObstacles?: PrefilteredObstacle[],
   precomputedWindow?: SolarWindowInfo,
-  hourSystem?: ISolarHourSystem
+  hourSystem?: ISolarHourSystem,
+  baseHeightOverride?: number
 ): SunlightResult {
   const normal = segment.normal;
   const sys = hourSystem ?? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
@@ -912,7 +914,7 @@ export function analyzeSunlightAtPoint(
       );
 
       if (hitDist > 0.05 && hitDist < Infinity) {
-        const pointBaseH = segment.hBase ?? 0.0;
+        const pointBaseH = baseHeightOverride ?? segment.hBase ?? 0.0;
         const deltaH = Math.max(0, seg.hTop - pointBaseH);
         const deltaHbase = Math.max(0, (seg.hBase ?? 0.0) - pointBaseH);
         const betaTopDeg = Math.atan2(deltaH, hitDist) * RAD2DEG;
@@ -984,7 +986,8 @@ export function analyzeSunlightAtPointSegments(
   settings: ProjectSettings,
   prefilteredObstacles?: PrefilteredObstacle[],
   precomputedWindow?: SolarWindowInfo,
-  hourSystem?: ISolarHourSystem
+  hourSystem?: ISolarHourSystem,
+  baseHeightOverride?: number
 ): SunlightResult & { _segMethodMs?: number } {
   const t0 = performance.now();
   const normal = segment.normal;
@@ -1035,7 +1038,7 @@ export function analyzeSunlightAtPointSegments(
 
   const { nStart, nEnd } = windowInfo;
 
-  const pointBaseH = segment.hBase ?? 0.0;
+  const pointBaseH = baseHeightOverride ?? segment.hBase ?? 0.0;
 
   for (const { seg, bldgId } of obstacles) {
     // Wysokość przeszkody H względem punktu badanego P (segment.hBase)

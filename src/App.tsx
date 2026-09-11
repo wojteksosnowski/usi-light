@@ -8,15 +8,22 @@ import { ProjectParametersPanel } from './components/parameters/ProjectParameter
 import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
 import { ShareProjectModal } from './components/common/ShareProjectModal';
+import { PricingModal } from './components/license/PricingModal';
+import { LicenseManagementModal } from './components/license/LicenseManagementModal';
+import { PaymentSuccessModal } from './components/license/PaymentSuccessModal';
+import { DevLicenseToolbar } from './components/license/DevLicenseToolbar';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
 import { CadToolBar } from './components/layout/CadToolBar';
+import { ControlPointButton } from './components/layout/ControlPointButton';
 import { CadLegendBottom } from './components/layout/CadLegendBottom';
+import { registerGeoLayers } from './modules/wfs-import/registerGeoLayers';
 import {
   useSceneStore,
   useCadToolStore,
   useSolarAnalysisStore,
   useUiStore,
+  useLicenseStore,
   SavedSceneData,
 } from './store';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
@@ -30,6 +37,7 @@ import {
   prefilterShadowingObstacles,
   prefilterSunlightObstacles,
 } from './engine/analysisEngine';
+import { computeStoryHeightIntervals } from './engine/modifiers/modifierPipeline';
 import { Point2D, AnalysisPointResult } from './types/geometry';
 import { createBuildingFromVertices } from './utils/dxfParser';
 import { analyzeSegmentsStatistics } from './utils/segmentStatistics';
@@ -69,8 +77,6 @@ export const App: React.FC = () => {
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
-  const rotateInitialBuildingsSnapshot = useCadToolStore((s) => s.rotateInitialBuildingsSnapshot);
-  const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
   const sweepWidth = useCadToolStore((s) => s.sweepWidth);
   const sweepAlignment = useCadToolStore((s) => s.sweepAlignment);
   const isEditMode = useCadToolStore((s) => s.isEditMode);
@@ -91,13 +97,16 @@ export const App: React.FC = () => {
   const handleDimensionClickEdge = useCadToolStore((s) => s.handleDimensionClickEdge);
   const cancelDimension = useCadToolStore((s) => s.cancelDimension);
   const deleteDimension = useCadToolStore((s) => s.deleteDimension);
+  const alignPendingRef = useCadToolStore((s) => s.alignPendingRef);
+  const handleAlignClickEdge = useCadToolStore((s) => s.handleAlignClickEdge);
+  const cancelAlign = useCadToolStore((s) => s.cancelAlign);
   const viewRotationMode = useCadToolStore((s) => s.viewRotationMode);
   const setViewRotationMode = useCadToolStore((s) => s.setViewRotationMode);
   const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
   const setViewRotationDeg = useCadToolStore((s) => s.setViewRotationDeg);
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
-  const fitTrigger = useCadToolStore((s) => s.fitTrigger);
+  const fitRequest = useCadToolStore((s) => s.fitRequest);
   const isInteracting = useCadToolStore((s) => s.isInteracting);
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
 
@@ -131,16 +140,45 @@ export const App: React.FC = () => {
   const addPinnedPoint = useSolarAnalysisStore((s) => s.addPinnedPoint);
   const deletePinnedPoint = useSolarAnalysisStore((s) => s.deletePinnedPoint);
   const updatePinnedPoint = useSolarAnalysisStore((s) => s.updatePinnedPoint);
+  const updatePinnedPointStorey = useSolarAnalysisStore((s) => s.updatePinnedPointStorey);
   const setAnalysisOutput = useSolarAnalysisStore((s) => s.setAnalysisOutput);
 
   // UI Store & Sharing
   const isShareModalOpen = useUiStore((s) => s.isShareModalOpen);
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
+  const setPaymentSuccessModalOpen = useUiStore((s) => s.setPaymentSuccessModalOpen);
+  const setPaymentSuccessSessionId = useUiStore((s) => s.setPaymentSuccessSessionId);
+
+  // License Store
+  const initializeLicense = useLicenseStore((s) => s.initializeLicense);
+
+  // Inicjalizacja licencji oraz detekcja powrotu ze Stripe Checkout
+  useEffect(() => {
+    initializeLicense();
+
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const isPaymentSuccess = urlParams.get('payment_success') === 'true';
+      const sessionId = urlParams.get('session_id');
+
+      if (isPaymentSuccess && sessionId) {
+        setPaymentSuccessSessionId(sessionId);
+        setPaymentSuccessModalOpen(true);
+        // Oczyszczamy pasek adresu z parametrów Stripe
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch (e) {
+      console.warn('Błąd odczytu parametrów URL:', e);
+    }
+  }, [initializeLicense, setPaymentSuccessModalOpen, setPaymentSuccessSessionId]);
 
   // Shared Project Loader (auto-hydrates state if /p/:id is detected)
   const { loadStatus, dismissStatus } = useSharedProjectLoader();
 
   const sceneHydratedRef = useRef(false);
+
+  // Geo module: register WMS/WFS layers in render pipeline
+  useEffect(() => registerGeoLayers(), []);
 
   // Progressive Accuracy Refinement Effect
   useEffect(() => {
@@ -167,6 +205,14 @@ export const App: React.FC = () => {
       setShowModifiersPanel(false);
     }
   }, [selectedBuildingId, buildings, setShowModifiersPanel]);
+
+  // Wyjście z edycji wierzchołków, gdy edytowany obiekt przestaje być zaznaczony
+  // (klik na puste pole, usunięcie budynku, ukrycie warstwy, wczytanie nowej scenerii itd.)
+  useEffect(() => {
+    if (!selectedBuildingId && drawingMode === 'vertexEdit') {
+      setDrawingMode('none');
+    }
+  }, [selectedBuildingId, drawingMode, setDrawingMode]);
 
   const currentAccuracyOptions = useMemo<AnalysisAccuracyOptions>(() => {
     switch (accuracyStage) {
@@ -247,6 +293,12 @@ export const App: React.FC = () => {
         const prefilteredShadowing = prefilterShadowingObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
         const prefilteredSunlight = prefilterSunlightObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
 
+        let baseHeightOverride: number | undefined;
+        if (pt.storeyIndex !== undefined) {
+          const intervals = computeStoryHeightIntervals(bldg);
+          baseHeightOverride = intervals[pt.storeyIndex]?.hBottom;
+        }
+
         const shadowRes = analyzeShadowingAtPoint(
           exactPoint,
           seg,
@@ -254,7 +306,9 @@ export const App: React.FC = () => {
           effectiveBuildings,
           bldg.id,
           currentAccuracyOptions.angleStepDeg,
-          prefilteredShadowing
+          prefilteredShadowing,
+          undefined,
+          baseHeightOverride
         );
 
         const sunRes =
@@ -266,7 +320,10 @@ export const App: React.FC = () => {
                 effectiveBuildings,
                 bldg.id,
                 settings,
-                prefilteredSunlight
+                prefilteredSunlight,
+                undefined,
+                undefined,
+                baseHeightOverride
               )
             : analyzeSunlightAtPoint(
                 exactPoint,
@@ -277,7 +334,10 @@ export const App: React.FC = () => {
                 settings,
                 currentAccuracyOptions.sunlightStepMinutes,
                 undefined,
-                prefilteredSunlight
+                prefilteredSunlight,
+                undefined,
+                undefined,
+                baseHeightOverride
               );
 
         return {
@@ -287,6 +347,7 @@ export const App: React.FC = () => {
           buildingId: bldg.id,
           segmentId: seg.id,
           label: pt.label || `P${pIdx + 1}`,
+          storeyIndex: pt.storeyIndex,
           shadowing: shadowRes,
           sunlight: sunRes,
         };
@@ -332,8 +393,27 @@ export const App: React.FC = () => {
     }
   }, [showProjectParameters, activePointResult, showModifiersPanel]);
 
+  // Dev-only: ładowanie sceny testowej z URL (?perfScene=/perf-scene.json) - do testów
+  // wydajnościowych na dużych scenach, bez limitu rozmiaru localStorage.
+  useEffect(() => {
+    const perfSceneUrl = new URLSearchParams(window.location.search).get('perfScene');
+    if (!perfSceneUrl) return;
+    (async () => {
+      try {
+        const res = await fetch(perfSceneUrl);
+        const scene = (await res.json()) as SavedSceneData;
+        loadSceneData(scene);
+        sceneHydratedRef.current = true;
+        console.log(`[perfScene] Załadowano ${scene.buildings?.length ?? 0} obiektów z ${perfSceneUrl}`);
+      } catch (err) {
+        console.error('[perfScene] Błąd ładowania sceny testowej:', err);
+      }
+    })();
+  }, [loadSceneData]);
+
   // LocalStorage Persistence (Load on mount)
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('perfScene')) return;
     try {
       const raw = localStorage.getItem(SCENE_STORAGE_KEY);
       if (!raw) return;
@@ -354,6 +434,7 @@ export const App: React.FC = () => {
   // LocalStorage Persistence (Save on update)
   useEffect(() => {
     if (!sceneHydratedRef.current) return;
+    if (new URLSearchParams(window.location.search).get('perfScene')) return;
     const scene: SavedSceneData = {
       version: 1,
       buildings,
@@ -418,11 +499,10 @@ export const App: React.FC = () => {
           cancelDimension();
           handledTool = true;
         }
+        if (drawingMode === 'align') {
+          cancelAlign();
+        }
         if (drawingMode !== 'none') {
-          if (drawingMode === 'rotate' && rotateInitialBuildingsSnapshot) {
-            setBuildings(rotateInitialBuildingsSnapshot);
-            setRotateInitialBuildingsSnapshot(null);
-          }
           setDrawingMode('none');
           setDrawingVerticesCount(0);
           handledTool = true;
@@ -483,7 +563,6 @@ export const App: React.FC = () => {
   }, [
     isDimensionToolActive,
     drawingMode,
-    rotateInitialBuildingsSnapshot,
     isLinkingMode,
     isEditMode,
     viewRotationMode,
@@ -492,10 +571,9 @@ export const App: React.FC = () => {
     selectedBuildingIds,
     deleteBuildings,
     cancelDimension,
+    cancelAlign,
     setDrawingMode,
     setDrawingVerticesCount,
-    setRotateInitialBuildingsSnapshot,
-    setBuildings,
     setIsLinkingMode,
     setLinkingSourceId,
     setIsEditMode,
@@ -510,12 +588,6 @@ export const App: React.FC = () => {
   // Handlers for CadCanvas
   const handleFinishDrawing = useCallback(
     (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => {
-      if (drawingMode === 'rotate') {
-        setRotateInitialBuildingsSnapshot(null);
-        setDrawingMode('none');
-        setDrawingVerticesCount(0);
-        return;
-      }
       let effectiveVertices = vertices;
       if (shapeType === 'sweep') {
         if (vertices.length < 2) return;
@@ -541,17 +613,13 @@ export const App: React.FC = () => {
       setDrawingMode('none');
       setDrawingVerticesCount(0);
     },
-    [drawingMode, buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, setRotateInitialBuildingsSnapshot, sweepWidth, sweepAlignment]
+    [buildings.length, addBuilding, setDrawingMode, setDrawingVerticesCount, sweepWidth, sweepAlignment]
   );
 
   const handleCancelDrawing = useCallback(() => {
-    if (drawingMode === 'rotate' && rotateInitialBuildingsSnapshot) {
-      setBuildings(rotateInitialBuildingsSnapshot);
-      setRotateInitialBuildingsSnapshot(null);
-    }
     setDrawingMode('none');
     setDrawingVerticesCount(0);
-  }, [drawingMode, rotateInitialBuildingsSnapshot, setBuildings, setDrawingMode, setDrawingVerticesCount, setRotateInitialBuildingsSnapshot]);
+  }, [setDrawingMode, setDrawingVerticesCount]);
 
   const handleBuildingRotate = useCallback(
     (id: string, pivot: Point2D, deltaAngleRad: number) => {
@@ -585,7 +653,10 @@ export const App: React.FC = () => {
         <CadTopHud />
 
         {/* Floating Tool Bar under Top HUD */}
-        <CadToolBar />
+        <div className="cad-toolbar-row">
+          <ControlPointButton />
+          <CadToolBar />
+        </div>
 
         {/* Legend & Stats Overlay at Bottom-Left */}
         <CadLegendBottom />
@@ -644,11 +715,12 @@ export const App: React.FC = () => {
             latitude={settings.latitude}
             longitude={settings.longitude}
             equinoxDate={settings.equinoxDate}
-            fitTrigger={fitTrigger}
+            fitRequest={fitRequest}
             onInteractionChange={setIsInteracting}
             isLinkingMode={isLinkingMode}
             linkingSourceId={linkingSourceId}
             drawingMode={drawingMode}
+            onDrawingModeChange={setDrawingMode}
             sweepWidth={sweepWidth}
             sweepAlignment={sweepAlignment}
             onFinishDrawing={handleFinishDrawing}
@@ -670,6 +742,8 @@ export const App: React.FC = () => {
             dimensionPendingRef={dimensionPendingRef}
             onDimensionClickEdge={handleDimensionClickEdge}
             onDeleteDimension={deleteDimension}
+            alignPendingRef={alignPendingRef}
+            onAlignClickEdge={handleAlignClickEdge}
             layerSettings={layerSettings}
             viewRotationMode={viewRotationMode}
             viewRotationDeg={viewRotationDeg}
@@ -704,6 +778,7 @@ export const App: React.FC = () => {
                   activePointId={activePinnedPointId}
                   onSelectPointId={setActivePinnedPointId}
                   onDeletePointId={deletePinnedPoint}
+                  onStoreyChange={updatePinnedPointStorey}
                   activeMode={activePointMode}
                   sunlightMethod={sunlightMethod}
                   onModeChange={setActivePointMode}
@@ -822,6 +897,14 @@ export const App: React.FC = () => {
 
         {/* Share Project Modal */}
         <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setShareModalOpen(false)} />
+
+        {/* License & Payment Modals */}
+        <PricingModal />
+        <LicenseManagementModal />
+        <PaymentSuccessModal />
+
+        {/* Development Floating Toolbar */}
+        <DevLicenseToolbar />
       </main>
     </div>
   );

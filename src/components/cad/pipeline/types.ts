@@ -46,7 +46,7 @@ export interface CadRenderFrameContext {
     ratio: number;
   } | null;
   readonly facadePointMode?: boolean;
-  readonly drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
+  readonly drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
   readonly showAnalysisPoints?: boolean;
   readonly showShadowRange?: boolean;
   readonly showShadowFill?: boolean;
@@ -67,16 +67,17 @@ export interface CadRenderFrameContext {
   readonly crsInfo?: CrsDetectionResult;
   readonly draggedVertexIndex?: number | null;
   readonly dragVertexPreviewPt?: Point2D | null;
+  readonly projectCirclePulse?: { radius: number; opacity: number } | null;
+  readonly projectRadius?: number;
 
   // Overlay / Tool Preview context
   readonly effectivePivot?: Point2D | null;
-  readonly isPivotHovered?: boolean;
-  readonly isDraggingPivot?: boolean;
+  readonly isRotateHandleHovered?: boolean;
   readonly isRotating?: boolean;
-  readonly rotStartAngleScreen?: number;
   readonly rotAngleDeg?: number;
-  readonly hoveredRotateVertexIndex?: number | null;
   readonly activeRotateAngleSnap?: { angleDeg: number; isCardinal?: boolean; label?: string } | null;
+  readonly alignPendingRef?: DimensionReference | null;
+  readonly alignHoveredEdge?: { buildingId: string; segmentId: string } | null;
   readonly drawingVertices?: Point2D[];
   readonly currentMouseWorld?: Point2D | null;
   readonly hoveredVertexIndex?: number | null;

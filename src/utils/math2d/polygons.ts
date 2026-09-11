@@ -22,6 +22,81 @@ export function calculateSignedArea(points: Point2D[]): number {
   return area / 2;
 }
 
+/**
+ * Average (centroid) of a polygon's vertices — used as the pivot for
+ * per-object rotation (rotate handle, align tool).
+ */
+export function getPolygonCentroid(vertices: Point2D[]): Point2D {
+  if (!vertices || vertices.length === 0) return { x: 0, y: 0 };
+  let x = 0, y = 0;
+  for (const v of vertices) {
+    x += v.x;
+    y += v.y;
+  }
+  return { x: x / vertices.length, y: y / vertices.length };
+}
+
+/**
+ * Rotates a point by `angleRad` (CCW, standard math convention) around `pivot`.
+ * Shared by every place that needs to replicate a building's own rotation
+ * math (rotate handle, `rotateBuilding`, canonical/local-space normalization).
+ */
+export function rotatePointAroundPivot(pt: Point2D, pivot: Point2D, angleRad: number): Point2D {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const rx = pt.x - pivot.x;
+  const ry = pt.y - pivot.y;
+  return {
+    x: rx * cos - ry * sin,
+    y: rx * sin + ry * cos,
+  };
+}
+
+const ROTATE_HANDLE_MARGIN_PX = 28;
+
+/**
+ * Screen position of the per-object rotate handle. Points at "12 o'clock"
+ * relative to the object: straight up on screen when the building's own
+ * rotation (`transform.rotationDeg`) is 0 and the view isn't rotated, then
+ * turns rigidly with the building as it's rotated. The farthest-vertex
+ * distance is kept only to size the offset so the handle clears the shape.
+ */
+export function getRotateHandleScreenPos(
+  bldg: { vertices: Point2D[]; transform?: { rotationDeg?: number } },
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  scale: number,
+  viewRotationDeg: number = 0
+): { sx: number; sy: number } | null {
+  if (!bldg.vertices || bldg.vertices.length === 0) return null;
+  const centroid = getPolygonCentroid(bldg.vertices);
+  let maxDistSq = -Infinity;
+  for (const v of bldg.vertices) {
+    const d = (v.x - centroid.x) ** 2 + (v.y - centroid.y) ** 2;
+    if (d > maxDistSq) maxDistSq = d;
+  }
+  const dist = Math.sqrt(maxDistSq);
+
+  // worldToScreen rotates world vectors by +viewRotationDeg before flipping Y,
+  // so to land straight up on screen at rotationDeg=0 we need to counter-rotate
+  // by viewRotationDeg here, then add the building's own rotation on top.
+  const rotationDeg = bldg.transform?.rotationDeg || 0;
+  const angleRad = ((rotationDeg - viewRotationDeg) * Math.PI) / 180;
+  // (-sin, cos) is the "up" vector (0,1) rotated by angleRad using the same
+  // CCW math convention as rotateBuilding (atan2-based deltas); using
+  // (sin, cos) here would spin the handle opposite to the object/mouse.
+  const dirX = -Math.sin(angleRad);
+  const dirY = Math.cos(angleRad);
+
+  const marginWorld = ROTATE_HANDLE_MARGIN_PX / (scale || 1);
+  const worldPos = {
+    x: centroid.x + dirX * (dist + marginWorld),
+    y: centroid.y + dirY * (dist + marginWorld),
+  };
+  const s = worldToScreen(worldPos.x, worldPos.y);
+  if (!Number.isFinite(s.sx) || !Number.isFinite(s.sy)) return null;
+  return s;
+}
+
 export function isPolygonCCW(points: Point2D[]): boolean {
   if (!points || points.length < 3) return true;
   return calculateSignedArea(points) > 0;
@@ -596,4 +671,61 @@ export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
   }
 
   return bestPt;
+}
+
+/**
+ * Szacuje stosunek pola wielokąta znajdującego się wewnątrz okręgu do całkowitego pola wielokąta.
+ * Używa próbkowania siatki — wydajne dla wielokątów geodezyjnych w zasięgu 50–200 m.
+ *
+ * @param vertices  wierzchołki wielokąta w lokalnym układzie CAD (metry, środek projektu = 0,0)
+ * @param cx        środek okręgu X (zwykle 0 dla środka projektu)
+ * @param cy        środek okręgu Y (zwykle 0 dla środka projektu)
+ * @param radius    promień okręgu w metrach
+ * @returns         liczba z zakresu [0, 1] — udział pola wielokąta wewnątrz okręgu
+ */
+export function polygonCircleIntersectionRatio(
+  vertices: Point2D[],
+  cx: number,
+  cy: number,
+  radius: number
+): number {
+  if (!vertices || vertices.length < 3 || radius <= 0) return 0;
+
+  // Oblicz obwiednię wielokąta
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const v of vertices) {
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+  }
+
+  const STEPS = 20; // 20x20 = 400 punktów próbkowania
+  const dx = (maxX - minX) / STEPS;
+  const dy = (maxY - minY) / STEPS;
+  const r2 = radius * radius;
+
+  if (dx < 1e-9 || dy < 1e-9) {
+    // Zdegenerowany wielokąt — sprawdź sam środek
+    const pt = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    if (!isPointInPolygon(pt, vertices)) return 0;
+    const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2;
+    return dd <= r2 ? 1 : 0;
+  }
+
+  let inside = 0;
+  let total = 0;
+
+  for (let ix = 0; ix <= STEPS; ix++) {
+    for (let iy = 0; iy <= STEPS; iy++) {
+      const pt: Point2D = { x: minX + ix * dx, y: minY + iy * dy };
+      if (!isPointInPolygon(pt, vertices)) continue;
+      total++;
+      const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2;
+      if (dd <= r2) inside++;
+    }
+  }
+
+  if (total === 0) return 0;
+  return inside / total;
 }

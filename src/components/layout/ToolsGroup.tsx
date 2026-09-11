@@ -2,9 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Wrench,
   Magnet,
-  Square,
-  RotateCw,
-  Combine,
   Ruler,
   MapPin,
   Trash2,
@@ -21,7 +18,22 @@ import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d'
 import { analyzeSegmentsStatistics } from '../../utils/segmentStatistics';
 import { APP_CONFIG } from '../../config/appConfig';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
+import { MODIFIER_DESCRIPTORS } from '../modifiers/modifierDescriptors';
+import { ModifierType } from '../../types/modifiers';
+import { DRAWING_TOOLS } from '../toolbar/drawingToolDescriptors';
+
+const ALIGN_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'align')!;
+const UNION_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'union')!;
+
+/** Układ przycisków "dodaj modyfikator" — jeden wiersz = jeden rząd siatki w kolejności deklaracji. */
+const ADD_MODIFIER_ROWS: ModifierType[][] = [
+  ['story_offset', 'terrace', 'donut'],
+  ['bay_window'],
+  ['corner_cut'],
+];
+
+/** Modyfikatory obszarów (działają też na obiektach kategorii 'boundary') — osobna sekcja w toolbarze. */
+const AREA_MODIFIER_ROWS: ModifierType[][] = [['zone_offset']];
 
 export const ToolsGroup: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -47,7 +59,7 @@ export const ToolsGroup: React.FC = () => {
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
   const drawingVerticesCount = useCadToolStore((s) => s.drawingVerticesCount);
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
-  const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
+  const cancelAlign = useCadToolStore((s) => s.cancelAlign);
   const sweepWidth = useCadToolStore((s) => s.sweepWidth);
   const setSweepWidth = useCadToolStore((s) => s.setSweepWidth);
   const sweepAlignment = useCadToolStore((s) => s.sweepAlignment);
@@ -122,56 +134,27 @@ export const ToolsGroup: React.FC = () => {
           </div>
 
 
-          {/* Rząd 1: Prostokąt, Polilinia, Wstęga */}
+          {/* Rząd 1: Prostokąt, Polilinia, Wstęga — zarejestrowane w DRAWING_TOOLS (współdzielone z CadToolBar) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'rectangle' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Rysuj nowy prostokąt"
-            >
-              <Square size={13} />
-              <span style={{ fontWeight: 600 }}>Prostokąt</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'polyline' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Rysuj nową polilinię"
-            >
-              <TrapezoidIcon size={13} />
-              <span style={{ fontWeight: 600 }}>Polilinia</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'sweep' ? 'none' : 'sweep');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-                setIsEditMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'sweep' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Rysuj wstęgę z odsunięciem (sweep)"
-            >
-              <BrokenLineIcon size={13} />
-              <span style={{ fontWeight: 600 }}>Wstęga</span>
-            </button>
+            {DRAWING_TOOLS.filter((t) => t.mode === 'rectangle' || t.mode === 'polyline' || t.mode === 'sweep').map((tool) => (
+              <button
+                key={tool.mode}
+                type="button"
+                onClick={() => {
+                  setDrawingMode(drawingMode === tool.mode ? 'none' : tool.mode);
+                  setDrawingVerticesCount(0);
+                  setIsDimensionToolActive(false);
+                  setFacadePointMode(false);
+                  setIsEditMode(false);
+                }}
+                className={`btn-tile ${drawingMode === tool.mode ? 'active-indigo' : 'inactive'}`}
+                style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+                title={tool.title}
+              >
+                <tool.Icon size={13} />
+                <span style={{ fontWeight: 600 }}>{tool.label}</span>
+              </button>
+            ))}
           </div>
 
           {/* Pasek opcji Wstęgi (gdy aktywny tryb sweep) */}
@@ -269,51 +252,6 @@ export const ToolsGroup: React.FC = () => {
               </div>
             </div>
           )}
-
-          {/* Rząd 2: Obrót, Suma */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
-            <button
-              type="button"
-              onClick={() => {
-                if (drawingMode === 'rotate') {
-                  setRotateInitialBuildingsSnapshot(null);
-                  setDrawingMode('none');
-                } else {
-                  setRotateInitialBuildingsSnapshot(
-                    buildings.map((b) => ({ ...b, vertices: [...b.vertices], segments: [...b.segments] }))
-                  );
-                  setDrawingMode('rotate');
-                  setDrawingVerticesCount(0);
-                  setIsDimensionToolActive(false);
-                  setFacadePointMode(false);
-                  setIsEditMode(false);
-                }
-              }}
-              className={`btn-tile ${drawingMode === 'rotate' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Obrót obiektów"
-            >
-              <RotateCw size={13} />
-              <span style={{ fontWeight: 600 }}>Obrót</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
-                setDrawingVerticesCount(0);
-                setIsDimensionToolActive(false);
-                setFacadePointMode(false);
-                setIsEditMode(false);
-              }}
-              className={`btn-tile ${drawingMode === 'union' ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
-              title="Suma (Boolean Union)"
-            >
-              <Combine size={13} />
-              <span style={{ fontWeight: 600 }}>Suma</span>
-            </button>
-          </div>
 
           {/* Rząd 3: Wymiar, Punkt fasady */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
@@ -547,6 +485,48 @@ export const ToolsGroup: React.FC = () => {
 
                 <button
                   type="button"
+                  disabled={!selectedBuildingId}
+                  onClick={() => {
+                    if (!selectedBuildingId) return;
+                    if (drawingMode === 'align') {
+                      cancelAlign();
+                      setDrawingMode('none');
+                    } else {
+                      cancelAlign();
+                      setDrawingMode('align');
+                      setDrawingVerticesCount(0);
+                      setIsDimensionToolActive(false);
+                      setFacadePointMode(false);
+                      setIsEditMode(false);
+                    }
+                  }}
+                  className={`btn-tile ${drawingMode === 'align' ? 'active-indigo' : 'inactive'}`}
+                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                  title={ALIGN_TOOL.title}
+                >
+                  <ALIGN_TOOL.Icon size={13} />
+                  <span style={{ fontWeight: 600 }}>{ALIGN_TOOL.label}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
+                    setDrawingVerticesCount(0);
+                    setIsDimensionToolActive(false);
+                    setFacadePointMode(false);
+                    setIsEditMode(false);
+                  }}
+                  className={`btn-tile ${drawingMode === 'union' ? 'active-indigo' : 'inactive'}`}
+                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                  title={UNION_TOOL.title}
+                >
+                  <UNION_TOOL.Icon size={13} />
+                  <span style={{ fontWeight: 600 }}>{UNION_TOOL.label}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => deleteBuilding(selectedBuilding.id)}
                   style={{
                     padding: '8px 10px',
@@ -724,208 +704,45 @@ export const ToolsGroup: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {selectedBuilding ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'story_offset' as const,
-                      enabled: true,
-                      distance: -2.0,
-                      storiesCount: -1,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title={
-                    selectedBuilding.category === 'boundary'
-                      ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji wysokościowych'
-                      : 'Dodaj modyfikator uskoku kondygnacji (penthouse / podcień)'
-                  }
-                >
-                  <SetbackPenthouseIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#c084fc'} />
-                  <span style={{ fontWeight: 600 }}>+ Uskok</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'terrace' as const,
-                      enabled: true,
-                      depth: -4.0,
-                      storiesCount: -1,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title="Dodaj modyfikator tarasu (uskok wybranej krawędzi)"
-                >
-                  <TerraceIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#fed7aa'} />
-                  <span style={{ fontWeight: 600 }}>+ Taras</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'donut' as const,
-                      enabled: true,
-                      offset: -12.0,
-                      storiesCount: 0,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title="Dodaj modyfikator donata (wewnętrzny otwór / patio)"
-                >
-                  <DonutIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#a7f3d0'} />
-                  <span style={{ fontWeight: 600 }}>+ Donat</span>
-                </button>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const newMod = {
-                      id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'zone_offset' as const,
-                      enabled: true,
-                      distance: 4.0,
-                      areaType: 'plot' as const,
-                      name: 'Strefa buforowa',
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
-                  title="Dodaj modyfikator strefy / bufora obszaru o zadanym offsecie"
-                >
-                  <ZoneBufferIcon size={12} color="#38bdf8" />
-                  <span style={{ fontWeight: 600 }}>+ Strefa</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBuilding.category === 'boundary'}
-                  onClick={() => {
-                    if (selectedBuilding.category === 'boundary') return;
-                    const newMod = {
-                      id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                      type: 'bay_window' as const,
-                      enabled: true,
-                      width: 4.0,
-                      projection: 1.5,
-                      storiesCount: 0,
-                    };
-                    addBuildingModifier(selectedBuilding.id, newMod);
-                    setShowModifiersPanel(true);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '7px 4px',
-                    fontSize: '10px',
-                    opacity: selectedBuilding.category === 'boundary' ? 0.4 : 1,
-                    cursor: selectedBuilding.category === 'boundary' ? 'not-allowed' : 'pointer',
-                  }}
-                  title={
-                    selectedBuilding.category === 'boundary'
-                      ? 'Obiekty geodezyjne (granica/obszar) nie posiadają elewacji'
-                      : 'Dodaj modyfikator wykuszu (Bay Window) na wybranej lub najdłuższej krawędzi'
-                  }
-                >
-                  <BayWindowIcon size={12} color={selectedBuilding.category === 'boundary' ? '#94a3b8' : '#fef08a'} />
-                  <span style={{ fontWeight: 600 }}>+ Wykusz</span>
-                </button>
-              </div>
+              {ADD_MODIFIER_ROWS.map((row, rowIdx) => (
+                <div key={rowIdx} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: '4px' }}>
+                  {row.map((type) => {
+                    const descriptor = MODIFIER_DESCRIPTORS[type];
+                    const disabled = type !== 'zone_offset' && selectedBuilding.category === 'boundary';
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          addBuildingModifier(selectedBuilding.id, descriptor.createDefault());
+                          setShowModifiersPanel(true);
+                        }}
+                        className="btn-tile active-indigo"
+                        style={{
+                          justifyContent: 'center',
+                          gap: '4px',
+                          padding: '7px 4px',
+                          fontSize: '10px',
+                          opacity: disabled ? 0.4 : 1,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                        }}
+                        title={disabled ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji ani elewacji' : `Dodaj modyfikator: ${descriptor.title}`}
+                      >
+                        <descriptor.Icon size={12} color={disabled ? 'var(--text-secondary)' : descriptor.accentVar} />
+                        <span style={{ fontWeight: 600 }}>+ {descriptor.title.split(' ')[0]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
 
               {/* Quick list of modifiers */}
               {selectedBuilding.modifiers && selectedBuilding.modifiers.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
                   {selectedBuilding.modifiers.map((m, idx) => {
-                    const isStory = m.type === 'story_offset';
-                    const isZone = m.type === 'zone_offset';
-                    const isBay = m.type === 'bay_window';
-                    const isTerrace = m.type === 'terrace';
-                    const isDonut = m.type === 'donut';
-                    const offMod = m as any;
-                    const accentColor = isStory
-                      ? '#c084fc'
-                      : isZone
-                      ? '#38bdf8'
-                      : isBay
-                      ? '#fef08a'
-                      : isTerrace
-                      ? '#fed7aa'
-                      : '#a7f3d0';
-                    const bgAccent = isStory
-                      ? 'rgba(168, 85, 247, 0.15)'
-                      : isZone
-                      ? 'rgba(56, 189, 248, 0.15)'
-                      : isBay
-                      ? 'rgba(234, 179, 8, 0.15)'
-                      : isTerrace
-                      ? 'rgba(249, 115, 22, 0.15)'
-                      : 'rgba(16, 185, 129, 0.15)';
-                    const borderAccent = isStory
-                      ? 'rgba(168, 85, 247, 0.35)'
-                      : isZone
-                      ? 'rgba(56, 189, 248, 0.35)'
-                      : isBay
-                      ? 'rgba(234, 179, 8, 0.35)'
-                      : isTerrace
-                      ? 'rgba(249, 115, 22, 0.35)'
-                      : 'rgba(16, 185, 129, 0.35)';
-
-                    const typeName = isStory
-                      ? 'Uskok'
-                      : isZone
-                      ? 'Strefa'
-                      : isBay
-                      ? 'Wykusz'
-                      : isTerrace
-                      ? 'Taras'
-                      : 'Donat';
+                    const descriptor = MODIFIER_DESCRIPTORS[m.type];
 
                     return (
                       <div
@@ -936,8 +753,8 @@ export const ToolsGroup: React.FC = () => {
                           justifyContent: 'space-between',
                           padding: '4px 8px',
                           borderRadius: '6px',
-                          backgroundColor: m.enabled ? bgAccent : 'rgba(15, 23, 42, 0.6)',
-                          border: `1px solid ${m.enabled ? borderAccent : 'rgba(255, 255, 255, 0.08)'}`,
+                          backgroundColor: m.enabled ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.6)',
+                          border: `1px solid ${m.enabled ? descriptor.accentVar : 'rgba(255, 255, 255, 0.08)'}`,
                           fontSize: '10.5px',
                         }}
                       >
@@ -946,24 +763,11 @@ export const ToolsGroup: React.FC = () => {
                             type="checkbox"
                             checked={m.enabled}
                             onChange={() => toggleBuildingModifier(selectedBuilding.id, m.id)}
-                            style={{ cursor: 'pointer', accentColor }}
+                            style={{ cursor: 'pointer', accentColor: descriptor.accentVar }}
                           />
-                          <span style={{ color: m.enabled ? '#f3e8ff' : '#94a3b8', fontWeight: 600 }}>
-                            #{idx + 1} {typeName}{' '}
-                            {isStory && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
-                            {isZone && (offMod.distance > 0 ? `+${offMod.distance}m` : `${offMod.distance}m`)}
-                            {isBay && `(${offMod.width}m × ${offMod.projection > 0 ? `+${offMod.projection}m` : `${offMod.projection}m`})`}
-                            {isTerrace && `${offMod.depth}m`}
-                            {isDonut && `${offMod.offset}m`}
-                            {(isStory || isTerrace || isDonut) && (
-                              <span style={{ opacity: 0.8, fontSize: '9.5px', marginLeft: '3px' }}>
-                                ({offMod.storiesCount === 0
-                                  ? 'całość'
-                                  : offMod.storiesCount < 0
-                                  ? `${offMod.storiesCount} góra`
-                                  : `+${offMod.storiesCount} dół`})
-                              </span>
-                            )}
+                          <span style={{ color: m.enabled ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: 600 }}>
+                            #{idx + 1} {descriptor.title}{' '}
+                            <span style={{ opacity: 0.85 }}>{descriptor.formatSummary(m)}</span>
                           </span>
                         </div>
                         <button
@@ -972,7 +776,7 @@ export const ToolsGroup: React.FC = () => {
                           style={{
                             background: 'transparent',
                             border: 'none',
-                            color: '#fb7185',
+                            color: 'var(--accent-rose)',
                             cursor: 'pointer',
                             padding: '2px',
                           }}
@@ -985,7 +789,7 @@ export const ToolsGroup: React.FC = () => {
                   })}
                 </div>
               ) : (
-                <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '4px 0' }}>
+                <div style={{ fontSize: '10.5px', color: 'var(--text-secondary)', textAlign: 'center', padding: '4px 0' }}>
                   Brak modyfikatorów na obiekcie.
                 </div>
               )}
@@ -993,6 +797,46 @@ export const ToolsGroup: React.FC = () => {
           ) : (
             <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '6px 0' }}>
               Zaznacz budynek na scenie, aby zarządzać modyfikatorami.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3.3 Kafel Modyfikatory obszarów */}
+      <div className="ui-card">
+        <div className="ui-title">
+          <span>Modyfikatory obszarów</span>
+          <Layers size={14} color="#a855f7" />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {selectedBuilding ? (
+            AREA_MODIFIER_ROWS.map((row, rowIdx) => (
+              <div key={rowIdx} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: '4px' }}>
+                {row.map((type) => {
+                  const descriptor = MODIFIER_DESCRIPTORS[type];
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => {
+                        addBuildingModifier(selectedBuilding.id, descriptor.createDefault());
+                        setShowModifiersPanel(true);
+                      }}
+                      className="btn-tile active-indigo"
+                      style={{ justifyContent: 'center', gap: '4px', padding: '7px 4px', fontSize: '10px' }}
+                      title={`Dodaj modyfikator: ${descriptor.title}`}
+                    >
+                      <descriptor.Icon size={12} color={descriptor.accentVar} />
+                      <span style={{ fontWeight: 600 }}>+ {descriptor.title.split(' ')[0]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', padding: '6px 0' }}>
+              Zaznacz budynek lub obszar, aby zarządzać modyfikatorami obszaru.
             </div>
           )}
         </div>

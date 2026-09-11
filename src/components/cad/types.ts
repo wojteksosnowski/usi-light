@@ -10,6 +10,8 @@ import {
 import { DominantDirection } from '../../utils/segmentStatistics';
 
 
+export type CadDrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+
 export interface ViewportState {
   panX: number;
   panY: number;
@@ -36,6 +38,8 @@ export interface CadCanvasProps {
   selectedBuildingId: string | null;
   selectedBuildingIds?: string[];
   onSelectBuilding: (id: string | null, isMultiSelect?: boolean) => void;
+  /** Wywoływane przy "czystym" kliknięciu (bez przeciągnięcia) w etykietę budynku - przełącza minipanel rozwiniętej etykiety. `null` zamyka minipanel. */
+  onLabelClick?: (id: string | null) => void;
   onBuildingMove: (id: string, dx: number, dy: number) => void;
   onBuildingsMove?: (ids: string[], dx: number, dy: number) => void;
   analysisResults: AnalysisPointResult[];
@@ -55,11 +59,12 @@ export interface CadCanvasProps {
   latitude?: number;
   longitude?: number;
   equinoxDate?: 'spring' | 'autumn';
-  fitTrigger?: number;
+  fitRequest?: { nonce: number; ignoreSelection: boolean };
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;
   linkingSourceId?: string | null;
-  drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
+  drawingMode?: CadDrawingMode;
+  onDrawingModeChange?: (mode: CadDrawingMode) => void;
   onFinishDrawing?: (vertices: Point2D[], shapeType: 'rectangle' | 'polyline' | 'sweep') => void;
   onCancelDrawing?: () => void;
   sweepWidth?: number;
@@ -86,6 +91,8 @@ export interface CadCanvasProps {
   dimensionType?: DimensionType;
   dimensionPendingRef?: DimensionReference | null;
   onDimensionClickEdge?: (buildingId: string, segmentId: string) => void;
+  alignPendingRef?: DimensionReference | null;
+  onAlignClickEdge?: (selectedBuildingId: string, buildingId: string, segmentId: string) => void;
   onDeleteDimension?: (id: string) => void;
   layerSettings?: Record<string, CadLayerSettings>;
   viewRotationMode?: boolean;

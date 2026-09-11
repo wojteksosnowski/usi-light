@@ -70,7 +70,7 @@ describe('Vercel Serverless Function /api/share', () => {
   });
 
   describe('POST /api/share', () => {
-    it('powinien zwrócić 400 gdy body nie zawiera compressedData', async () => {
+    it('powinien zwrócić 400 gdy body nie zawiera version/iv/ciphertext', async () => {
       const req: any = { method: 'POST', headers: {}, body: {} };
       const res = createMockRes();
 
@@ -79,9 +79,9 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.data.error).toMatch(/Nieprawidłowy format/);
     });
 
-    it('powinien zwrócić 413 gdy compressedData przekracza 256 KB', async () => {
+    it('powinien zwrócić 413 gdy iv+ciphertext przekracza 256 KB', async () => {
       const hugeString = 'a'.repeat(257 * 1024);
-      const req: any = { method: 'POST', headers: {}, body: { compressedData: hugeString } };
+      const req: any = { method: 'POST', headers: {}, body: { version: 1, iv: 'abc', ciphertext: hugeString } };
       const res = createMockRes();
 
       await handler(req, res);
@@ -94,7 +94,7 @@ describe('Vercel Serverless Function /api/share', () => {
       const req: any = {
         method: 'POST',
         headers: { 'x-forwarded-for': '192.168.1.1' },
-        body: { compressedData: 'valid-compressed-data' },
+        body: { version: 1, iv: 'abc', ciphertext: 'valid-ciphertext-data' },
       };
       const res = createMockRes();
 
@@ -103,12 +103,12 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.data.error).toMatch(/Zbyt wiele zapytań/);
     });
 
-    it('powinien zapisać projekt do Redis z TTL 14 dni i zwrócić shareId', async () => {
+    it('powinien zapisać zaszyfrowany projekt do Redis z TTL 7 dni (free) i zwrócić shareId', async () => {
       mockRedisSet.mockResolvedValueOnce('OK');
       const req: any = {
         method: 'POST',
         headers: {},
-        body: { compressedData: 'H4sICCAAAAAAA...' },
+        body: { version: 1, iv: 'ivBase64Url', ciphertext: 'H4sICCAAAAAAA...' },
       };
       const res = createMockRes();
 
@@ -116,11 +116,15 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.statusCode).toBe(200);
       expect(res.data.shareId).toBeDefined();
       expect(res.data.url).toMatch(/^\/p\//);
+      expect(res.data.ttlDays).toBe(7);
       expect(mockRedisSet).toHaveBeenCalledWith(
         expect.stringMatching(/^project:/),
-        'H4sICCAAAAAAA...',
-        { ex: 1209600 }
+        expect.stringContaining('"ciphertext":"H4sICCAAAAAAA..."'),
+        { ex: 604800 }
       );
+      // Serwer nigdy nie widzi/przechowuje klucza deszyfrującego — tylko IV + szyfrogram.
+      const storedRecord = JSON.parse(mockRedisSet.mock.calls[0][1]);
+      expect(storedRecord).toEqual({ version: 1, iv: 'ivBase64Url', ciphertext: 'H4sICCAAAAAAA...', createdAt: expect.any(Number) });
     });
   });
 
@@ -143,15 +147,27 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.data.error).toMatch(/wygasł lub nie istnieje/);
     });
 
-    it('powinien zwrócić 200 ze skompresowanymi danymi gdy projekt istnieje', async () => {
-      mockRedisGet.mockResolvedValueOnce('compressed-payload-string');
+    it('powinien zwrócić { version, iv, ciphertext } dla nowego (zaszyfrowanego) rekordu', async () => {
+      mockRedisGet.mockResolvedValueOnce(
+        JSON.stringify({ version: 1, iv: 'ivBase64Url', ciphertext: 'cipherBase64Url', createdAt: 123 })
+      );
       const req: any = { method: 'GET', headers: {}, query: { id: 'test123456' } };
       const res = createMockRes();
 
       await handler(req, res);
       expect(res.statusCode).toBe(200);
-      expect(res.data.compressedData).toBe('compressed-payload-string');
+      expect(res.data).toEqual({ version: 1, iv: 'ivBase64Url', ciphertext: 'cipherBase64Url' });
       expect(mockRedisGet).toHaveBeenCalledWith('project:test123456');
+    });
+
+    it('powinien zwrócić { compressedData } dla starszego (niezaszyfrowanego) rekordu (format legacy)', async () => {
+      mockRedisGet.mockResolvedValueOnce('compressed-payload-string');
+      const req: any = { method: 'GET', headers: {}, query: { id: 'oldid123' } };
+      const res = createMockRes();
+
+      await handler(req, res);
+      expect(res.statusCode).toBe(200);
+      expect(res.data.compressedData).toBe('compressed-payload-string');
     });
   });
 });

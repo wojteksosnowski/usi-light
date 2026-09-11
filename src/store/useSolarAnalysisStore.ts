@@ -33,6 +33,7 @@ interface SolarAnalysisState {
   showShadowFill: boolean;
   showSatelliteLayer: boolean;
   satelliteOpacity: number;
+  satelliteProvider: 'google' | 'here';
   showProjectParameters: boolean;
 
   // Analysis calculations & modes
@@ -62,6 +63,7 @@ interface SolarAnalysisState {
   setShowShadowFill: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowSatelliteLayer: (show: boolean | ((prev: boolean) => boolean)) => void;
   setSatelliteOpacity: (opacity: number) => void;
+  setSatelliteProvider: (provider: 'google' | 'here') => void;
   setShowProjectParameters: (show: boolean | ((prev: boolean) => boolean)) => void;
 
   setSunlightMethod: (method: 'raycasting' | 'segments') => void;
@@ -77,6 +79,7 @@ interface SolarAnalysisState {
   addPinnedPoint: (pt: { buildingId: string; segmentId: string; offsetRatio: number }) => void;
   deletePinnedPoint: (id: string) => void;
   updatePinnedPoint: (id: string, buildingId: string, segmentId: string, offsetRatio: number) => void;
+  updatePinnedPointStorey: (id: string, storeyIndex: number | undefined) => void;
   clearPinnedPoints: () => void;
 }
 
@@ -100,6 +103,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   showShadowFill: false,
   showSatelliteLayer: true,
   satelliteOpacity: 0.65,
+  satelliteProvider: 'google',
   showProjectParameters: false,
 
   // Linijka Słońca jest domyślną metodą obliczeń w '56'
@@ -173,6 +177,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
     })),
 
   setSatelliteOpacity: (opacity) => set({ satelliteOpacity: opacity }),
+  setSatelliteProvider: (provider) => set({ satelliteProvider: provider }),
 
   setShowProjectParameters: (updater) =>
     set((state) => ({
@@ -217,6 +222,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
       set((state) => ({
         pinnedPoints: [...state.pinnedPoints, newPt],
         activePinnedPointId: newPt.id,
+        showAnalysisPoints: true,
       }));
     }
   },
@@ -236,6 +242,14 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
     set((state) => ({
       pinnedPoints: state.pinnedPoints.map((p) =>
         p.id === id ? { ...p, buildingId, segmentId, offsetRatio } : p
+      ),
+    }));
+  },
+
+  updatePinnedPointStorey: (id, storeyIndex) => {
+    set((state) => ({
+      pinnedPoints: state.pinnedPoints.map((p) =>
+        p.id === id ? { ...p, storeyIndex } : p
       ),
     }));
   },

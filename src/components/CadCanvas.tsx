@@ -7,9 +7,12 @@ import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { useCanvasInteraction, isBuildingLocked, getBuildingTopElevation } from './cad/hooks/useCanvasInteraction';
 import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
+import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
+import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { APP_CONFIG } from '../config/appConfig';
+import { useWfsStore } from '../modules/wfs-import/store/useWfsStore';
 
 export { isBuildingLocked, getBuildingTopElevation };
 
@@ -34,7 +37,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     latitude = 52.23,
     longitude = 21.01,
     equinoxDate = 'spring',
-    fitTrigger,
+    fitRequest,
     onCancelDrawing,
     onFinishDrawing,
     drawingMode = 'none',
@@ -49,6 +52,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     isDimensionMode = false,
     dimensionType = 'linear',
     dimensionPendingRef = null,
+    alignPendingRef = null,
     layerSettings = {},
     viewRotationMode = false,
     viewRotationDeg = 0,
@@ -63,6 +67,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [expandedLabelBuildingId, setExpandedLabelBuildingId] = useState<string | null>(null);
+  const handleLabelClick = (id: string | null) => {
+    setExpandedLabelBuildingId((prev) => (id && prev === id ? null : id));
+  };
 
   // Menedżer kafelków satelitarnych Google Maps
   const [tileRenderTick, setTileRenderTick] = useState<number>(0);
@@ -79,6 +88,67 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     }
   }, [googleMapsApiKey]);
 
+  // Geo module: re-render canvas when WMS tiles load or layers change
+  useEffect(() => {
+    const handler = () => setTileRenderTick((t) => t + 1);
+    window.addEventListener('geo-render-needed', handler);
+    return () => window.removeEventListener('geo-render-needed', handler);
+  }, []);
+
+  // Prefetch mapy satelitarnej po synchronizacji danych geo
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ lat: number; lon: number; radius: number }>).detail;
+      if (tileManagerRef.current && detail) {
+        tileManagerRef.current.prefetchTilesInRadius(detail.lat, detail.lon, detail.radius);
+      }
+    };
+    window.addEventListener('geo-prefetch-satellite', handler);
+    return () => window.removeEventListener('geo-prefetch-satellite', handler);
+  }, []);
+
+  // Project circle pulse animation (shows when Centruj is pressed)
+  const [projectCirclePulse, setProjectCirclePulse] = useState<{ radius: number; opacity: number } | null>(null);
+  const circleAnimRef = useRef<number | null>(null);
+  const projectRadius = useWfsStore((s) => s.projectRadius);
+
+  useEffect(() => {
+    if (fitRequest === undefined || fitRequest.nonce === 0) return;
+
+    // Cancel any running animation
+    if (circleAnimRef.current !== null) {
+      cancelAnimationFrame(circleAnimRef.current);
+      circleAnimRef.current = null;
+    }
+
+    const DURATION_MS = 2500;
+    const startTime = performance.now();
+    const radius = projectRadius;
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / DURATION_MS, 1);
+      const opacity = 1 - t;
+      if (opacity > 0.01) {
+        setProjectCirclePulse({ radius, opacity });
+        circleAnimRef.current = requestAnimationFrame(animate);
+      } else {
+        setProjectCirclePulse(null);
+        circleAnimRef.current = null;
+      }
+    };
+
+    setProjectCirclePulse({ radius, opacity: 1 });
+    circleAnimRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (circleAnimRef.current !== null) {
+        cancelAnimationFrame(circleAnimRef.current);
+        circleAnimRef.current = null;
+      }
+    };
+  }, [fitRequest, projectRadius]);
+
   // Detekcja układu współrzędnych sceny CAD
   const crsInfo = useMemo<CrsDetectionResult>(() => {
     const allPts: Point2D[] = [];
@@ -87,17 +157,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         for (const v of b.vertices) allPts.push(v);
       }
     }
-    return detectCoordinateSystem(allPts);
-  }, [buildings]);
+    return detectCoordinateSystem(allPts, { lat: latitude, lon: longitude });
+  }, [buildings, latitude, longitude]);
 
   // Viewport hook
   const { viewState, setViewState, worldToScreen, screenToWorld } = useCadViewport(
     containerRef,
     buildings,
     viewRotationDeg,
-    fitTrigger,
+    fitRequest,
     selectedBuildingId,
-    layerSettings
+    layerSettings,
+    projectRadius
   );
 
   // Canvas interaction hook
@@ -109,6 +180,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     setViewState,
     worldToScreen,
     screenToWorld,
+    onLabelClick: handleLabelClick,
   });
 
   // Hotkeys hook
@@ -324,6 +396,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       crsInfo,
       draggedVertexIndex: interaction.draggedVertexIndex,
       dragVertexPreviewPt: interaction.dragVertexPreviewPt,
+      projectCirclePulse,
+      projectRadius,
     });
   }, [
     buildings,
@@ -376,6 +450,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     crsInfo,
     interaction.draggedVertexIndex,
     interaction.dragVertexPreviewPt,
+    projectCirclePulse,
+    projectRadius,
   ]);
 
   // 2. Overlay Render Loop
@@ -413,13 +489,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       buildings,
       selectedBuildingId,
       effectivePivot: interaction.effectivePivot,
-      isPivotHovered: interaction.isPivotHovered,
-      isDraggingPivot: interaction.isDraggingPivot,
+      isRotateHandleHovered: interaction.isRotateHandleHovered,
       isRotating: interaction.isRotating,
-      rotStartAngleScreen: interaction.rotStartAngleScreen,
       rotAngleDeg: interaction.rotAngleDeg,
-      hoveredRotateVertexIndex: interaction.hoveredRotateVertexIndex,
       activeRotateAngleSnap: interaction.activeRotateAngleSnap,
+      alignPendingRef,
+      alignHoveredEdge: interaction.alignHoveredEdge,
       drawingMode,
       drawingVertices: interaction.drawingVertices,
       currentMouseWorld: interaction.currentMouseWorld,
@@ -447,13 +522,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     buildings,
     selectedBuildingId,
     interaction.effectivePivot,
-    interaction.isPivotHovered,
-    interaction.isDraggingPivot,
+    interaction.isRotateHandleHovered,
     interaction.isRotating,
-    interaction.rotStartAngleScreen,
     interaction.rotAngleDeg,
-    interaction.hoveredRotateVertexIndex,
     interaction.activeRotateAngleSnap,
+    alignPendingRef,
+    interaction.alignHoveredEdge,
     drawingMode,
     interaction.drawingVertices,
     interaction.currentMouseWorld,
@@ -469,6 +543,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     sweepAlignment,
     interaction.effectiveIsInteracting,
   ]);
+
+  const expandedLabelBuilding = expandedLabelBuildingId
+    ? buildings.find((b) => b.id === expandedLabelBuildingId) || null
+    : null;
+  const expandedLabelAnchor = expandedLabelBuilding
+    ? getBuildingLabelScreenAnchor(expandedLabelBuilding, worldToScreen)
+    : null;
 
   return (
     <div
@@ -487,6 +568,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         ref={canvasRef}
         onWheel={interaction.handleWheel}
         onMouseDown={interaction.handleMouseDown}
+        onDoubleClick={interaction.handleDoubleClick}
         onMouseMove={interaction.handleMouseMove}
         onMouseUp={interaction.handleMouseUp}
         onMouseLeave={interaction.handleMouseUp}
@@ -513,6 +595,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           pointerEvents: 'none',
         }}
       />
+      {expandedLabelBuilding && expandedLabelAnchor && (
+        <BuildingLabelMiniPanel
+          building={expandedLabelBuilding}
+          anchor={{ sx: expandedLabelAnchor.sx, sy: expandedLabelAnchor.bottomSy }}
+          onClose={() => setExpandedLabelBuildingId(null)}
+        />
+      )}
     </div>
   );
 };

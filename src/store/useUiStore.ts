@@ -5,6 +5,10 @@ interface UiState {
   openSidebarGroup: 'project' | 'layers' | 'tools' | null;
   copiedToast: string | null;
   isShareModalOpen: boolean;
+  isPricingModalOpen: boolean;
+  isLicenseModalOpen: boolean;
+  isPaymentSuccessModalOpen: boolean;
+  paymentSuccessSessionId: string | null;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -12,6 +16,10 @@ interface UiState {
   toggleSidebarGroup: (group: 'project' | 'layers' | 'tools') => void;
   showCopiedToast: (msg: string) => void;
   setShareModalOpen: (open: boolean) => void;
+  setPricingModalOpen: (open: boolean) => void;
+  setLicenseModalOpen: (open: boolean) => void;
+  setPaymentSuccessModalOpen: (open: boolean) => void;
+  setPaymentSuccessSessionId: (sessionId: string | null) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -19,6 +27,10 @@ export const useUiStore = create<UiState>((set) => ({
   openSidebarGroup: 'project',
   copiedToast: null,
   isShareModalOpen: false,
+  isPricingModalOpen: false,
+  isLicenseModalOpen: false,
+  isPaymentSuccessModalOpen: false,
+  paymentSuccessSessionId: null,
 
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
@@ -37,4 +49,8 @@ export const useUiStore = create<UiState>((set) => ({
   },
 
   setShareModalOpen: (open) => set({ isShareModalOpen: open }),
+  setPricingModalOpen: (open) => set({ isPricingModalOpen: open }),
+  setLicenseModalOpen: (open) => set({ isLicenseModalOpen: open }),
+  setPaymentSuccessModalOpen: (open) => set({ isPaymentSuccessModalOpen: open }),
+  setPaymentSuccessSessionId: (sessionId) => set({ paymentSuccessSessionId: sessionId }),
 }));

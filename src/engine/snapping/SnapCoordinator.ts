@@ -5,6 +5,8 @@ import { MidpointSnapStrategy } from './strategies/MidpointSnapStrategy';
 import { EdgeSnapStrategy } from './strategies/EdgeSnapStrategy';
 import { DirectionSnapStrategy } from './strategies/DirectionSnapStrategy';
 import { GridSnapStrategy } from './strategies/GridSnapStrategy';
+import { SpatialLineIndex } from './SpatialLineIndex';
+import { PerfMonitor } from '../perf/PerfMonitor';
 
 /**
  * SnapCoordinator - Centralny punkt wejścia podsystemu Snappingu.
@@ -12,6 +14,7 @@ import { GridSnapStrategy } from './strategies/GridSnapStrategy';
  */
 export class SnapCoordinator {
   private strategies: SnapStrategy[] = [];
+  private spatialIndex = new SpatialLineIndex();
 
   constructor(customStrategies?: SnapStrategy[]) {
     if (customStrategies !== undefined) {
@@ -54,13 +57,21 @@ export class SnapCoordinator {
    * Główna metoda ewaluacji punktu w zadanym kontekście snappingu.
    */
   public evaluate(point: Point2D, context: SnapContext): SnapResult {
+    const evalStart = performance.now();
+    this.spatialIndex.rebuildIfStale(context.lineBuffer);
+    const contextWithIndex: SnapContext = { ...context, spatialIndex: this.spatialIndex };
+
     for (const strategy of this.strategies) {
-      const result = strategy.findSnap(point, context);
+      const result = PerfMonitor.time(`snap.strategy.${strategy.name}`, () =>
+        strategy.findSnap(point, contextWithIndex)
+      );
       if (result && result.snapped) {
+        PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
         return result;
       }
     }
 
+    PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
     return {
       point: { ...point },
       snapped: false,

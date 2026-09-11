@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
-import { BuildingLoop, CadLayerSettings, Point2D, Modifier } from '../types/geometry';
-import { createSampleBuildings, createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
+import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference } from '../types/geometry';
+import { createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
-import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon } from '@/utils/math2d';
+import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 
 export interface SavedSceneData {
@@ -68,6 +68,7 @@ interface SceneState {
   moveBuildings: (ids: string[], dx: number, dy: number) => void;
   moveBuildingEdge: (buildingId: string, edgeIndex: number, dx: number, dy: number) => void;
   rotateBuilding: (id: string, pivot: Point2D, deltaAngleRad: number) => void;
+  alignBuildingEdgeToEdge: (targetRef: DimensionReference, referenceRef: DimensionReference) => void;
   booleanUnion: (bldgIdA: string, bldgIdB: string) => { success: boolean; error?: string };
 
   // Modifiers
@@ -113,12 +114,19 @@ let interactionBatchSnapshot: {
   layerSettings: Record<string, CadLayerSettings>;
 } | null = null;
 
+/** Derives storeysCount from a total height, given per-floor heights. */
+function deriveStoreysCount(height: number, firstFloorHeight: number, typicalFloorHeight: number): number {
+  return height > firstFloorHeight
+    ? 1 + Math.max(1, Math.round((height - firstFloorHeight) / typicalFloorHeight))
+    : 1;
+}
+
 export const useSceneStore = create<SceneState>()(
   temporal(
     (set, get) => ({
-  buildings: createSampleBuildings(),
-  selectedBuildingId: 'bldg-1',
-  selectedBuildingIds: ['bldg-1'],
+  buildings: [],
+  selectedBuildingId: null,
+  selectedBuildingIds: [],
   layerSettings: {},
   selectedLayerName: null,
   isLinkingMode: false,
@@ -309,8 +317,7 @@ export const useSceneStore = create<SceneState>()(
         const ht = updated.typicalFloorHeight ?? 3.0;
 
         if (fields.defaultHeight !== undefined && fields.storeysCount === undefined) {
-          const H = fields.defaultHeight;
-          updated.storeysCount = H > h1 ? 1 + Math.max(1, Math.round((H - h1) / ht)) : 1;
+          updated.storeysCount = deriveStoreysCount(fields.defaultHeight, h1, ht);
         } else if (fields.storeysCount !== undefined && fields.defaultHeight === undefined) {
           const n = Math.max(1, fields.storeysCount);
           updated.storeysCount = n;
@@ -356,9 +363,11 @@ export const useSceneStore = create<SceneState>()(
       buildings: state.buildings.map((bldg) => {
         if (!targetIds.includes(bldg.id)) return bldg;
         const nextHeight = Math.max(0.5, Number((bldg.defaultHeight + deltaMeters).toFixed(2)));
+        const storeysCount = deriveStoreysCount(nextHeight, bldg.firstFloorHeight ?? 3.0, bldg.typicalFloorHeight ?? 3.0);
         const updated = {
           ...bldg,
           defaultHeight: nextHeight,
+          storeysCount,
           segments: bldg.segments.map((seg) => ({
             ...seg,
             hTop: nextHeight,
@@ -573,9 +582,11 @@ export const useSceneStore = create<SceneState>()(
   },
 
   rotateBuilding: (id, pivot, deltaAngleRad) => {
-    const cosA = Math.cos(deltaAngleRad);
-    const sinA = Math.sin(deltaAngleRad);
     const deltaDeg = (deltaAngleRad * 180) / Math.PI;
+    const rotate = (v: Point2D) => {
+      const r = rotatePointAroundPivot(v, pivot, deltaAngleRad);
+      return { x: pivot.x + r.x, y: pivot.y + r.y };
+    };
 
     set((state) => {
       const targetBldg = state.buildings.find((b) => b.id === id);
@@ -586,25 +597,9 @@ export const useSceneStore = create<SceneState>()(
           const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
           if (!shouldRotate) return bldg;
 
-          const newVertices = bldg.vertices.map((v) => {
-            const rx = v.x - pivot.x;
-            const ry = v.y - pivot.y;
-            return {
-              x: pivot.x + rx * cosA - ry * sinA,
-              y: pivot.y + rx * sinA + ry * cosA,
-            };
-          });
+          const newVertices = bldg.vertices.map(rotate);
 
-          const newSweepPath = bldg.sweepPath
-            ? bldg.sweepPath.map((v) => {
-                const rx = v.x - pivot.x;
-                const ry = v.y - pivot.y;
-                return {
-                  x: pivot.x + rx * cosA - ry * sinA,
-                  y: pivot.y + rx * sinA + ry * cosA,
-                };
-              })
-            : undefined;
+          const newSweepPath = bldg.sweepPath ? bldg.sweepPath.map(rotate) : undefined;
 
           const updatedTransform = {
             ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
@@ -624,6 +619,30 @@ export const useSceneStore = create<SceneState>()(
         }),
       };
     });
+  },
+
+  alignBuildingEdgeToEdge: (targetRef, referenceRef) => {
+    const { buildings } = get();
+    const targetBldg = buildings.find((b) => b.id === targetRef.buildingId);
+    const referenceBldg = buildings.find((b) => b.id === referenceRef.buildingId);
+    if (!targetBldg || !referenceBldg) return;
+
+    const targetSeg = targetBldg.segments.find((s) => s.id === targetRef.segmentId);
+    const referenceSeg = referenceBldg.segments.find((s) => s.id === referenceRef.segmentId);
+    if (!targetSeg || !referenceSeg) return;
+
+    // Edges are undirected lines: normalize both angles into [0, PI) before
+    // taking the difference, so we always rotate by the shortest amount that
+    // makes them parallel (never an unnecessary 180° flip).
+    const normalizeLineAngle = (angleRad: number) => ((angleRad % Math.PI) + Math.PI) % Math.PI;
+    let deltaRad = normalizeLineAngle(referenceSeg.angleRad) - normalizeLineAngle(targetSeg.angleRad);
+    if (deltaRad > Math.PI / 2) deltaRad -= Math.PI;
+    if (deltaRad < -Math.PI / 2) deltaRad += Math.PI;
+
+    if (Math.abs(deltaRad) < 1e-6) return;
+
+    const pivot = getPolygonCentroid(targetBldg.vertices);
+    get().rotateBuilding(targetBldg.id, pivot, deltaRad);
   },
 
   booleanUnion: (bldgIdA, bldgIdB) => {
@@ -903,7 +922,7 @@ export const useSceneStore = create<SceneState>()(
 
   loadSceneData: (scene) => {
     set({
-      buildings: scene.buildings ?? createSampleBuildings(),
+      buildings: scene.buildings ?? [],
       selectedBuildingId: scene.selectedBuildingId ?? null,
       selectedBuildingIds: scene.selectedBuildingId ? [scene.selectedBuildingId] : [],
       layerSettings: scene.layerSettings ?? {},
@@ -918,9 +937,9 @@ export const useSceneStore = create<SceneState>()(
   resetScene: () => {
     interactionBatchSnapshot = null;
     set({
-      buildings: createSampleBuildings(),
-      selectedBuildingId: 'bldg-1',
-      selectedBuildingIds: ['bldg-1'],
+      buildings: [],
+      selectedBuildingId: null,
+      selectedBuildingIds: [],
       layerSettings: {},
       selectedLayerName: null,
       isLinkingMode: false,

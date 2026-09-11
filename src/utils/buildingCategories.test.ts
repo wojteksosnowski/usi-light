@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BuildingLoop } from '../types/geometry';
 import { analyzeSegmentsStatistics } from './segmentStatistics';
-import { computeDistancesToBoundaries, computeCombinedShadowEnvelope } from '@/utils/math2d';
+import { computeCombinedShadowEnvelope } from '@/utils/math2d';
 import { analyzeShadowingAtPoint, prefilterObstacleSegments } from '../engine/analysisEngine';
 import { createBuildingFromVertices } from './dxfParser';
 
@@ -110,16 +110,6 @@ describe('Object Categories: boundary, building, balcony', () => {
     expect(envBuilding.length).toBeGreaterThan(0);
   });
 
-  it('computes exact distance from building to boundary parcels', () => {
-    // Building edges: x in [10, 25], y in [10, 20]
-    // Boundary edges: x in [0, 40], y in [0, 30]
-    // Min distance from building to boundary:
-    // South edge y=10 to boundary south edge y=0 is distance 10.0 m
-    const distances = computeDistancesToBoundaries(buildingA, [boundaryPoly]);
-    expect(distances.length).toBe(1);
-    expect(distances[0].boundaryId).toBe('bnd-1');
-    expect(distances[0].minDistance).toBeCloseTo(10.0, 1);
-  });
 
   it('ignores balcony in shadowing (§ 12) analysis', () => {
     const point = { x: 14, y: 10 };

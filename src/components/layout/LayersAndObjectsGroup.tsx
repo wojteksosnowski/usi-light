@@ -20,7 +20,6 @@ import { useSceneStore, useSolarAnalysisStore, useCadToolStore } from '../../sto
 import {
   computePolygonArea,
   computeBuildingsUnionArea,
-  computeDistancesToBoundaries,
 } from '@/utils/math2d';
 import { rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors, toRomanNumeral } from '../../utils/buildingFloorCalculator';
@@ -43,7 +42,7 @@ const CircleSelectionIcon: React.FC<{
       />
     );
   }
-  return <Circle size={size} color="#64748b" />;
+  return <Circle size={size} color="var(--text-muted)" />;
 };
 
 export const LayersAndObjectsGroup: React.FC = () => {
@@ -212,11 +211,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
   }, [buildings]);
 
   // Działki z włączonym "Obiekt badany (isTested)" dla kalkulacji wskaźników
-  // Distances from selected building to all boundaries
-  const distancesToBoundaries = useMemo(() => {
-    if (!selectedBuilding || selectedBuilding.category === 'boundary' || boundaryObjects.length === 0) return [];
-    return computeDistancesToBoundaries(selectedBuilding, boundaryObjects);
-  }, [selectedBuilding, boundaryObjects]);
 
   // Obrót obiektu wokół centroidu
   const handleBuildingRotate = (id: string, pivot: { x: number; y: number }, deltaAngleRad: number) => {
@@ -357,7 +351,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                         borderRadius: '5px',
                         border: 'none',
                         backgroundColor: isLocked ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                        color: isLocked ? '#fbbf24' : '#64748b',
+                        color: isLocked ? 'var(--accent-lock)' : 'var(--text-muted)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -376,7 +370,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                         borderRadius: '5px',
                         border: 'none',
                         backgroundColor: isGhosted ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
-                        color: isGhosted ? '#c084fc' : '#64748b',
+                        color: isGhosted ? 'var(--accent-purple)' : 'var(--text-muted)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -595,7 +589,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: objectTree.buildingList.every((b) => b.isLocked) ? '#fbbf24' : '#64748b',
+                      color: objectTree.buildingList.every((b) => b.isLocked) ? 'var(--accent-lock)' : 'var(--text-muted)',
                       cursor: 'pointer',
                       padding: '2px 4px',
                     }}
@@ -612,7 +606,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: objectTree.buildingList.every((b) => b.isGhosted) ? '#c084fc' : '#64748b',
+                      color: objectTree.buildingList.every((b) => b.isGhosted) ? 'var(--accent-purple)' : 'var(--text-muted)',
                       cursor: 'pointer',
                       padding: '2px 4px',
                     }}
@@ -675,7 +669,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                               style={{
                                 background: 'transparent',
                                 border: 'none',
-                                color: allSubLocked ? '#fbbf24' : '#64748b',
+                                color: allSubLocked ? 'var(--accent-lock)' : 'var(--text-muted)',
                                 cursor: 'pointer',
                                 padding: '2px',
                               }}
@@ -689,7 +683,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                               style={{
                                 background: 'transparent',
                                 border: 'none',
-                                color: allSubGhosted ? '#c084fc' : '#64748b',
+                                color: allSubGhosted ? 'var(--accent-purple)' : 'var(--text-muted)',
                                 cursor: 'pointer',
                                 padding: '2px',
                               }}
@@ -762,7 +756,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                       style={{
                                         background: 'transparent',
                                         border: 'none',
-                                        color: isLocked ? '#fbbf24' : '#64748b',
+                                        color: isLocked ? 'var(--accent-lock)' : 'var(--text-muted)',
                                         cursor: 'pointer',
                                         padding: '2px',
                                       }}
@@ -776,7 +770,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                       style={{
                                         background: 'transparent',
                                         border: 'none',
-                                        color: isGhosted ? '#c084fc' : '#64748b',
+                                        color: isGhosted ? 'var(--accent-purple)' : 'var(--text-muted)',
                                         cursor: 'pointer',
                                         padding: '2px',
                                       }}
@@ -850,7 +844,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: objectTree.areaList.every((b) => b.isLocked) ? '#fbbf24' : '#64748b',
+                      color: objectTree.areaList.every((b) => b.isLocked) ? 'var(--accent-lock)' : 'var(--text-muted)',
                       cursor: 'pointer',
                       padding: '2px 4px',
                     }}
@@ -867,7 +861,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: objectTree.areaList.every((b) => b.isGhosted) ? '#c084fc' : '#64748b',
+                      color: objectTree.areaList.every((b) => b.isGhosted) ? 'var(--accent-purple)' : 'var(--text-muted)',
                       cursor: 'pointer',
                       padding: '2px 4px',
                     }}
@@ -966,14 +960,14 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                   <button
                                     type="button"
                                     onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
-                                    style={{ background: 'transparent', border: 'none', color: isLocked ? '#fbbf24' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                    style={{ background: 'transparent', border: 'none', color: isLocked ? 'var(--accent-lock)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
                                   >
                                     {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
-                                    style={{ background: 'transparent', border: 'none', color: isGhosted ? '#c084fc' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                    style={{ background: 'transparent', border: 'none', color: isGhosted ? 'var(--accent-purple)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
                                   >
                                     <Ghost size={12} />
                                   </button>
@@ -1073,14 +1067,14 @@ export const LayersAndObjectsGroup: React.FC = () => {
                                   <button
                                     type="button"
                                     onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
-                                    style={{ background: 'transparent', border: 'none', color: isLocked ? '#fbbf24' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                    style={{ background: 'transparent', border: 'none', color: isLocked ? 'var(--accent-lock)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
                                   >
                                     {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
-                                    style={{ background: 'transparent', border: 'none', color: isGhosted ? '#c084fc' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                                    style={{ background: 'transparent', border: 'none', color: isGhosted ? 'var(--accent-purple)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
                                   >
                                     <Ghost size={12} />
                                   </button>
@@ -1150,7 +1144,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: objectTree.balconyList.every((b) => b.isLocked) ? '#fbbf24' : '#64748b',
+                      color: objectTree.balconyList.every((b) => b.isLocked) ? 'var(--accent-lock)' : 'var(--text-muted)',
                       cursor: 'pointer',
                       padding: '2px 4px',
                     }}
@@ -1167,7 +1161,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: objectTree.balconyList.every((b) => b.isGhosted) ? '#c084fc' : '#64748b',
+                      color: objectTree.balconyList.every((b) => b.isGhosted) ? 'var(--accent-purple)' : 'var(--text-muted)',
                       cursor: 'pointer',
                       padding: '2px 4px',
                     }}
@@ -1222,14 +1216,14 @@ export const LayersAndObjectsGroup: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => updateBuilding(b.id, { isLocked: !isLocked })}
-                            style={{ background: 'transparent', border: 'none', color: isLocked ? '#fbbf24' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                            style={{ background: 'transparent', border: 'none', color: isLocked ? 'var(--accent-lock)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
                           >
                             {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
                           </button>
                           <button
                             type="button"
                             onClick={() => updateBuilding(b.id, { isGhosted: !isGhosted })}
-                            style={{ background: 'transparent', border: 'none', color: isGhosted ? '#c084fc' : '#64748b', cursor: 'pointer', padding: '2px' }}
+                            style={{ background: 'transparent', border: 'none', color: isGhosted ? 'var(--accent-purple)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px' }}
                           >
                             <Ghost size={12} />
                           </button>
@@ -1401,7 +1395,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ color: '#94a3b8' }}>Powierzchnia placu zabaw:</span>
-                        <b style={{ color: '#fbbf24', fontFamily: 'monospace' }}>
+                        <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>
                           {selectedBuildingArea.toFixed(1)} m²
                         </b>
                       </div>
@@ -1429,7 +1423,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                               {capacity.displayText}
                             </b>
                           </div>
-                          <div style={{ fontSize: '10px', color: '#64748b' }}>
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                             {capacity.tierDescription}
                           </div>
                           <div style={{ fontSize: '9.5px', color: '#94a3b8', fontStyle: 'italic', marginTop: '1px' }}>
@@ -2028,14 +2022,14 @@ export const LayersAndObjectsGroup: React.FC = () => {
                             style={{
                               fontWeight: 600,
                               fontFamily: 'monospace',
-                              color: floorCalc.atticHeight > 0.001 ? '#fbbf24' : '#64748b',
+                              color: floorCalc.atticHeight > 0.001 ? 'var(--accent-amber)' : 'var(--text-muted)',
                             }}
                           >
                             {floorCalc.atticHeight.toFixed(2)} m
                           </span>
                         </div>
 
-                        <div style={{ fontSize: '9.5px', color: '#64748b', borderTop: '1px dashed #334155', paddingTop: '4px' }}>
+                        <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', borderTop: '1px dashed #334155', paddingTop: '4px' }}>
                           H = {h1.toFixed(2)}m (parter) + {floorCalc.storeysCount > 1 ? `${floorCalc.storeysCount - 1}×${ht.toFixed(2)}m` : '0m'} + {floorCalc.atticHeight.toFixed(2)}m (attyka) = <b>{selectedBuilding.defaultHeight.toFixed(2)}m</b>
                         </div>
                       </div>
@@ -2080,19 +2074,6 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   );
                 })()}
 
-                {distancesToBoundaries.length > 0 && (
-                  <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.3)', fontSize: '10.5px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                    <div style={{ color: '#fca5a5', fontWeight: 600 }}>Odległość od granicy działki:</div>
-                    {distancesToBoundaries.map((d) => (
-                      <div key={d.boundaryId} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#cbd5e1' }}>{d.boundaryName}:</span>
-                        <b style={{ color: d.minDistance < 3.0 ? '#f43f5e' : d.minDistance < 4.0 ? '#fbbf24' : '#6ee7b7', fontFamily: 'monospace' }}>
-                          {d.minDistance.toFixed(2)} m
-                        </b>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
@@ -2161,7 +2142,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="ui-card" style={{ textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
+        <div className="ui-card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
           Kliknij dowolny obiekt na rzucie CAD, aby edytować jego parametry.
         </div>
       )}

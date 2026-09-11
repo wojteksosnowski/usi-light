@@ -4,11 +4,12 @@ import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 import { useSceneStore } from './useSceneStore';
 
+export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+
 interface CadToolState {
   // Drawing Tools
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union';
+  drawingMode: DrawingMode;
   drawingVerticesCount: number;
-  rotateInitialBuildingsSnapshot: any[] | null;
 
   // Sweep (Wstęga) settings
   sweepWidth: number;
@@ -29,19 +30,23 @@ interface CadToolState {
   dimensionType: DimensionType;
   dimensionPendingRef: DimensionReference | null;
 
+  // Align tool (edge-to-edge)
+  alignPendingRef: DimensionReference | null;
+
   // Viewport & UCS rotation
   viewRotationMode: boolean;
   viewRotationDeg: number;
   savedViewRotationDeg: number;
-  fitTrigger: number;
+  // Żądanie dopasowania widoku (Zoom Extents): nonce inkrementowany przy każdym wywołaniu,
+  // ignoreSelection: true wymusza dopasowanie do całego projektu z pominięciem zaznaczenia
+  fitRequest: { nonce: number; ignoreSelection: boolean };
 
   // Interaction accuracy flag
   isInteracting: boolean;
 
   // Actions
-  setDrawingMode: (mode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'rotate' | 'union') => void;
+  setDrawingMode: (mode: DrawingMode) => void;
   setDrawingVerticesCount: (count: number) => void;
-  setRotateInitialBuildingsSnapshot: (snapshot: any[] | null) => void;
   setSweepWidth: (width: number) => void;
   setSweepAlignment: (alignment: SweepAlignment) => void;
   setIsEditMode: (active: boolean) => void;
@@ -60,6 +65,11 @@ interface CadToolState {
   setDimensionPendingRef: (ref: DimensionReference | null) => void;
   handleDimensionClickEdge: (buildingId: string, segmentId: string) => void;
   cancelDimension: () => void;
+
+  // Align tool actions
+  setAlignPendingRef: (ref: DimensionReference | null) => void;
+  handleAlignClickEdge: (selectedBuildingId: string | null, buildingId: string, segmentId: string) => void;
+  cancelAlign: () => void;
   deleteDimension: (id: string) => void;
   toggleDimensionType: (id: string) => void;
   clearAllDimensions: () => void;
@@ -69,7 +79,7 @@ interface CadToolState {
   setViewRotationDeg: (deg: number | ((prev: number) => number)) => void;
   setSavedViewRotationDeg: (deg: number | ((prev: number) => number)) => void;
   toggleUcsRotation: () => void;
-  triggerFit: () => void;
+  triggerFit: (options?: { ignoreSelection?: boolean }) => void;
 
   setIsInteracting: (interacting: boolean) => void;
 }
@@ -77,7 +87,6 @@ interface CadToolState {
 export const useCadToolStore = create<CadToolState>((set, get) => ({
   drawingMode: 'none',
   drawingVerticesCount: 0,
-  rotateInitialBuildingsSnapshot: null,
 
   sweepWidth: 5.0,
   sweepAlignment: 'center',
@@ -94,16 +103,17 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   dimensionType: 'linear',
   dimensionPendingRef: null,
 
+  alignPendingRef: null,
+
   viewRotationMode: false,
   viewRotationDeg: 0,
   savedViewRotationDeg: 0,
-  fitTrigger: 0,
+  fitRequest: { nonce: 0, ignoreSelection: false },
 
   isInteracting: false,
 
   setDrawingMode: (mode) => set({ drawingMode: mode }),
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
-  setRotateInitialBuildingsSnapshot: (snapshot) => set({ rotateInitialBuildingsSnapshot: snapshot }),
   setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : 5.0) }),
   setSweepAlignment: (alignment) => set({ sweepAlignment: alignment }),
   setIsEditMode: (active) => set({ isEditMode: active }),
@@ -151,6 +161,31 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   },
 
   cancelDimension: () => set({ dimensionPendingRef: null, isDimensionToolActive: false }),
+
+  setAlignPendingRef: (ref) => set({ alignPendingRef: ref }),
+
+  handleAlignClickEdge: (selectedBuildingId, buildingId, segmentId) => {
+    if (!selectedBuildingId) return;
+    const { alignPendingRef } = get();
+    if (!alignPendingRef) {
+      set({ alignPendingRef: { buildingId, segmentId } });
+      return;
+    }
+    if (alignPendingRef.buildingId === buildingId && alignPendingRef.segmentId === segmentId) {
+      return;
+    }
+    const secondRef = { buildingId, segmentId };
+    const targetRef = alignPendingRef.buildingId === selectedBuildingId ? alignPendingRef : secondRef;
+    const referenceRef = targetRef === alignPendingRef ? secondRef : alignPendingRef;
+    if (targetRef.buildingId !== selectedBuildingId) {
+      set({ alignPendingRef: null });
+      return;
+    }
+    useSceneStore.getState().alignBuildingEdgeToEdge(targetRef, referenceRef);
+    set({ alignPendingRef: null, drawingMode: 'none' });
+  },
+
+  cancelAlign: () => set({ alignPendingRef: null }),
   deleteDimension: (id) => set((state) => ({ dimensions: state.dimensions.filter((d) => d.id !== id) })),
   toggleDimensionType: (id) =>
     set((state) => ({
@@ -187,7 +222,10 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
     });
   },
 
-  triggerFit: () => set((state) => ({ fitTrigger: state.fitTrigger + 1 })),
+  triggerFit: (options) =>
+    set((state) => ({
+      fitRequest: { nonce: state.fitRequest.nonce + 1, ignoreSelection: options?.ignoreSelection ?? false },
+    })),
   setIsInteracting: (interacting) => {
     set({ isInteracting: interacting });
     if (interacting) {

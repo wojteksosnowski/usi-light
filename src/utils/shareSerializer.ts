@@ -1,6 +1,7 @@
 import { gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate';
-import { SharedProjectPayload } from '../types/sharing';
-import { BuildingLoop, CadLayerSettings, PinnedFacadePoint } from '../types/geometry';
+import { SharedProjectPayload, SharedProjectPayloadV2, SharedBuildingV2, PointTuple } from '../types/sharing';
+import { BuildingLoop, CadLayerSettings, PinnedFacadePoint, Point2D } from '../types/geometry';
+import { SHARE_V2_BUILDING_DEFAULTS, omitIfDefault } from './shareDefaults';
 import { normalizeLegacyBuildingTypes } from './legacyBuildingType';
 
 /**
@@ -49,7 +50,31 @@ export function decompressProjectData(base64Str: string): SharedProjectPayload {
   const jsonStr = strFromU8(decompressed);
   const parsed = JSON.parse(jsonStr) as SharedProjectPayload;
 
-  if (!parsed || parsed.v !== 1 || !parsed.scene || !Array.isArray(parsed.scene.buildings)) {
+  if (!parsed || (parsed.v !== 1 && parsed.v !== 2) || !parsed.scene || !Array.isArray(parsed.scene.buildings)) {
+    throw new Error('Nieprawidłowy format lub uszkodzona struktura projektu.');
+  }
+  normalizeLegacyBuildingTypes(parsed.scene.buildings as unknown as BuildingLoop[]);
+
+  return parsed;
+}
+
+/**
+ * Serializuje i kompresuje payload do surowych bajtów (bez Base64) — używane jako
+ * wejście do szyfrowania E2EE (patrz shareCrypto.ts), gdzie szyfrowanie następuje
+ * po kompresji (dane zaszyfrowane nie kompresują się dalej).
+ */
+export function serializeAndGzipPayload(payload: SharedProjectPayload): Uint8Array {
+  return gzipSync(strToU8(JSON.stringify(payload)), { level: 9 });
+}
+
+/**
+ * Odwrotność serializeAndGzipPayload — z odszyfrowanych surowych bajtów do payloadu.
+ */
+export function gunzipAndDeserializePayload(gzippedBytes: Uint8Array): SharedProjectPayload {
+  const jsonStr = strFromU8(gunzipSync(gzippedBytes));
+  const parsed = JSON.parse(jsonStr) as SharedProjectPayload;
+
+  if (!parsed || (parsed.v !== 1 && parsed.v !== 2) || !parsed.scene || !Array.isArray(parsed.scene.buildings)) {
     throw new Error('Nieprawidłowy format lub uszkodzona struktura projektu.');
   }
   normalizeLegacyBuildingTypes(parsed.scene.buildings as unknown as BuildingLoop[]);
@@ -78,6 +103,57 @@ export function getCompressionStats(payload: SharedProjectPayload, base64Compres
     compressedSizeBytes,
     reductionPercentage,
   };
+}
+
+export function pointToTuple(p: Point2D): PointTuple {
+  return [p.x, p.y];
+}
+
+export function tupleToPoint([x, y]: PointTuple): Point2D {
+  return { x, y };
+}
+
+export function pointsToTuples(pts: Point2D[]): PointTuple[] {
+  return pts.map(pointToTuple);
+}
+
+export function tuplesToPoints(tuples: PointTuple[]): Point2D[] {
+  return tuples.map(tupleToPoint);
+}
+
+function toSharedBuildingV2(b: BuildingLoop): SharedBuildingV2 {
+  const out: SharedBuildingV2 = {
+    id: b.id,
+    name: b.name,
+    layer: b.layer,
+    isTested: b.isTested,
+    vertices: pointsToTuples(b.vertices),
+    defaultHeight: b.defaultHeight,
+    transform: b.transform,
+  };
+  omitIfDefault(out, 'transform', b.transform, SHARE_V2_BUILDING_DEFAULTS.transform);
+  omitIfDefault(out, 'category', b.category, SHARE_V2_BUILDING_DEFAULTS.category);
+  omitIfDefault(out, 'elevation', b.elevation, SHARE_V2_BUILDING_DEFAULTS.elevation);
+  omitIfDefault(out, 'firstFloorHeight', b.firstFloorHeight, SHARE_V2_BUILDING_DEFAULTS.firstFloorHeight);
+  omitIfDefault(out, 'typicalFloorHeight', b.typicalFloorHeight, SHARE_V2_BUILDING_DEFAULTS.typicalFloorHeight);
+  omitIfDefault(out, 'hWindowBottom', b.hWindowBottom, SHARE_V2_BUILDING_DEFAULTS.hWindowBottom);
+  omitIfDefault(out, 'isCityCentre', b.isCityCentre, SHARE_V2_BUILDING_DEFAULTS.isCityCentre);
+  omitIfDefault(out, 'buildingType', b.buildingType, SHARE_V2_BUILDING_DEFAULTS.buildingType);
+  omitIfDefault(out, 'isIncluded', b.isIncluded, SHARE_V2_BUILDING_DEFAULTS.isIncluded);
+  if (b.areaType !== undefined) out.areaType = b.areaType;
+  if (b.plotNumber !== undefined) out.plotNumber = b.plotNumber;
+  if (b.storeysCount !== undefined) out.storeysCount = b.storeysCount;
+  if (b.isLocked !== undefined) out.isLocked = b.isLocked;
+  if (b.isGhosted !== undefined) out.isGhosted = b.isGhosted;
+  if (b.groupId !== undefined) out.groupId = b.groupId;
+  if (b.modifiers && b.modifiers.length > 0) out.modifiers = b.modifiers;
+  if (b.sweepPath && b.sweepPath.length > 0) out.sweepPath = pointsToTuples(b.sweepPath);
+  if (b.sweepWidth !== undefined) out.sweepWidth = b.sweepWidth;
+  if (b.sweepAlignment !== undefined) out.sweepAlignment = b.sweepAlignment;
+  if (b.playgroundVoronoi !== undefined) out.playgroundVoronoi = b.playgroundVoronoi;
+  if (b.playgroundParams !== undefined) out.playgroundParams = b.playgroundParams;
+  // Explicitly NOT copied: segments, storyPolygons, zonePolygons, isClockwise (all derived).
+  return out;
 }
 
 export interface ExtractStateOptions {
@@ -116,19 +192,18 @@ export interface ExtractStateOptions {
 }
 
 /**
- * Tworzy kompletny obiekt SharedProjectPayload ze stanu aplikacji.
+ * Tworzy minimalny obiekt SharedProjectPayload (v2) ze stanu aplikacji.
+ * Pomija dane wyliczane (segments, storyPolygons, zonePolygons) oraz stan UI/sesji
+ * (przełączniki widoczności, zaznaczenia, viewport) — zachowuje wyłącznie dane
+ * źródłowe potrzebne do odtworzenia projektu.
  */
-export function createSharedPayloadFromState(options: ExtractStateOptions): SharedProjectPayload {
+export function createSharedPayloadFromState(options: ExtractStateOptions): SharedProjectPayloadV2 {
   return {
-    v: 1,
+    v: 2,
     createdAt: Date.now(),
     metadata: {
-      name: options.projectName || `Projekt ${options.selectedCity || 'USI Light'}`,
+      name: options.projectName || `Projekt ${options.selectedCity || 'Światło'}`,
       northAngleDeg: options.viewRotationDeg ?? 0,
-    },
-    viewport: {
-      rotation: options.viewRotationDeg ?? 0,
-      savedRotation: options.savedViewRotationDeg ?? 0,
     },
     solar: {
       analysisType: 'SECTION_13',
@@ -138,26 +213,13 @@ export function createSharedPayloadFromState(options: ExtractStateOptions): Shar
       selectedCity: options.selectedCity,
       equinoxDate: options.settings.equinoxDate,
       sunlightMethod: options.sunlightMethod,
-      activePointMode: options.activePointMode,
-      showNormals: options.showNormals,
-      showShadowingLines: options.showShadowingLines,
-      showSunlightLines: options.showSunlightLines,
-      showAnalysisPoints: options.showAnalysisPoints,
-      showShadowRange: options.showShadowRange,
-      showShadowFill: options.showShadowFill,
-      showSatelliteLayer: options.showSatelliteLayer,
-      satelliteOpacity: options.satelliteOpacity,
-      showProjectParameters: options.showProjectParameters,
       mapsInput: options.mapsInput,
     },
     scene: {
-      buildings: options.buildings,
-      selectedBuildingId: options.selectedBuildingId,
-      pinnedPoints: options.pinnedPoints,
-      activePinnedPointId: options.activePinnedPointId,
+      buildings: options.buildings.map(toSharedBuildingV2),
+      pinnedPoints: options.pinnedPoints && options.pinnedPoints.length > 0 ? options.pinnedPoints : undefined,
       layerSettings: options.layerSettings,
-      selectedLayerName: options.selectedLayerName,
-      dimensions: options.dimensions,
+      dimensions: options.dimensions && options.dimensions.length > 0 ? options.dimensions : undefined,
       dxfUnit: options.dxfUnit,
       dxfImportInfo: options.dxfImportInfo,
     },

@@ -7,8 +7,10 @@ import {
   FolderKanban,
   Layers,
   Wrench,
+  Map,
 } from 'lucide-react';
 import { useUiStore } from '../../store';
+import { ProBadge } from '../license/ProBadge';
 import { ProjectGroup } from './ProjectGroup';
 import { LayersAndObjectsGroup } from './LayersAndObjectsGroup';
 import { ToolsGroup } from './ToolsGroup';
@@ -46,6 +48,7 @@ export const AppSidebar: React.FC = () => {
               Światło
             </div>
           </div>
+          <ProBadge />
         </div>
         <button
           onClick={() => setSidebarOpen(false)}

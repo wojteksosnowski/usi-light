@@ -9,8 +9,12 @@ import {
   Globe,
   Share2,
   FileSpreadsheet,
+  Layers,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
+import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
+import { useIdleGlint } from '../../hooks/useIdleGlint';
+import { APP_CONFIG } from '../../config/appConfig';
 
 export const CadTopHud: React.FC = () => {
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
@@ -41,52 +45,10 @@ export const CadTopHud: React.FC = () => {
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
 
-  // Timer bezczynności: 30s bezczynności -> 1. błyśnięcie (1s), kolejne 15s bezczynności -> 2. błyśnięcie (1s), potem stop
-  const [isShareGlinting, setIsShareGlinting] = React.useState(false);
+  // Idle-glint: 1. błysk po 30s bezczynności, 2. błysk po kolejnych 15s (łącznie 45s), potem stop
+  const isShareGlinting = useIdleGlint([30000, 45000]);
 
   React.useEffect(() => {
-    let timer1: NodeJS.Timeout | null = null;
-    let timer2: NodeJS.Timeout | null = null;
-    let glintOffTimer: NodeJS.Timeout | null = null;
-
-    const triggerGlint = () => {
-      setIsShareGlinting(true);
-      if (glintOffTimer) clearTimeout(glintOffTimer);
-      glintOffTimer = setTimeout(() => {
-        setIsShareGlinting(false);
-      }, 1000);
-    };
-
-    const resetIdleTimers = () => {
-      if (timer1) clearTimeout(timer1);
-      if (timer2) clearTimeout(timer2);
-      setIsShareGlinting(false);
-
-      // 1. błysk po 30 sekundach bezczynności
-      timer1 = setTimeout(() => {
-        triggerGlint();
-      }, 30000);
-
-      // 2. błysk po kolejnych 15 sekundach bezczynności (łącznie 45s)
-      timer2 = setTimeout(() => {
-        triggerGlint();
-      }, 45000);
-
-      // Po 45s już nie błyska
-    };
-
-    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'pointermove'];
-    const handleActivity = () => {
-      resetIdleTimers();
-    };
-
-    activityEvents.forEach((evt) => {
-      window.addEventListener(evt, handleActivity, { passive: true });
-    });
-
-    // Inicjalne wystartowanie timerów
-    resetIdleTimers();
-
     // Czyszczenie ewentualnych starych kluczy licencyjnych z wersji eksperymentalnych
     try {
       if (localStorage.getItem('usi_license_key')) {
@@ -95,15 +57,6 @@ export const CadTopHud: React.FC = () => {
     } catch {
       // Ignoruj błędy dostępu do localStorage
     }
-
-    return () => {
-      if (timer1) clearTimeout(timer1);
-      if (timer2) clearTimeout(timer2);
-      if (glintOffTimer) clearTimeout(glintOffTimer);
-      activityEvents.forEach((evt) => {
-        window.removeEventListener(evt, handleActivity);
-      });
-    };
   }, []);
 
 
@@ -287,6 +240,52 @@ export const CadTopHud: React.FC = () => {
         <span className="hud-btn-label">Parametry</span>
       </button>
 
+      {/* Podkłady GEO (PRO) button — ukryte do czasu publikacji, patrz APP_CONFIG.geoOverlays */}
+      {APP_CONFIG.geoOverlays.showTogglesPanel && (
+        <button
+          onClick={() => {
+            const s = useWfsStore.getState();
+            const anyActive = s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer;
+            if (anyActive) {
+              s.setShowOrthophotoLayer(false);
+              s.setShowKiutLayer(false);
+              s.setShowMpzpLayer(false);
+              s.setShowBdotLayer(false);
+              s.setShowTerrainLayer(false);
+              s.setShowEgibLayer(false);
+            } else {
+              s.setShowOrthophotoLayer(true);
+              s.setShowKiutLayer(true);
+            }
+          }}
+          style={{
+            height: '28px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '4px',
+            padding: '0 8px',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+              ? 'rgba(99, 102, 241, 0.2)'
+              : 'transparent',
+            color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+              ? '#a5b4fc'
+              : '#94a3b8',
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
+          }}
+          title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT / BDOT / MPZP) [Wersja PRO]"
+        >
+          <Layers size={13} />
+          <span className="hud-btn-label">Podkład GEO</span>
+        </button>
+      )}
+
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
 
       {/* Grupa Widok: centruj, obrót, przełącz */}
@@ -299,8 +298,8 @@ export const CadTopHud: React.FC = () => {
         }}
       >
         <button
-          onClick={triggerFit}
-          title="Dopasuj widok do obiektów (Zoom Extents)"
+          onClick={() => triggerFit()}
+          title="Dopasuj widok do zaznaczonego obiektu (jeśli zaznaczony) lub do całego projektu (Zoom Extents)"
           style={{
             height: '28px',
             display: 'inline-flex',

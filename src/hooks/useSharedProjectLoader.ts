@@ -4,8 +4,49 @@ import {
   useSolarAnalysisStore,
   useCadToolStore,
 } from '../store';
-import { decompressProjectData } from '../utils/shareSerializer';
-import { ShareApiGetResponse } from '../types/sharing';
+import { decompressProjectData, gunzipAndDeserializePayload, tuplesToPoints } from '../utils/shareSerializer';
+import { decryptPayload } from '../utils/shareCrypto';
+import { ShareApiGetResponse, SharedBuildingV2, SharedProjectPayload } from '../types/sharing';
+import { BuildingLoop } from '../types/geometry';
+import { SHARE_V2_BUILDING_DEFAULTS } from '../utils/shareDefaults';
+import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
+
+function reifyV2Building(sb: SharedBuildingV2): BuildingLoop {
+  const building: BuildingLoop = {
+    id: sb.id,
+    name: sb.name,
+    layer: sb.layer,
+    isTested: sb.isTested,
+    category: sb.category ?? SHARE_V2_BUILDING_DEFAULTS.category,
+    areaType: sb.areaType,
+    plotNumber: sb.plotNumber,
+    elevation: sb.elevation ?? SHARE_V2_BUILDING_DEFAULTS.elevation,
+    firstFloorHeight: sb.firstFloorHeight ?? SHARE_V2_BUILDING_DEFAULTS.firstFloorHeight,
+    typicalFloorHeight: sb.typicalFloorHeight ?? SHARE_V2_BUILDING_DEFAULTS.typicalFloorHeight,
+    storeysCount: sb.storeysCount,
+    modifiers: sb.modifiers ?? [],
+    storyPolygons: [],
+    zonePolygons: [],
+    isIncluded: sb.isIncluded ?? SHARE_V2_BUILDING_DEFAULTS.isIncluded,
+    isLocked: sb.isLocked,
+    isGhosted: sb.isGhosted,
+    isCityCentre: sb.isCityCentre ?? SHARE_V2_BUILDING_DEFAULTS.isCityCentre,
+    buildingType: sb.buildingType ?? SHARE_V2_BUILDING_DEFAULTS.buildingType,
+    defaultHeight: sb.defaultHeight,
+    hWindowBottom: sb.hWindowBottom ?? SHARE_V2_BUILDING_DEFAULTS.hWindowBottom,
+    vertices: tuplesToPoints(sb.vertices),
+    segments: [],
+    sweepPath: sb.sweepPath ? tuplesToPoints(sb.sweepPath) : undefined,
+    sweepWidth: sb.sweepWidth,
+    sweepAlignment: sb.sweepAlignment,
+    playgroundVoronoi: sb.playgroundVoronoi,
+    playgroundParams: sb.playgroundParams,
+    groupId: sb.groupId,
+    transform: sb.transform ?? SHARE_V2_BUILDING_DEFAULTS.transform,
+  };
+  const { segments, storyPolygons, zonePolygons } = applyBuildingModifiers(building);
+  return { ...building, segments, storyPolygons, zonePolygons };
+}
 
 export interface SharedProjectLoadStatus {
   status: 'idle' | 'loading' | 'success' | 'error';
@@ -67,6 +108,9 @@ export function useSharedProjectLoader() {
     if (!shareId) return;
     hasAttemptedRef.current = true;
 
+    // Klucz deszyfrujący E2EE żyje wyłącznie w fragmencie URL (nigdy wysyłany do serwera)
+    const fragmentKey = window.location.hash.slice(1) || null;
+
     // 2. Pobieranie danych z endpointu API
     const loadProject = async () => {
       setLoadStatus({ status: 'loading', message: 'Wczytywanie udostępnionego projektu...' });
@@ -83,27 +127,54 @@ export function useSharedProjectLoader() {
           throw new Error('Otrzymano puste dane projektu.');
         }
 
-        // 3. Dekompresja w przeglądarce
-        const payload = decompressProjectData(data.compressedData);
+        // 3. Deszyfrowanie (E2EE) lub dekompresja formatu legacy w przeglądarce
+        let payload: SharedProjectPayload;
+        if (data.version === 1 && data.iv && data.ciphertext) {
+          if (!fragmentKey) {
+            throw new Error(
+              'Brak klucza deszyfrującego w adresie URL. Użyj pełnego linku zawierającego fragment po znaku "#".'
+            );
+          }
+          try {
+            const gzippedBytes = await decryptPayload(
+              { version: 1, iv: data.iv, ciphertext: data.ciphertext },
+              fragmentKey
+            );
+            payload = gunzipAndDeserializePayload(gzippedBytes);
+          } catch {
+            throw new Error('Nie udało się odszyfrować projektu — link jest nieprawidłowy lub uszkodzony.');
+          }
+        } else if (data.compressedData) {
+          payload = decompressProjectData(data.compressedData);
+        } else {
+          throw new Error('Otrzymano puste lub nieprawidłowe dane projektu.');
+        }
 
         // 4. Hydratacja stanu do store'ów aplikacji (Pełny edytor bez trybu prezentacji)
         if (payload.scene) {
-          setBuildings(payload.scene.buildings || []);
-          if (payload.scene.selectedBuildingId) {
+          const buildings =
+            payload.v === 2
+              ? payload.scene.buildings.map(reifyV2Building)
+              : payload.scene.buildings; // v1: geometria wyliczona jest już zapisana w payloadzie
+
+          setBuildings(buildings);
+
+          if (payload.v === 1 && payload.scene.selectedBuildingId) {
             setSelectedBuildingId(payload.scene.selectedBuildingId);
-          } else if (payload.scene.buildings && payload.scene.buildings.length > 0) {
-            setSelectedBuildingId(payload.scene.buildings[0].id);
+          } else if (buildings.length > 0) {
+            setSelectedBuildingId(buildings[0].id);
           }
           if (payload.scene.layerSettings) {
             setLayerSettings(payload.scene.layerSettings);
           }
-          if (payload.scene.selectedLayerName !== undefined) {
+          if (payload.v === 1 && payload.scene.selectedLayerName !== undefined) {
             setSelectedLayerName(payload.scene.selectedLayerName);
           }
           if (payload.scene.pinnedPoints) {
             setPinnedPoints(payload.scene.pinnedPoints);
+            const activeId = payload.v === 1 ? payload.scene.activePinnedPointId : undefined;
             setActivePinnedPointId(
-              payload.scene.activePinnedPointId || (payload.scene.pinnedPoints.length > 0 ? payload.scene.pinnedPoints[0].id : null)
+              activeId || (payload.scene.pinnedPoints.length > 0 ? payload.scene.pinnedPoints[0].id : null)
             );
           }
           if (payload.scene.dimensions) {
@@ -126,18 +197,21 @@ export function useSharedProjectLoader() {
           }));
           if (payload.solar.selectedCity) setSelectedCity(payload.solar.selectedCity);
           if (payload.solar.mapsInput !== undefined) setMapsInput(payload.solar.mapsInput);
-          if (payload.solar.showNormals !== undefined) setShowNormals(payload.solar.showNormals);
-          if (payload.solar.showShadowingLines !== undefined) setShowShadowingLines(payload.solar.showShadowingLines);
-          if (payload.solar.showSunlightLines !== undefined) setShowSunlightLines(payload.solar.showSunlightLines);
-          if (payload.solar.showAnalysisPoints !== undefined) setShowAnalysisPoints(payload.solar.showAnalysisPoints);
           if (payload.solar.sunlightMethod) setSunlightMethod(payload.solar.sunlightMethod);
-          if (payload.solar.activePointMode) setActivePointMode(payload.solar.activePointMode);
-          if (payload.solar.showShadowFill !== undefined) setShowShadowFill(payload.solar.showShadowFill);
-          if (payload.solar.showSatelliteLayer !== undefined) setShowSatelliteLayer(payload.solar.showSatelliteLayer);
-          if (payload.solar.satelliteOpacity !== undefined) setSatelliteOpacity(payload.solar.satelliteOpacity);
+
+          if (payload.v === 1) {
+            if (payload.solar.showNormals !== undefined) setShowNormals(payload.solar.showNormals);
+            if (payload.solar.showShadowingLines !== undefined) setShowShadowingLines(payload.solar.showShadowingLines);
+            if (payload.solar.showSunlightLines !== undefined) setShowSunlightLines(payload.solar.showSunlightLines);
+            if (payload.solar.showAnalysisPoints !== undefined) setShowAnalysisPoints(payload.solar.showAnalysisPoints);
+            if (payload.solar.activePointMode) setActivePointMode(payload.solar.activePointMode);
+            if (payload.solar.showShadowFill !== undefined) setShowShadowFill(payload.solar.showShadowFill);
+            if (payload.solar.showSatelliteLayer !== undefined) setShowSatelliteLayer(payload.solar.showSatelliteLayer);
+            if (payload.solar.satelliteOpacity !== undefined) setSatelliteOpacity(payload.solar.satelliteOpacity);
+          }
         }
 
-        if (payload.viewport) {
+        if (payload.v === 1 && payload.viewport) {
           if (payload.viewport.rotation !== undefined) {
             setViewRotationDeg(payload.viewport.rotation);
           }
@@ -145,6 +219,7 @@ export function useSharedProjectLoader() {
             setSavedViewRotationDeg(payload.viewport.savedRotation);
           }
         }
+        // v2: brak zapisanego viewportu — kamera dopasowywana automatycznie (triggerFit poniżej).
 
         // Zoom extents do wczytanych obiektów
         setTimeout(() => {

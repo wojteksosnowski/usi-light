@@ -1,19 +1,21 @@
 import React from 'react';
 import { useStore } from 'zustand';
-import {
-  Square,
-  RotateCw,
-  Combine,
-  Ruler,
-  MapPin,
-  Copy,
-  Trash2,
-  Undo2,
-  Redo2,
-} from 'lucide-react';
+import { Ruler, Copy, Trash2, Undo2, Redo2 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
-import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { TrapezoidIcon, BrokenLineIcon, ZoneBufferIcon, BayWindowIcon, TerraceIcon, DonutIcon } from '../common/CustomCadIcons';
+import type { DrawingMode } from '../../store/useCadToolStore';
+import { DRAWING_TOOLS } from '../toolbar/drawingToolDescriptors';
+import { MODIFIER_DESCRIPTORS } from '../modifiers/modifierDescriptors';
+import { ModifierType } from '../../types/modifiers';
+
+/** Modyfikatory dostępne z górnego toolbara, w kolejności prezentacji. */
+const TOOLBAR_MODIFIER_TYPES: ModifierType[] = [
+  'story_offset',
+  'terrace',
+  'donut',
+  'zone_offset',
+  'bay_window',
+  'corner_cut',
+];
 
 export const CadToolBar: React.FC = () => {
   const { undo, redo, pastStates, futureStates } = useStore(useSceneStore.temporal, (state) => state);
@@ -33,7 +35,7 @@ export const CadToolBar: React.FC = () => {
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
   const setDrawingVerticesCount = useCadToolStore((s) => s.setDrawingVerticesCount);
-  const setRotateInitialBuildingsSnapshot = useCadToolStore((s) => s.setRotateInitialBuildingsSnapshot);
+  const cancelAlign = useCadToolStore((s) => s.cancelAlign);
 
   const sweepWidth = useCadToolStore((s) => s.sweepWidth);
   const setSweepWidth = useCadToolStore((s) => s.setSweepWidth);
@@ -42,7 +44,6 @@ export const CadToolBar: React.FC = () => {
 
   const isEditMode = useCadToolStore((s) => s.isEditMode);
   const setIsEditMode = useCadToolStore((s) => s.setIsEditMode);
-  const facadePointMode = useCadToolStore((s) => s.facadePointMode);
   const setFacadePointMode = useCadToolStore((s) => s.setFacadePointMode);
 
   const isDimensionToolActive = useCadToolStore((s) => s.isDimensionToolActive);
@@ -54,6 +55,20 @@ export const CadToolBar: React.FC = () => {
 
   const hasSelection = selectedBuildingIds.length > 0 || selectedBuildingId !== null;
   const targetDeleteIds = selectedBuildingIds.length > 0 ? selectedBuildingIds : (selectedBuildingId ? [selectedBuildingId] : []);
+
+  const activateMode = (mode: DrawingMode) => {
+    if (mode === 'align') {
+      if (!selectedBuildingId) return;
+      cancelAlign();
+      setDrawingMode(drawingMode === 'align' ? 'none' : 'align');
+    } else {
+      setDrawingMode(drawingMode === mode ? 'none' : mode);
+    }
+    setDrawingVerticesCount(0);
+    setIsDimensionToolActive(false);
+    setFacadePointMode(false);
+    setIsEditMode(false);
+  };
 
   const buttonStyle = (isActive: boolean, activeColor = '#818cf8', activeBg = 'rgba(99, 102, 241, 0.25)'): React.CSSProperties => ({
     height: '28px',
@@ -74,53 +89,26 @@ export const CadToolBar: React.FC = () => {
 
   return (
     <div className="cad-toolbar" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-      {/* 1. Prostokąt */}
-      <button
-        type="button"
-        style={buttonStyle(drawingMode === 'rectangle', '#818cf8', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          setDrawingMode(drawingMode === 'rectangle' ? 'none' : 'rectangle');
-          setDrawingVerticesCount(0);
-          setIsDimensionToolActive(false);
-          setFacadePointMode(false);
-          setIsEditMode(false);
-        }}
-        title="Rysuj prostokąt (Esc aby anulować)"
-      >
-        <Square size={14} />
-      </button>
-
-      {/* 2. Polilinia */}
-      <button
-        type="button"
-        style={buttonStyle(drawingMode === 'polyline', '#818cf8', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          setDrawingMode(drawingMode === 'polyline' ? 'none' : 'polyline');
-          setDrawingVerticesCount(0);
-          setIsDimensionToolActive(false);
-          setFacadePointMode(false);
-          setIsEditMode(false);
-        }}
-        title="Rysuj polilinię (Esc aby anulować, Enter by zamknąć)"
-      >
-        <TrapezoidIcon size={14} />
-      </button>
-
-      {/* 2b. Wstęga (Sweep) */}
-      <button
-        type="button"
-        style={buttonStyle(drawingMode === 'sweep', '#38bdf8', 'rgba(56, 189, 248, 0.25)')}
-        onClick={() => {
-          setDrawingMode(drawingMode === 'sweep' ? 'none' : 'sweep');
-          setDrawingVerticesCount(0);
-          setIsDimensionToolActive(false);
-          setFacadePointMode(false);
-          setIsEditMode(false);
-        }}
-        title="Rysuj wstęgę z odsunięciem / sweep (Esc aby anulować, Enter by zakończyć)"
-      >
-        <BrokenLineIcon size={14} />
-      </button>
+      {/* Narzędzia rysowania — zarejestrowane w DRAWING_TOOLS (jedno źródło prawdy z sidebarem) */}
+      {DRAWING_TOOLS.map((tool) => {
+        const disabled = tool.requiresSelection && !selectedBuildingId;
+        return (
+          <button
+            key={tool.mode}
+            type="button"
+            disabled={disabled}
+            style={{
+              ...buttonStyle(drawingMode === tool.mode, '#818cf8', 'rgba(99, 102, 241, 0.25)'),
+              opacity: disabled ? 0.4 : 1,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+            }}
+            onClick={() => activateMode(tool.mode)}
+            title={disabled ? 'Zaznacz obiekt, aby wyrównać jego krawędź' : tool.title}
+          >
+            <tool.Icon size={14} />
+          </button>
+        );
+      })}
 
       {/* Pasek opcji Wstęgi (gdy aktywny tryb sweep) */}
       {drawingMode === 'sweep' && (
@@ -190,46 +178,6 @@ export const CadToolBar: React.FC = () => {
         </div>
       )}
 
-      {/* 3. Obrót */}
-      <button
-        type="button"
-        style={buttonStyle(drawingMode === 'rotate', '#818cf8', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          if (drawingMode === 'rotate') {
-            setRotateInitialBuildingsSnapshot(null);
-            setDrawingMode('none');
-          } else {
-            setRotateInitialBuildingsSnapshot(
-              buildings.map((b) => ({ ...b, vertices: [...b.vertices], segments: [...b.segments] }))
-            );
-            setDrawingMode('rotate');
-            setDrawingVerticesCount(0);
-            setIsDimensionToolActive(false);
-            setFacadePointMode(false);
-            setIsEditMode(false);
-          }
-        }}
-        title="Obrót zaznaczonych obiektów wokół punktu (Esc aby anulować)"
-      >
-        <RotateCw size={14} />
-      </button>
-
-      {/* 4. Suma boolowska */}
-      <button
-        type="button"
-        style={buttonStyle(drawingMode === 'union', '#818cf8', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
-          setDrawingVerticesCount(0);
-          setIsDimensionToolActive(false);
-          setFacadePointMode(false);
-          setIsEditMode(false);
-        }}
-        title="Suma boolowska brył (Union)"
-      >
-        <Combine size={14} />
-      </button>
-
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
       {/* 7. Wymiarowanie */}
@@ -249,192 +197,42 @@ export const CadToolBar: React.FC = () => {
         <Ruler size={14} />
       </button>
 
-      {/* 8. Punkt fasady */}
-      <button
-        type="button"
-        style={buttonStyle(facadePointMode, '#818cf8', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          setFacadePointMode(!facadePointMode);
-          setDrawingMode('none');
-          setIsDimensionToolActive(false);
-          setIsEditMode(false);
-        }}
-        title="Dodaj punkt kontrolny analizy na fasadzie"
-      >
-        <MapPin size={14} />
-      </button>
-
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 
-      {/* 9. Modyfikatory (Uskok 2.5D, Strefa oraz Wykusz) */}
-      {(() => {
-        const isStoryEligible = !!selectedBuilding && selectedBuilding.category !== 'boundary';
-        const isEligible = !!selectedBuilding;
-
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-            {/* Przycisk Uskok 2.5D */}
+      {/* 9. Modyfikatory — zarejestrowane w MODIFIER_DESCRIPTORS (jedno źródło prawdy z sidebarem) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+        {TOOLBAR_MODIFIER_TYPES.map((type) => {
+          const descriptor = MODIFIER_DESCRIPTORS[type];
+          const disabled = type !== 'zone_offset' && (!selectedBuilding || selectedBuilding.category === 'boundary');
+          const eligible = !disabled && !!selectedBuilding;
+          return (
             <button
+              key={type}
               type="button"
-              disabled={!isStoryEligible}
+              disabled={!eligible}
               style={{
                 ...buttonStyle(false),
-                opacity: isStoryEligible ? 1 : 0.35,
-                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
+                opacity: eligible ? 1 : 0.35,
+                cursor: eligible ? 'pointer' : 'not-allowed',
               }}
               onClick={() => {
-                if (!isStoryEligible) return;
-                const newMod = {
-                  id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  type: 'story_offset' as const,
-                  enabled: true,
-                  distance: -2.0,
-                  storiesCount: -1,
-                };
-                addBuildingModifier(selectedBuilding.id, newMod);
+                if (!eligible || !selectedBuilding) return;
+                addBuildingModifier(selectedBuilding.id, descriptor.createDefault());
                 setShowModifiersPanel(true);
               }}
               title={
                 !selectedBuilding
-                  ? 'Modyfikator Uskok 2.5D (zaznacz budynek na scenie, aby dodać uskok)'
-                  : selectedBuilding.category === 'boundary'
+                  ? `${descriptor.title} (zaznacz obiekt na scenie, aby dodać modyfikator)`
+                  : disabled
                   ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
-                  : 'Dodaj / edytuj uskok 2.5D (penthouse / podcień)'
+                  : `Dodaj / edytuj: ${descriptor.title}`
               }
             >
-              <SetbackPenthouseIcon size={14} color={isStoryEligible ? '#c084fc' : '#94a3b8'} />
+              <descriptor.Icon size={14} color={eligible ? descriptor.accentVar : '#94a3b8'} />
             </button>
-
-            {/* Przycisk Taras */}
-            <button
-              type="button"
-              disabled={!isStoryEligible}
-              style={{
-                ...buttonStyle(false),
-                opacity: isStoryEligible ? 1 : 0.35,
-                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
-              }}
-              onClick={() => {
-                if (!isStoryEligible) return;
-                const newMod = {
-                  id: `mod-terrace-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  type: 'terrace' as const,
-                  enabled: true,
-                  depth: -4.0,
-                  storiesCount: -1,
-                };
-                addBuildingModifier(selectedBuilding.id, newMod);
-                setShowModifiersPanel(true);
-              }}
-              title={
-                !selectedBuilding
-                  ? 'Modyfikator Taras (zaznacz budynek na scenie, aby dodać uskok krawędzi)'
-                  : selectedBuilding.category === 'boundary'
-                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
-                  : 'Dodaj / edytuj taras (uskok wybranej krawędzi)'
-              }
-            >
-              <TerraceIcon size={14} color={isStoryEligible ? '#fed7aa' : '#94a3b8'} />
-            </button>
-
-            {/* Przycisk Donat */}
-            <button
-              type="button"
-              disabled={!isStoryEligible}
-              style={{
-                ...buttonStyle(false),
-                opacity: isStoryEligible ? 1 : 0.35,
-                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
-              }}
-              onClick={() => {
-                if (!isStoryEligible) return;
-                const newMod = {
-                  id: `mod-donut-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  type: 'donut' as const,
-                  enabled: true,
-                  offset: -12.0,
-                  storiesCount: 0,
-                };
-                addBuildingModifier(selectedBuilding.id, newMod);
-                setShowModifiersPanel(true);
-              }}
-              title={
-                !selectedBuilding
-                  ? 'Modyfikator Donat (zaznacz budynek na scenie, aby dodać wewnętrzny otwór)'
-                  : selectedBuilding.category === 'boundary'
-                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
-                  : 'Dodaj / edytuj donata (otwór / dziedziniec wewnątrz obrysu)'
-              }
-            >
-              <DonutIcon size={14} color={isStoryEligible ? '#a7f3d0' : '#94a3b8'} />
-            </button>
-
-            {/* Przycisk Strefa / Obszar */}
-            <button
-              type="button"
-              disabled={!isEligible}
-              style={{
-                ...buttonStyle(false),
-                opacity: isEligible ? 1 : 0.35,
-                cursor: isEligible ? 'pointer' : 'not-allowed',
-              }}
-              onClick={() => {
-                if (!isEligible) return;
-                const newMod = {
-                  id: `mod-zone-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  type: 'zone_offset' as const,
-                  enabled: true,
-                  distance: 4.0,
-                  areaType: 'plot' as const,
-                  name: 'Strefa buforowa',
-                };
-                addBuildingModifier(selectedBuilding.id, newMod);
-                setShowModifiersPanel(true);
-              }}
-              title={
-                !selectedBuilding
-                  ? 'Modyfikator Strefa (zaznacz obiekt na scenie, aby dodać strefę/bufor)'
-                  : 'Dodaj / edytuj strefę (obszar buforowy o zadanym offsecie)'
-              }
-            >
-              <ZoneBufferIcon size={14} color={isEligible ? '#38bdf8' : '#94a3b8'} />
-            </button>
-
-            {/* Przycisk Wykusz (Bay Window) */}
-            <button
-              type="button"
-              disabled={!isStoryEligible}
-              style={{
-                ...buttonStyle(false),
-                opacity: isStoryEligible ? 1 : 0.35,
-                cursor: isStoryEligible ? 'pointer' : 'not-allowed',
-              }}
-              onClick={() => {
-                if (!isStoryEligible) return;
-                const newMod = {
-                  id: `mod-bay-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                  type: 'bay_window' as const,
-                  enabled: true,
-                  width: 4.0,
-                  projection: 1.5,
-                  storiesCount: 0,
-                };
-                addBuildingModifier(selectedBuilding.id, newMod);
-                setShowModifiersPanel(true);
-              }}
-              title={
-                !selectedBuilding
-                  ? 'Modyfikator Wykusz (zaznacz budynek na scenie, aby dodać wykusz)'
-                  : selectedBuilding.category === 'boundary'
-                  ? 'Obiekty geodezyjne (granica/obszar) nie obsługują modyfikatorów wysokościowych'
-                  : 'Dodaj / edytuj wykusz (Bay Window) na elewacji'
-              }
-            >
-              <BayWindowIcon size={14} color={isStoryEligible ? '#fef08a' : '#94a3b8'} />
-            </button>
-          </div>
-        );
-      })()}
+          );
+        })}
+      </div>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
 

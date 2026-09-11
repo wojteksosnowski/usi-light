@@ -2,7 +2,16 @@ import React from 'react';
 import { AnalysisPointResult } from '../types/geometry';
 import { Sun, ShieldCheck, ShieldAlert, Clock, Compass, X } from 'lucide-react';
 import { FloatingInspectorCard } from './common/FloatingInspectorCard';
+import { IndexPillSelector } from './modifiers/controls/IndexPillSelector';
 import { useSceneStore } from '../store';
+import { calculateBuildingFloors } from '../utils/buildingFloorCalculator';
+
+function formatHoursAsClock(totalMinutes: number): string {
+  const rounded = Math.round(totalMinutes);
+  const hh = Math.floor(rounded / 60);
+  const mm = rounded % 60;
+  return `${hh}:${String(mm).padStart(2, '0')} h`;
+}
 
 interface PointInspectorModalProps {
   pointResult: AnalysisPointResult | null;
@@ -10,6 +19,7 @@ interface PointInspectorModalProps {
   activePointId?: string | null;
   onSelectPointId?: (id: string) => void;
   onDeletePointId?: (id: string) => void;
+  onStoreyChange?: (id: string, storeyIndex: number | undefined) => void;
   activeMode?: 'shadowing' | 'sunlight';
   sunlightMethod?: 'raycasting' | 'segments';
   onModeChange?: (mode: 'shadowing' | 'sunlight') => void;
@@ -25,6 +35,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
   activePointId,
   onSelectPointId,
   onDeletePointId,
+  onStoreyChange,
   activeMode = 'shadowing',
   sunlightMethod = 'raycasting',
   onModeChange,
@@ -45,6 +56,16 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
 
   const associatedBuilding = buildings.find((b) => b.id === pointResult.buildingId);
   const buildingLabel = associatedBuilding ? associatedBuilding.name : `Budynek ${pointResult.buildingId}`;
+
+  const storeyIntervals = associatedBuilding
+    ? calculateBuildingFloors(
+        associatedBuilding.defaultHeight,
+        associatedBuilding.firstFloorHeight,
+        associatedBuilding.typicalFloorHeight,
+        associatedBuilding.elevation,
+        associatedBuilding.storeysCount
+      ).intervals
+    : [];
 
   return (
     <FloatingInspectorCard
@@ -123,6 +144,24 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Storey (kondygnacja) selector for the active point */}
+      {storeyIntervals.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <IndexPillSelector
+            label="Kondygnacja pomiaru:"
+            value={pointResult.storeyIndex ?? -1}
+            placeholderValue={-1}
+            placeholderLabel="Auto (na podstawie geometrii)"
+            options={storeyIntervals.map((iv) => ({
+              value: iv.index,
+              label: `${iv.isFirst ? 'Parter' : iv.label} (${iv.hBottom.toFixed(2)}–${iv.hTop.toFixed(2)} m)`,
+            }))}
+            onChange={(storeyIndex) => onStoreyChange?.(pointResult.id, storeyIndex)}
+            disabled={!onStoreyChange}
+          />
         </div>
       )}
 
@@ -221,7 +260,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
             <span>Czas słońca:</span>
           </div>
           <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#fcd34d' }}>
-            {sunlight.totalHours.toFixed(2)} h ({sunlight.totalMinutes} min)
+            {formatHoursAsClock(sunlight.totalMinutes)}
           </div>
         </div>
 
@@ -252,7 +291,7 @@ export const PointInspectorModal: React.FC<PointInspectorModalProps> = React.mem
               return (
                 <div
                   key={idx}
-                  title={`${sec.startTimeStr} - ${sec.endTimeStr} (${sec.hours.toFixed(2)}h) — ${
+                  title={`${sec.startTimeStr} - ${sec.endTimeStr} (${formatHoursAsClock(sec.hours * 60)}) — ${
                     sec.isDirectSunlight ? 'Bezpośrednie słońce (Kąt ≥ 12°)' : 'Zacienione'
                   }`}
                   style={{
