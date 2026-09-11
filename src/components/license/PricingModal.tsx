@@ -8,6 +8,7 @@ import {
   Loader2,
   Gift,
   Copy,
+  Download,
   Sparkles,
   Crown,
   Clock,
@@ -19,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useUiStore, useLicenseStore } from '../../store';
 import { APP_CONFIG } from '../../config/appConfig';
-import { fetchJson } from '../../utils/apiFetch';
+import { fetchJson, downloadLicenseKeyFile } from '../../utils/apiFetch';
 
 const PREVIEW_MODE = APP_CONFIG.previewMode.enabled;
 
@@ -126,6 +127,13 @@ export const PricingModal: React.FC = () => {
 
       setTrialKey(data.licenseKey);
       setInputKey(data.licenseKey);
+
+      // Automatyczne pobranie pliku TXT z kluczem
+      try {
+        downloadLicenseKeyFile(data.licenseKey, 7, 'Bezpłatny Dostęp Zapoznawczy (7 dni)');
+      } catch (dlErr) {
+        console.warn('Błąd pobierania pliku TXT z kluczem:', dlErr);
+      }
     } catch (err: any) {
       setTrialError(err.message || 'Wystąpił błąd podczas generowania klucza próbnego.');
     } finally {
@@ -618,25 +626,36 @@ export const PricingModal: React.FC = () => {
                       <span style={{ fontSize: '14px', fontWeight: 800, fontFamily: 'monospace', color: '#34d399', letterSpacing: '0.03em' }}>
                         {trialKey}
                       </span>
-                      <button
-                        type="button"
-                        onClick={handleCopyTrialKey}
-                        className="btn-secondary"
-                        style={{ width: 'auto', padding: '6px 10px', fontSize: '11px', gap: '5px' }}
-                        title="Skopiuj klucz do schowka"
-                      >
-                        {trialCopied ? (
-                          <>
-                            <Check size={12} color="#10b981" />
-                            <span style={{ color: '#10b981' }}>Skopiowano</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={12} />
-                            <span>Kopiuj</span>
-                          </>
-                        )}
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => downloadLicenseKeyFile(trialKey, 7, 'Bezpłatny Dostęp Zapoznawczy (7 dni)')}
+                          className="btn-secondary"
+                          style={{ width: 'auto', padding: '6px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="Pobierz klucz jako plik tekstowy (.txt)"
+                        >
+                          <Download size={13} color="#34d399" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopyTrialKey}
+                          className="btn-secondary"
+                          style={{ width: 'auto', padding: '6px 10px', fontSize: '11px', gap: '5px' }}
+                          title="Skopiuj klucz do schowka"
+                        >
+                          {trialCopied ? (
+                            <>
+                              <Check size={12} color="#10b981" />
+                              <span style={{ color: '#10b981' }}>Skopiowano</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={12} />
+                              <span>Kopiuj</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <button
                       type="button"
