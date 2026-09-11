@@ -6,13 +6,12 @@ export const ProBadge: React.FC = () => {
   const isPro = useLicenseStore((s) => s.isPro);
   const daysLeft = useLicenseStore((s) => s.daysLeft);
   const setPricingModalOpen = useUiStore((s) => s.setPricingModalOpen);
-  const setLicenseModalOpen = useUiStore((s) => s.setLicenseModalOpen);
 
   if (isPro) {
     return (
       <button
         type="button"
-        onClick={() => setLicenseModalOpen(true)}
+        onClick={() => setPricingModalOpen(true)}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -47,3 +46,4 @@ export const ProBadge: React.FC = () => {
     </button>
   );
 };
+

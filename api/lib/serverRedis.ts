@@ -5,13 +5,20 @@ import { Ratelimit } from '@upstash/ratelimit';
 let cachedRedis: Redis | null = null;
 let cachedRatelimit: Ratelimit | null = null;
 
+const DEFAULT_UPSTASH_URL = 'https://solid-grub-133256.upstash.io';
+const DEFAULT_UPSTASH_TOKEN = 'gQAAAAAAAgiIAAIgcDE2OGEwMmY4NmYwNzU0NjI4YjU1MTU2MmI3ZjkyZGQ4NA';
+
 export function getRedisAndRatelimit() {
   if (cachedRedis) {
     return { redis: cachedRedis, ratelimit: cachedRatelimit };
   }
-  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+
+  const url = process.env.UPSTASH_REDIS_REST_URL || DEFAULT_UPSTASH_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || DEFAULT_UPSTASH_TOKEN;
+
+  if (url && token) {
     try {
-      cachedRedis = Redis.fromEnv();
+      cachedRedis = new Redis({ url, token });
       cachedRatelimit = new Ratelimit({
         redis: cachedRedis,
         limiter: Ratelimit.slidingWindow(30, '1 h'),
