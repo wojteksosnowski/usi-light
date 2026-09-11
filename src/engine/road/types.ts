@@ -1,6 +1,7 @@
 import { Point2D } from '../../types/geometry';
 
-export type RoadStrategy = 'shortest' | 'centered_smooth';
+export type RoadStrategy = 'centered_smooth';
+export type RoadSolveStatus = 'pending' | 'solved' | 'partial_radius' | 'no_path';
 
 export interface RoadSolveInput {
   pointA: Point2D;
@@ -9,7 +10,7 @@ export interface RoadSolveInput {
   obstacles: Point2D[][];
   plot: Point2D[] | null;
   strategy?: RoadStrategy;
-  /** Promień skrętu (m) egzekwowany przez strategię 'centered_smooth'; ignorowany przy 'shortest'. */
+  /** Minimalny promień skrętu (m). Zmniejszanie promienia poniżej tej wartości jest niedopuszczalne. */
   minTurnRadius?: number;
 }
 
@@ -18,7 +19,6 @@ export interface RoadSolveResult {
   polygon: Point2D[];
   success: boolean;
   reason?: 'no_path' | 'point_blocked';
-  /** false gdy strategia 'centered_smooth' musiała lokalnie zmniejszyć lub pominąć promień
-   * skrętu w co najmniej jednym załamaniu, bo pełny promień kolidował z przeszkodami. */
+  /** false gdy promień skrętu w co najmniej jednym załamaniu nie mógł osiągnąć R_min */
   radiusFullyMet?: boolean;
 }

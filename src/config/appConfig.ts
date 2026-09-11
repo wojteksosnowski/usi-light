@@ -63,6 +63,12 @@ export const APP_CONFIG = {
     testedBuildingSelectedFill: 'rgba(59, 130, 246, 0.30)',
     obstacleBuildingFill: 'rgba(71, 85, 105, 0.18)',
     obstacleBuildingSelectedFill: 'rgba(148, 163, 184, 0.28)',
+    // Kolory obszarów utwardzonych (areaType: 'utwardzenie')
+    hardstandingFill: 'rgba(120, 113, 108, 0.22)',
+    hardstandingHoverFill: 'rgba(168, 162, 158, 0.30)',
+    hardstandingSelectedFill: 'rgba(168, 162, 158, 0.40)',
+    hardstandingStroke: '#a8a29e',
+    hardstandingSelectedStroke: '#e7e5e4',
   },
 
   // System śledzenia kierunków i snapowania (Polar / Ortho Tracking & Snapping)

@@ -154,16 +154,6 @@ function buildRawJoinRing(vertices: Point2D[], distance: number, joinType: 'roun
 /**
  * Uniwersalny, kuloodporny offset wielokąta — dylatacja (`distance > 0`) lub erozja
  * (`distance < 0`) o zadaną odległość, ze stylem naroża 'miter'|'round'|'bevel'.
- *
- * W przeciwieństwie do naiwnego offsetu per-wierzchołek (który przy dużej erozji wielokątów
- * niewypukłych może się samo-przeciąć albo powinien rozpaść się na kilka niezależnych wysp),
- * ta funkcja czyści surowy wynik techniką "self-union": przepuszcza go przez boolowską unię
- * (`unionPolygonLoops`, wrapper na `polygon-clipping`) tego samego pierścienia z samym sobą —
- * standardowy sposób naprawy samo-przecinających się wielokątów, który przy okazji poprawnie
- * rozdziela wynik na wiele prostych pętli, gdy erozja faktycznie rozcina wielokąt na wyspy.
- *
- * @returns Płaska lista pętli wynikowych (0 pętli = wielokąt całkowicie się zapadł; >1 pętla =
- * erozja rozcięła wielokąt na niezależne wyspy). Puste tylko w skrajnym przypadku degeneracji.
  */
 export function offsetPolygonRobust(
   vertices: Point2D[],
@@ -184,10 +174,6 @@ export function offsetPolygonRobust(
 
   if (rawRing.length < 3) return [];
 
-  // Self-union: naprawia samo-przecięcia i rozdziela na niezależne pętle (wyspy), jeśli erozja
-  // faktycznie rozcina geometrię — polygon-clipping poprawnie obsługuje samo-przecinające wejście.
-  // Uwaga: unionPolygonLoops ma skrót "1 wejście → zwróć bez zmian" (nic do łączenia), więc
-  // pierścień trzeba podać DWUKROTNIE, by wymusić faktyczne przejście przez silnik boolowski.
   let cleanedLoops: Point2D[][];
   try {
     cleanedLoops = unionPolygonLoops([rawRing, rawRing]);
@@ -201,9 +187,107 @@ export function offsetPolygonRobust(
     if (loop.length < 3) return false;
     const area = Math.abs(calculateSignedArea(loop));
     if (area < minArea) return false;
-    // Przy erozji żadna wynikowa wyspa nie może być większa niż oryginalny wielokąt (sanity check
-    // analogiczny do dawnego validateOffsetResult, ale per-pętla, nie all-or-nothing).
     if (distance < 0 && area > origArea + minArea) return false;
     return true;
   });
 }
+
+/**
+ * Buduje surowy pierścień miter z adaptacyjnym odsunięciem wypukłych narożników dla zadanego promienia R_min.
+ */
+function buildRoadMiterRing(
+  vertices: Point2D[],
+  distance: number,
+  minTurnRadius: number,
+  isCCW: boolean
+): Point2D[] {
+  const n = vertices.length;
+  const edgeNormals = computeEdgeNormals(vertices, isCCW);
+  const result: Point2D[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const prevIdx = (i - 1 + n) % n;
+    const nextIdx = i;
+    const n1 = edgeNormals[prevIdx];
+    const n2 = edgeNormals[nextIdx];
+    const vi = vertices[i];
+
+    if (n1.len < 1e-7 && n2.len < 1e-7) {
+      result.push({ ...vi });
+      continue;
+    }
+
+    const norm1 = n1.len < 1e-7 ? n2 : n1;
+    const norm2 = n2.len < 1e-7 ? n1 : n2;
+
+    const cross = norm1.x * norm2.y - norm1.y * norm2.x;
+    const isConvex = isCCW ? cross > 1e-5 : cross < -1e-5;
+
+    const c1 = norm1.x * vi.x + norm1.y * vi.y + distance;
+    const c2 = norm2.x * vi.x + norm2.y * vi.y + distance;
+    const det = norm1.x * norm2.y - norm1.y * norm2.x;
+
+    if (Math.abs(det) < 1e-5) {
+      result.push({ x: vi.x + distance * norm1.x, y: vi.y + distance * norm1.y });
+      continue;
+    }
+
+    const px = (c1 * norm2.y - c2 * norm1.y) / det;
+    const py = (norm1.x * c2 - norm2.x * c1) / det;
+
+    if (isConvex && minTurnRadius > distance) {
+      const bisectX = norm1.x + norm2.x;
+      const bisectY = norm1.y + norm2.y;
+      const bisectLen = Math.hypot(bisectX, bisectY);
+      if (bisectLen > 1e-5) {
+        const sinHalfTheta = Math.max(0.1, bisectLen / 2);
+        const requiredDist = (minTurnRadius / sinHalfTheta) - minTurnRadius + distance;
+        const clampedDist = Math.min(requiredDist, Math.max(distance * 4.0, minTurnRadius * 4.0));
+        result.push({
+          x: vi.x + (clampedDist * bisectX) / bisectLen,
+          y: vi.y + (clampedDist * bisectY) / bisectLen,
+        });
+        continue;
+      }
+    }
+
+    result.push({ x: px, y: py });
+  }
+
+  return result;
+}
+
+/**
+ * Dylatuje przeszkody pod trasowanie drogi z uwzględnieniem minimalnego promienia skrętu R_min.
+ * Odsunięcie wypukłych narożników o O(theta, R_min, W/2) gwarantuje, że wpisany łuk o pełnym
+ * promieniu R_min nie zetnie narożnika i zachowa odległość >= W/2 od przeszkody.
+ */
+export function offsetPolygonForRoad(
+  vertices: Point2D[],
+  distance: number,
+  minTurnRadius: number,
+  options: MiterOffsetOptions = {}
+): Point2D[][] {
+  if (!vertices || vertices.length < 3) return [];
+  if (Math.abs(distance) < 1e-5) return [vertices.map((p) => ({ ...p }))];
+
+  const { minArea = 0.5 } = options;
+  const isCCW = isPolygonCCW(vertices);
+  const rawRing = buildRoadMiterRing(vertices, distance, minTurnRadius, isCCW);
+
+  if (rawRing.length < 3) return [];
+
+  let cleanedLoops: Point2D[][];
+  try {
+    cleanedLoops = unionPolygonLoops([rawRing, rawRing]);
+  } catch {
+    cleanedLoops = [rawRing];
+  }
+
+  return cleanedLoops.filter((loop) => {
+    if (loop.length < 3) return false;
+    const area = Math.abs(calculateSignedArea(loop));
+    return area >= minArea;
+  });
+}
+

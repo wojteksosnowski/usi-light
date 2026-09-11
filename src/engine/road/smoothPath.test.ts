@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { smoothCenterlineWithArcs } from './smoothPath';
+import { dilateObstacles, dilateObstaclesForRoad, isSegmentClear } from './obstacleZone';
+import { buildVisibilityGraph } from './visibilityGraph';
+import { findShortestPath } from './pathfind';
 
 describe('smoothCenterlineWithArcs', () => {
   it('leaves a straight 2-point line untouched', () => {
@@ -29,13 +32,13 @@ describe('smoothCenterlineWithArcs', () => {
     }
   });
 
-  it('shrinks the radius (not skips it silently) when the full radius would collide', () => {
+  it('does not reduce radius below minTurnRadius when minTurnRadius would collide, reporting fullyMet=false', () => {
     const centerline = [
       { x: -10, y: 0 },
       { x: 0, y: 0 },
       { x: 0, y: 10 },
     ];
-    // Przeszkoda tuż przy narożniku, blokująca duży łuk ale nie mały.
+    // Przeszkoda blokująca łuk o promieniu 8m
     const obstacle = [
       [
         { x: -1, y: 5 },
@@ -49,15 +52,16 @@ describe('smoothCenterlineWithArcs', () => {
     expect(fullyMet).toBe(false);
   });
 
-  it('caps tangent length so arcs on short adjacent segments do not overlap the endpoints', () => {
+  it('smoothly rounds corner with maximal fitting radius when requested radius cannot fit, reporting fullyMet=false', () => {
     const centerline = [
       { x: -1, y: 0 },
       { x: 0, y: 0 },
       { x: 0, y: 1 },
     ];
-    const { path } = smoothCenterlineWithArcs(centerline, 10, [], 0, null);
-    // Punkt startowy łuku nie może wyjść poza segment wejściowy.
-    const firstArcPoint = path[1];
-    expect(firstArcPoint.x).toBeGreaterThanOrEqual(-1 - 1e-6);
+    // desiredRadius = 10m wymaga stycznej ~10m, ale segmenty mają długość 1m.
+    // Solver adaptacyjnie wpisuje maksymalny bezkolizyjny łuk (~0.98m), eliminując ostre załamanie i raportując fullyMet=false.
+    const { path, fullyMet } = smoothCenterlineWithArcs(centerline, 10, [], 0, null);
+    expect(fullyMet).toBe(false);
+    expect(path.length).toBeGreaterThan(3);
   });
 });

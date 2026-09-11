@@ -42,7 +42,7 @@ import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
 
 export type ObjectCategory = 'building' | 'boundary' | 'balcony' | 'road';
 export type AreaType = 'plot' | 'playground' | 'utwardzenie';
-export type RoadStrategy = 'shortest' | 'centered_smooth';
+export type RoadStrategy = 'centered_smooth';
 
 export interface PlaygroundSamplePoint {
   point: Point2D;

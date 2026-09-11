@@ -1,22 +1,26 @@
 import { Point2D } from '../../types/geometry';
 import { generateSweepPolygon } from '../../utils/math2d/sweep';
 import { isPointInPolygon } from '../../utils/math2d/polygons';
-import { dilateObstacles, insetPlot, isSegmentClear } from './obstacleZone';
+import { dilateObstacles, dilateObstaclesForRoad, insetPlot, isSegmentClear } from './obstacleZone';
 import { buildVisibilityGraph } from './visibilityGraph';
 import { findShortestPath } from './pathfind';
 import { smoothCenterlineWithArcs } from './smoothPath';
 import { RoadSolveInput, RoadSolveResult } from './types';
 
 /**
- * Wyznacza drogę łączącą pointA z pointB, omijającą przeszkody, algorytmem
- * grafu widoczności (strategia 'shortest'): dylatacja przeszkód o W/2, wierzchołki
- * przeszkód jako węzły grafu, Dijkstra po krawędziach nieprzecinających przeszkód.
+ * Wyznacza optymalną, bezkolizyjną drogę łączącą pointA z pointB:
+ * 1. Dylatacja przeszkód i stref buforowych o W/2 (oraz adaptacyjna dylatacja wierzchołków dla R_min).
+ * 2. Znalezienie najkrótszej bezkolizyjnej trasy algorytmem Dijkstry po grafie widoczności.
+ * 3. Automatyczne wygładzanie zakrętów łukami kołowymi o nienaruszalnym minimalnym promieniu (R >= minTurnRadius).
+ * 4. Generowanie wstęgi drogowej o zadanej szerokości W.
  */
 export function solveRoad(input: RoadSolveInput): RoadSolveResult {
-  const { pointA, pointB, width, obstacles, plot, strategy, minTurnRadius } = input;
+  const { pointA, pointB, width, obstacles, plot, minTurnRadius } = input;
   const halfWidth = width / 2;
+  const effectiveRadius = minTurnRadius ?? 6.0;
 
   const dilatedObstacles = dilateObstacles(obstacles, halfWidth);
+  const roadDilatedObstacles = dilateObstaclesForRoad(obstacles, halfWidth, effectiveRadius);
   const plotInset = plot && plot.length >= 3 ? insetPlot(plot, halfWidth) : null;
 
   for (const obstacle of dilatedObstacles) {
@@ -36,7 +40,7 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
   if (isSegmentClear(pointA, pointB, dilatedObstacles, plotInset)) {
     centerline = [pointA, pointB];
   } else {
-    const graph = buildVisibilityGraph(pointA, pointB, dilatedObstacles, plotInset);
+    const graph = buildVisibilityGraph(pointA, pointB, dilatedObstacles, plotInset, roadDilatedObstacles);
     centerline = findShortestPath(graph, 0, 1);
   }
 
@@ -45,10 +49,8 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
   }
 
   let radiusFullyMet: boolean | undefined;
-  const effectiveStrategy = strategy ?? 'centered_smooth';
-  const effectiveRadius = minTurnRadius ?? 6.0;
 
-  if (effectiveStrategy === 'centered_smooth' && effectiveRadius > 1e-6) {
+  if (effectiveRadius > 1e-6) {
     const smoothed = smoothCenterlineWithArcs(centerline, effectiveRadius, obstacles, halfWidth, plotInset);
     centerline = smoothed.path;
     radiusFullyMet = smoothed.fullyMet;

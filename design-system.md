@@ -54,6 +54,7 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
 - **Podświetlenie pod kursorem (`hoverColor`)**: `#fbbf24`
 - **Budynek badany (`testedBuildingFill`)**: `rgba(59, 130, 246, 0.16)` (selekcja: `rgba(59, 130, 246, 0.30)`)
 - **Budynek przesłaniający (`obstacleBuildingFill`)**: `rgba(71, 85, 105, 0.18)` (selekcja: `rgba(148, 163, 184, 0.28)`)
+- **Obszar utwardzony (`hardstandingFill`)**: `rgba(120, 113, 108, 0.22)` (hover: `rgba(168, 162, 158, 0.30)`, selekcja: `rgba(168, 162, 158, 0.40)`, krawędź: `#a8a29e`, krawędź selekcji: `#e7e5e4`)
 
 ### 2.2. Pasma Analityczne na Fasadach (`APP_CONFIG.analysisBands`)
 - **Przesłanianie § 12 (Pasmo wewnętrzne)**:

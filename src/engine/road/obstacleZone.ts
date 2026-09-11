@@ -1,6 +1,6 @@
 import { Point2D } from '../../types/geometry';
 import { offsetPolygonWithJoin } from '../../utils/math2d/miterOffset';
-import { offsetPolygonRobust } from '../../utils/math2d/offsetPolygon';
+import { offsetPolygonRobust, offsetPolygonForRoad } from '../../utils/math2d/offsetPolygon';
 import { unionPolygonLoops, differencePolygonLoops, isPointInPolygon } from '../../utils/math2d/polygons';
 import { segmentSegmentIntersectionParam, distancePointToSegment } from '../../utils/math2d/segments';
 import { pointsEqual } from '../../utils/math2d/vec2';
@@ -11,13 +11,20 @@ import { pointsEqual } from '../../utils/math2d/vec2';
  */
 export function dilateObstacles(obstacles: Point2D[][], halfWidth: number): Point2D[][] {
   if (halfWidth <= 1e-6) return obstacles.map((o) => o.map((p) => ({ ...p })));
-  // Uwaga: 'miter' (nie 'round') celowo — graf widoczności używa wierzchołków dylatowanej
-  // przeszkody jako węzłów; przy stylu 'round' cięcie (chord) między dwoma punktami tego
-  // samego łuku zawsze wpada do wnętrza okręgu, mimo że nie przecina żadnej krawędzi
-  // transversalnie (wchodzi/wychodzi w wierzchołkach) — dawałoby to fałszywie "wolne" ścieżki.
-  // flatMap (nie map): offsetPolygonRobust może rozdzielić dylatację skomplikowanej/niewypukłej
-  // przeszkody na kilka niezależnych pętli — wszystkie trafiają do dalszej unii przeszkód.
   return obstacles.flatMap((o) => offsetPolygonRobust(o, halfWidth, 'miter'));
+}
+
+/**
+ * Dylatuje przeszkody z adaptacyjnym odsunięciem wypukłych narożników pod zadany promień R_min.
+ */
+export function dilateObstaclesForRoad(
+  obstacles: Point2D[][],
+  halfWidth: number,
+  minTurnRadius: number = 0
+): Point2D[][] {
+  if (halfWidth <= 1e-6) return obstacles.map((o) => o.map((p) => ({ ...p })));
+  const effectiveR = Math.max(halfWidth, minTurnRadius);
+  return obstacles.flatMap((o) => offsetPolygonForRoad(o, halfWidth, effectiveR));
 }
 
 /**
@@ -84,13 +91,25 @@ export function isSegmentClear(
   dilatedObstacles: Point2D[][],
   plotInset?: Point2D[] | null
 ): boolean {
-  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   for (const obstacle of dilatedObstacles) {
-    // Cięcie (chord) łączące dwa styczne punkty tego samego zaokrąglonego narożnika
-    // przechodzi wewnątrz przeszkody bez transversalnego przecięcia żadnej krawędzi
-    // (wchodzi/wychodzi dokładnie w wierzchołkach) — łapiemy ten przypadek testem środka.
-    if (isPointStrictlyInsidePolygon(mid, obstacle, 1e-4)) {
-      return false;
+    if (obstacle.length < 3) continue;
+    const SAMPLE_COUNT = 20;
+    const n = obstacle.length;
+    for (let s = 1; s < SAMPLE_COUNT; s++) {
+      const t = s / SAMPLE_COUNT;
+      const pt = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (isPointInPolygon(pt, obstacle)) {
+        let onBoundary = false;
+        for (let i = 0; i < n; i++) {
+          if (distancePointToSegment(pt, obstacle[i], obstacle[(i + 1) % n]) < 1e-4) {
+            onBoundary = true;
+            break;
+          }
+        }
+        if (!onBoundary) {
+          return false;
+        }
+      }
     }
   }
 
@@ -101,8 +120,7 @@ export function isSegmentClear(
       const p1 = obstacle[i];
       const p2 = obstacle[(i + 1) % n];
       // Pomijamy krawędzie przeszkody dotykające a/b tym samym wierzchołkiem (styczność w węźle
-      // grafu widoczności, nie kolizja) — inaczej każdy odcinek wychodzący z narożnika przeszkody
-      // zostałby błędnie zablokowany przez własną krawędź.
+      // grafu widoczności, nie kolizja)
       if (pointsEqual(a, p1) || pointsEqual(a, p2) || pointsEqual(b, p1) || pointsEqual(b, p2)) {
         continue;
       }
@@ -113,6 +131,7 @@ export function isSegmentClear(
   }
 
   if (plotInset && plotInset.length >= 3) {
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     if (!isPointInPolygon(mid, plotInset)) {
       return false;
     }

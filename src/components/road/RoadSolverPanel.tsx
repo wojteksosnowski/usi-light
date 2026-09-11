@@ -109,16 +109,7 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
             : 'Trasa OK'}
         </div>
 
-        <SegmentedControl
-          label="Strategia"
-          value={selectedBuilding.roadStrategy ?? 'centered_smooth'}
-          onChange={(roadStrategy) => updateSelectedBuilding({ roadStrategy })}
-          options={[
-            { value: 'shortest', label: 'Najkrótsza' },
-            { value: 'centered_smooth', label: 'Wygładzona' },
-          ]}
-          accentVar="#94a3b8"
-        />
+
 
         <LabeledNumberField
           label="Szerokość (m)"
@@ -133,7 +124,6 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
           value={selectedBuilding.roadMinTurnRadius ?? 6.0}
           step={0.5}
           min={0}
-          hint="Używany tylko przez strategię 'Wygładzona'"
           onChange={(roadMinTurnRadius) => updateSelectedBuilding({ roadMinTurnRadius })}
         />
 
