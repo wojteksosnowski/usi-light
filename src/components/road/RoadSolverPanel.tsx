@@ -127,6 +127,47 @@ export const RoadSolverPanel: React.FC<RoadSolverPanelProps> = React.memo(({
           onChange={(roadMinTurnRadius) => updateSelectedBuilding({ roadMinTurnRadius })}
         />
 
+        <div>
+          <LabeledNumberField
+            label="Łuk na skrzyżowaniu (R w metrach)"
+            value={selectedBuilding.roadCornerRadius ?? 5.0}
+            step={0.5}
+            min={0.5}
+            max={25.0}
+            onChange={(roadCornerRadius) => updateSelectedBuilding({ roadCornerRadius })}
+          />
+          <div style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+            {[
+              { label: '3.0m', val: 3.0, title: 'Minimalny łuk zjazdu / chodnika' },
+              { label: '5.0m', val: 5.0, title: 'Standardowa droga wewnętrzna' },
+              { label: '6.0m', val: 6.0, title: 'Dojazd pożarowy / ciężki' },
+            ].map((preset) => {
+              const isActive = (selectedBuilding.roadCornerRadius ?? 5.0) === preset.val;
+              return (
+                <button
+                  key={preset.val}
+                  type="button"
+                  onClick={() => updateSelectedBuilding({ roadCornerRadius: preset.val })}
+                  title={preset.title}
+                  style={{
+                    flex: 1,
+                    padding: '4px 6px',
+                    borderRadius: '6px',
+                    border: isActive ? '1px solid var(--accent-stone, #a8a29e)' : '1px solid var(--border-light)',
+                    backgroundColor: isActive ? 'rgba(168, 162, 158, 0.25)' : 'var(--bg-input)',
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontWeight: isActive ? 700 : 500,
+                    fontSize: '10.5px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <button
           type="button"
           disabled={status !== 'solved' && status !== 'partial_radius'}

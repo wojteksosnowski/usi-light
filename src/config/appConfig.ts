@@ -161,6 +161,14 @@ export const APP_CONFIG = {
   geoOverlays: {
     showTogglesPanel: false,
   },
+
+  // Niedestrukcyjna siatka dróg i utwardzeń
+  roadNetwork: {
+    defaultCornerRadius: 5.0, // Domyślny promień łuku na skrzyżowaniach i włączeniach (m)
+    minCornerRadius: 0.5,
+    maxCornerRadius: 25.0,
+    filletSegmentsPerArc: 6, // Liczba segmentów na łuk wyokrąglenia
+  },
 } as const;
 
 

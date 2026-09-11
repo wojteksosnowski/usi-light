@@ -93,6 +93,7 @@ export interface BuildingLoop {
   roadPointB?: Point2D; // Punkt docelowy drogi (category === 'road')
   roadStrategy?: RoadStrategy; // Strategia solvera drogi
   roadMinTurnRadius?: number; // Minimalny promień skrętu (m), używany przez strategię 'centered_smooth'
+  roadCornerRadius?: number; // Promień zaokrąglenia łuków na skrzyżowaniach i włączeniach (m), default: 5.0
   roadSolveStatus?: 'pending' | 'solved' | 'no_path' | 'partial_radius'; // Status ostatniego przeliczenia solvera drogi
   playgroundVoronoi?: boolean; // Czy generować komórki Voronoi dla placu zabaw (domyślnie true)
   playgroundParams?: PlaygroundVoronoiConfig; // Opcjonalne parametry gęstości siatki Voronoi (faza testowa)

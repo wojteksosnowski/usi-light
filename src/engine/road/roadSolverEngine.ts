@@ -22,14 +22,16 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
   const dilatedObstacles = dilateObstacles(obstacles, halfWidth);
   const roadDilatedObstacles = dilateObstaclesForRoad(obstacles, halfWidth, effectiveRadius);
   const plotInset = plot && plot.length >= 3 ? insetPlot(plot, halfWidth) : null;
+  // Działka ogranicza korytarz drogowy, gdy oba punkty A i B leżą wewnątrz działki (droga wewnętrzna).
+  // Jeśli droga stanowi zjazd, drogę dojazdową lub włączenie z zewnątrz (A lub B poza działką),
+  // obrys działki nie blokuje trasy.
+  const isInternalRoad = Boolean(
+    plotInset && isPointInPolygon(pointA, plotInset) && isPointInPolygon(pointB, plotInset)
+  );
+  const effectivePlotInset = isInternalRoad ? plotInset : null;
 
   for (const obstacle of dilatedObstacles) {
     if (isPointInPolygon(pointA, obstacle) || isPointInPolygon(pointB, obstacle)) {
-      return { centerline: [], polygon: [], success: false, reason: 'point_blocked' };
-    }
-  }
-  if (plotInset) {
-    if (!isPointInPolygon(pointA, plotInset) || !isPointInPolygon(pointB, plotInset)) {
       return { centerline: [], polygon: [], success: false, reason: 'point_blocked' };
     }
   }
@@ -37,10 +39,10 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
   let centerline: Point2D[] | null;
 
   // Szybka ścieżka: gdy odcinek A->B jest już wolny, unikamy budowy pełnego grafu.
-  if (isSegmentClear(pointA, pointB, dilatedObstacles, plotInset)) {
+  if (isSegmentClear(pointA, pointB, dilatedObstacles, effectivePlotInset)) {
     centerline = [pointA, pointB];
   } else {
-    const graph = buildVisibilityGraph(pointA, pointB, dilatedObstacles, plotInset, roadDilatedObstacles);
+    const graph = buildVisibilityGraph(pointA, pointB, dilatedObstacles, effectivePlotInset, roadDilatedObstacles);
     centerline = findShortestPath(graph, 0, 1);
   }
 
@@ -51,7 +53,7 @@ export function solveRoad(input: RoadSolveInput): RoadSolveResult {
   let radiusFullyMet: boolean | undefined;
 
   if (effectiveRadius > 1e-6) {
-    const smoothed = smoothCenterlineWithArcs(centerline, effectiveRadius, obstacles, halfWidth, plotInset);
+    const smoothed = smoothCenterlineWithArcs(centerline, effectiveRadius, obstacles, halfWidth, effectivePlotInset);
     centerline = smoothed.path;
     radiusFullyMet = smoothed.fullyMet;
   }

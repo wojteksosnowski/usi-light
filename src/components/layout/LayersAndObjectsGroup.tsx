@@ -1690,6 +1690,71 @@ export const LayersAndObjectsGroup: React.FC = () => {
                       </div>
                     )}
                   </div>
+                ) : selectedBuilding.areaType === 'utwardzenie' ? (
+                  /* Utwardzenie (Siatka ulic, chodników i placów) */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(168, 162, 158, 0.1)',
+                        border: '1px solid rgba(168, 162, 158, 0.3)',
+                        fontSize: '11px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Powierzchnia utwardzenia:</span>
+                        <b style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>
+                          {selectedBuildingArea.toFixed(1)} m²
+                        </b>
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                        • Obiekt tworzy zunifikowaną siatkę dróg, chodników i placów bez szwów.
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Łuk skrzyżowań (R):</span>
+                        <b style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: '11px' }}>
+                          {(selectedBuilding.roadCornerRadius ?? 5.0).toFixed(1)} m
+                        </b>
+                      </div>
+                      <div style={{ display: 'flex', gap: '5px' }}>
+                        {[
+                          { label: '3.0m', val: 3.0, title: 'Minimalny łuk zjazdu / chodnika' },
+                          { label: '5.0m', val: 5.0, title: 'Standardowa droga wewnętrzna' },
+                          { label: '6.0m', val: 6.0, title: 'Dojazd pożarowy / ciężki' },
+                        ].map((preset) => {
+                          const isActive = (selectedBuilding.roadCornerRadius ?? 5.0) === preset.val;
+                          return (
+                            <button
+                              key={preset.val}
+                              type="button"
+                              onClick={() => updateSelectedBuilding({ roadCornerRadius: preset.val })}
+                              title={preset.title}
+                              style={{
+                                flex: 1,
+                                padding: '4px 6px',
+                                borderRadius: '6px',
+                                border: isActive ? '1px solid var(--accent-stone, #a8a29e)' : '1px solid var(--border-light)',
+                                backgroundColor: isActive ? 'rgba(168, 162, 158, 0.25)' : 'var(--bg-input)',
+                                color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                fontWeight: isActive ? 700 : 500,
+                                fontSize: '10.5px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   /* Działka */
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

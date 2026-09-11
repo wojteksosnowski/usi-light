@@ -12,6 +12,10 @@ import {
   computePolygonArea,
   computePolygonIntersectionWithBoundaries,
 } from '@/utils/math2d';
+import {
+  buildHardstandingMesh,
+  computeHardstandingAreaInPlot,
+} from '../../engine/road/hardstandingMeshEngine';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
 
 interface ProjectParametersPanelProps {
@@ -49,10 +53,10 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     return computePolygonArea(selectedBuilding.vertices);
   }, [selectedBuilding]);
 
-  // Działki (boundary, wykluczając place zabaw)
+  // Działki (boundary, wykluczając place zabaw i utwardzenia)
   const boundaryObjects = useMemo(() => {
     return buildings.filter(
-      (b) => b.category === 'boundary' && b.areaType !== 'playground' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
+      (b) => b.category === 'boundary' && b.areaType !== 'playground' && b.areaType !== 'utwardzenie' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
     );
   }, [buildings]);
 
@@ -69,6 +73,23 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
   const totalBoundaryArea = useMemo(() => {
     return activePlotBoundaries.reduce((sum, b) => sum + computePolygonArea(b.vertices), 0);
   }, [activePlotBoundaries]);
+
+  // Zunifikowana siatka utwardzeń (drogi, wstęgi, place, parkingi)
+  const hardstandingMesh = useMemo(() => {
+    return buildHardstandingMesh(buildings);
+  }, [buildings]);
+
+  // Powierzchnia utwardzona (Pu) w obrysie działki badanej
+  const hardstandingInPlotArea = useMemo(() => {
+    if (activePlotBoundaries.length === 0) {
+      return hardstandingMesh.totalArea;
+    }
+    return computeHardstandingAreaInPlot(hardstandingMesh.polygons, activePlotBoundaries);
+  }, [hardstandingMesh, activePlotBoundaries]);
+
+  const hardstandingCoverageRatio = useMemo(() => {
+    return totalBoundaryArea > 0 ? (hardstandingInPlotArea / totalBoundaryArea) * 100 : 0;
+  }, [hardstandingInPlotArea, totalBoundaryArea]);
 
 
   // Summary of tested buildings (Projektowane)
@@ -130,6 +151,14 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
         `Wskaźnik powierzchni zabudowy: ${testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%`,
         `Wskaźnik intensywności zabudowy: ${testedBuildingsSummary.intensityRatio.toFixed(2)}`
       );
+      if (hardstandingInPlotArea > 0) {
+        lines.push(
+          `Powierzchnia utwardzona (Pu): ${Math.round(hardstandingInPlotArea)} m²`,
+          `Wskaźnik powierzchni utwardzonej: ${hardstandingCoverageRatio.toFixed(1)}%`
+        );
+      }
+    } else if (hardstandingInPlotArea > 0) {
+      lines.push(`Powierzchnia utwardzona (Pu): ${Math.round(hardstandingInPlotArea)} m²`);
     }
 
     if (selectedBuilding && selectedBuilding.category !== 'boundary') {
@@ -292,6 +321,25 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
                 <span style={{ color: 'var(--text-secondary)' }}>Wskaźnik intensywności:</span>
                 <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityRatio.toFixed(2)}</b>
               </div>
+            </>
+          )}
+
+          {hardstandingInPlotArea > 0 && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(239, 68, 68, 0.2)', paddingTop: '4px', marginTop: '2px' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Pow. utwardzona (Pu):</span>
+                <b style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>
+                  {Math.round(hardstandingInPlotArea)} m²
+                </b>
+              </div>
+              {totalBoundaryArea > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Wskaźnik pow. utwardzonej:</span>
+                  <b style={{ color: 'var(--accent-stone, #d6d3d1)', fontFamily: 'monospace' }}>
+                    {hardstandingCoverageRatio.toFixed(1)}%
+                  </b>
+                </div>
+              )}
             </>
           )}
         </div>

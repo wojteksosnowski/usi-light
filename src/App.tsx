@@ -19,6 +19,7 @@ import { CadToolBar } from './components/layout/CadToolBar';
 import { ControlPointButton } from './components/layout/ControlPointButton';
 import { CadLegendBottom } from './components/layout/CadLegendBottom';
 import { registerGeoLayers } from './modules/wfs-import/registerGeoLayers';
+import { APP_CONFIG } from './config/appConfig';
 import {
   useSceneStore,
   useCadToolStore,
@@ -620,6 +621,7 @@ export const App: React.FC = () => {
         newBldg.roadPointB = pointB;
         newBldg.roadStrategy = 'centered_smooth';
         newBldg.roadMinTurnRadius = 6.0;
+        newBldg.roadCornerRadius = APP_CONFIG.roadNetwork.defaultCornerRadius;
         newBldg.roadSolveStatus = geometry.roadSolveStatus;
 
         addBuilding(newBldg);

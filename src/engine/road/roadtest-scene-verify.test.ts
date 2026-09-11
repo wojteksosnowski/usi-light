@@ -3,9 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import polygonClipping from 'polygon-clipping';
 import { solveRoad } from './roadSolverEngine';
+import { solveRoadObjectGeometry } from './roadObjectGeometry';
 import { gatherRoadObstacles, findPlotBoundary } from './gatherObstacles';
+import { buildHardstandingMesh, computeHardstandingAreaInPlot } from './hardstandingMeshEngine';
 import { RoadSolveInput, RoadSolveResult } from './types';
-import { Point2D } from '../../types/geometry';
+import { Point2D, BuildingLoop } from '../../types/geometry';
 import { calculateSignedArea } from '../../utils/math2d/polygons';
 import { hasSelfIntersectionForTest } from '../../utils/math2d/sweep';
 
@@ -282,6 +284,60 @@ export function analyzeCenterlineCurvature(
 }
 
 /**
+ * Analizuje wierzchołki pierścienia wielokąta pod kątem kątów załamań,
+ * wykrywając ostre narożniki wklęsłe (węzły skrzyżowań) oraz łuki wyokrąglające (fillet).
+ */
+export function analyzePolygonCornerAngles(
+  ring: Point2D[],
+  isOuterCCW: boolean = true,
+  sharpAngleThresholdDeg: number = 45.0
+) {
+  const n = ring.length;
+  if (n < 3) return { sharpConcaveCorners: [], smoothedArcPointsCount: 0, turnAnglesDeg: [] };
+
+  const turnAnglesDeg: number[] = [];
+  const sharpConcaveCorners: Array<{ index: number; pt: Point2D; angleDeg: number }> = [];
+  let smoothedArcPointsCount = 0;
+
+  for (let i = 0; i < n; i++) {
+    const pPrev = ring[(i - 1 + n) % n];
+    const pCurr = ring[i];
+    const pNext = ring[(i + 1) % n];
+
+    const inDx = pCurr.x - pPrev.x;
+    const inDy = pCurr.y - pPrev.y;
+    const outDx = pNext.x - pCurr.x;
+    const outDy = pNext.y - pCurr.y;
+
+    const inLen = Math.hypot(inDx, inDy);
+    const outLen = Math.hypot(outDx, outDy);
+
+    if (inLen < 1e-4 || outLen < 1e-4) continue;
+
+    const dot = (inDx * outDx + inDy * outDy) / (inLen * outLen);
+    const clampedDot = Math.max(-1, Math.min(1, dot));
+    const turnAngleDeg = (Math.acos(clampedDot) * 180) / Math.PI;
+    turnAnglesDeg.push(turnAngleDeg);
+
+    // Cross product: inDir x outDir
+    const cross = inDx * outDy - inDy * outDx;
+    const isConcave = isOuterCCW ? cross < -1e-4 : cross > 1e-4;
+
+    if (isConcave) {
+      if (turnAngleDeg > sharpAngleThresholdDeg) {
+        // Niewyokrąglone, surowe ostre załamanie wklęsłe węzła skrzyżowania
+        sharpConcaveCorners.push({ index: i, pt: pCurr, angleDeg: turnAngleDeg });
+      } else if (turnAngleDeg >= 1.0) {
+        // Punkt leżący na płynnym łuku wyokrąglającym (fillet arc)
+        smoothedArcPointsCount++;
+      }
+    }
+  }
+
+  return { sharpConcaveCorners, smoothedArcPointsCount, turnAnglesDeg };
+}
+
+/**
  * ============================================================================
  * TESTY REFERENCYJNE
  * ============================================================================
@@ -493,6 +549,254 @@ describe('Referencyjny test walidacji geometrii i integralności Drogi', () => {
         });
       });
     });
+
+    // Wariant C: Niedestrukcyjna siatka utwardzeń (Hardstanding Mesh), docinanie i zaokrąglanie skrzyżowań
+    describe('Wariant C: Niedestrukcyjna siatka utwardzeń (Hardstanding Mesh) w roadtest3.json', () => {
+      const obstacles = gatherRoadObstacles(scene.buildings);
+      const plotBoundary = findPlotBoundary(scene.buildings);
+
+      it('Pętla 1 (Adaptacyjny plot): pomyślnie rozwiązuje geometrię wszystkich 5 dróg przy aktywnym obrysie działki', () => {
+        const solvedRoads = roadBuildings.map((road: any) => {
+          const geom = solveRoadObjectGeometry(
+            {
+              pointA: road.roadPointA,
+              pointB: road.roadPointB,
+              width: road.sweepWidth ?? 5,
+              obstacles,
+              plot: plotBoundary,
+              strategy: road.roadStrategy ?? 'centered_smooth',
+              minTurnRadius: road.roadMinTurnRadius ?? 6,
+            },
+            road.id
+          );
+          return {
+            ...road,
+            vertices: geom.vertices,
+            sweepPath: geom.sweepPath,
+            roadSolveStatus: geom.roadSolveStatus,
+          };
+        });
+
+        expect(solvedRoads.length).toBe(5);
+        for (const r of solvedRoads) {
+          expect(r.vertices.length).toBeGreaterThanOrEqual(4);
+          expect(r.roadSolveStatus).not.toBe('no_path');
+        }
+      });
+
+      it('Pętla 2 i 3 (Siatka utwardzeń i jakość skrzyżowań): łączy drogi w spójną siatkę bez samoprzecięć z łukami fillet', () => {
+        const solvedBuildings: BuildingLoop[] = scene.buildings.map((b: any) => {
+          if (!b.roadPointA || !b.roadPointB) return b;
+          const geom = solveRoadObjectGeometry(
+            {
+              pointA: b.roadPointA,
+              pointB: b.roadPointB,
+              width: b.sweepWidth ?? 5,
+              obstacles,
+              plot: plotBoundary,
+              strategy: b.roadStrategy ?? 'centered_smooth',
+              minTurnRadius: b.roadMinTurnRadius ?? 6,
+            },
+            b.id
+          );
+          return {
+            ...b,
+            vertices: geom.vertices,
+            sweepPath: geom.sweepPath,
+            roadSolveStatus: geom.roadSolveStatus,
+          };
+        });
+
+        // 1. Zbudowanie siatki
+        const mesh = buildHardstandingMesh(solvedBuildings, true);
+
+        // Wszystkie obiekty dróg weszły do siatki (5 dróg + 1 dodatkowy obiekt utwardzenia)
+        expect(mesh.sourceBuildingIds).toHaveLength(6);
+        expect(mesh.polygons.length).toBeGreaterThanOrEqual(1);
+
+        // 2. Brak samoprzecięć na wielokątach wynikowych siatki
+        for (const poly of mesh.polygons) {
+          expect(hasSelfIntersectionForTest(poly.outer)).toBe(false);
+          for (const hole of poly.holes) {
+            expect(hasSelfIntersectionForTest(hole)).toBe(false);
+          }
+        }
+
+        // 3. Łuki wyokrąglające skrzyżowań (fillet) - liczba punktów po unii i wygładzeniu jest większa niż suma surowych wierzchołków
+        const totalMeshOuterPoints = mesh.polygons.reduce((acc, p) => acc + p.outer.length, 0);
+        expect(totalMeshOuterPoints).toBeGreaterThan(100);
+
+        // 4. Niedestrukcyjność: obiekty źródłowe zachowują punkty A/B i niezależność
+        const liveRoads = solvedBuildings.filter((b) => b.roadPointA && b.roadPointB);
+        expect(liveRoads).toHaveLength(5);
+        for (const r of liveRoads) {
+          expect(r.roadPointA).toBeDefined();
+          expect(r.roadPointB).toBeDefined();
+        }
+      });
+
+      it('Weryfikacja ostrych narożników (załamań): eliminuje surowe kąty wklęsłe (>45°) na skrzyżowaniach na rzecz łuków fillet', () => {
+        const solvedBuildings: BuildingLoop[] = scene.buildings.map((b: any) => {
+          if (!b.roadPointA || !b.roadPointB) return b;
+          const geom = solveRoadObjectGeometry(
+            {
+              pointA: b.roadPointA,
+              pointB: b.roadPointB,
+              width: b.sweepWidth ?? 5,
+              obstacles,
+              plot: plotBoundary,
+              strategy: b.roadStrategy ?? 'centered_smooth',
+              minTurnRadius: b.roadMinTurnRadius ?? 6,
+            },
+            b.id
+          );
+          return {
+            ...b,
+            vertices: geom.vertices,
+            sweepPath: geom.sweepPath,
+            roadSolveStatus: geom.roadSolveStatus,
+          };
+        });
+
+        const mesh = buildHardstandingMesh(solvedBuildings, true);
+
+        // Analiza kątów na zewnętrznym obrysie siatki
+        for (const poly of mesh.polygons) {
+          const analysis = analyzePolygonCornerAngles(poly.outer, true, 45.0);
+          // Wszystkie węzły skrzyżowań dróg zostały zaokrąglone łukami fillet (brak ostrych wklęsłych załamań > 45°)
+          expect(analysis.sharpConcaveCorners).toHaveLength(0);
+          expect(analysis.smoothedArcPointsCount).toBeGreaterThan(0);
+        }
+      });
+
+      it('Weryfikacja braku nakładania się wypełnień: wielokąty ostatecznego kształtu są rozłączne i eliminują podwójne krycie', () => {
+        const solvedBuildings: BuildingLoop[] = scene.buildings.map((b: any) => {
+          if (!b.roadPointA || !b.roadPointB) return b;
+          const geom = solveRoadObjectGeometry(
+            {
+              pointA: b.roadPointA,
+              pointB: b.roadPointB,
+              width: b.sweepWidth ?? 5,
+              obstacles,
+              plot: plotBoundary,
+              strategy: b.roadStrategy ?? 'centered_smooth',
+              minTurnRadius: b.roadMinTurnRadius ?? 6,
+            },
+            b.id
+          );
+          return {
+            ...b,
+            vertices: geom.vertices,
+            sweepPath: geom.sweepPath,
+            roadSolveStatus: geom.roadSolveStatus,
+          };
+        });
+
+        const mesh = buildHardstandingMesh(solvedBuildings, true);
+
+        // 1. Rozłączność poszczególnych wielokątów siatki (jeśli siatka składa się z kilku wysp)
+        if (mesh.polygons.length > 1) {
+          for (let i = 0; i < mesh.polygons.length; i++) {
+            for (let j = i + 1; j < mesh.polygons.length; j++) {
+              const ringI = [toClippingRing(mesh.polygons[i].outer)];
+              const ringJ = [toClippingRing(mesh.polygons[j].outer)];
+              const inter = polygonClipping.intersection([ringI], [ringJ]);
+              expect(inter).toHaveLength(0);
+            }
+          }
+        }
+
+        // 2. Eliminacja powierzchni nakładających się skrzyżowań (brak double-fill alpha)
+        // Suma pól WSZYSTKICH obiektów wchodzących do siatki (mesh.sourceBuildingIds),
+        // nie tylko "żywych" dróg z roadPointA/B — siatka utwardzeń unifikuje każdy
+        // obiekt boundary+utwardzenie, więc porównanie musi obejmować ten sam zbiór.
+        const meshSourceIds = new Set(mesh.sourceBuildingIds);
+        let rawSumArea = 0;
+        for (const r of solvedBuildings) {
+          if (meshSourceIds.has(r.id) && r.vertices && r.vertices.length >= 3) {
+            rawSumArea += Math.abs(calculateSignedArea(r.vertices));
+          }
+        }
+
+        const meshArea = mesh.totalArea;
+        const overlapEliminatedArea = rawSumArea - meshArea;
+        console.log(`\n>>> [WERYFIKACJA NAKŁADANIA WYPEŁNIEŃ]`);
+        console.log(`Suma surowych obiektów dróg: ${Math.round(rawSumArea)} m²`);
+        console.log(`Pole zunifikowanej siatki: ${Math.round(meshArea)} m²`);
+        console.log(`Wyeliminowana strefa nakładania skrzyżowań: ${Math.round(overlapEliminatedArea)} m²`);
+
+        // Wyeliminowano nakładanie się powierzchni o wielkości ponad 400 m²
+        expect(overlapEliminatedArea).toBeGreaterThan(400);
+        expect(meshArea).toBeLessThan(rawSumArea);
+      });
+
+      it('Pętla 4 (Precyzja bilansu Pu w działce): poprawnie docina łączną powierzchnię utwardzeń do granic działki', () => {
+        const solvedBuildings: BuildingLoop[] = scene.buildings.map((b: any) => {
+          if (!b.roadPointA || !b.roadPointB) return b;
+          const geom = solveRoadObjectGeometry(
+            {
+              pointA: b.roadPointA,
+              pointB: b.roadPointB,
+              width: b.sweepWidth ?? 5,
+              obstacles,
+              plot: plotBoundary,
+              strategy: b.roadStrategy ?? 'centered_smooth',
+              minTurnRadius: b.roadMinTurnRadius ?? 6,
+            },
+            b.id
+          );
+          return {
+            ...b,
+            vertices: geom.vertices,
+            sweepPath: geom.sweepPath,
+            roadSolveStatus: geom.roadSolveStatus,
+          };
+        });
+
+        const mesh = buildHardstandingMesh(solvedBuildings, true);
+        const plotBuilding = scene.buildings.find((b: any) => b.id === 'bldg-1789126226695');
+        expect(plotBuilding).toBeDefined();
+
+        const areaInPlot = computeHardstandingAreaInPlot(mesh.polygons, [plotBuilding]);
+
+        // Łączna powierzchnia utwardzeń w roadtest3 to ponad 4000 m²
+        expect(mesh.totalArea).toBeGreaterThan(4000);
+        // Wewnątrz działki leży ok. 3136 m²
+        expect(areaInPlot).toBeGreaterThan(3000);
+        expect(areaInPlot).toBeLessThan(mesh.totalArea);
+      });
+
+      it('Pętla 5 (Wydajność generowania siatki): buduje siatkę 5 dróg z zaokrągleniami poniżej 25ms', () => {
+        const solvedBuildings: BuildingLoop[] = scene.buildings.map((b: any) => {
+          if (!b.roadPointA || !b.roadPointB) return b;
+          const geom = solveRoadObjectGeometry(
+            {
+              pointA: b.roadPointA,
+              pointB: b.roadPointB,
+              width: b.sweepWidth ?? 5,
+              obstacles,
+              plot: plotBoundary,
+              strategy: b.roadStrategy ?? 'centered_smooth',
+              minTurnRadius: b.roadMinTurnRadius ?? 6,
+            },
+            b.id
+          );
+          return { ...b, vertices: geom.vertices };
+        });
+
+        // Pomiar czasu (Warm-up + benchmark)
+        buildHardstandingMesh(solvedBuildings, true);
+        const t0 = performance.now();
+        const iterations = 5;
+        for (let i = 0; i < iterations; i++) {
+          buildHardstandingMesh(solvedBuildings, true);
+        }
+        const avgMs = (performance.now() - t0) / iterations;
+        console.log(`\n>>> [BENCHMARK] Średni czas generowania siatki 5 dróg: ${avgMs.toFixed(2)} ms`);
+
+        expect(avgMs).toBeLessThan(25.0);
+      });
+    });
   });
 
   describe('4. Syntetyczne przypadki brzegowe i geometrie skrajne', () => {
@@ -622,6 +926,41 @@ describe('Referencyjny test walidacji geometrii i integralności Drogi', () => {
         });
       }
     }
+  });
+
+  describe('6. Weryfikacja Siatki Utwardzeń dla całej sceny reference/roadtest3.json', () => {
+    const scenePath = path.resolve(__dirname, '../../../reference/roadtest3.json');
+    const scene = JSON.parse(fs.readFileSync(scenePath, 'utf8'));
+
+    it('buduje spójną siatkę utwardzeń z prawidłowymi otworami i wygładzonymi krawędziami', () => {
+      const mesh = buildHardstandingMesh(scene.buildings, true);
+
+      // Wszystkie drogi z roadtest3.json łączą się w 1 zunifikowany poligon główny
+      expect(mesh.polygons.length).toBe(1);
+      expect(mesh.sourceBuildingIds.length).toBeGreaterThanOrEqual(5);
+
+      const poly = mesh.polygons[0];
+      // Zewnętrzny obrys
+      assertValidPolygon(poly.outer);
+      assertNoSelfIntersections(poly.outer);
+      expect(poly.outer.length).toBeGreaterThan(20);
+
+      // Wewnętrzne otwory (wyspy zieleni)
+      expect(poly.holes.length).toBe(4);
+      for (const hole of poly.holes) {
+        assertValidPolygon(hole);
+        assertNoSelfIntersections(hole);
+
+        // Krawężniki wewnętrzne wysp również muszą być zaokrąglone łukami fillet
+        // (brak ostrych wklęsłych załamań > 45° na obrysie otworu)
+        const analysis = analyzePolygonCornerAngles(hole, false, 45.0);
+        expect(analysis.sharpConcaveCorners).toHaveLength(0);
+      }
+
+      // Całkowite pole powierzchni zunifikowanej siatki jest dodatnie i skończone
+      expect(mesh.totalArea).toBeGreaterThan(100);
+      expect(Number.isFinite(mesh.totalArea)).toBe(true);
+    });
   });
 });
 
