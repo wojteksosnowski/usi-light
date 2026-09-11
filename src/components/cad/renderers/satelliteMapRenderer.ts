@@ -18,12 +18,12 @@ import {
   wgs84ToCadPoint,
   LatLon,
 } from '../../../utils/geoTransform';
-import { GoogleTileManager } from '../../../utils/googleTileManager';
+import { ISatelliteTileManager } from '../../../utils/googleTileManager';
 import { Point2D } from '../../../types/geometry';
 
 export interface RenderSatelliteMapOptions {
   rc: CadRenderContext;
-  tileManager: GoogleTileManager;
+  tileManager: ISatelliteTileManager;
   crsInfo: CrsDetectionResult;
   projectCenterLatLon?: LatLon;
   opacity?: number;

@@ -1,25 +1,16 @@
 /**
- * googleTileManager.ts
+ * hereTileManager.ts
  *
- * Menedżer asynchronicznego pobierania i buforowania (LRU Cache) kafelków satelitarnych Google Maps.
+ * Menedżer asynchronicznego pobierania i buforowania (LRU Cache) kafelków satelitarnych HERE Maps.
  *
  * Bezpieczeństwo i koszty:
  * - Gdy warstwa jest wyłączona, NIE są wykonywane żadne zapytania sieciowe.
- * - Wykorzystuje standardowy raster kafelkowy Google Maps lub Google Maps 2D Tile API.
+ * - Wykorzystuje HERE Raster Tile API v3 (styl satellite.day — czyste zdjęcia satelitarne bez etykiet).
  */
 
-export interface TileKey {
-  x: number;
-  y: number;
-  z: number;
-}
+import { ISatelliteTileManager } from './googleTileManager';
 
-/** Wspólny interfejs strukturalny dla managerów kafelków satelitarnych (Google, HERE, ...). */
-export interface ISatelliteTileManager {
-  getTile(x: number, y: number, z: number): HTMLImageElement | null;
-}
-
-export class GoogleTileManager {
+export class HereTileManager implements ISatelliteTileManager {
   private cache: Map<string, HTMLImageElement> = new Map();
   private pendingRequests: Set<string> = new Set();
   private maxCacheSize: number = 200;
@@ -83,11 +74,9 @@ export class GoogleTileManager {
     const img = new Image();
     img.crossOrigin = 'anonymous';
 
-    // Endpoint satelitarny Google Maps z kluczem API
-    // Obsługuje format lyrs=s (satellite) lub lyrs=y (hybrid)
+    // HERE Raster Tile API v3 — styl satellite.day (wyłącznie zdjęcia satelitarne, bez etykiet/wektorów)
     const cleanKey = this.apiKey ? this.apiKey.trim() : '';
-    const keyParam = cleanKey ? `&key=${encodeURIComponent(cleanKey)}` : '';
-    const url = `https://mt1.google.com/vt/lyrs=s&x=${x}&y=${y}&z=${z}${keyParam}`;
+    const url = `https://maps.hereapi.com/v3/base/mc/${z}/${x}/${y}/png8?apiKey=${encodeURIComponent(cleanKey)}&style=satellite.day`;
 
     img.onload = () => {
       this.pendingRequests.delete(key);

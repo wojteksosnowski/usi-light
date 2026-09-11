@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Point2D, AnalysisPointResult } from '../types/geometry';
 import { computeCombinedShadowEnvelope } from '@/utils/math2d';
 import { computeHourlyShadowsLive } from '@/utils/math2d/shadowEnvelope';
@@ -10,9 +10,11 @@ import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
 import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
 import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
 import { GoogleTileManager } from '../utils/googleTileManager';
+import { HereTileManager } from '../utils/hereTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { APP_CONFIG } from '../config/appConfig';
 import { useWfsStore } from '../modules/wfs-import/store/useWfsStore';
+import { useSolarAnalysisStore } from '../store/useSolarAnalysisStore';
 
 export { isBuildingLocked, getBuildingTopElevation };
 
@@ -73,9 +75,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     setExpandedLabelBuildingId((prev) => (id && prev === id ? null : id));
   };
 
-  // Menedżer kafelków satelitarnych Google Maps
+  // Menedżery kafelków satelitarnych (Google i HERE) — instancjonowane oba, aktywny wybierany przez satelliteProvider
   const [tileRenderTick, setTileRenderTick] = useState<number>(0);
   const tileManagerRef = useRef<GoogleTileManager | null>(null);
+  const hereTileManagerRef = useRef<HereTileManager | null>(null);
+  const satelliteProvider = useSolarAnalysisStore((s) => s.satelliteProvider);
 
   useEffect(() => {
     const effectiveKey = googleMapsApiKey || APP_CONFIG.googleMaps.apiKey;
@@ -88,6 +92,19 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     }
   }, [googleMapsApiKey]);
 
+  useEffect(() => {
+    const effectiveKey = APP_CONFIG.hereMaps.apiKey;
+    if (!hereTileManagerRef.current) {
+      hereTileManagerRef.current = new HereTileManager(effectiveKey, () => {
+        setTileRenderTick((t) => t + 1);
+      });
+    } else {
+      hereTileManagerRef.current.setApiKey(effectiveKey);
+    }
+  }, []);
+
+  const activeTileManager = satelliteProvider === 'here' ? hereTileManagerRef.current : tileManagerRef.current;
+
   // Geo module: re-render canvas when WMS tiles load or layers change
   useEffect(() => {
     const handler = () => setTileRenderTick((t) => t + 1);
@@ -99,22 +116,20 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ lat: number; lon: number; radius: number }>).detail;
-      if (tileManagerRef.current && detail) {
-        tileManagerRef.current.prefetchTilesInRadius(detail.lat, detail.lon, detail.radius);
+      if (activeTileManager && detail) {
+        activeTileManager.prefetchTilesInRadius(detail.lat, detail.lon, detail.radius);
       }
     };
     window.addEventListener('geo-prefetch-satellite', handler);
     return () => window.removeEventListener('geo-prefetch-satellite', handler);
-  }, []);
+  }, [activeTileManager]);
 
   // Project circle pulse animation (shows when Centruj is pressed)
   const [projectCirclePulse, setProjectCirclePulse] = useState<{ radius: number; opacity: number } | null>(null);
   const circleAnimRef = useRef<number | null>(null);
   const projectRadius = useWfsStore((s) => s.projectRadius);
 
-  useEffect(() => {
-    if (fitRequest === undefined || fitRequest.nonce === 0) return;
-
+  const triggerProjectCirclePulse = useCallback((radius: number) => {
     // Cancel any running animation
     if (circleAnimRef.current !== null) {
       cancelAnimationFrame(circleAnimRef.current);
@@ -123,7 +138,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     const DURATION_MS = 2500;
     const startTime = performance.now();
-    const radius = projectRadius;
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
@@ -140,14 +154,30 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     setProjectCirclePulse({ radius, opacity: 1 });
     circleAnimRef.current = requestAnimationFrame(animate);
+  }, []);
 
+  useEffect(() => {
+    if (fitRequest === undefined || fitRequest.nonce === 0) return;
+    triggerProjectCirclePulse(projectRadius);
+  }, [fitRequest, projectRadius, triggerProjectCirclePulse]);
+
+  // Show the pulse whenever the project radius itself changes (e.g. via the parameters panel)
+  const prevProjectRadiusRef = useRef(projectRadius);
+  useEffect(() => {
+    if (prevProjectRadiusRef.current !== projectRadius) {
+      prevProjectRadiusRef.current = projectRadius;
+      triggerProjectCirclePulse(projectRadius);
+    }
+  }, [projectRadius, triggerProjectCirclePulse]);
+
+  useEffect(() => {
     return () => {
       if (circleAnimRef.current !== null) {
         cancelAnimationFrame(circleAnimRef.current);
         circleAnimRef.current = null;
       }
     };
-  }, [fitRequest, projectRadius]);
+  }, []);
 
   // Detekcja układu współrzędnych sceny CAD
   const crsInfo = useMemo<CrsDetectionResult>(() => {
@@ -359,6 +389,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       selectedBuildingId,
       selectedBuildingIds,
       hoveredBuildingId: interaction.hoveredBuildingId,
+      hoveredLabelBuildingId: interaction.hoveredLabelBuildingId,
       hoveredEdge: interaction.hoveredEdge,
       isEditMode,
       showNormals,
@@ -392,7 +423,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       viewRotationMode,
       showSatelliteLayer,
       satelliteOpacity,
-      tileManager: tileManagerRef.current,
+      tileManager: activeTileManager,
       crsInfo,
       draggedVertexIndex: interaction.draggedVertexIndex,
       dragVertexPreviewPt: interaction.dragVertexPreviewPt,
@@ -404,6 +435,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     selectedBuildingId,
     selectedBuildingIds,
     interaction.hoveredBuildingId,
+    interaction.hoveredLabelBuildingId,
     interaction.hoveredEdge,
     selectedPointResult,
     activePointMode,
@@ -447,6 +479,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     satelliteOpacity,
     showAnalysisPoints,
     tileRenderTick,
+    activeTileManager,
     crsInfo,
     interaction.draggedVertexIndex,
     interaction.dragVertexPreviewPt,

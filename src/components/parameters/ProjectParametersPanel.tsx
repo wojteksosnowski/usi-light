@@ -56,7 +56,7 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     );
   }, [buildings]);
 
-  // Działki z włączonym "Obiekt badany (isTested)" dla kalkulacji wskaźników
+  // Działki z włączonym "W projekcie" (isTested) dla kalkulacji wskaźników
   const testedBoundaryObjects = useMemo(() => {
     return boundaryObjects.filter((b) => b.isTested);
   }, [boundaryObjects]);

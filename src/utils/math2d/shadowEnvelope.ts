@@ -273,7 +273,7 @@ export function computeCombinedShadowEnvelope(
   longitude: number = 21.01
 ): Point2D[][] {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
   );
   if (testedBuildings.length === 0) return [];
 
@@ -299,7 +299,7 @@ export function computeFullShadowAnalysis(
   const t0 = performance.now();
 
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
   );
 
   if (testedBuildings.length === 0) {
@@ -313,7 +313,7 @@ export function computeFullShadowAnalysis(
 
   // Budynki ograniczające ("negatywny cień")
   const blockingBuildings = buildings.filter(
-    (b) => !b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
+    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
   );
 
   // Prekalkulacja bazowych AABB dla budynków blokujących (eliminuje tysiące iteracji po wierzchołkach w każdej godzinie)
@@ -500,12 +500,12 @@ export function computeHourlyShadowsLive(
   sunlightMethod: 'raycasting' | 'segments' = 'raycasting'
 ): { hourlyShadows: HourlyShadowLoop[]; envelopeLoops: Point2D[][] } {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
   );
   if (testedBuildings.length === 0) return { hourlyShadows: [], envelopeLoops: [] };
 
   const blockingBuildings = buildings.filter(
-    (b) => !b.isTested && b.isIncluded !== false && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
+    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
   );
 
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);

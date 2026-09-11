@@ -210,7 +210,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
     };
   }, [buildings]);
 
-  // Działki z włączonym "Obiekt badany (isTested)" dla kalkulacji wskaźników
+  // Działki z włączonym "W projekcie" (isTested) dla kalkulacji wskaźników
 
   // Obrót obiektu wokół centroidu
   const handleBuildingRotate = (id: string, pivot: { x: number; y: number }, deltaAngleRad: number) => {
@@ -470,9 +470,9 @@ export const LayersAndObjectsGroup: React.FC = () => {
                       textAlign: 'center',
                       minHeight: '48px',
                     }}
-                    title="Uwzględnij w kalkulacji (wszystkie obiekty na warstwie)"
+                    title="Dodaj do analiz §12/§56 (wszystkie obiekty na warstwie) — nie wpływa na cień ani parametry"
                   >
-                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Uwzględnij w kalkulacji</span>
+                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Dodaj do analiz</span>
                     <span style={{ fontSize: '9.5px', fontWeight: 700 }}>
                       {allIncluded ? 'TAK' : someIncluded ? 'CZĘŚĆ' : 'NIE'}
                     </span>
@@ -492,9 +492,9 @@ export const LayersAndObjectsGroup: React.FC = () => {
                       textAlign: 'center',
                       minHeight: '48px',
                     }}
-                    title="Obiekt badany / Projektowany (wszystkie obiekty na warstwie)"
+                    title="W projekcie (wszystkie obiekty na warstwie) — wlicza się do cienia i parametrów"
                   >
-                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Obiekt badany</span>
+                    <span style={{ fontSize: '10px', lineHeight: '1.2' }}>W projekcie</span>
                     <span style={{ fontSize: '9.5px', fontWeight: 700 }}>
                       {allTested ? 'TAK' : someTested ? 'CZĘŚĆ' : 'NIE'}
                     </span>
@@ -2093,9 +2093,9 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   textAlign: 'center',
                   minHeight: '48px',
                 }}
-                title="Uwzględnij obiekt w kalkulacjach nasłonecznienia i przesłaniania"
+                title="Dodaj obiekt jako przeszkodę do analiz §12 i §56, nawet jeśli nie jest w projekcie — nie wpływa na cień ani parametry"
               >
-                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Uwzględnij w kalkulacji</span>
+                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Dodaj do analiz</span>
                 <span style={{ fontSize: '9.5px', fontWeight: 700 }}>{selectedBuilding.isIncluded !== false ? 'TAK' : 'NIE'}</span>
               </button>
 
@@ -2113,9 +2113,9 @@ export const LayersAndObjectsGroup: React.FC = () => {
                   textAlign: 'center',
                   minHeight: '48px',
                 }}
-                title="Oznacz obiekt jako badany (projektowany)"
+                title="Oznacz obiekt jako część projektowanego zamierzenia — wlicza się do cienia i parametrów"
               >
-                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Obiekt badany</span>
+                <span style={{ fontSize: '10px', lineHeight: '1.2' }}>W projekcie</span>
                 <span style={{ fontSize: '9.5px', fontWeight: 700 }}>{selectedBuilding.isTested ? 'TAK' : 'NIE'}</span>
               </button>
 

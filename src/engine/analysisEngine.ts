@@ -112,6 +112,7 @@ export function prefilterShadowingCandidatesForSegment(
   const candidates: PrefilteredObstacle[] = [];
 
   for (const bldg of allBuildings) {
+    // "Dodaj do analiz" (isIncluded): przeszkoda w §12/§56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
     // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż maxReach od odcinka
@@ -252,6 +253,7 @@ export function prefilterSunlightCandidatesForSegment(
   const candidates: PrefilteredObstacle[] = [];
 
   for (const bldg of allBuildings) {
+    // "Dodaj do analiz" (isIncluded): przeszkoda w §12/§56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
     const aabb = getBuildingAABB(bldg);
@@ -1317,6 +1319,7 @@ export function runFullAnalysis(
   }
 
   const results: AnalysisPointResult[] = [];
+  // "W projekcie" (isTested): fasady tych obiektów są próbkowane jako punkty analizy §12/§56.
   const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary');
   const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
   const angleStep = options?.angleStepDeg ?? 0.5;
@@ -1564,6 +1567,7 @@ export function analyzePlaygroundSunlight(
   const requiredDurationHours = isCityCentre ? 1.0 : 2.0;
 
   // Wyznacz segmenty przeszkód (budynki o H > elevation)
+  // "Dodaj do analiz" (isIncluded): przeszkoda w §56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
   const obstacleSegments: FacadeSegment[] = [];
   for (const bldg of allBuildings) {
     if (bldg.id === playground.id || bldg.isIncluded === false || bldg.category === 'boundary') continue;

@@ -289,7 +289,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
             <span style={{ color: 'var(--text-secondary)' }}>Zawartość sceny:</span>
             <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-              {buildings.length} obiektów ({testedCount} badanych, {obstaclesCount} przesłaniających)
+              {buildings.length} obiektów ({testedCount} w projekcie, {obstaclesCount} pozostałych)
             </span>
           </div>
           {pinnedPoints.length > 0 && (

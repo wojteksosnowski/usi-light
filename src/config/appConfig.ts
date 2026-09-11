@@ -126,6 +126,11 @@ export const APP_CONFIG = {
     defaultOpacity: 0.65,
   },
 
+  hereMaps: {
+    apiKey: 'BDske2zxCqqwwBGMf4IBKA49FRvRZLe4TnfBtYTor9c',
+    defaultOpacity: 0.65,
+  },
+
   // Konfiguracja modułu geodezyjnego (ukryta przed użytkownikiem)
   geo: {
     // Twardy clip canvas WMS do okręgu zasięgu projektu (wizualnie widoczne tylko w promieniu)

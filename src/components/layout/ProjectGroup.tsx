@@ -1390,7 +1390,7 @@ export const ProjectGroup: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setSatelliteProvider('google')}
-                      title="Google Maps Satellite (Aktywny)"
+                      title="Google Maps Satellite"
                       style={{
                         padding: '3px 8px',
                         borderRadius: '5px',
@@ -1407,18 +1407,17 @@ export const ProjectGroup: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      disabled
-                      title="HERE Satellite (Zablokowane — integracja wkrótce)"
+                      onClick={() => setSatelliteProvider('here')}
+                      title="HERE Satellite"
                       style={{
                         padding: '3px 8px',
                         borderRadius: '5px',
                         fontSize: '10px',
                         fontWeight: 700,
-                        cursor: 'not-allowed',
+                        cursor: 'pointer',
                         border: 'none',
-                        backgroundColor: 'transparent',
-                        color: '#475569',
-                        opacity: 0.6,
+                        backgroundColor: satelliteProvider === 'here' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                        color: satelliteProvider === 'here' ? '#38bdf8' : '#64748b',
                         transition: 'all 0.15s ease',
                       }}
                     >

@@ -329,6 +329,7 @@ export function useCanvasInteraction({
 
   const [hoveredBuildings, setHoveredBuildings] = useState<string[]>([]);
   const [hoveredBuildingIndex, setHoveredBuildingIndex] = useState(0);
+  const [hoveredLabelBuildingId, setHoveredLabelBuildingId] = useState<string | null>(null);
   const [rotationHover, setRotationHover] = useState<{
     buildingId: string;
     segmentId: string;
@@ -1047,6 +1048,9 @@ export function useCanvasInteraction({
       }
       setRotationHover(closest);
     }
+
+    const hitLabelId = getBuildingLabelHitAtPoint(sx, sy, buildings, worldToScreen, viewState.scale, layerSettings);
+    setHoveredLabelBuildingId((prev) => (prev === hitLabelId ? prev : hitLabelId));
 
     let hoveredBldgId: string | undefined;
     let minBldgDistPx = 45;
@@ -1905,6 +1909,7 @@ export function useCanvasInteraction({
       if (!rect) return;
       if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
         setHoveredBuildings([]);
+        setHoveredLabelBuildingId(null);
         return;
       }
       const sx = e.clientX - rect.left;
@@ -2024,6 +2029,7 @@ export function useCanvasInteraction({
     liveFacadeSnap,
     hoveredBuildingId,
     hoveredBuildings,
+    hoveredLabelBuildingId,
     rotationHover,
     dimHoveredEdge,
     effectiveIsInteracting,
