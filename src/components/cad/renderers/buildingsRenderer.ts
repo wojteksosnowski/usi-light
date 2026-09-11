@@ -1,6 +1,7 @@
 import { CadRenderContext } from '../types';
 import { Point2D } from '../../../types/geometry';
 import { getPolygonInteriorPoint, isPointInPolygon, splitSegmentByOccludingPolygons, distancePointToSegment } from '@/utils/math2d';
+import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
 
 export interface EditingEdgeLengthState {
   buildingId: string;
@@ -24,6 +25,31 @@ interface BuildingCachedGeometry {
 }
 
 const buildingGeoCache = new WeakMap<object, BuildingCachedGeometry>();
+
+// Styl obiektów badanych (isTested=true) musi być wyraźnie bardziej eksponowany niż obiektów-przeszkód.
+const TESTED_STROKE = { normal: '#0ea5e9', selected: '#0284c7' };
+const TESTED_STROKE_WIDTH = { normal: 2.5, selected: 3.5 };
+const TESTED_FILL = { normal: 'rgba(14, 165, 233, 0.16)', selected: 'rgba(14, 165, 233, 0.26)' };
+const NON_TESTED_STROKE = { normal: '#cbd5e1', selected: '#94a3b8' };
+const NON_TESTED_STROKE_WIDTH = { normal: 1, selected: 2 };
+const NON_TESTED_FILL = { normal: 'rgba(203, 213, 225, 0.08)', selected: 'rgba(203, 213, 225, 0.12)' };
+
+// Kolory obiektów 'boundary' (działka=czerwony, plac zabaw=bursztynowy), z osobną wersją dla
+// isTested=true ("obiekt badany", wyraźnie eksponowana) i isTested!=true (stonowana).
+const BOUNDARY_RGB = { plot: '239, 68, 68', playground: '245, 158, 11' };
+function getBoundaryStyle(isPlayground: boolean, isTested: boolean) {
+  const rgb = isPlayground ? BOUNDARY_RGB.playground : BOUNDARY_RGB.plot;
+  const strokeOpacity = isTested ? 0.9 : 0.65;
+  return {
+    strokeSelected: isTested ? (isPlayground ? '#f59e0b' : '#ef4444') : `rgba(${rgb}, 0.75)`,
+    strokeDefault: `rgba(${rgb}, ${strokeOpacity})`,
+    strokeWidthSelected: isTested ? 2.5 : 1.8,
+    strokeWidthDefault: isTested ? 1.8 : 1.4,
+    fillSelected: isTested ? `rgba(${rgb}, 0.18)` : `rgba(${rgb}, 0.08)`,
+    fillHover: isTested ? `rgba(${rgb}, 0.12)` : `rgba(${rgb}, 0.06)`,
+    fillDefault: isTested ? `rgba(${rgb}, 0.06)` : `rgba(${rgb}, 0.03)`,
+  };
+}
 
 /**
  * Sprawdza czy kliknięcie w punkcie ekranowym (screenX, screenY) trafiło w etykietę/kartę obiektu.
@@ -264,6 +290,16 @@ export function renderBuildings(
   const vpMinY = Math.min(c1.wy, c2.wy, c3.wy, c4.wy);
   const vpMaxY = Math.max(c1.wy, c2.wy, c3.wy, c4.wy);
 
+  // Grupy stykających się obiektów category='boundary' (dzielony areaType) do połączonego renderowania obwiedni.
+  const boundaryMergeGroups = detectBoundaryMergeGroups(buildings);
+  const isBuildingSelected = (id: string) => id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(id));
+  const mergeableGroups = boundaryMergeGroups.filter((g) => {
+    const selectedFlags = g.buildingIds.map(isBuildingSelected);
+    return selectedFlags.every((v) => v) || selectedFlags.every((v) => !v);
+  });
+  const mergeableBoundaryIds = new Set<string>();
+  for (const g of mergeableGroups) for (const id of g.buildingIds) mergeableBoundaryIds.add(id);
+
   // 0. Render Dashed Ghost Preview for Edge Length Editing
   if (editingEdgeLength?.previewVertices && editingEdgeLength.previewVertices.length >= 3) {
     ctx.save();
@@ -329,18 +365,13 @@ export function renderBuildings(
     const isPlayground = isBoundary && bldg.areaType === 'playground';
     const isBalcony = bldg.category === 'balcony';
 
-    if (isPlayground) {
+    if (isBoundary) {
+      const bs = getBoundaryStyle(isPlayground, bldg.isTested === true);
       ctx.fillStyle = isSelected
-        ? 'rgba(245, 158, 11, 0.18)'
+        ? bs.fillSelected
         : bldg.id === hoveredBuildingId
-        ? 'rgba(245, 158, 11, 0.12)'
-        : 'rgba(245, 158, 11, 0.05)';
-    } else if (isBoundary) {
-      ctx.fillStyle = isSelected
-        ? 'rgba(239, 68, 68, 0.12)'
-        : bldg.id === hoveredBuildingId
-        ? 'rgba(239, 68, 68, 0.08)'
-        : 'rgba(239, 68, 68, 0.03)';
+        ? bs.fillHover
+        : bs.fillDefault;
     } else if (isBalcony) {
       ctx.fillStyle = isSelected
         ? 'rgba(168, 85, 247, 0.25)'
@@ -350,19 +381,19 @@ export function renderBuildings(
     } else if (bldg.id === hoveredBuildingId && !isSelected) {
       ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
     } else if (isSelected) {
-      ctx.fillStyle = isTested ? 'rgba(59, 130, 246, 0.22)' : 'rgba(148, 163, 184, 0.2)';
+      ctx.fillStyle = isTested ? TESTED_FILL.selected : NON_TESTED_FILL.selected;
     } else if (isGhosted) {
       if (isTested) {
-        ctx.fillStyle = 'rgba(96, 165, 250, 0.14)';
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.10)';
       } else if (isIncluded) {
-        ctx.fillStyle = 'rgba(51, 65, 85, 0.25)';
+        ctx.fillStyle = 'rgba(203, 213, 225, 0.06)';
       } else {
-        ctx.fillStyle = 'rgba(71, 85, 105, 0.20)';
+        ctx.fillStyle = 'rgba(203, 213, 225, 0.04)';
       }
     } else if (isTested) {
-      ctx.fillStyle = isIncluded ? 'rgba(96, 165, 250, 0.12)' : 'rgba(100, 116, 139, 0.08)';
+      ctx.fillStyle = isIncluded ? TESTED_FILL.normal : 'rgba(14, 165, 233, 0.08)';
     } else {
-      ctx.fillStyle = isIncluded ? 'rgba(51, 65, 85, 0.25)' : 'rgba(30, 41, 59, 0.15)';
+      ctx.fillStyle = isIncluded ? NON_TESTED_FILL.normal : 'rgba(203, 213, 225, 0.04)';
     }
     ctx.fill(geo.path, 'evenodd');
 
@@ -450,15 +481,13 @@ export function renderBuildings(
       ctx.stroke(geo.path);
     } else if (isSelected) {
       ctx.lineWidth = (isBoundary ? 2.0 : 2.5) / s;
-      ctx.strokeStyle = isPlayground
-        ? '#f59e0b'
-        : isBoundary
-        ? '#ef4444'
+      ctx.strokeStyle = isBoundary
+        ? getBoundaryStyle(isPlayground, bldg.isTested === true).strokeSelected
         : isBalcony
         ? '#c084fc'
         : isTested
-        ? '#60a5fa'
-        : '#94a3b8';
+        ? TESTED_STROKE.selected
+        : NON_TESTED_STROKE.selected;
       if (isBoundary) {
         ctx.setLineDash([]);
       }
@@ -549,6 +578,10 @@ export function renderBuildings(
           }
         }
 
+        // Obiekty 'boundary' w grupie stykających się granic renderowane są jako jedna wspólna obwiednia
+        // (patrz sekcja po pętli) - pomijamy tu ich standardowy per-building stroke.
+        if (bldg.category === 'boundary' && mergeableBoundaryIds.has(bldg.id)) continue;
+
         const { sx: x1, sy: y1 } = worldToScreen(seg.p1.x, seg.p1.y);
         const { sx: x2, sy: y2 } = worldToScreen(seg.p2.x, seg.p2.y);
         if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
@@ -599,35 +632,33 @@ export function renderBuildings(
         if (isEdgeHovered) {
           strokeColor = '#38bdf8';
           strokeWidth = 4;
-        } else if (isPlayground) {
-          strokeColor = isSelected ? '#f59e0b' : 'rgba(245, 158, 11, 0.85)';
-          strokeWidth = isSelected ? 2.5 : 1.8;
         } else if (isBoundary) {
-          strokeColor = isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.85)';
-          strokeWidth = isSelected ? 2.5 : 1.8;
+          const bs = getBoundaryStyle(isPlayground, isTested === true);
+          strokeColor = isSelected ? bs.strokeSelected : bs.strokeDefault;
+          strokeWidth = isSelected ? bs.strokeWidthSelected : bs.strokeWidthDefault;
         } else if (isBalcony) {
           strokeColor = isSelected ? '#c084fc' : 'rgba(192, 132, 252, 0.75)';
           strokeWidth = isSelected ? 2.0 : 1.4;
         } else if (isGhosted) {
           if (isTested) {
-            strokeColor = 'rgba(96, 165, 250, 0.55)';
-            strokeWidth = 1.2;
+            strokeColor = 'rgba(14, 165, 233, 0.55)';
+            strokeWidth = 1.4;
           } else if (isIncluded) {
-            strokeColor = 'rgba(148, 163, 184, 0.55)';
-            strokeWidth = 1.2;
+            strokeColor = 'rgba(148, 163, 184, 0.40)';
+            strokeWidth = 0.8;
           } else {
-            strokeColor = 'rgba(148, 163, 184, 0.50)';
-            strokeWidth = 1.0;
+            strokeColor = 'rgba(148, 163, 184, 0.35)';
+            strokeWidth = 0.8;
           }
         } else if (!isIncluded) {
-          strokeColor = 'rgba(71, 85, 105, 0.4)';
-          strokeWidth = 1;
+          strokeColor = 'rgba(148, 163, 184, 0.3)';
+          strokeWidth = 0.8;
         } else if (isTested) {
-          strokeColor = isSelected ? '#3b82f6' : '#60a5fa';
-          strokeWidth = isSelected ? 3 : 2;
+          strokeColor = isSelected ? TESTED_STROKE.selected : TESTED_STROKE.normal;
+          strokeWidth = isSelected ? TESTED_STROKE_WIDTH.selected : TESTED_STROKE_WIDTH.normal;
         } else {
-          strokeColor = isSelected ? '#cbd5e1' : '#64748b';
-          strokeWidth = isSelected ? 2.5 : 1.5;
+          strokeColor = isSelected ? NON_TESTED_STROKE.selected : NON_TESTED_STROKE.normal;
+          strokeWidth = isSelected ? NON_TESTED_STROKE_WIDTH.selected : NON_TESTED_STROKE_WIDTH.normal;
         }
 
         ctx.strokeStyle = strokeColor;
@@ -908,9 +939,10 @@ export function renderBuildings(
           const iconsW = iconCount * 14;
           const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
 
-          // Kolorowe wskaźniki statusu [included: zielony, tested: indygo, cityCentre: pomarańczowy, childcare: fioletowy]
+          // Kolorowe wskaźniki statusu [included: zielony, tested: indygo, cityCentre: pomarańczowy, typ: usługowy/garaż]
           const isIncluded = bldg.isIncluded !== false;
-          const isChildcare = bldg.buildingType === 'childcare' || (Array.isArray(bldg.segments) && bldg.segments.some((s: any) => s.buildingType === 'childcare'));
+          const isService = bldg.buildingType === 'service';
+          const isGarage = bldg.buildingType === 'garage';
           const isCityCentre = bldg.isCityCentre || (Array.isArray(bldg.segments) && bldg.segments.some((s: any) => s.isCityCentre));
 
           const dots: { color: string; active: boolean }[] = [
@@ -918,8 +950,10 @@ export function renderBuildings(
             { color: '#6366f1', active: isTested },
             { color: '#f59e0b', active: isCityCentre },
           ];
-          if (isChildcare) {
-            dots.push({ color: '#c084fc', active: true });
+          if (isService) {
+            dots.push({ color: '#f59e0b', active: true });
+          } else if (isGarage) {
+            dots.push({ color: '#64748b', active: true });
           }
 
           const dotRadius = 2.5;
@@ -973,6 +1007,58 @@ export function renderBuildings(
       }
     }
     ctx.restore();
+  }
+
+  // 2.5 Render Merged Boundary Envelopes (stykające się obiekty 'boundary' jako jedna obwiednia
+  // + delikatna linia na wspólnej/ukrytej krawędzi)
+  if (mergeableGroups.length > 0) {
+    const rot = ((viewRotationDeg || 0) * Math.PI) / 180;
+    const cosR = Math.cos(rot);
+    const sinR = Math.sin(rot);
+    const s = viewState.scale;
+    const a = s * cosR;
+    const b = -s * sinR;
+    const c = -s * sinR;
+    const d = -s * cosR;
+    const e = viewState.panX;
+    const f = viewState.panY;
+
+    for (const group of mergeableGroups) {
+      if (!group.mergedVertices || group.mergedVertices.length < 3) continue;
+      const isSelected = isBuildingSelected(group.buildingIds[0]);
+      const isPlayground = group.areaType === 'playground';
+
+      ctx.save();
+      ctx.setTransform(a, b, c, d, e, f);
+
+      const envelopePath = new Path2D();
+      envelopePath.moveTo(group.mergedVertices[0].x, group.mergedVertices[0].y);
+      for (let i = 1; i < group.mergedVertices.length; i++) {
+        envelopePath.lineTo(group.mergedVertices[i].x, group.mergedVertices[i].y);
+      }
+      envelopePath.closePath();
+
+      // Grupy łączone istnieją tylko dla isTested===true (patrz detectBoundaryMergeGroups).
+      const bs = getBoundaryStyle(isPlayground, true);
+      ctx.lineWidth = (isSelected ? bs.strokeWidthSelected : bs.strokeWidthDefault) / s;
+      ctx.strokeStyle = isSelected ? bs.strokeSelected : bs.strokeDefault;
+      ctx.setLineDash([]);
+      ctx.stroke(envelopePath);
+
+      // Delikatna linia na wspólnej (ukrytej) krawędzi
+      ctx.lineWidth = 0.8 / s;
+      ctx.strokeStyle = isPlayground ? 'rgba(245, 158, 11, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+      ctx.setLineDash([3 / s, 2 / s]);
+      for (const se of group.sharedEdges) {
+        ctx.beginPath();
+        ctx.moveTo(se.edge[0].x, se.edge[0].y);
+        ctx.lineTo(se.edge[1].x, se.edge[1].y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      ctx.restore();
+    }
   }
 
   // 3. Render Group Links / Link Handles

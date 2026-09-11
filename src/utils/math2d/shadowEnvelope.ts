@@ -332,8 +332,7 @@ export function computeFullShadowAnalysis(
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);
   const noonHour = sunlightMethod === 'segments' ? 12.0 : solarLUT.astroSystem.solarNoonDecimal;
 
-  const anyChildcare = testedBuildings.some((b) => b.segments.some((s) => s.buildingType === 'childcare'));
-  const maxOffset = anyChildcare ? 4 : 5;
+  const maxOffset = 5;
 
   const allOffsets: number[] = [];
   const step = Math.max(0.1, stepHours);
@@ -354,9 +353,6 @@ export function computeFullShadowAnalysis(
 
     const hourPolys: Point2D[][] = [];
     for (const bldg of testedBuildings) {
-      const isChildcare = bldg.segments.some((s) => s.buildingType === 'childcare');
-      if (isChildcare && Math.abs(offset) > 4) continue;
-
       if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
         for (const sf of bldg.storyPolygons) {
           if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > (sf.hBottom || 0)) {
@@ -515,8 +511,7 @@ export function computeHourlyShadowsLive(
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);
   const noonHour = sunlightMethod === 'segments' ? 12.0 : solarLUT.astroSystem.solarNoonDecimal;
 
-  const anyChildcare = testedBuildings.some((b) => b.segments.some((s) => s.buildingType === 'childcare'));
-  const maxOffset = anyChildcare ? 4 : 5;
+  const maxOffset = 5;
 
   const result: HourlyShadowLoop[] = [];
   const allRenderedLoops: Point2D[][] = [];

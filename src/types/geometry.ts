@@ -8,7 +8,7 @@ export interface Vector2D {
   y: number;
 }
 
-export type BuildingType = 'residential' | 'childcare' | 'other';
+export type BuildingType = 'residential' | 'service' | 'garage';
 
 export interface LineEquation2D {
   A: number; // A*x + B*y + C = 0 (normalized: A^2 + B^2 = 1)

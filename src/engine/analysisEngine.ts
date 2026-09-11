@@ -804,12 +804,11 @@ export function analyzeSunlightAtPoint(
   hourSystem?: ISolarHourSystem
 ): SunlightResult {
   const normal = segment.normal;
-  const isChildcare = segment.buildingType === 'childcare';
   const sys = hourSystem ?? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
 
   const trajectory =
     precomputedTrajectory ??
-    computeDailySolarTrajectory(settings, stepMinutes, isChildcare, sys);
+    computeDailySolarTrajectory(settings, stepMinutes, false, sys);
 
   // 1. Orientation culling check:
   // Find which slots actually strike this facade at an angle >= 12 deg (relative to wall plane, <= 78 deg from normal)
@@ -851,7 +850,7 @@ export function analyzeSunlightAtPoint(
     prefilteredObstacles ?? prefilterSunlightObstacles(point, segment, allBuildings, targetBuildingId);
 
   const windowInfo =
-    precomputedWindow ?? precomputeSolarWindow(settings, isChildcare, sys);
+    precomputedWindow ?? precomputeSolarWindow(settings, false, sys);
   const { nStart, nEnd } = windowInfo;
 
   // Liniowy filtr okna 10h dla kandydatów
@@ -989,12 +988,11 @@ export function analyzeSunlightAtPointSegments(
 ): SunlightResult & { _segMethodMs?: number } {
   const t0 = performance.now();
   const normal = segment.normal;
-  const isChildcare = segment.buildingType === 'childcare';
   const sys = hourSystem ?? new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
 
   // 1. Solar equinox analysis window (niezmienne dla lokalizacji)
   const windowInfo =
-    precomputedWindow ?? precomputeSolarWindow(settings, isChildcare, sys);
+    precomputedWindow ?? precomputeSolarWindow(settings, false, sys);
 
   const azSolarMin = windowInfo.azSolarMin;
   const azSolarMax = windowInfo.azSolarMax;
@@ -1229,7 +1227,7 @@ export function analyzeSunlightAtPointSegments(
 
   // Dokładne zaokrąglenie do pełnych minut, z uwzględnieniem tolerancji numerycznej O(1) dla pełnego okna
   let totalMinutes = Math.round(totalHours * 60);
-  const maxAllowedHours = isChildcare ? 8.0 : 10.0;
+  const maxAllowedHours = 10.0;
   if (Math.abs(totalHours - maxAllowedHours) < 0.05) {
     totalHours = maxAllowedHours;
     totalMinutes = Math.round(maxAllowedHours * 60);
@@ -1321,7 +1319,7 @@ export function runFullAnalysis(
   const angleStep = options?.angleStepDeg ?? 0.5;
   const sunlightStep = options?.sunlightStepMinutes ?? 5;
 
-  // Precompute solar trajectories and 10h window lines once for standard residential and childcare segments
+  // Precompute solar trajectories and 10h window lines once for all facade segments
   const astroSystem = isSunlightEnabled ? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
   const linijkaSystem = isSunlightEnabled ? new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
   const activeHourSystem = isSunlightEnabled ? (sunlightMethod === 'segments' ? linijkaSystem! : astroSystem!) : null;
@@ -1329,14 +1327,8 @@ export function runFullAnalysis(
   const standardTrajectory = (isSunlightEnabled && activeHourSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, false, activeHourSystem)
     : [];
-  const childcareTrajectory = (isSunlightEnabled && activeHourSystem)
-    ? computeDailySolarTrajectory(settings, sunlightStep, true, activeHourSystem)
-    : [];
   const standardWindow = (isSunlightEnabled && activeHourSystem)
     ? precomputeSolarWindow(settings, false, activeHourSystem)
-    : null;
-  const childcareWindow = (isSunlightEnabled && activeHourSystem)
-    ? precomputeSolarWindow(settings, true, activeHourSystem)
     : null;
 
   // Trajektorie referencyjne (Astro) tylko gdy jawnie zażądano profilowania (options?.debugBenchmark)
@@ -1344,14 +1336,8 @@ export function runFullAnalysis(
   const refStandardTrajectory = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, false, astroSystem)
     : null;
-  const refChildcareTrajectory = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
-    ? computeDailySolarTrajectory(settings, sunlightStep, true, astroSystem)
-    : null;
   const refStandardWindow = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? precomputeSolarWindow(settings, false, astroSystem)
-    : null;
-  const refChildcareWindow = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
-    ? precomputeSolarWindow(settings, true, astroSystem)
     : null;
 
   let totalShadowingTimeMs = 0;
@@ -1371,12 +1357,11 @@ export function runFullAnalysis(
     for (const bldg of testedBuildings) {
       const tBldg0 = performance.now();
       for (const seg of bldg.segments) {
-        const isChildcare = seg.buildingType === 'childcare';
         const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
-        const trajectory = isChildcare ? childcareTrajectory : standardTrajectory;
-        const windowInfo = isChildcare ? childcareWindow : standardWindow;
-        const refTrajectory = isChildcare ? refChildcareTrajectory : refStandardTrajectory;
-        const refWindowInfo = isChildcare ? refChildcareWindow : refStandardWindow;
+        const trajectory = standardTrajectory;
+        const windowInfo = standardWindow;
+        const refTrajectory = refStandardTrajectory;
+        const refWindowInfo = refStandardWindow;
 
         // Wstępne wyliczenie wektorów stożka widzenia i kandydatów przeszkód dla CAŁEGO odcinka fasady
         const normalAngleRad = Math.atan2(seg.normal.y, seg.normal.x);

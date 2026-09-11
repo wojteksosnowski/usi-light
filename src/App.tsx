@@ -21,6 +21,7 @@ import {
 } from './store';
 import { useAnalysisWorker } from './hooks/useAnalysisWorker';
 import { useSharedProjectLoader } from './hooks/useSharedProjectLoader';
+import { normalizeLegacyBuildingTypes } from './utils/legacyBuildingType';
 import {
   AnalysisAccuracyOptions,
   analyzeShadowingAtPoint,
@@ -338,6 +339,7 @@ export const App: React.FC = () => {
       if (!raw) return;
       const scene = JSON.parse(raw) as SavedSceneData;
       if (!scene || scene.version !== 1) return;
+      normalizeLegacyBuildingTypes(scene.buildings);
 
       loadSceneData(scene);
       if (scene.settings) setSettings(scene.settings);

@@ -1,6 +1,7 @@
 import { gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate';
 import { SharedProjectPayload } from '../types/sharing';
 import { BuildingLoop, CadLayerSettings, PinnedFacadePoint } from '../types/geometry';
+import { normalizeLegacyBuildingTypes } from './legacyBuildingType';
 
 /**
  * Konwertuje Uint8Array do ciągu Base64 z bezpiecznym dzieleniem na chunki (unika Maximum call stack size exceeded).
@@ -51,6 +52,7 @@ export function decompressProjectData(base64Str: string): SharedProjectPayload {
   if (!parsed || parsed.v !== 1 || !parsed.scene || !Array.isArray(parsed.scene.buildings)) {
     throw new Error('Nieprawidłowy format lub uszkodzona struktura projektu.');
   }
+  normalizeLegacyBuildingTypes(parsed.scene.buildings as unknown as BuildingLoop[]);
 
   return parsed;
 }

@@ -1726,6 +1726,78 @@ export const LayersAndObjectsGroup: React.FC = () => {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {selectedBuilding.category !== 'balcony' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                      Typ budynku
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => updateSelectedBuilding({ buildingType: 'residential' })}
+                        style={{
+                          padding: '5px 6px',
+                          borderRadius: '6px',
+                          border: (!selectedBuilding.buildingType || selectedBuilding.buildingType === 'residential')
+                            ? '1px solid #818cf8'
+                            : '1px solid var(--border-light)',
+                          backgroundColor: (!selectedBuilding.buildingType || selectedBuilding.buildingType === 'residential')
+                            ? 'rgba(99, 102, 241, 0.25)'
+                            : 'var(--bg-input)',
+                          color: (!selectedBuilding.buildingType || selectedBuilding.buildingType === 'residential') ? '#e0e7ff' : '#94a3b8',
+                          fontWeight: (!selectedBuilding.buildingType || selectedBuilding.buildingType === 'residential') ? 700 : 500,
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Mieszkalny
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => updateSelectedBuilding({ buildingType: 'service' })}
+                        style={{
+                          padding: '5px 6px',
+                          borderRadius: '6px',
+                          border: selectedBuilding.buildingType === 'service'
+                            ? '1px solid #f59e0b'
+                            : '1px solid var(--border-light)',
+                          backgroundColor: selectedBuilding.buildingType === 'service'
+                            ? 'rgba(245, 158, 11, 0.25)'
+                            : 'var(--bg-input)',
+                          color: selectedBuilding.buildingType === 'service' ? '#fcd34d' : '#94a3b8',
+                          fontWeight: selectedBuilding.buildingType === 'service' ? 700 : 500,
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Usługowy
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => updateSelectedBuilding({ buildingType: 'garage' })}
+                        style={{
+                          padding: '5px 6px',
+                          borderRadius: '6px',
+                          border: selectedBuilding.buildingType === 'garage'
+                            ? '1px solid #64748b'
+                            : '1px solid var(--border-light)',
+                          backgroundColor: selectedBuilding.buildingType === 'garage'
+                            ? 'rgba(100, 116, 139, 0.25)'
+                            : 'var(--bg-input)',
+                          color: selectedBuilding.buildingType === 'garage' ? '#e2e8f0' : '#94a3b8',
+                          fontWeight: selectedBuilding.buildingType === 'garage' ? 700 : 500,
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Garaż
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                   <label style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>Wysokość H (m)</label>
                   <input

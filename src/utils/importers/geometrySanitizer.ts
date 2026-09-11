@@ -9,7 +9,7 @@ export interface SanitizePolygonOptions {
   defaultHeight?: number; // Domyślnie 15 m
   hWindowBottom?: number; // Domyślnie 0.85 m
   buildingId?: string;
-  buildingType?: 'residential' | 'childcare';
+  buildingType?: 'residential' | 'service' | 'garage';
   isCityCentre?: boolean;
 }
 
