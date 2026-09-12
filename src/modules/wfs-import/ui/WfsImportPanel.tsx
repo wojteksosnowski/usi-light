@@ -6,25 +6,16 @@ import { useWfsStore } from '../store/useWfsStore';
 import { AddressSearch } from './AddressSearch';
 import { ImportStatus } from './ImportStatus';
 import { GeocodingResult, latLonToBbox } from '../services/geocoding';
-import {
-  fetchWarsawBuildings,
-  fetchWarsawParcels,
-  fetchWarsawTrees,
-} from '../services/wfsWarsawClient';
+import { fetchWarsawTrees, EPSG_2178 } from '../services/wfsWarsawClient';
+import { findCitySource } from '../services/citySources';
 import {
   importBuildingsFromGeoJson,
   importParcelsFromGeoJson,
   importTrees,
 } from '../services/geoJsonImporter';
-import { detectCoordinateSystem, CrsDetectionResult } from '../../../utils/geoTransform';
+import { detectCoordinateSystem } from '../../../utils/geoTransform';
 
 const RADIUS_OPTIONS = [100, 200, 300, 500];
-const WARSAW_BBOX = [20.85, 52.09, 21.27, 52.37];
-
-function isInWarsaw(lat: number, lon: number): boolean {
-  return lon >= WARSAW_BBOX[0] && lon <= WARSAW_BBOX[2]
-    && lat >= WARSAW_BBOX[1] && lat <= WARSAW_BBOX[3];
-}
 
 export const WfsImportPanel: React.FC = () => {
   const settings = useSolarAnalysisStore((s) => s.settings);
@@ -53,48 +44,44 @@ export const WfsImportPanel: React.FC = () => {
   const handleFetch = useCallback(async () => {
     if (!selectedLocation) return;
 
-    setStatus({ isFetching: true, error: null, info: null, buildingsCount: 0, parcelsCount: 0, treesCount: 0 });
+    setStatus({ isFetching: true, stage: 'idle', progressDone: 0, progressTotal: 0, error: null, info: null, buildingsCount: 0, parcelsCount: 0, treesCount: 0 });
 
     try {
       const { lat, lon } = selectedLocation;
       const bbox = latLonToBbox(lat, lon, radius);
-      const isWarsaw = isInWarsaw(lat, lon);
+      const citySource = findCitySource(lat, lon);
 
       const projectCenter = { lat: settings.latitude, lon: settings.longitude };
       const projectCrs = detectCoordinateSystem([]);
-      const sourceCrs: CrsDetectionResult = {
-        crs: 'EPSG:2178',
-        description: 'PL-2000 strefa 7',
-        geodeticLabel: 'ETRF2000-PL / CS2000 / 21',
-        isGeodetic: true,
-        zone: 7,
-      };
 
       let buildingsCount = 0;
       let parcelsCount = 0;
       let treesCount = 0;
 
-      if (options.buildings && isWarsaw) {
-        const buildingsGeoJson = await fetchWarsawBuildings(bbox);
-        const result = importBuildingsFromGeoJson(buildingsGeoJson, sourceCrs, projectCrs, projectCenter);
+      if (options.buildings && citySource) {
+        setStatus({ stage: 'buildings' });
+        const buildingsGeoJson = await citySource.fetchBuildings(bbox);
+        const result = importBuildingsFromGeoJson(buildingsGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
         for (const bld of result.buildings) {
           addBuilding(bld);
         }
         buildingsCount = result.buildings.length;
       }
 
-      if (options.parcels && isWarsaw) {
-        const parcelsGeoJson = await fetchWarsawParcels(bbox);
-        const result = importParcelsFromGeoJson(parcelsGeoJson, sourceCrs, projectCrs, projectCenter);
+      if (options.parcels && citySource?.fetchParcels) {
+        setStatus({ stage: 'parcels' });
+        const parcelsGeoJson = await citySource.fetchParcels(bbox);
+        const result = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
         for (const parcel of result.parcels) {
           addBuilding(parcel);
         }
         parcelsCount = result.parcels.length;
       }
 
-      if (options.trees && isWarsaw) {
+      if (options.trees && citySource?.name === 'Warszawa') {
+        setStatus({ stage: 'trees' });
         const rawTrees = await fetchWarsawTrees(bbox);
-        const trees = importTrees(rawTrees, sourceCrs, projectCrs, projectCenter);
+        const trees = importTrees(rawTrees, EPSG_2178, projectCrs, projectCenter);
         setTrees(trees);
         setShowTreesLayer(true);
         treesCount = trees.length;
@@ -102,23 +89,25 @@ export const WfsImportPanel: React.FC = () => {
 
       setLastImportBbox(bbox);
 
-      if (!isWarsaw) {
+      if (!citySource) {
         setShowEgibLayer(true);
         setShowTerrainLayer(true);
         setStatus({
           isFetching: false,
+          stage: 'done',
           error: null,
-          info: 'Poza Warszawą — włączono podkłady krajowe (EGiB, NMT)',
+          info: 'Brak lokalnego serwisu WFS dla tej lokalizacji — włączono podkłady krajowe (EGiB, NMT)',
           buildingsCount: 0,
           parcelsCount: 0,
           treesCount: 0,
         });
       } else {
-        setStatus({ isFetching: false, error: null, info: null, buildingsCount, parcelsCount, treesCount });
+        setStatus({ isFetching: false, stage: 'done', error: null, info: null, buildingsCount, parcelsCount, treesCount });
       }
     } catch (err) {
       setStatus({
         isFetching: false,
+        stage: 'idle',
         error: err instanceof Error ? err.message : 'Błąd pobierania danych',
         info: null,
         buildingsCount: 0,

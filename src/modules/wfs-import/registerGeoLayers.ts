@@ -1,4 +1,5 @@
 import { CadRenderPipeline } from '../../components/cad/pipeline/CadRenderPipeline';
+import { CadRenderLayer } from '../../components/cad/pipeline/types';
 import { OrthophotoLayer } from './layers/OrthophotoLayer';
 import { KiutOverlayLayer } from './layers/KiutOverlayLayer';
 import { MpzpOverlayLayer } from './layers/MpzpOverlayLayer';
@@ -6,6 +7,7 @@ import { BdotOverlayLayer } from './layers/BdotOverlayLayer';
 import { TerrainShadingLayer } from './layers/TerrainShadingLayer';
 import { EgibOverlayLayer } from './layers/EgibOverlayLayer';
 import { WfsTreesLayer } from './layers/WfsTreesLayer';
+import { ParcelLoadingPreviewLayer } from './layers/ParcelLoadingPreviewLayer';
 import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
 
@@ -20,6 +22,20 @@ const triggerRender = () => {
   window.dispatchEvent(new Event('geo-render-needed'));
 };
 
+/** Rejestruje/wyrejestrowuje warstwę w pipeline gdy jej widoczność się zmienia. Zwraca true jeśli coś się zmieniło. */
+function toggleMainLayer(
+  pipeline: CadRenderPipeline,
+  layer: CadRenderLayer,
+  layerId: string,
+  shouldShow: boolean,
+  prevShouldShow: boolean
+): boolean {
+  if (shouldShow === prevShouldShow) return false;
+  if (shouldShow) pipeline.registerMainLayer(layer);
+  else pipeline.unregisterMainLayer(layerId);
+  return true;
+}
+
 let registered = false;
 
 const orthophotoLayer = new OrthophotoLayer();
@@ -29,6 +45,7 @@ const bdotLayer = new BdotOverlayLayer();
 const terrainLayer = new TerrainShadingLayer();
 const egibLayer = new EgibOverlayLayer();
 const treesLayer = new WfsTreesLayer();
+const parcelLoadingPreviewLayer = new ParcelLoadingPreviewLayer();
 
 const orthophotoTileManager = new WmsTileManager({
   baseUrl: ORTO_WMS_URL,
@@ -93,6 +110,7 @@ export function registerGeoLayers(): () => void {
   let prevShowEgib = false;
   let prevShowTrees = false;
   let prevTreesLen = 0;
+  let prevLoadingParcelsLen = 0;
 
   const unsub = useWfsStore.subscribe((state) => {
     const {
@@ -108,71 +126,57 @@ export function registerGeoLayers(): () => void {
       showEgibLayer,
       showTreesLayer,
       trees,
+      loadingParcels,
     } = state;
 
     let changed = false;
 
     // 1. Ortofotomapa
     orthophotoLayer.setOpacity(orthophotoOpacity);
-    if (showOrthophotoLayer !== prevShowOrtho) {
-      if (showOrthophotoLayer) pipeline.registerMainLayer(orthophotoLayer);
-      else pipeline.unregisterMainLayer('wfs_orthophoto');
-      prevShowOrtho = showOrthophotoLayer;
-      changed = true;
-    }
+    if (toggleMainLayer(pipeline, orthophotoLayer, 'wfs_orthophoto', showOrthophotoLayer, prevShowOrtho)) changed = true;
+    prevShowOrtho = showOrthophotoLayer;
 
     // 2. Sieci GESUT (KIUT)
     kiutLayer.setOpacity(kiutOpacity);
-    if (showKiutLayer !== prevShowKiut) {
-      if (showKiutLayer) pipeline.registerMainLayer(kiutLayer);
-      else pipeline.unregisterMainLayer('wfs_kiut_overlay');
-      prevShowKiut = showKiutLayer;
-      changed = true;
-    }
+    if (toggleMainLayer(pipeline, kiutLayer, 'wfs_kiut_overlay', showKiutLayer, prevShowKiut)) changed = true;
+    prevShowKiut = showKiutLayer;
 
     // 3. MPZP
     mpzpLayer.setOpacity(mpzpOpacity);
-    if (showMpzpLayer !== prevShowMpzp) {
-      if (showMpzpLayer) pipeline.registerMainLayer(mpzpLayer);
-      else pipeline.unregisterMainLayer('wfs_mpzp_overlay');
-      prevShowMpzp = showMpzpLayer;
-      changed = true;
-    }
+    if (toggleMainLayer(pipeline, mpzpLayer, 'wfs_mpzp_overlay', showMpzpLayer, prevShowMpzp)) changed = true;
+    prevShowMpzp = showMpzpLayer;
 
     // 4. BDOT10k
     bdotLayer.setOpacity(bdotOpacity);
-    if (showBdotLayer !== prevShowBdot) {
-      if (showBdotLayer) pipeline.registerMainLayer(bdotLayer);
-      else pipeline.unregisterMainLayer('wfs_bdot_overlay');
-      prevShowBdot = showBdotLayer;
-      changed = true;
-    }
+    if (toggleMainLayer(pipeline, bdotLayer, 'wfs_bdot_overlay', showBdotLayer, prevShowBdot)) changed = true;
+    prevShowBdot = showBdotLayer;
 
     // 5. Cieniowanie NMT
-    if (showTerrainLayer !== prevShowTerrain) {
-      if (showTerrainLayer) pipeline.registerMainLayer(terrainLayer);
-      else pipeline.unregisterMainLayer('wfs_terrain_shading');
-      prevShowTerrain = showTerrainLayer;
-      changed = true;
-    }
+    if (toggleMainLayer(pipeline, terrainLayer, 'wfs_terrain_shading', showTerrainLayer, prevShowTerrain)) changed = true;
+    prevShowTerrain = showTerrainLayer;
 
     // 6. EGiB
-    if (showEgibLayer !== prevShowEgib) {
-      if (showEgibLayer) pipeline.registerMainLayer(egibLayer);
-      else pipeline.unregisterMainLayer('wfs_egib_overlay');
-      prevShowEgib = showEgibLayer;
-      changed = true;
-    }
+    if (toggleMainLayer(pipeline, egibLayer, 'wfs_egib_overlay', showEgibLayer, prevShowEgib)) changed = true;
+    prevShowEgib = showEgibLayer;
 
     // 7. Drzewa
     treesLayer.setTrees(trees);
     treesLayer.setVisible(showTreesLayer);
     const shouldShowTrees = showTreesLayer && trees.length > 0;
     if (shouldShowTrees !== prevShowTrees || trees.length !== prevTreesLen) {
-      if (shouldShowTrees) pipeline.registerMainLayer(treesLayer);
-      else pipeline.unregisterMainLayer('wfs_trees');
+      toggleMainLayer(pipeline, treesLayer, 'wfs_trees', shouldShowTrees, prevShowTrees);
       prevShowTrees = shouldShowTrees;
       prevTreesLen = trees.length;
+      changed = true;
+    }
+
+    // 8. Podgląd wczytywanych działek (ULDK, batch po batchu)
+    parcelLoadingPreviewLayer.setLoops(loadingParcels);
+    if (loadingParcels.length !== prevLoadingParcelsLen) {
+      const hasLoadingParcels = loadingParcels.length > 0;
+      const hadLoadingParcels = prevLoadingParcelsLen > 0;
+      toggleMainLayer(pipeline, parcelLoadingPreviewLayer, 'wfs_parcels_loading', hasLoadingParcels, hadLoadingParcels);
+      prevLoadingParcelsLen = loadingParcels.length;
       changed = true;
     }
 
@@ -188,6 +192,7 @@ export function registerGeoLayers(): () => void {
     pipeline.unregisterMainLayer('wfs_terrain_shading');
     pipeline.unregisterMainLayer('wfs_egib_overlay');
     pipeline.unregisterMainLayer('wfs_trees');
+    pipeline.unregisterMainLayer('wfs_parcels_loading');
     registered = false;
   };
 }

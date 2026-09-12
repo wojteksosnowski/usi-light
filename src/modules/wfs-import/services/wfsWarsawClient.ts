@@ -12,7 +12,7 @@ export type WfsBbox = [number, number, number, number];
 
 import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
 
-const EPSG_2178: CrsDetectionResult = {
+export const EPSG_2178: CrsDetectionResult = {
   crs: 'EPSG:2178',
   description: 'PL-2000 strefa 7',
   geodeticLabel: 'ETRF2000-PL / CS2000 / 21',
@@ -20,18 +20,25 @@ const EPSG_2178: CrsDetectionResult = {
   zone: 7,
 };
 
+/** Rogi bboxa WGS84 [west, south, east, north] przeliczone na EPSG:2178. */
+export function wgs84BboxToEpsg2178Bounds(bbox: WfsBbox): { minE: number; minN: number; maxE: number; maxN: number } {
+  const [west, south, east, north] = bbox;
+  const sw = wgs84ToCadPoint({ lat: south, lon: west }, EPSG_2178);
+  const ne = wgs84ToCadPoint({ lat: north, lon: east }, EPSG_2178);
+  return {
+    minE: Math.min(sw.x, ne.x),
+    minN: Math.min(sw.y, ne.y),
+    maxE: Math.max(sw.x, ne.x),
+    maxN: Math.max(sw.y, ne.y),
+  };
+}
+
 /**
  * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2178
  * w kolejności northing, easting (wymaganej przez GeoServer).
  */
-function wgs84BboxToEpsg2178(bbox: WfsBbox): string {
-  const [west, south, east, north] = bbox;
-  const sw = wgs84ToCadPoint({ lat: south, lon: west }, EPSG_2178);
-  const ne = wgs84ToCadPoint({ lat: north, lon: east }, EPSG_2178);
-  const minN = Math.min(sw.y, ne.y);
-  const minE = Math.min(sw.x, ne.x);
-  const maxN = Math.max(sw.y, ne.y);
-  const maxE = Math.max(sw.x, ne.x);
+export function wgs84BboxToEpsg2178(bbox: WfsBbox): string {
+  const { minE, minN, maxE, maxN } = wgs84BboxToEpsg2178Bounds(bbox);
   return `${minN},${minE},${maxN},${maxE}`;
 }
 

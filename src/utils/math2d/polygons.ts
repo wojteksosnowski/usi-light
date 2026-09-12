@@ -683,6 +683,18 @@ export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
  * @param radius    promień okręgu w metrach
  * @returns         liczba z zakresu [0, 1] — udział pola wielokąta wewnątrz okręgu
  */
+/** Obwiednia (bounding box) zbioru punktów. */
+export function computePointsBoundingBox(points: Point2D[]): { minX: number; maxX: number; minY: number; maxY: number } {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, maxX, minY, maxY };
+}
+
 export function polygonCircleIntersectionRatio(
   vertices: Point2D[],
   cx: number,
@@ -692,13 +704,7 @@ export function polygonCircleIntersectionRatio(
   if (!vertices || vertices.length < 3 || radius <= 0) return 0;
 
   // Oblicz obwiednię wielokąta
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const v of vertices) {
-    if (v.x < minX) minX = v.x;
-    if (v.x > maxX) maxX = v.x;
-    if (v.y < minY) minY = v.y;
-    if (v.y > maxY) maxY = v.y;
-  }
+  const { minX, maxX, minY, maxY } = computePointsBoundingBox(vertices);
 
   const STEPS = 20; // 20x20 = 400 punktów próbkowania
   const dx = (maxX - minX) / STEPS;

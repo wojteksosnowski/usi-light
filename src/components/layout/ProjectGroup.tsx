@@ -28,10 +28,10 @@ import {
   useLicenseStore,
   POLISH_CITIES,
 } from '../../store';
-import { useWfsStore, ProjectRadius } from '../../modules/wfs-import/store/useWfsStore';
+import { useWfsStore, ProjectRadius, formatWfsProgress, WFS_IMPORT_CONTINUE_HINT } from '../../modules/wfs-import/store/useWfsStore';
 import { fetchParcelsInRadius } from '../../modules/wfs-import/services/uldkClient';
-import { fetchWarsawBuildings } from '../../modules/wfs-import/services/wfsWarsawClient';
-import { importBuildingsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
+import { findCitySource } from '../../modules/wfs-import/services/citySources';
+import { importBuildingsFromGeoJson, importParcelsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
 import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
@@ -165,7 +165,7 @@ export const ProjectGroup: React.FC = () => {
       setPricingModalOpen(true);
       return;
     }
-    setStatus({ isFetching: true, error: null, info: null });
+    setStatus({ isFetching: true, stage: 'parcels', progressDone: 0, progressTotal: 0, error: null, info: null });
     setSyncFeedback(null);
     try {
       const centerLat = settings.latitude;
@@ -173,21 +173,38 @@ export const ProjectGroup: React.FC = () => {
       const radius = projectRadius;
       const projectCenter = { lat: centerLat, lon: centerLon };
       const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
-
-      // 1. Działki ewidencyjne z ULDK (ogólnopolskie wektory)
-      const parcels = await fetchParcelsInRadius(centerLat, centerLon, radius, projectCrs, projectCenter);
-
-      // 2. Budynki wektorowe (dla Warszawy WFS, dla innych miast serwisy lokalne)
       const bbox = latLonToBbox(centerLat, centerLon, radius);
-      let importedBuildings: BuildingLoop[] = [];
-      const WARSAW_BBOX = [20.85, 52.09, 21.27, 52.37];
-      const isWarsaw = centerLon >= WARSAW_BBOX[0] && centerLon <= WARSAW_BBOX[2] && centerLat >= WARSAW_BBOX[1] && centerLat <= WARSAW_BBOX[3];
+      const citySource = findCitySource(centerLat, centerLon);
 
-      if (isWarsaw) {
+      // 1. Działki: lokalne źródło miasta (jeśli dostępne) zastępuje ogólnopolski ULDK
+      let parcels: BuildingLoop[];
+      if (citySource?.fetchParcels) {
+        const parcelsGeoJson = await citySource.fetchParcels(bbox);
+        parcels = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter).parcels;
+      } else {
+        parcels = await fetchParcelsInRadius(
+          centerLat,
+          centerLon,
+          radius,
+          projectCrs,
+          projectCenter,
+          undefined,
+          (done, total) => setStatus({ progressDone: done, progressTotal: total }),
+          (loops) => {
+            useWfsStore.getState().addLoadingParcels(loops);
+            window.dispatchEvent(new Event('geo-render-needed'));
+          }
+        );
+      }
+
+      // 2. Budynki wektorowe (serwisy lokalne dla obsługiwanych miast)
+      let importedBuildings: BuildingLoop[] = [];
+
+      setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0 });
+      if (citySource) {
         try {
-          const bldGeoJson = await fetchWarsawBuildings(bbox);
-          const sourceCrs = { crs: 'EPSG:2178' as const, description: 'PL-2000 strefa 7', geodeticLabel: 'ETRF2000-PL / CS2000 / 21', isGeodetic: true, zone: 7 };
-          const res = importBuildingsFromGeoJson(bldGeoJson, sourceCrs, projectCrs, projectCenter, radius);
+          const bldGeoJson = await citySource.fetchBuildings(bbox);
+          const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter, radius);
           importedBuildings = res.buildings;
         } catch {
           // kontynuuj z działkami
@@ -201,6 +218,7 @@ export const ProjectGroup: React.FC = () => {
 
       setStatus({
         isFetching: false,
+        stage: 'done',
         error: null,
         info: null,
         parcelsCount: parcels.length,
@@ -217,9 +235,13 @@ export const ProjectGroup: React.FC = () => {
     } catch (err) {
       setStatus({
         isFetching: false,
+        stage: 'idle',
         error: err instanceof Error ? err.message : 'Błąd synchronizacji',
         info: null,
       });
+    } finally {
+      useWfsStore.getState().clearLoadingParcels();
+      window.dispatchEvent(new Event('geo-render-needed'));
     }
   };
 
@@ -661,8 +683,14 @@ export const ProjectGroup: React.FC = () => {
                 title="Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK) oraz budynki wewnątrz okręgu projektu"
               >
                 {status.isFetching && <RefreshCw size={13} className="spin" />}
-                <span>{status.isFetching ? 'Synchronizacja danych...' : 'Pobierz działki i budynki'}</span>
+                <span>{status.isFetching ? formatWfsProgress(status) : 'Pobierz działki i budynki'}</span>
               </button>
+
+              {status.isFetching && (
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                  {WFS_IMPORT_CONTINUE_HINT}
+                </div>
+              )}
 
               {syncFeedback && (
                 <div style={{ fontSize: '10.5px', color: '#34d399', textAlign: 'center', fontWeight: 600 }}>

@@ -6,7 +6,7 @@
  * dla obszaru CAŁEJ POLSKI bez ograniczeń CORS (Access-Control-Allow-Origin: *).
  */
 
-import { Point2D, BuildingLoop, ObjectCategory } from '../../../types/geometry';
+import { Point2D, Vector2D, BuildingLoop, ObjectCategory } from '../../../types/geometry';
 import { sanitizePolygon } from '../../../utils/importers/geometrySanitizer';
 import {
   cadPointToWgs84,
@@ -15,7 +15,8 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { wgs84ToEpsg2180 } from '../utils/wgs84ToEpsg2180';
-import { polygonCircleIntersectionRatio } from '../../../utils/math2d/polygons';
+import { polygonCircleIntersectionRatio, isPolygonCCW, isPointInPolygon, computePointsBoundingBox } from '../../../utils/math2d/polygons';
+import { calculateOutwardNormal } from '../../../utils/math2d/vec2';
 
 
 const ULDK_BASE_URL = 'https://uldk.gugik.gov.pl/';
@@ -197,13 +198,146 @@ export async function fetchParcelByEpsg2180(
 /**
  * Pobiera działkę główną oraz sąsiednie działki w promieniu wokół punktu geograficznego (WGS84).
  */
+function rawParcelToLoops(
+  id: string,
+  raw: UldkParcelRaw,
+  parts: PolygonPart[],
+  sourceCrs: CrsDetectionResult,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon,
+  radiusMeters: number
+): BuildingLoop[] {
+  const loops: BuildingLoop[] = [];
+  for (let pi = 0; pi < parts.length; pi++) {
+    const part = parts[pi];
+    // Uwaga: renderujemy wyłącznie granicę zewnętrzną części wielokąta.
+    // Pierścienie-otwory (np. działka-enklawa wycięta w środku innej działki) NIE są
+    // wycinane z bryły — BuildingLoop nie ma koncepcji wielopierścieniowego wielokąta.
+    // Zamiast tworzyć fantomową, nakładającą się bryłę w miejscu otworu (jak poprzednio),
+    // po prostu pomijamy pierścienie-otwory i sygnalizujemy to w konsoli.
+    if (part.holes.length > 0) {
+      console.warn(
+        `[ULDK] Działka ${id} (część ${pi}) zawiera ${part.holes.length} nieodwzorowany(ch) otwór(ów) — ` +
+        `render pominie wycięcie enklawy w środku bryły.`
+      );
+    }
+
+    const cadPoints: Point2D[] = part.outer.map(([x2180, y2180]) => {
+      // Konwersja EPSG:2180 -> WGS84 -> CAD
+      const latLon = cadPointToWgs84({ x: x2180, y: y2180 }, sourceCrs);
+      return wgs84ToCadPoint(latLon, projectCrs, projectCenter);
+    });
+
+    const loopId = pi === 0 ? `uldk-${id}` : `uldk-${id}-p${pi}`;
+    const sanitized = sanitizePolygon(cadPoints, {
+      buildingId: loopId,
+      defaultHeight: 0,
+      buildingType: 'residential',
+      isCityCentre: false,
+    });
+
+    if (!sanitized.valid) continue;
+
+    // Filtr zasięgu: działka musi mieć co najmniej 10% powierzchni wewnątrz okręgu projektu
+    const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
+    if (ratio < 0.1) continue;
+
+    loops.push({
+      id: loopId,
+      name: raw.plotNumber
+        ? `Działka nr ${raw.plotNumber}${part.holes.length > 0 ? ' (⚠ zawiera nieodwzorowany otwór)' : ''}`
+        : `Działka ${id}`,
+      layer: 'WFS_DZIALKI',
+      category: 'boundary' as ObjectCategory,
+      areaType: 'plot',
+      plotNumber: raw.plotNumber || undefined,
+      isTested: false,
+      isIncluded: true,
+      isLocked: true,
+      isCityCentre: false,
+      buildingType: 'residential',
+      defaultHeight: 0,
+      hWindowBottom: 0,
+      elevation: 0.0,
+      firstFloorHeight: 0,
+      typicalFloorHeight: 0,
+      storeysCount: 0,
+      vertices: sanitized.vertices,
+      segments: sanitized.segments,
+      isClockwise: !sanitized.isCCW,
+      transform: { tx: 0, ty: 0, rotationDeg: 0 },
+    });
+  }
+  return loops;
+}
+
+/**
+ * Generuje punkty próbne tuż za granicą pierścienia (środki krawędzi + wierzchołki),
+ * przesunięte na zewnątrz o `epsilon` metrów wzdłuż normalnej/dwusiecznej kąta.
+ * Używane do rekurencyjnej ekspansji wykrywania działek: sąsiednia działka
+ * (niezależnie od jej rozmiaru) leży tuż za granicą działki już znalezionej.
+ */
+function generateProbePointsForRing(ring: Ring, epsilon: number = 0.5): Array<{ x: number; y: number }> {
+  const n = ring.length;
+  if (n < 3) return [];
+
+  const points: Point2D[] = ring.map(([x, y]) => ({ x, y }));
+  const ccw = isPolygonCCW(points);
+
+  const edgeNormals: Vector2D[] = [];
+  for (let i = 0; i < n; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    edgeNormals.push(calculateOutwardNormal(p1, p2, ccw));
+  }
+
+  const probes: Array<{ x: number; y: number }> = [];
+  const seen = new Set<string>();
+  const addProbe = (x: number, y: number) => {
+    const key = `${x.toFixed(2)},${y.toFixed(2)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    probes.push({ x, y });
+  };
+
+  for (let i = 0; i < n; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    const normal = edgeNormals[i];
+
+    // Środek krawędzi przesunięty na zewnątrz.
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    addProbe(midX + normal.x * epsilon, midY + normal.y * epsilon);
+
+    // Wierzchołek p2: dwusieczna kąta zewnętrznego jako suma normalnych dwóch
+    // przyległych krawędzi (fallback na samą normalną krawędzi przy ostrych narożnikach).
+    const nextNormal = edgeNormals[(i + 1) % n];
+    let bx = normal.x + nextNormal.x;
+    let by = normal.y + nextNormal.y;
+    const bLen = Math.hypot(bx, by);
+    if (bLen < 1e-6) {
+      bx = nextNormal.x;
+      by = nextNormal.y;
+    } else {
+      bx /= bLen;
+      by /= bLen;
+    }
+    addProbe(p2.x + bx * epsilon, p2.y + by * epsilon);
+  }
+
+  return probes;
+}
+
 export async function fetchParcelsInRadius(
   centerLat: number,
   centerLon: number,
   radiusMeters: number,
   projectCrs: CrsDetectionResult,
   projectCenter: LatLon,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: (done: number, total: number) => void,
+  onPartialParcels?: (loops: BuildingLoop[]) => void
 ): Promise<BuildingLoop[]> {
   const center2180 = wgs84ToEpsg2180(centerLat, centerLon);
   const parcelsMap = new Map<string, UldkParcelRaw>();
@@ -225,21 +359,6 @@ export async function fetchParcelsInRadius(
 
   // Zapytania w batchach równoległych (ULDK jest szybki, ale siatka może liczyć
   // setki punktów dla większych promieni — unikamy jednorazowego zalewu tysiącami fetchy).
-  const SAMPLE_CONCURRENCY = 24;
-  for (let i = 0; i < samplePoints.length; i += SAMPLE_CONCURRENCY) {
-    if (signal?.aborted) break;
-    const batch = samplePoints.slice(i, i + SAMPLE_CONCURRENCY);
-    await Promise.allSettled(
-      batch.map((pt) =>
-        fetchParcelByEpsg2180(pt.x, pt.y, signal).then((raw) => {
-          if (raw && raw.id && !parcelsMap.has(raw.id)) {
-            parcelsMap.set(raw.id, raw);
-          }
-        })
-      )
-    );
-  }
-
   const sourceCrs: CrsDetectionResult = {
     crs: 'EPSG:2180',
     description: 'PL-1992 (EPSG:2180)',
@@ -247,68 +366,106 @@ export async function fetchParcelsInRadius(
     isGeodetic: true,
   };
 
+  const SAMPLE_CONCURRENCY = 24;
   const loops: BuildingLoop[] = [];
 
-  for (const [id, raw] of parcelsMap) {
+  // Kolejka BFS ekspansji granicznej: dla każdej znalezionej działki próbkujemy punkty
+  // tuż za jej krawędziami/wierzchołkami, żeby wykryć sąsiadów niezależnie od ich
+  // rozmiaru (siatka regularna sama w sobie przeoczy wąskie/małe działki między punktami).
+  const expansionQueue: Ring[] = [];
+  const EXPANSION_MARGIN = Math.max(GRID_STEP_METERS, 30);
+  const MAX_PROBE_COUNT = 5000;
+  const MAX_PARCEL_COUNT = 500;
+  let totalProbesIssued = 0;
+
+  const isWithinExpandableRange = (x: number, y: number): boolean => {
+    const dx = x - center2180.x;
+    const dy = y - center2180.y;
+    const r = radiusMeters + EXPANSION_MARGIN;
+    return dx * dx + dy * dy <= r * r;
+  };
+
+  // Obrysy już pobranych działek — żeby nie wysyłać do ULDK punktów próbnych, które
+  // i tak wylądują wewnątrz działki, którą już mamy (np. gdy punkt wygenerowany tuż
+  // za krawędzią jednej działki trafia w obręb sąsiedniej, już znalezionej).
+  const knownParcelRings: Array<{ minX: number; maxX: number; minY: number; maxY: number; points: Point2D[] }> = [];
+
+  const isInsideKnownParcel = (x: number, y: number): boolean => {
+    for (const ring of knownParcelRings) {
+      if (x < ring.minX || x > ring.maxX || y < ring.minY || y > ring.maxY) continue;
+      if (isPointInPolygon({ x, y }, ring.points)) return true;
+    }
+    return false;
+  };
+
+  const registerFoundParcel = (id: string, raw: UldkParcelRaw) => {
+    parcelsMap.set(id, raw);
     const parts = parseWktToPolygonParts(raw.wkt);
-    for (let pi = 0; pi < parts.length; pi++) {
-      const part = parts[pi];
-      // Uwaga: renderujemy wyłącznie granicę zewnętrzną części wielokąta.
-      // Pierścienie-otwory (np. działka-enklawa wycięta w środku innej działki) NIE są
-      // wycinane z bryły — BuildingLoop nie ma koncepcji wielopierścieniowego wielokąta.
-      // Zamiast tworzyć fantomową, nakładającą się bryłę w miejscu otworu (jak poprzednio),
-      // po prostu pomijamy pierścienie-otwory i sygnalizujemy to w konsoli.
-      if (part.holes.length > 0) {
-        console.warn(
-          `[ULDK] Działka ${id} (część ${pi}) zawiera ${part.holes.length} nieodwzorowany(ch) otwór(ów) — ` +
-          `render pominie wycięcie enklawy w środku bryły.`
-        );
+    const partialLoops = rawParcelToLoops(id, raw, parts, sourceCrs, projectCrs, projectCenter, radiusMeters);
+    loops.push(...partialLoops);
+    if (onPartialParcels && partialLoops.length > 0) onPartialParcels(partialLoops);
+
+    if (parcelsMap.size < MAX_PARCEL_COUNT) {
+      for (const part of parts) {
+        const withinRange = part.outer.some(([x, y]) => isWithinExpandableRange(x, y));
+        if (withinRange) expansionQueue.push(part.outer);
+
+        const points: Point2D[] = part.outer.map(([x, y]) => ({ x, y }));
+        const { minX, maxX, minY, maxY } = computePointsBoundingBox(points);
+        knownParcelRings.push({ minX, maxX, minY, maxY, points });
       }
+    }
+  };
 
-      const cadPoints: Point2D[] = part.outer.map(([x2180, y2180]) => {
-        // Konwersja EPSG:2180 -> WGS84 -> CAD
-        const latLon = cadPointToWgs84({ x: x2180, y: y2180 }, sourceCrs);
-        return wgs84ToCadPoint(latLon, projectCrs, projectCenter);
-      });
+  /** Odpytuje ULDK dla batcha punktów, rejestruje nowo znalezione działki i raportuje postęp.
+   * Punkty leżące już wewnątrz dotychczas pobranej działki są pomijane — nie mają sensu jako zapytanie. */
+  const fetchAndRegisterBatch = async (
+    batch: Array<{ x: number; y: number }>,
+    onBatchDone: () => void
+  ): Promise<void> => {
+    const pointsToQuery = batch.filter((pt) => !isInsideKnownParcel(pt.x, pt.y));
+    const newlyFound: Array<[string, UldkParcelRaw]> = [];
+    await Promise.allSettled(
+      pointsToQuery.map((pt) =>
+        fetchParcelByEpsg2180(pt.x, pt.y, signal).then((raw) => {
+          if (raw && raw.id && !parcelsMap.has(raw.id)) {
+            newlyFound.push([raw.id, raw]);
+          }
+        })
+      )
+    );
+    onBatchDone();
+    for (const [id, raw] of newlyFound) {
+      if (!parcelsMap.has(id)) registerFoundParcel(id, raw);
+    }
+  };
 
-      const loopId = pi === 0 ? `uldk-${id}` : `uldk-${id}-p${pi}`;
-      const sanitized = sanitizePolygon(cadPoints, {
-        buildingId: loopId,
-        defaultHeight: 0,
-        buildingType: 'residential',
-        isCityCentre: false,
-      });
+  // ===== Faza 1: siatka-seed =====
+  for (let i = 0; i < samplePoints.length; i += SAMPLE_CONCURRENCY) {
+    if (signal?.aborted) break;
+    const batch = samplePoints.slice(i, i + SAMPLE_CONCURRENCY);
+    await fetchAndRegisterBatch(batch, () => {
+      onProgress?.(Math.min(i + SAMPLE_CONCURRENCY, samplePoints.length), samplePoints.length);
+    });
+  }
 
-      if (!sanitized.valid) continue;
+  // ===== Faza 2: rekurencyjna ekspansja wzdłuż granic znalezionych działek =====
+  while (
+    expansionQueue.length > 0 &&
+    totalProbesIssued < MAX_PROBE_COUNT &&
+    parcelsMap.size < MAX_PARCEL_COUNT &&
+    !signal?.aborted
+  ) {
+    const ring = expansionQueue.shift()!;
+    const probes = generateProbePointsForRing(ring, 0.5).filter((p) => isWithinExpandableRange(p.x, p.y));
 
-      // Filtr zasięgu: działka musi mieć co najmniej 10% powierzchni wewnątrz okręgu projektu
-      const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
-      if (ratio < 0.1) continue;
-
-      loops.push({
-        id: loopId,
-        name: raw.plotNumber
-          ? `Działka nr ${raw.plotNumber}${part.holes.length > 0 ? ' (⚠ zawiera nieodwzorowany otwór)' : ''}`
-          : `Działka ${id}`,
-        layer: 'WFS_DZIALKI',
-        category: 'boundary' as ObjectCategory,
-        areaType: 'plot',
-        plotNumber: raw.plotNumber || undefined,
-        isTested: false,
-        isIncluded: true,
-        isLocked: true,
-        isCityCentre: false,
-        buildingType: 'residential',
-        defaultHeight: 0,
-        hWindowBottom: 0,
-        elevation: 0.0,
-        firstFloorHeight: 0,
-        typicalFloorHeight: 0,
-        storeysCount: 0,
-        vertices: sanitized.vertices,
-        segments: sanitized.segments,
-        isClockwise: !sanitized.isCCW,
-        transform: { tx: 0, ty: 0, rotationDeg: 0 },
+    for (let i = 0; i < probes.length; i += SAMPLE_CONCURRENCY) {
+      if (signal?.aborted || totalProbesIssued >= MAX_PROBE_COUNT) break;
+      const batch = probes.slice(i, i + SAMPLE_CONCURRENCY);
+      totalProbesIssued += batch.length;
+      await fetchAndRegisterBatch(batch, () => {
+        const estimatedRemaining = expansionQueue.length * 8;
+        onProgress?.(samplePoints.length + totalProbesIssued, samplePoints.length + totalProbesIssued + estimatedRemaining);
       });
     }
   }

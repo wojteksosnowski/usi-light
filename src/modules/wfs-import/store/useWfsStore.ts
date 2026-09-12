@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Point2D } from '../../../types/geometry';
+import { Point2D, BuildingLoop } from '../../../types/geometry';
 
 export interface WfsTreeFeature {
   id: number;
@@ -13,8 +13,13 @@ export interface WfsTreeFeature {
   updatedAt: string;
 }
 
+export type WfsImportStage = 'idle' | 'parcels' | 'buildings' | 'trees' | 'done';
+
 export interface WfsImportStatus {
   isFetching: boolean;
+  stage: WfsImportStage;
+  progressDone: number;
+  progressTotal: number;
   buildingsCount: number;
   parcelsCount: number;
   treesCount: number;
@@ -59,6 +64,10 @@ interface WfsState {
 
   lastImportBbox: [number, number, number, number] | null;
 
+  loadingParcels: BuildingLoop[];
+  addLoadingParcels: (loops: BuildingLoop[]) => void;
+  clearLoadingParcels: () => void;
+
   setTrees: (trees: WfsTreeFeature[]) => void;
   setStatus: (patch: Partial<WfsImportStatus>) => void;
   setOptions: (patch: Partial<WfsImportOptions>) => void;
@@ -86,12 +95,34 @@ interface WfsState {
 
 const defaultStatus: WfsImportStatus = {
   isFetching: false,
+  stage: 'idle',
+  progressDone: 0,
+  progressTotal: 0,
   buildingsCount: 0,
   parcelsCount: 0,
   treesCount: 0,
   error: null,
   info: null,
 };
+
+const STAGE_LABELS: Record<WfsImportStage, string> = {
+  idle: '',
+  parcels: 'Pobieranie działek…',
+  buildings: 'Pobieranie budynków…',
+  trees: 'Pobieranie drzew…',
+  done: 'Zakończono',
+};
+
+export const WFS_IMPORT_CONTINUE_HINT = 'Możesz kontynuować pracę — dane zostaną dodane po zakończeniu.';
+
+export function formatWfsProgress(status: WfsImportStatus): string {
+  const label = STAGE_LABELS[status.stage] || 'Pobieranie danych…';
+  if (status.progressTotal > 0) {
+    const pct = Math.round((status.progressDone / status.progressTotal) * 100);
+    return `${label} ${status.progressDone} z ${status.progressTotal} punktów (${pct}%)`;
+  }
+  return label;
+}
 
 export const useWfsStore = create<WfsState>((set) => ({
   trees: [],
@@ -123,6 +154,11 @@ export const useWfsStore = create<WfsState>((set) => ({
   showTreesLayer: false,
 
   lastImportBbox: null,
+
+  loadingParcels: [],
+  addLoadingParcels: (loops) =>
+    set((state) => ({ loadingParcels: [...state.loadingParcels, ...loops] })),
+  clearLoadingParcels: () => set({ loadingParcels: [] }),
 
   setTrees: (trees) => set({ trees }),
   setStatus: (patch) =>

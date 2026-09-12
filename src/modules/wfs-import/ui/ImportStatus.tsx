@@ -1,6 +1,6 @@
 import React from 'react';
 import { Loader2, CheckCircle2, AlertCircle, Building2, TreePine, Info } from 'lucide-react';
-import { WfsImportStatus } from '../store/useWfsStore';
+import { WfsImportStatus, formatWfsProgress, WFS_IMPORT_CONTINUE_HINT } from '../store/useWfsStore';
 
 interface ImportStatusProps {
   status: WfsImportStatus;
@@ -26,9 +26,26 @@ export const ImportStatus: React.FC<ImportStatusProps> = ({ status }) => {
       }}
     >
       {status.isFetching && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-blue)' }}>
-          <Loader2 size={13} className="animate-spin" />
-          <span>Pobieranie danych…</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-blue)' }}>
+            <Loader2 size={13} className="animate-spin" />
+            <span>{formatWfsProgress(status)}</span>
+          </div>
+          {status.progressTotal > 0 && (
+            <div style={{ height: '4px', borderRadius: '2px', background: 'rgba(59, 130, 246, 0.15)', overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: `${Math.min(100, (status.progressDone / status.progressTotal) * 100)}%`,
+                  background: 'var(--accent-blue)',
+                  transition: 'width 150ms ease-out',
+                }}
+              />
+            </div>
+          )}
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+            {WFS_IMPORT_CONTINUE_HINT}
+          </span>
         </div>
       )}
 
