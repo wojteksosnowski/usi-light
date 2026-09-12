@@ -7,9 +7,11 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
-import { WfsTreeFeature, OvertureLineFeature, OverturePolygonFeature, MpzpZoneFeature } from '../store/useWfsStore';
+import { WfsTreeFeature, OvertureLineFeature, OverturePolygonFeature, MpzpZoneFeature, LandCoverFeature } from '../store/useWfsStore';
 import { MpzpZoneRawFeature } from './wfsMpzpWarsawClient';
-import { polygonCircleIntersectionRatio } from '../../../utils/math2d/polygons';
+import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../utils/math2d/polygons';
+import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
+import { ensureOppositeWinding } from '../../../utils/ringSegments';
 
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
@@ -70,6 +72,29 @@ function extractRings(geometry: { type: string; coordinates: unknown }): number[
   return [];
 }
 
+interface PolygonStructure {
+  outer: number[][];
+  holes: number[][][];
+}
+
+/**
+ * Jak `extractRings`, ale zachowuje hierarchię obrys-zewnętrzny/otwory zamiast spłaszczać
+ * wszystkie pierścienie do jednej listy (GeoJSON `Polygon.coordinates[0]` = obrys, `[1..]` = otwory;
+ * `MultiPolygon` = lista takich struktur, po jednej na część).
+ */
+function extractPolygonStructures(geometry: { type: string; coordinates: unknown }): PolygonStructure[] {
+  if (geometry.type === 'Polygon') {
+    const coords = geometry.coordinates as number[][][];
+    if (coords.length === 0) return [];
+    return [{ outer: coords[0], holes: coords.slice(1) }];
+  }
+  if (geometry.type === 'MultiPolygon') {
+    const mp = geometry.coordinates as number[][][][];
+    return mp.filter((poly) => poly.length > 0).map((poly) => ({ outer: poly[0], holes: poly.slice(1) }));
+  }
+  return [];
+}
+
 function estimateHeight(storeys: number | null): number {
   if (storeys == null || storeys <= 0) return DEFAULT_HEIGHT;
   if (storeys === 1) return FIRST_FLOOR_HEIGHT;
@@ -91,7 +116,7 @@ export function importBuildingsFromGeoJson(
     const feature = collection.features[fi];
     if (!feature.geometry) continue;
 
-    const rings = extractRings(feature.geometry);
+    const structures = extractPolygonStructures(feature.geometry);
     const props = feature.properties || {};
     const storeys = props.KONDYGNACJE_NADZIEMNE != null
       ? Math.round(Number(props.KONDYGNACJE_NADZIEMNE))
@@ -101,14 +126,16 @@ export function importBuildingsFromGeoJson(
     const rawBuildingId = strOrNullIfMissing(props.ID_BUDYNKU);
     const buildingId = rawBuildingId || `wfs-bld-${now}-${fi}`;
 
-    for (let ri = 0; ri < rings.length; ri++) {
-      const ring = rings[ri];
-      const rawPoints: Point2D[] = ring.map(([x, y]) =>
+    for (let si = 0; si < structures.length; si++) {
+      const struct = structures[si];
+      const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
         wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
       );
 
+      const id = si === 0 ? buildingId : `${buildingId}-p${si}`;
+
       const sanitized = sanitizePolygon(rawPoints, {
-        buildingId: ri === 0 ? buildingId : `${buildingId}-r${ri}`,
+        buildingId: id,
         defaultHeight: height,
         buildingType: 'residential',
         isCityCentre: false,
@@ -125,10 +152,24 @@ export function importBuildingsFromGeoJson(
         if (ratio < 0.1) continue;
       }
 
-      const id = ri === 0 ? buildingId : `${buildingId}-r${ri}`;
       const storeysCount = storeys ?? DEFAULT_STOREYS;
+      const outerIsCCW = isPolygonCCW(sanitized.vertices);
+      const holes: Point2D[][] = [];
+      for (const rawHole of struct.holes) {
+        const rawHolePoints: Point2D[] = rawHole.map(([x, y]) =>
+          wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+        );
+        const sanitizedHole = sanitizePolygon(rawHolePoints, {
+          buildingId: `${id}-hole`,
+          defaultHeight: height,
+          buildingType: 'residential',
+          isCityCentre: false,
+        });
+        if (!sanitizedHole.valid) continue;
+        holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+      }
 
-      buildings.push({
+      const buildingBase: BuildingLoop = {
         id,
         name: `WFS ${rawBuildingId || `#${fi + 1}`}`,
         layer: 'WFS_BUDYNKI',
@@ -146,10 +187,13 @@ export function importBuildingsFromGeoJson(
         typicalFloorHeight: DEFAULT_FLOOR_HEIGHT,
         storeysCount,
         vertices: sanitized.vertices,
+        holes: holes.length > 0 ? holes : undefined,
         segments: sanitized.segments,
         isClockwise: !sanitized.isCCW,
         transform: { tx: 0, ty: 0, rotationDeg: 0 },
-      });
+      };
+
+      buildings.push(rebuildBuildingSegments(buildingBase, sanitized.vertices));
     }
   }
 
@@ -170,19 +214,21 @@ export function importParcelsFromGeoJson(
     const feature = collection.features[fi];
     if (!feature.geometry) continue;
 
-    const rings = extractRings(feature.geometry);
+    const structures = extractPolygonStructures(feature.geometry);
     const props = feature.properties || {};
     const parcelId = strOrNullIfMissing(props.ID_DZIALKI) || `wfs-parcel-${now}-${fi}`;
     const plotNumber = str(props.NUMER_DZIALKI);
 
-    for (let ri = 0; ri < rings.length; ri++) {
-      const ring = rings[ri];
-      const rawPoints: Point2D[] = ring.map(([x, y]) =>
+    for (let si = 0; si < structures.length; si++) {
+      const struct = structures[si];
+      const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
         wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
       );
 
+      const id = si === 0 ? parcelId : `${parcelId}-p${si}`;
+
       const sanitized = sanitizePolygon(rawPoints, {
-        buildingId: ri === 0 ? parcelId : `${parcelId}-r${ri}`,
+        buildingId: id,
         defaultHeight: 0,
         buildingType: 'residential',
         isCityCentre: false,
@@ -193,9 +239,23 @@ export function importParcelsFromGeoJson(
         continue;
       }
 
-      const id = ri === 0 ? parcelId : `${parcelId}-r${ri}`;
+      const outerIsCCW = isPolygonCCW(sanitized.vertices);
+      const holes: Point2D[][] = [];
+      for (const rawHole of struct.holes) {
+        const rawHolePoints: Point2D[] = rawHole.map(([x, y]) =>
+          wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+        );
+        const sanitizedHole = sanitizePolygon(rawHolePoints, {
+          buildingId: `${id}-hole`,
+          defaultHeight: 0,
+          buildingType: 'residential',
+          isCityCentre: false,
+        });
+        if (!sanitizedHole.valid) continue;
+        holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+      }
 
-      parcels.push({
+      const parcelBase: BuildingLoop = {
         id,
         name: `Działka ${plotNumber || `#${fi + 1}`}`,
         layer: 'WFS_DZIALKI',
@@ -214,10 +274,13 @@ export function importParcelsFromGeoJson(
         typicalFloorHeight: 0,
         storeysCount: 0,
         vertices: sanitized.vertices,
+        holes: holes.length > 0 ? holes : undefined,
         segments: sanitized.segments,
         isClockwise: !sanitized.isCCW,
         transform: { tx: 0, ty: 0, rotationDeg: 0 },
-      });
+      };
+
+      parcels.push(rebuildBuildingSegments(parcelBase, sanitized.vertices));
     }
   }
 
@@ -343,6 +406,64 @@ export function importMpzpZonesFromGeoJson(
       liczKond: strOrNullIfMissing(props.licz_kond),
       nazwaPlan: strOrNullIfMissing(props.nazwa_plan),
     });
+  }
+
+  return result;
+}
+
+/**
+ * Konwertuje jednostki pokrycia terenu z ogólnopolskiej usługi WFS GUGiK "wfsLCV" (patrz
+ * `wfsLcvClient.ts`) na LandCoverFeature w lokalnych współrzędnych CAD. Zachowuje otwory
+ * wewnętrzne (`extractPolygonStructures()`) — te geometrie realnie mają enklawy/wyspy.
+ * Bez sanityzacji do segmentów budynku (`sanitizePolygon` tu służy tylko do odrzucenia
+ * zdegenerowanych punktów/krawędzi i wyznaczenia kierunku nawijania) — to czysta geometria
+ * referencyjna, nie `BuildingLoop`.
+ */
+export function importLandCoverFromGeoJson(
+  collection: GeoJsonFeatureCollection,
+  sourceCrs: CrsDetectionResult,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): LandCoverFeature[] {
+  const result: LandCoverFeature[] = [];
+
+  for (let fi = 0; fi < collection.features.length; fi++) {
+    const feature = collection.features[fi];
+    if (!feature.geometry) continue;
+
+    const structures = extractPolygonStructures(feature.geometry);
+    const props = feature.properties || {};
+    const classHref = strOrNullIfMissing(props.class);
+    const landCoverClass = classHref ? classHref.split('/').filter(Boolean).pop() ?? null : null;
+
+    for (let si = 0; si < structures.length; si++) {
+      const struct = structures[si];
+      const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
+        wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+      );
+
+      const id = `lcv-${fi}-${si}`;
+      const sanitized = sanitizePolygon(rawPoints, { buildingId: id, defaultHeight: 0 });
+      if (!sanitized.valid) continue;
+
+      const outerIsCCW = isPolygonCCW(sanitized.vertices);
+      const holes: Point2D[][] = [];
+      for (const rawHole of struct.holes) {
+        const rawHolePoints: Point2D[] = rawHole.map(([x, y]) =>
+          wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+        );
+        const sanitizedHole = sanitizePolygon(rawHolePoints, { buildingId: `${id}-hole`, defaultHeight: 0 });
+        if (!sanitizedHole.valid) continue;
+        holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+      }
+
+      result.push({
+        id,
+        outer: sanitized.vertices,
+        holes: holes.length > 0 ? holes : undefined,
+        landCoverClass,
+      });
+    }
   }
 
   return result;

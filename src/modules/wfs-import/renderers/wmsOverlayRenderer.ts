@@ -23,6 +23,10 @@ export interface RenderWmsOverlayOptions {
    * traktowane jako "podkład satelitarny" (np. ortofotomapa), żeby zachowywały się spójnie
    * z Google/HERE: bufor kafli w promieniu projektu, ale wyświetlanie całej mapy również poza okręgiem. */
   skipRadiusClip?: boolean;
+  /** Odwraca kolory kafli ("invert(1) hue-rotate(180deg)") — dla warstw zaprojektowanych na
+   * białe tło (KIUT/BDOT), nieczytelnych na ciemnym tle CAD. Zachowuje odcień elementów
+   * kolorowych (np. konwencje kolorów przewodów GESUT), odwraca jasność tła/linii achromatycznych. */
+  invertColors?: boolean;
 }
 
 /**
@@ -47,7 +51,7 @@ function tileIntersectsCircle(
 }
 
 export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
-  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius, skipRadiusClip = false } = options;
+  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius, skipRadiusClip = false, invertColors = false } = options;
   const { ctx, width, height, viewState, screenToWorld, worldToScreen } = rc;
 
   const c1 = screenToWorld(0, 0);
@@ -93,6 +97,7 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
   ctx.save();
   ctx.globalAlpha = Math.max(0.05, Math.min(1.0, opacity));
   ctx.imageSmoothingEnabled = true;
+  ctx.filter = invertColors ? 'invert(1) hue-rotate(180deg)' : 'none';
 
   // Twardy clip canvas do okręgu zasięgu projektu
   if (radiusPx != null && APP_CONFIG.geo.wmsClipToProjectRadius && !skipRadiusClip) {

@@ -36,9 +36,12 @@ import {
   importParcelsFromGeoJson,
   importOverturePolygons,
   importMpzpZonesFromGeoJson,
+  importLandCoverFromGeoJson,
 } from '../../modules/wfs-import/services/geoJsonImporter';
 import { fetchOvertureBase } from '../../modules/wfs-import/services/overtureMapsApiClient';
 import { fetchMpzpZonesInRadius } from '../../modules/wfs-import/services/wfsMpzpWarsawClient';
+import { fetchLandCoverUnits } from '../../modules/wfs-import/services/wfsLcvClient';
+import { EPSG_2180 } from '../../modules/wfs-import/services/wfsEgibClient';
 import { analyzeBuildingHeights } from '../../modules/wfs-import/utils/terrainAnalyzer';
 import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
 import { detectCoordinateSystem, CrsDetectionResult, LatLon } from '../../utils/geoTransform';
@@ -221,6 +224,8 @@ export const ProjectGroup: React.FC = () => {
   const setShowKiutLayer = useWfsStore((s) => s.setShowKiutLayer);
   const kiutOpacity = useWfsStore((s) => s.kiutOpacity);
   const setKiutOpacity = useWfsStore((s) => s.setKiutOpacity);
+  const kiutInvertColors = useWfsStore((s) => s.kiutInvertColors);
+  const setKiutInvertColors = useWfsStore((s) => s.setKiutInvertColors);
   const showMpzpLayer = useWfsStore((s) => s.showMpzpLayer);
   const setShowMpzpLayer = useWfsStore((s) => s.setShowMpzpLayer);
   const mpzpOpacity = useWfsStore((s) => s.mpzpOpacity);
@@ -229,6 +234,8 @@ export const ProjectGroup: React.FC = () => {
   const setShowBdotLayer = useWfsStore((s) => s.setShowBdotLayer);
   const bdotOpacity = useWfsStore((s) => s.bdotOpacity);
   const setBdotOpacity = useWfsStore((s) => s.setBdotOpacity);
+  const bdotInvertColors = useWfsStore((s) => s.bdotInvertColors);
+  const setBdotInvertColors = useWfsStore((s) => s.setBdotInvertColors);
   const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
   const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
@@ -237,10 +244,13 @@ export const ProjectGroup: React.FC = () => {
   const setShowOvertureGreenAreas = useWfsStore((s) => s.setShowOvertureGreenAreas);
   const showMpzpZonesLayer = useWfsStore((s) => s.showMpzpZonesLayer);
   const setShowMpzpZonesLayer = useWfsStore((s) => s.setShowMpzpZonesLayer);
+  const showLandCoverLayer = useWfsStore((s) => s.showLandCoverLayer);
+  const setShowLandCoverLayer = useWfsStore((s) => s.setShowLandCoverLayer);
   const status = useWfsStore((s) => s.status);
   const setStatus = useWfsStore((s) => s.setStatus);
   const [overtureLoading, setOvertureLoading] = React.useState(false);
   const [mpzpZonesLoading, setMpzpZonesLoading] = React.useState(false);
+  const [landCoverLoading, setLandCoverLoading] = React.useState(false);
 
   const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
 
@@ -434,6 +444,24 @@ export const ProjectGroup: React.FC = () => {
   const toggleMpzpZonesLayer = () => {
     if (!showMpzpZonesLayer) ensureMpzpZonesLoaded();
     setShowMpzpZonesLayer(!showMpzpZonesLayer);
+  };
+
+  /** Pokrycie terenu (wektor) — ogólnopolskie, patrz `wfsLcvClient.ts`. Bez bramkowania miejskiego. */
+  const ensureLandCoverLoaded = () => ensureGeoContextLoaded(
+    useWfsStore.getState().landCoverUnits.length > 0,
+    setLandCoverLoading,
+    (projectCrs, projectCenter) => {
+      const bbox = latLonToBbox(settings.latitude, settings.longitude, projectRadius);
+      return fetchLandCoverUnits(bbox)
+        .then((collection) => importLandCoverFromGeoJson(collection, EPSG_2180, projectCrs, projectCenter));
+    },
+    useWfsStore.getState().setLandCoverUnits,
+    'Nie udało się pobrać pokrycia terenu:'
+  );
+
+  const toggleLandCoverLayer = () => {
+    if (!showLandCoverLayer) ensureLandCoverLoaded();
+    setShowLandCoverLayer(!showLandCoverLayer);
   };
 
   const handleMapsInputChange = (val: string) => {
@@ -1869,6 +1897,15 @@ export const ProjectGroup: React.FC = () => {
                     onChange={(e) => setKiutOpacity(parseFloat(e.target.value))}
                     style={{ width: '100%', accentColor: '#fbbf24', cursor: 'pointer' }}
                   />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#94a3b8', cursor: 'pointer', userSelect: 'none', paddingTop: '2px' }}>
+                    <input
+                      type="checkbox"
+                      checked={kiutInvertColors}
+                      onChange={(e) => setKiutInvertColors(e.target.checked)}
+                      style={{ accentColor: '#fbbf24', cursor: 'pointer' }}
+                    />
+                    <span>Odwróć kolory (czytelność na ciemnym tle)</span>
+                  </label>
                 </div>
               )}
             </div>
@@ -2017,6 +2054,15 @@ export const ProjectGroup: React.FC = () => {
                     onChange={(e) => setBdotOpacity(parseFloat(e.target.value))}
                     style={{ width: '100%', accentColor: '#34d399', cursor: 'pointer' }}
                   />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#94a3b8', cursor: 'pointer', userSelect: 'none', paddingTop: '2px' }}>
+                    <input
+                      type="checkbox"
+                      checked={bdotInvertColors}
+                      onChange={(e) => setBdotInvertColors(e.target.checked)}
+                      style={{ accentColor: '#34d399', cursor: 'pointer' }}
+                    />
+                    <span>Odwróć kolory (czytelność na ciemnym tle)</span>
+                  </label>
                 </div>
               )}
             </div>
@@ -2098,6 +2144,15 @@ export const ProjectGroup: React.FC = () => {
                 onToggle={isMpzpZonesAvailableHere ? toggleMpzpZonesLayer : () => {}}
               />
             </div>
+
+            {/* H. Pokrycie terenu (wektor, ogólnopolskie) — geometria + klasyfikacja z usługi
+                WFS GUGiK "wfsLCV" (INSPIRE Land Cover, źródło BDOT10k), patrz ensureLandCoverLoaded(). */}
+            <SimpleLayerToggle
+              label={landCoverLoading ? 'Pokrycie terenu (wczytywanie…)' : 'Pokrycie terenu'}
+              active={showLandCoverLayer}
+              dotColor="#84cc16"
+              onToggle={toggleLandCoverLayer}
+            />
           </div>
           )}
 

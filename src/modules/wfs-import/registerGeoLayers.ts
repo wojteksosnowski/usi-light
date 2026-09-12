@@ -9,6 +9,7 @@ import { WfsTreesLayer } from './layers/WfsTreesLayer';
 import { ParcelLoadingPreviewLayer } from './layers/ParcelLoadingPreviewLayer';
 import { OvertureContextLayer } from './layers/OvertureContextLayer';
 import { MpzpZonesVectorLayer } from './layers/MpzpZonesVectorLayer';
+import { LandCoverVectorLayer } from './layers/LandCoverVectorLayer';
 import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
 
@@ -47,6 +48,7 @@ const treesLayer = new WfsTreesLayer();
 const parcelLoadingPreviewLayer = new ParcelLoadingPreviewLayer();
 const overtureContextLayer = new OvertureContextLayer();
 const mpzpZonesVectorLayer = new MpzpZonesVectorLayer();
+const landCoverVectorLayer = new LandCoverVectorLayer();
 
 const orthophotoTileManager = new WmsTileManager({
   baseUrl: ORTO_WMS_URL,
@@ -121,6 +123,8 @@ export function registerGeoLayers(): () => void {
   let prevOvertureFeaturesLen = 0;
   let prevShowMpzpZones = false;
   let prevMpzpZonesLen = 0;
+  let prevShowLandCover = false;
+  let prevLandCoverLen = 0;
 
   const unsub = useWfsStore.subscribe((state) => {
     const {
@@ -128,10 +132,12 @@ export function registerGeoLayers(): () => void {
       orthophotoOpacity,
       showKiutLayer,
       kiutOpacity,
+      kiutInvertColors,
       showMpzpLayer,
       mpzpOpacity,
       showBdotLayer,
       bdotOpacity,
+      bdotInvertColors,
       showTerrainLayer,
       showTreesLayer,
       trees,
@@ -140,6 +146,8 @@ export function registerGeoLayers(): () => void {
       showOvertureGreenAreas,
       mpzpZones,
       showMpzpZonesLayer,
+      landCoverUnits,
+      showLandCoverLayer,
     } = state;
 
     let changed = false;
@@ -151,6 +159,7 @@ export function registerGeoLayers(): () => void {
 
     // 2. Sieci GESUT (KIUT)
     kiutLayer.setOpacity(kiutOpacity);
+    kiutLayer.setInvertColors(kiutInvertColors);
     if (toggleMainLayer(pipeline, kiutLayer, 'wfs_kiut_overlay', showKiutLayer, prevShowKiut)) changed = true;
     prevShowKiut = showKiutLayer;
 
@@ -161,6 +170,7 @@ export function registerGeoLayers(): () => void {
 
     // 4. BDOT10k
     bdotLayer.setOpacity(bdotOpacity);
+    bdotLayer.setInvertColors(bdotInvertColors);
     if (toggleMainLayer(pipeline, bdotLayer, 'wfs_bdot_overlay', showBdotLayer, prevShowBdot)) changed = true;
     prevShowBdot = showBdotLayer;
 
@@ -212,6 +222,17 @@ export function registerGeoLayers(): () => void {
       changed = true;
     }
 
+    // 11. Pokrycie terenu (wektor, ogólnopolskie)
+    landCoverVectorLayer.setData(landCoverUnits);
+    landCoverVectorLayer.setVisibility(showLandCoverLayer);
+    const shouldShowLandCover = showLandCoverLayer && landCoverUnits.length > 0;
+    if (shouldShowLandCover !== prevShowLandCover || landCoverUnits.length !== prevLandCoverLen) {
+      toggleMainLayer(pipeline, landCoverVectorLayer, 'wfs_land_cover_vector', shouldShowLandCover, prevShowLandCover);
+      prevShowLandCover = shouldShowLandCover;
+      prevLandCoverLen = landCoverUnits.length;
+      changed = true;
+    }
+
     if (changed) triggerRender();
   });
 
@@ -226,6 +247,7 @@ export function registerGeoLayers(): () => void {
     pipeline.unregisterMainLayer('wfs_parcels_loading');
     pipeline.unregisterMainLayer('wfs_overture_context');
     pipeline.unregisterMainLayer('wfs_mpzp_zones_vector');
+    pipeline.unregisterMainLayer('wfs_land_cover_vector');
     registered = false;
   };
 }

@@ -71,7 +71,8 @@ describe('booleanUnionBuildings', () => {
     expect(result.success).toBe(true);
     expect(result.building).toBeDefined();
     expect(result.building?.vertices.length).toBeGreaterThanOrEqual(4);
-    expect(result.building?.segments.length).toBe(result.building?.vertices.length);
+    const holeVertexCount = (result.building?.holes || []).reduce((sum, h) => sum + h.length, 0);
+    expect(result.building?.segments.length).toBe((result.building?.vertices.length || 0) + holeVertexCount);
   });
 
   it('unions two buildings that touch along an edge', () => {

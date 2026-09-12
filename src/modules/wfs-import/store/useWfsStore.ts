@@ -49,6 +49,21 @@ export interface MpzpZoneFeature {
   nazwaPlan: string | null;
 }
 
+/**
+ * Jednostka pokrycia terenu z ogólnopolskiej usługi WFS GUGiK "wfsLCV" (INSPIRE Land Cover,
+ * `lcv:LandCoverUnit`, źródło BDOT10k) — patrz `wfsLcvClient.ts`. W przeciwieństwie do
+ * `MpzpZoneFeature.rings` (płaska lista pierścieni, bez rozróżnienia obrys/otwór) geometria
+ * jest tu zapisana jako obrys + otwory (jak `BuildingLoop.holes`), bo te wielokąty realnie
+ * mają enklawy/wyspy — płaski rendering "każdy pierścień osobno" zamalowałby otwór.
+ */
+export interface LandCoverFeature {
+  id: string;
+  outer: Point2D[];
+  holes?: Point2D[][];
+  /** Sufiks URI klasyfikacji, np. "grass", "arableLand", "flowingWater" (patrz `landCoverRenderer.ts`). */
+  landCoverClass: string | null;
+}
+
 export type WfsImportStage = 'idle' | 'parcels' | 'buildings' | 'trees' | 'done';
 
 export interface WfsImportStatus {
@@ -87,10 +102,15 @@ interface WfsState {
   orthophotoOpacity: number;
   showKiutLayer: boolean;
   kiutOpacity: number;
+  // Warstwy KIUT/BDOT są renderowane przez GUGiK z myślą o białym tle (STYLES= puste, brak
+  // wariantu na ciemne tło) — nieczytelne na ciemnym płótnie CAD bez korekcji kolorów po
+  // stronie klienta (patrz `wmsOverlayRenderer.ts` `invertColors`).
+  kiutInvertColors: boolean;
   showMpzpLayer: boolean;
   mpzpOpacity: number;
   showBdotLayer: boolean;
   bdotOpacity: number;
+  bdotInvertColors: boolean;
   showTerrainLayer: boolean;
   terrainOpacity: number;
   showTreesLayer: boolean;
@@ -107,6 +127,10 @@ interface WfsState {
   // showMpzpLayer (raster WMS ogólnopolski) — użytkownik może chcieć oba naraz.
   mpzpZones: MpzpZoneFeature[];
   showMpzpZonesLayer: boolean;
+
+  // Pokrycie terenu (wektor) — ogólnopolskie, patrz wfsLcvClient.ts.
+  landCoverUnits: LandCoverFeature[];
+  showLandCoverLayer: boolean;
 
   lastImportBbox: [number, number, number, number] | null;
 
@@ -125,10 +149,12 @@ interface WfsState {
   setOrthophotoOpacity: (val: number) => void;
   setShowKiutLayer: (show: boolean) => void;
   setKiutOpacity: (val: number) => void;
+  setKiutInvertColors: (invert: boolean) => void;
   setShowMpzpLayer: (show: boolean) => void;
   setMpzpOpacity: (val: number) => void;
   setShowBdotLayer: (show: boolean) => void;
   setBdotOpacity: (val: number) => void;
+  setBdotInvertColors: (invert: boolean) => void;
   setShowTerrainLayer: (show: boolean) => void;
   setTerrainOpacity: (val: number) => void;
   setShowTreesLayer: (show: boolean) => void;
@@ -138,6 +164,9 @@ interface WfsState {
 
   setMpzpZones: (zones: MpzpZoneFeature[]) => void;
   setShowMpzpZonesLayer: (show: boolean) => void;
+
+  setLandCoverUnits: (units: LandCoverFeature[]) => void;
+  setShowLandCoverLayer: (show: boolean) => void;
 
   setLastImportBbox: (bbox: [number, number, number, number] | null) => void;
   resetStatus: () => void;
@@ -198,10 +227,12 @@ export const useWfsStore = create<WfsState>()(
       orthophotoOpacity: 0.85,
       showKiutLayer: false,
       kiutOpacity: 0.65,
+      kiutInvertColors: true,
       showMpzpLayer: false,
       mpzpOpacity: 0.5,
       showBdotLayer: false,
       bdotOpacity: 0.6,
+      bdotInvertColors: true,
       showTerrainLayer: false,
       terrainOpacity: 0.35,
       showTreesLayer: false,
@@ -211,6 +242,9 @@ export const useWfsStore = create<WfsState>()(
 
   mpzpZones: [],
   showMpzpZonesLayer: false,
+
+  landCoverUnits: [],
+  showLandCoverLayer: false,
 
   lastImportBbox: null,
 
@@ -260,10 +294,12 @@ export const useWfsStore = create<WfsState>()(
   setOrthophotoOpacity: (val) => set({ orthophotoOpacity: val }),
   setShowKiutLayer: (show) => set({ showKiutLayer: show }),
   setKiutOpacity: (val) => set({ kiutOpacity: val }),
+  setKiutInvertColors: (invert) => set({ kiutInvertColors: invert }),
   setShowMpzpLayer: (show) => set({ showMpzpLayer: show }),
   setMpzpOpacity: (val) => set({ mpzpOpacity: val }),
   setShowBdotLayer: (show) => set({ showBdotLayer: show }),
   setBdotOpacity: (val) => set({ bdotOpacity: val }),
+  setBdotInvertColors: (invert) => set({ bdotInvertColors: invert }),
   setShowTerrainLayer: (show) => set({ showTerrainLayer: show }),
   setTerrainOpacity: (val) => set({ terrainOpacity: val }),
   setShowTreesLayer: (show) => set({ showTreesLayer: show }),
@@ -273,6 +309,9 @@ export const useWfsStore = create<WfsState>()(
 
   setMpzpZones: (zones) => set({ mpzpZones: zones }),
   setShowMpzpZonesLayer: (show) => set({ showMpzpZonesLayer: show }),
+
+  setLandCoverUnits: (units) => set({ landCoverUnits: units }),
+  setShowLandCoverLayer: (show) => set({ showLandCoverLayer: show }),
 
   setLastImportBbox: (bbox) => set({ lastImportBbox: bbox }),
   resetStatus: () => set({ status: { ...defaultStatus } }),
@@ -285,15 +324,18 @@ export const useWfsStore = create<WfsState>()(
         orthophotoOpacity: state.orthophotoOpacity,
         showKiutLayer: state.showKiutLayer,
         kiutOpacity: state.kiutOpacity,
+        kiutInvertColors: state.kiutInvertColors,
         showMpzpLayer: state.showMpzpLayer,
         mpzpOpacity: state.mpzpOpacity,
         showBdotLayer: state.showBdotLayer,
         bdotOpacity: state.bdotOpacity,
+        bdotInvertColors: state.bdotInvertColors,
         showTerrainLayer: state.showTerrainLayer,
         terrainOpacity: state.terrainOpacity,
         showTreesLayer: state.showTreesLayer,
         showOvertureGreenAreas: state.showOvertureGreenAreas,
         showMpzpZonesLayer: state.showMpzpZonesLayer,
+        showLandCoverLayer: state.showLandCoverLayer,
         projectRadius: state.projectRadius,
       }),
     }

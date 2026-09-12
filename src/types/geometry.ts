@@ -34,6 +34,7 @@ export interface FacadeSegment {
   isCityCentre: boolean;
   buildingType: BuildingType;
   lineEquation?: LineEquation2D;
+  ringIndex?: number; // 0 (or undefined) = obrys zewnętrzny, 1+ = indeks otworu wewnętrznego + 1
 }
 
 export * from './modifiers';
@@ -85,6 +86,7 @@ export interface BuildingLoop {
   heightSource?: 'manual' | 'default' | 'storeys-wfs' | 'lidar-nmt';
   hWindowBottom: number;
   vertices: Point2D[];
+  holes?: Point2D[][]; // Pierścienie otworów wewnętrznych (np. dziedziniec budynku, enklawa działki)
   segments: FacadeSegment[];
   isClockwise?: boolean;
   sweepPath?: Point2D[]; // Otwarta polilinia bazowa dla obiektów typu Wstęga (Sweep)

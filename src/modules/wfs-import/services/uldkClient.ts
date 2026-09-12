@@ -17,6 +17,8 @@ import {
 import { wgs84ToEpsg2180 } from '../utils/wgs84ToEpsg2180';
 import { polygonCircleIntersectionRatio, isPolygonCCW, isPointInPolygon, computePointsBoundingBox } from '../../../utils/math2d/polygons';
 import { calculateOutwardNormal } from '../../../utils/math2d/vec2';
+import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
+import { ensureOppositeWinding } from '../../../utils/ringSegments';
 
 
 const ULDK_BASE_URL = 'https://uldk.gugik.gov.pl/';
@@ -217,23 +219,13 @@ function rawParcelToLoops(
   const loops: BuildingLoop[] = [];
   for (let pi = 0; pi < parts.length; pi++) {
     const part = parts[pi];
-    // Uwaga: renderujemy wyłącznie granicę zewnętrzną części wielokąta.
-    // Pierścienie-otwory (np. działka-enklawa wycięta w środku innej działki) NIE są
-    // wycinane z bryły — BuildingLoop nie ma koncepcji wielopierścieniowego wielokąta.
-    // Zamiast tworzyć fantomową, nakładającą się bryłę w miejscu otworu (jak poprzednio),
-    // po prostu pomijamy pierścienie-otwory i sygnalizujemy to w konsoli.
-    if (part.holes.length > 0) {
-      console.warn(
-        `[ULDK] Działka ${id} (część ${pi}) zawiera ${part.holes.length} nieodwzorowany(ch) otwór(ów) — ` +
-        `render pominie wycięcie enklawy w środku bryły.`
-      );
-    }
 
-    const cadPoints: Point2D[] = part.outer.map(([x2180, y2180]) => {
-      // Konwersja EPSG:2180 -> WGS84 -> CAD
+    const toCad = ([x2180, y2180]: [number, number]): Point2D => {
       const latLon = cadPointToWgs84({ x: x2180, y: y2180 }, sourceCrs);
       return wgs84ToCadPoint(latLon, projectCrs, projectCenter);
-    });
+    };
+
+    const cadPoints: Point2D[] = part.outer.map(toCad);
 
     const loopId = pi === 0 ? `uldk-${id}` : `uldk-${id}-p${pi}`;
     const sanitized = sanitizePolygon(cadPoints, {
@@ -249,10 +241,24 @@ function rawParcelToLoops(
     const ratio = polygonCircleIntersectionRatio(sanitized.vertices, 0, 0, radiusMeters);
     if (ratio < 0.1) continue;
 
-    loops.push({
+    const outerIsCCW = isPolygonCCW(sanitized.vertices);
+    const holes: Point2D[][] = [];
+    for (const hole of part.holes) {
+      const holePoints = hole.map(toCad);
+      const sanitizedHole = sanitizePolygon(holePoints, {
+        buildingId: `${loopId}-hole`,
+        defaultHeight: 0,
+        buildingType: 'residential',
+        isCityCentre: false,
+      });
+      if (!sanitizedHole.valid) continue;
+      holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+    }
+
+    const parcelBase: BuildingLoop = {
       id: loopId,
       name: raw.plotNumber
-        ? `Działka nr ${raw.plotNumber}${part.holes.length > 0 ? ' (⚠ zawiera nieodwzorowany otwór)' : ''}`
+        ? `Działka nr ${raw.plotNumber}${holes.length > 0 ? ' (z otworem)' : ''}`
         : `Działka ${id}`,
       layer: 'WFS_DZIALKI',
       category: 'boundary' as ObjectCategory,
@@ -270,10 +276,13 @@ function rawParcelToLoops(
       typicalFloorHeight: 0,
       storeysCount: 0,
       vertices: sanitized.vertices,
+      holes: holes.length > 0 ? holes : undefined,
       segments: sanitized.segments,
       isClockwise: !sanitized.isCCW,
       transform: { tx: 0, ty: 0, rotationDeg: 0 },
-    });
+    };
+
+    loops.push(rebuildBuildingSegments(parcelBase, sanitized.vertices));
   }
   return loops;
 }
