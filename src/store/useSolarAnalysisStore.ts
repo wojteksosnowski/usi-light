@@ -33,7 +33,7 @@ interface SolarAnalysisState {
   showShadowFill: boolean;
   showSatelliteLayer: boolean;
   satelliteOpacity: number;
-  satelliteProvider: 'google' | 'here';
+  satelliteProvider: 'google' | 'here' | 'orthophoto';
   showProjectParameters: boolean;
 
   // Analysis calculations & modes
@@ -63,7 +63,7 @@ interface SolarAnalysisState {
   setShowShadowFill: (show: boolean | ((prev: boolean) => boolean)) => void;
   setShowSatelliteLayer: (show: boolean | ((prev: boolean) => boolean)) => void;
   setSatelliteOpacity: (opacity: number) => void;
-  setSatelliteProvider: (provider: 'google' | 'here') => void;
+  setSatelliteProvider: (provider: 'google' | 'here' | 'orthophoto') => void;
   setShowProjectParameters: (show: boolean | ((prev: boolean) => boolean)) => void;
 
   setSunlightMethod: (method: 'raycasting' | 'segments') => void;

@@ -240,23 +240,14 @@ export const CadTopHud: React.FC = () => {
         <span className="hud-btn-label">Parametry</span>
       </button>
 
-      {/* Podkłady GEO (PRO) button — ukryte do czasu publikacji, patrz APP_CONFIG.geoOverlays */}
+      {/* Podkłady GEO (PRO) button — ukryte do czasu publikacji, patrz APP_CONFIG.geoOverlays.
+          Steruje wyłącznie warstwami GEO (KIUT/MPZP/BDOT/NMT) przez showGeoOverlayGroup — ortofotomapa
+          ma własny, niezależny przełącznik w panelu "Podkład satelitarny" (patrz CadCanvas.tsx). */}
       {APP_CONFIG.geoOverlays.showTogglesPanel && (
         <button
           onClick={() => {
             const s = useWfsStore.getState();
-            const anyActive = s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer;
-            if (anyActive) {
-              s.setShowOrthophotoLayer(false);
-              s.setShowKiutLayer(false);
-              s.setShowMpzpLayer(false);
-              s.setShowBdotLayer(false);
-              s.setShowTerrainLayer(false);
-              s.setShowEgibLayer(false);
-            } else {
-              s.setShowOrthophotoLayer(true);
-              s.setShowKiutLayer(true);
-            }
+            s.setShowGeoOverlayGroup(!s.showGeoOverlayGroup);
           }}
           style={{
             height: '28px',
@@ -270,16 +261,16 @@ export const CadTopHud: React.FC = () => {
             fontWeight: 600,
             cursor: 'pointer',
             border: 'none',
-            backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+            backgroundColor: useWfsStore((s) => s.showGeoOverlayGroup)
               ? 'rgba(99, 102, 241, 0.2)'
               : 'transparent',
-            color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
+            color: useWfsStore((s) => s.showGeoOverlayGroup)
               ? '#a5b4fc'
               : '#94a3b8',
             transition: 'all 0.15s ease',
             flexShrink: 0,
           }}
-          title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT / BDOT / MPZP) [Wersja PRO]"
+          title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Uzbrojenie GESUT / BDOT / MPZP / NMT) [Wersja PRO]"
         >
           <Layers size={13} />
           <span className="hud-btn-label">Podkład GEO</span>

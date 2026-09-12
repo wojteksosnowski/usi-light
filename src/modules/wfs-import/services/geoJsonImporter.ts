@@ -7,7 +7,8 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
-import { WfsTreeFeature } from '../store/useWfsStore';
+import { WfsTreeFeature, OvertureLineFeature, OverturePolygonFeature, MpzpZoneFeature } from '../store/useWfsStore';
+import { MpzpZoneRawFeature } from './wfsMpzpWarsawClient';
 import { polygonCircleIntersectionRatio } from '../../../utils/math2d/polygons';
 
 
@@ -28,6 +29,19 @@ function str(v: unknown): string {
 
 function strOrUndefined(v: unknown): string | undefined {
   return v != null ? String(v) : undefined;
+}
+
+/**
+ * Odczytuje atrybut tekstowy WFS odrzucając wartości niereprezentujące realnych danych — serwisy GUGiK
+ * (EGiB, Kraków) potrafią zwrócić dosłowny tekst "None" (serializacja Pythonowego None) zamiast pustej
+ * wartości, gdy atrybut jest niedostępny. Traktowanie "None" jak prawdziwego ID powodowało kolizje —
+ * wiele budynków bez ID_BUDYNKU dostawało ten sam identyfikator "None" i były traktowane jako jeden obiekt.
+ */
+function strOrNullIfMissing(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (s === '' || s.toLowerCase() === 'none') return null;
+  return s;
 }
 
 /**
@@ -83,7 +97,9 @@ export function importBuildingsFromGeoJson(
       ? Math.round(Number(props.KONDYGNACJE_NADZIEMNE))
       : null;
     const height = estimateHeight(storeys);
-    const buildingId = str(props.ID_BUDYNKU) || `wfs-bld-${now}-${fi}`;
+    const heightSource: BuildingLoop['heightSource'] = storeys != null ? 'storeys-wfs' : 'default';
+    const rawBuildingId = strOrNullIfMissing(props.ID_BUDYNKU);
+    const buildingId = rawBuildingId || `wfs-bld-${now}-${fi}`;
 
     for (let ri = 0; ri < rings.length; ri++) {
       const ring = rings[ri];
@@ -114,7 +130,7 @@ export function importBuildingsFromGeoJson(
 
       buildings.push({
         id,
-        name: `WFS ${str(props.ID_BUDYNKU) || `#${fi + 1}`}`,
+        name: `WFS ${rawBuildingId || `#${fi + 1}`}`,
         layer: 'WFS_BUDYNKI',
         category: 'building',
         isTested: false,
@@ -123,6 +139,7 @@ export function importBuildingsFromGeoJson(
         isCityCentre: false,
         buildingType: 'residential',
         defaultHeight: height,
+        heightSource,
         hWindowBottom: 0.85,
         elevation: 0.0,
         firstFloorHeight: FIRST_FLOOR_HEIGHT,
@@ -155,7 +172,7 @@ export function importParcelsFromGeoJson(
 
     const rings = extractRings(feature.geometry);
     const props = feature.properties || {};
-    const parcelId = str(props.ID_DZIALKI) || `wfs-parcel-${now}-${fi}`;
+    const parcelId = strOrNullIfMissing(props.ID_DZIALKI) || `wfs-parcel-${now}-${fi}`;
     const plotNumber = str(props.NUMER_DZIALKI);
 
     for (let ri = 0; ri < rings.length; ri++) {
@@ -205,6 +222,130 @@ export function importParcelsFromGeoJson(
   }
 
   return { buildings: [], parcels, warnings };
+}
+
+function extractLineStrings(geometry: { type: string; coordinates: unknown }): number[][][] {
+  if (geometry.type === 'LineString') {
+    return [geometry.coordinates as number[][]];
+  }
+  if (geometry.type === 'MultiLineString') {
+    return geometry.coordinates as number[][][];
+  }
+  return [];
+}
+
+/**
+ * Konwertuje cechy liniowe (drogi/koleje) z Overture Maps (WGS84) na OvertureLineFeature
+ * w lokalnych współrzędnych CAD. Overture nie wymaga kroku EPSG→WGS84 (dane są już WGS84).
+ */
+export function importOvertureLines(
+  collection: GeoJsonFeatureCollection,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): OvertureLineFeature[] {
+  const result: OvertureLineFeature[] = [];
+
+  for (let fi = 0; fi < collection.features.length; fi++) {
+    const feature = collection.features[fi];
+    if (!feature.geometry) continue;
+
+    const lines = extractLineStrings(feature.geometry);
+    const props = feature.properties || {};
+    const featureId = str(props.id) || `overture-line-${fi}`;
+    const className = strOrUndefined(props.class) ?? null;
+
+    for (let li = 0; li < lines.length; li++) {
+      const points: Point2D[] = lines[li].map(([lon, lat]) =>
+        wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)
+      );
+      if (points.length < 2) continue;
+
+      result.push({
+        id: li === 0 ? featureId : `${featureId}-${li}`,
+        points,
+        className,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Konwertuje cechy powierzchniowe (zieleń/wody) z Overture Maps (WGS84) na OverturePolygonFeature
+ * w lokalnych współrzędnych CAD.
+ */
+export function importOverturePolygons(
+  collection: GeoJsonFeatureCollection,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): OverturePolygonFeature[] {
+  const result: OverturePolygonFeature[] = [];
+
+  for (let fi = 0; fi < collection.features.length; fi++) {
+    const feature = collection.features[fi];
+    if (!feature.geometry) continue;
+
+    const rawRings = extractRings(feature.geometry);
+    if (rawRings.length === 0) continue;
+
+    const props = feature.properties || {};
+    const featureId = str(props.id) || `overture-poly-${fi}`;
+    const className = strOrUndefined(props.class) ?? null;
+
+    const rings: Point2D[][] = rawRings
+      .map((ring) => ring.map(([lon, lat]) => wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)))
+      .filter((ring) => ring.length >= 3);
+
+    if (rings.length === 0) continue;
+
+    result.push({ id: featureId, rings, className });
+  }
+
+  return result;
+}
+
+/**
+ * Konwertuje surowe strefy MPZP z usługi REST BGiK "PrzeznaczenieTerenow" (WGS84, patrz
+ * `wfsMpzpWarsawClient.ts`) na MpzpZoneFeature w lokalnych współrzędnych CAD.
+ */
+export function importMpzpZonesFromGeoJson(
+  features: MpzpZoneRawFeature[],
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): MpzpZoneFeature[] {
+  const result: MpzpZoneFeature[] = [];
+
+  for (let fi = 0; fi < features.length; fi++) {
+    const feature = features[fi];
+    if (!feature.geometry) continue;
+
+    const rawRings = extractRings(feature.geometry as { type: string; coordinates: unknown });
+    if (rawRings.length === 0) continue;
+
+    const props = feature.properties || {};
+    const featureId = strOrNullIfMissing(props.objectid) ?? `mpzp-zone-${fi}`;
+
+    const rings: Point2D[][] = rawRings
+      .map((ring) => ring.map(([lon, lat]) => wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)))
+      .filter((ring) => ring.length >= 3);
+
+    if (rings.length === 0) continue;
+
+    result.push({
+      id: featureId,
+      rings,
+      funSymb: strOrNullIfMissing(props.fun_symb),
+      funNazwa: strOrNullIfMissing(props.fun_nazwa),
+      maxWysokosc: strOrNullIfMissing(props.max_wys),
+      intenZab: strOrNullIfMissing(props.inten_zab),
+      powBio: strOrNullIfMissing(props.pow_bio),
+      liczKond: strOrNullIfMissing(props.licz_kond),
+      nazwaPlan: strOrNullIfMissing(props.nazwa_plan),
+    });
+  }
+
+  return result;
 }
 
 /**

@@ -8,6 +8,8 @@
  * - Wykorzystuje standardowy raster kafelkowy Google Maps lub Google Maps 2D Tile API.
  */
 
+import { computeTileRange, tileKeysInRange, ProtectedLruCache } from './tilePrefetchMath';
+
 export interface TileKey {
   x: number;
   y: number;
@@ -20,9 +22,8 @@ export interface ISatelliteTileManager {
 }
 
 export class GoogleTileManager {
-  private cache: Map<string, HTMLImageElement> = new Map();
+  private cache = new ProtectedLruCache<HTMLImageElement>(200);
   private pendingRequests: Set<string> = new Set();
-  private maxCacheSize: number = 200;
   private onTileLoaded?: () => void;
   private apiKey: string;
 
@@ -63,11 +64,8 @@ export class GoogleTileManager {
 
     const key = `${z}/${normX}/${normY}`;
 
-    if (this.cache.has(key)) {
-      const img = this.cache.get(key)!;
-      // Odśwież pozycję w LRU cache (delete + set)
-      this.cache.delete(key);
-      this.cache.set(key, img);
+    const img = this.cache.get(key);
+    if (img) {
       return img.complete && img.naturalWidth > 0 ? img : null;
     }
 
@@ -91,7 +89,7 @@ export class GoogleTileManager {
 
     img.onload = () => {
       this.pendingRequests.delete(key);
-      this.addToCache(key, img);
+      this.cache.set(key, img);
       if (this.onTileLoaded) {
         this.onTileLoaded();
       }
@@ -105,59 +103,25 @@ export class GoogleTileManager {
     img.src = url;
   }
 
-  private addToCache(key: string, img: HTMLImageElement) {
-    if (this.cache.size >= this.maxCacheSize) {
-      // Usuń najstarszy wpis (pierwszy klucz w Map)
-      const oldestKey = this.cache.keys().next().value;
-      if (oldestKey) {
-        this.cache.delete(oldestKey);
-      }
-    }
-    this.cache.set(key, img);
-  }
-
   /**
-   * Prefetch kafelków satelitarnych w obszarze okręgu wokół punktu geograficznego.
-   * Wywołaj po zakończeniu synchronizacji geo, aby kafelki były gotowe bez scrollowania.
+   * Prefetch kafelków satelitarnych w obszarze okręgu wokół punktu geograficznego, i "przypięcie"
+   * ich kluczy w cache tak, by przetrwały zwykłe przewijanie/zoom poza zasięgiem projektu.
+   * Wywołaj po zmianie środka/promienia projektu, żeby kafelki były zawsze gotowe bez scrollowania.
    *
    * @param lat     szerokość geograficzna środka (WGS84)
    * @param lon     długość geograficzna środka (WGS84)
    * @param radiusMeters  promień okręgu w metrach
    */
   public prefetchTilesInRadius(lat: number, lon: number, radiusMeters: number) {
-    // Dobierz zoom do promienia: małe obszary wymagają wyższego zoomu
-    const zoom = radiusMeters <= 100 ? 18 : radiusMeters <= 200 ? 17 : radiusMeters <= 500 ? 16 : 15;
+    const range = computeTileRange(lat, lon, radiusMeters);
+    if (!range) return;
 
-    // Oblicz bounding box okręgu w stopniach geograficznych
-    const latDelta = radiusMeters / 111320;
-    const lonDelta = radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180));
+    this.cache.setProtectedKeys(tileKeysInRange(range));
 
-    const minLat = lat - latDelta;
-    const maxLat = lat + latDelta;
-    const minLon = lon - lonDelta;
-    const maxLon = lon + lonDelta;
-
-    // Konwersja narożników bbox na piksele Web Mercator
-    const maxTile = Math.pow(2, zoom);
-    const latToTileY = (latDeg: number) => {
-      const latRad = (latDeg * Math.PI) / 180;
-      return Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * maxTile);
-    };
-    const lonToTileX = (lonDeg: number) => Math.floor(((lonDeg + 180) / 360) * maxTile);
-
-    const startTileX = lonToTileX(minLon);
-    const endTileX = lonToTileX(maxLon);
-    const startTileY = latToTileY(maxLat); // Y jest odwrócony (0 = północ)
-    const endTileY = latToTileY(minLat);
-
-    // Ogranicz liczbę kafelków do prefetchu (zabezpieczenie)
-    const tileCount = (endTileX - startTileX + 1) * (endTileY - startTileY + 1);
-    if (tileCount > 200) return;
-
-    for (let tx = startTileX; tx <= endTileX; tx++) {
-      for (let ty = startTileY; ty <= endTileY; ty++) {
+    for (let tx = range.startTileX; tx <= range.endTileX; tx++) {
+      for (let ty = range.startTileY; ty <= range.endTileY; ty++) {
         // getTile() automatycznie startuje download jeśli kafelka nie ma w cache
-        this.getTile(tx, ty, zoom);
+        this.getTile(tx, ty, range.zoom);
       }
     }
   }

@@ -31,14 +31,80 @@ import {
 import { useWfsStore, ProjectRadius, formatWfsProgress, WFS_IMPORT_CONTINUE_HINT } from '../../modules/wfs-import/store/useWfsStore';
 import { fetchParcelsInRadius } from '../../modules/wfs-import/services/uldkClient';
 import { findCitySource } from '../../modules/wfs-import/services/citySources';
-import { importBuildingsFromGeoJson, importParcelsFromGeoJson } from '../../modules/wfs-import/services/geoJsonImporter';
+import {
+  importBuildingsFromGeoJson,
+  importParcelsFromGeoJson,
+  importOverturePolygons,
+  importMpzpZonesFromGeoJson,
+} from '../../modules/wfs-import/services/geoJsonImporter';
+import { fetchOvertureBase } from '../../modules/wfs-import/services/overtureMapsApiClient';
+import { fetchMpzpZonesInRadius } from '../../modules/wfs-import/services/wfsMpzpWarsawClient';
+import { analyzeBuildingHeights } from '../../modules/wfs-import/utils/terrainAnalyzer';
 import { latLonToBbox } from '../../modules/wfs-import/services/geocoding';
-import { detectCoordinateSystem } from '../../utils/geoTransform';
+import { detectCoordinateSystem, CrsDetectionResult, LatLon } from '../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../utils/geoParser';
 import { parseDxfWithMetadata, DxfUnitOption, createSampleBuildings } from '../../utils/dxfParser';
 import { exportSceneToDxf } from '../../utils/dxfExport';
 import { PinnedFacadePoint, BuildingLoop } from '../../types/geometry';
 import { APP_CONFIG } from '../../config/appConfig';
+
+/** Dostawcy podkładu satelitarnego dostępni w przełączniku "Dostawca mapy". */
+const SATELLITE_PROVIDERS: { key: 'google' | 'here' | 'orthophoto'; label: string; title: string; pro?: boolean }[] = [
+  { key: 'google', label: 'Google', title: 'Google Maps Satellite' },
+  { key: 'here', label: 'HERE', title: 'HERE Satellite' },
+  { key: 'orthophoto', label: 'Ortofotomapa', title: 'Ortofotomapa HR GUGiK (≤10 cm) — PRO', pro: true },
+];
+
+/** Prosty przełącznik widoczności warstwy (bez opacity) — wzorem "Cieniowanie rzeźby"/"Overture: zieleń". */
+const SimpleLayerToggle: React.FC<{ label: string; active: boolean; dotColor: string; onToggle: () => void }> = ({
+  label, active, dotColor, onToggle,
+}) => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <span
+        style={{
+          width: '7px',
+          height: '7px',
+          borderRadius: '50%',
+          backgroundColor: active ? dotColor : '#64748b',
+          boxShadow: active ? `0 0 6px ${dotColor}99` : 'none',
+        }}
+      />
+      <span style={{ fontSize: '11px', fontWeight: 500, color: '#f8fafc' }}>{label}</span>
+    </div>
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+    >
+      <div
+        style={{
+          width: '28px',
+          height: '16px',
+          borderRadius: '999px',
+          backgroundColor: active ? dotColor : '#334155',
+          position: 'relative',
+          transition: 'background-color 0.2s ease',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: '12px',
+            height: '12px',
+            borderRadius: '50%',
+            backgroundColor: '#ffffff',
+            position: 'absolute',
+            top: '2px',
+            left: active ? '14px' : '2px',
+            transition: 'left 0.2s ease',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+          }}
+        />
+      </div>
+    </button>
+  </div>
+);
 
 export const ProjectGroup: React.FC = () => {
   // Scene Store
@@ -119,15 +185,31 @@ export const ProjectGroup: React.FC = () => {
   const setPricingModalOpen = useUiStore((s) => s.setPricingModalOpen);
   const isPro = useLicenseStore((s) => s.isPro);
 
-  const handleExportDxf = () => {
+  const [includeTerrainMesh, setIncludeTerrainMesh] = React.useState(false);
+  const [terrainExportBusy, setTerrainExportBusy] = React.useState(false);
+
+  const handleExportDxf = async () => {
     if (!isPro) {
       setPricingModalOpen(true);
       return;
     }
-    exportSceneToDxf({
-      buildings,
-      pinnedPoints,
-    });
+    const terrain = includeTerrainMesh
+      ? {
+          projectCenter: { lat: settings.latitude, lon: settings.longitude },
+          radiusMeters: useWfsStore.getState().projectRadius,
+          projectCrs: detectCoordinateSystem(buildings.flatMap((b) => b.vertices || [])),
+        }
+      : undefined;
+
+    setTerrainExportBusy(true);
+    try {
+      const { terrainWarning } = await exportSceneToDxf({ buildings, pinnedPoints, terrain });
+      if (terrainWarning) {
+        setSyncFeedback(`⚠️ Eksport DXF: ${terrainWarning}`);
+      }
+    } finally {
+      setTerrainExportBusy(false);
+    }
   };
 
   // WFS Store & Geo Data
@@ -135,10 +217,6 @@ export const ProjectGroup: React.FC = () => {
   const setProjectRadius = useWfsStore((s) => s.setProjectRadius);
   const isProjectCenterLocked = useWfsStore((s) => s.isProjectCenterLocked);
   const setIsProjectCenterLocked = useWfsStore((s) => s.setIsProjectCenterLocked);
-  const showOrthophotoLayer = useWfsStore((s) => s.showOrthophotoLayer);
-  const setShowOrthophotoLayer = useWfsStore((s) => s.setShowOrthophotoLayer);
-  const orthophotoOpacity = useWfsStore((s) => s.orthophotoOpacity);
-  const setOrthophotoOpacity = useWfsStore((s) => s.setOrthophotoOpacity);
   const showKiutLayer = useWfsStore((s) => s.showKiutLayer);
   const setShowKiutLayer = useWfsStore((s) => s.setShowKiutLayer);
   const kiutOpacity = useWfsStore((s) => s.kiutOpacity);
@@ -153,10 +231,16 @@ export const ProjectGroup: React.FC = () => {
   const setBdotOpacity = useWfsStore((s) => s.setBdotOpacity);
   const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
-  const showEgibLayer = useWfsStore((s) => s.showEgibLayer);
-  const setShowEgibLayer = useWfsStore((s) => s.setShowEgibLayer);
+  const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
+  const setShowGeoOverlayGroup = useWfsStore((s) => s.setShowGeoOverlayGroup);
+  const showOvertureGreenAreas = useWfsStore((s) => s.showOvertureGreenAreas);
+  const setShowOvertureGreenAreas = useWfsStore((s) => s.setShowOvertureGreenAreas);
+  const showMpzpZonesLayer = useWfsStore((s) => s.showMpzpZonesLayer);
+  const setShowMpzpZonesLayer = useWfsStore((s) => s.setShowMpzpZonesLayer);
   const status = useWfsStore((s) => s.status);
   const setStatus = useWfsStore((s) => s.setStatus);
+  const [overtureLoading, setOvertureLoading] = React.useState(false);
+  const [mpzpZonesLoading, setMpzpZonesLoading] = React.useState(false);
 
   const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
 
@@ -199,6 +283,7 @@ export const ProjectGroup: React.FC = () => {
 
       // 2. Budynki wektorowe (serwisy lokalne dla obsługiwanych miast)
       let importedBuildings: BuildingLoop[] = [];
+      let buildingsFetchError: string | null = null;
 
       setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0 });
       if (citySource) {
@@ -206,8 +291,37 @@ export const ProjectGroup: React.FC = () => {
           const bldGeoJson = await citySource.fetchBuildings(bbox);
           const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter, radius);
           importedBuildings = res.buildings;
-        } catch {
-          // kontynuuj z działkami
+
+          // Serwis nie podaje liczby kondygnacji (np. ogólnopolski fallback EGiB dla Gdańska,
+          // Wrocławia, Poznania...) — wszystkie budynki dostały tę samą wysokość domyślną
+          // (estimateHeight(null) w geoJsonImporter.ts). Dobieramy realną wysokość z różnicy
+          // LiDAR NMPT (DSM) − NMT (DTM), zamiast zostawić płaską zabudowę.
+          if (citySource.hasStoreyHeights === false && importedBuildings.length > 0) {
+            try {
+              const terrainResults = await analyzeBuildingHeights(importedBuildings, projectCrs, undefined, projectCenter);
+              const resultById: Record<string, typeof terrainResults[number]> = {};
+              terrainResults.forEach((r) => { resultById[r.buildingId] = r; });
+              importedBuildings = importedBuildings.map((b) => {
+                const result = resultById[b.id];
+                if (result == null) return b;
+                const realHeight = result.estimatedHeight;
+                const groundElevation = result.relativeElevation ?? 0;
+                return {
+                  ...b,
+                  defaultHeight: realHeight,
+                  heightSource: 'lidar-nmt',
+                  elevation: groundElevation,
+                  segments: b.segments.map((s) => ({ ...s, hTop: realHeight, hBase: groundElevation })),
+                };
+              });
+            } catch (terrainErr) {
+              console.warn('Nie udało się dobrać wysokości budynków z NMT/NMPT — pozostawiono wartość domyślną:', terrainErr);
+            }
+          }
+        } catch (err) {
+          buildingsFetchError = err instanceof Error ? err.message : 'Nieznany błąd pobierania budynków';
+          console.error(`Nie udało się pobrać budynków (${citySource.name}):`, err);
+          // kontynuuj z działkami — nie przerywamy całej synchronizacji przez błąd budynków
         }
       }
 
@@ -220,11 +334,14 @@ export const ProjectGroup: React.FC = () => {
         isFetching: false,
         stage: 'done',
         error: null,
-        info: null,
+        info: buildingsFetchError ? `Budynki: ${buildingsFetchError}` : null,
         parcelsCount: parcels.length,
         buildingsCount: importedBuildings.length,
       });
-      setSyncFeedback(`Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków`);
+      setSyncFeedback(
+        `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków` +
+        (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '')
+      );
 
       // 5. Prefetch kafelków satelitarnych w obszarze zasięgu projektu
       window.dispatchEvent(new CustomEvent('geo-prefetch-satellite', {
@@ -243,6 +360,80 @@ export const ProjectGroup: React.FC = () => {
       useWfsStore.getState().clearLoadingParcels();
       window.dispatchEvent(new Event('geo-render-needed'));
     }
+  };
+
+  /**
+   * Wzorzec współdzielony przez warstwy kontekstowe pobierane leniwie przy pierwszym włączeniu
+   * przełącznika widoczności (Overture, strefy MPZP, ...): pobierz dla środka+promienia projektu
+   * jeśli jeszcze nie wczytano, zapisz do store'u, odśwież render. `skip` pozwala każdej warstwie
+   * dopisać własny warunek pominięcia (np. dane już wczytane, lub warstwa niedostępna w tej lokalizacji).
+   */
+  const ensureGeoContextLoaded = async <T,>(
+    skip: boolean,
+    setLoading: (loading: boolean) => void,
+    fetchAndImport: (projectCrs: CrsDetectionResult, projectCenter: LatLon) => Promise<T>,
+    setData: (data: T) => void,
+    errorLabel: string
+  ) => {
+    if (skip) return;
+    setLoading(true);
+    try {
+      const projectCenter: LatLon = { lat: settings.latitude, lon: settings.longitude };
+      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
+      const data = await fetchAndImport(projectCrs, projectCenter);
+      setData(data);
+      window.dispatchEvent(new Event('geo-render-needed'));
+    } catch (err) {
+      console.error(errorLabel, err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Pobiera warstwę zieleni Overture Maps (`/base`) dla środka i promienia projektu, jeśli
+   * jeszcze nie jest wczytana — wywoływane leniwie przy pierwszym włączeniu przełącznika
+   * widoczności (analogicznie do WMS: włączenie = pobranie).
+   *
+   * Uwaga: drogi/koleje/wody przez surowe partycje Overture (`overtureDuckDb.ts`,
+   * DuckDB-WASM) świadomie wycofane z UI — mimo poprawionego kodu (naprawiony bug z globem
+   * `*` na HTTPS) w praktyce zacinały aplikację: paczki `mvp`/`eh` DuckDB-WASM są
+   * jednowątkowe, więc otwieranie ~32–128 plików Parquet (odpowiednio wody/transport)
+   * sekwencyjnie, każdy z round-tripem do `us-west-2`, zajmuje dziesiątki sekund bez
+   * żadnego wskaźnika postępu. `overtureDuckDb.ts` zostaje w repo nieużywany (z tym samym
+   * komentarzem) na wypadek podjęcia tego później, np. z wielowątkową paczką `coi`.
+   */
+  const ensureOvertureContextLoaded = () => ensureGeoContextLoaded(
+    useWfsStore.getState().overtureGreenAreas.length > 0,
+    setOvertureLoading,
+    (projectCrs, projectCenter) =>
+      fetchOvertureBase(settings.latitude, settings.longitude, projectRadius)
+        .then((base) => importOverturePolygons(base, projectCrs, projectCenter)),
+    useWfsStore.getState().setOvertureGreenAreas,
+    'Nie udało się pobrać warstwy zieleni Overture Maps:'
+  );
+
+  const toggleOvertureGreenAreas = () => {
+    if (!showOvertureGreenAreas) ensureOvertureContextLoaded();
+    setShowOvertureGreenAreas(!showOvertureGreenAreas);
+  };
+
+  /** Strefy MPZP (wektor) — pilot ograniczony do Warszawy, patrz `wfsMpzpWarsawClient.ts`. */
+  const isMpzpZonesAvailableHere = findCitySource(settings.latitude, settings.longitude)?.name === 'Warszawa';
+
+  const ensureMpzpZonesLoaded = () => ensureGeoContextLoaded(
+    useWfsStore.getState().mpzpZones.length > 0 || !isMpzpZonesAvailableHere,
+    setMpzpZonesLoading,
+    (projectCrs, projectCenter) =>
+      fetchMpzpZonesInRadius(settings.latitude, settings.longitude, projectRadius)
+        .then((rawZones) => importMpzpZonesFromGeoJson(rawZones, projectCrs, projectCenter)),
+    useWfsStore.getState().setMpzpZones,
+    'Nie udało się pobrać stref MPZP:'
+  );
+
+  const toggleMpzpZonesLayer = () => {
+    if (!showMpzpZonesLayer) ensureMpzpZonesLoaded();
+    setShowMpzpZonesLayer(!showMpzpZonesLayer);
   };
 
   const handleMapsInputChange = (val: string) => {
@@ -755,6 +946,7 @@ export const ProjectGroup: React.FC = () => {
               <button
                 type="button"
                 onClick={handleExportDxf}
+                disabled={terrainExportBusy}
                 className="btn-tile active-cyan"
                 style={{
                   justifyContent: 'center',
@@ -762,14 +954,39 @@ export const ProjectGroup: React.FC = () => {
                   padding: '8px 6px',
                   fontSize: '11px',
                   fontWeight: 600,
+                  opacity: terrainExportBusy ? 0.6 : 1,
+                  cursor: terrainExportBusy ? 'not-allowed' : 'pointer',
                 }}
                 title="Eksportuj geometrię i punkty pomiarowe do formatu CAD DXF"
               >
                 <FileCode size={13} />
-                <span>Eksport DXF</span>
+                <span>{terrainExportBusy ? 'Eksportowanie…' : 'Eksport DXF'}</span>
               </button>
             )}
           </div>
+
+          {isPro && (
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '10.5px',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              title="Dołącz do eksportu DXF siatkę rzeźby terenu (NMT, GUGiK) — wymaga dodatkowego zapytania sieciowego"
+            >
+              <input
+                type="checkbox"
+                checked={includeTerrainMesh}
+                onChange={(e) => setIncludeTerrainMesh(e.target.checked)}
+                style={{ accentColor: '#38bdf8', cursor: 'pointer' }}
+              />
+              <span>Dołącz rzeźbę terenu (NMT) do eksportu DXF</span>
+            </label>
+          )}
 
           <div style={{ fontSize: '11px', color: '#94a3b8' }}>
             Jednostka rysunku DXF:
@@ -1415,42 +1632,37 @@ export const ProjectGroup: React.FC = () => {
                       border: '1px solid #334155',
                     }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setSatelliteProvider('google')}
-                      title="Google Maps Satellite"
-                      style={{
-                        padding: '3px 8px',
-                        borderRadius: '5px',
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        border: 'none',
-                        backgroundColor: satelliteProvider === 'google' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                        color: satelliteProvider === 'google' ? '#38bdf8' : '#64748b',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      Google
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSatelliteProvider('here')}
-                      title="HERE Satellite"
-                      style={{
-                        padding: '3px 8px',
-                        borderRadius: '5px',
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        border: 'none',
-                        backgroundColor: satelliteProvider === 'here' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                        color: satelliteProvider === 'here' ? '#38bdf8' : '#64748b',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      HERE
-                    </button>
+                    {SATELLITE_PROVIDERS.map((provider) => (
+                      <button
+                        key={provider.key}
+                        type="button"
+                        onClick={() => {
+                          if (provider.pro && !isPro) {
+                            setPricingModalOpen(true);
+                            return;
+                          }
+                          setSatelliteProvider(provider.key);
+                        }}
+                        title={provider.title}
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: '5px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          border: 'none',
+                          backgroundColor: satelliteProvider === provider.key ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                          color: satelliteProvider === provider.key ? '#38bdf8' : '#64748b',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                        }}
+                      >
+                        {provider.label}
+                        {provider.pro && !isPro && <span style={{ fontSize: '8px', fontWeight: 800, opacity: 0.8 }}>PRO</span>}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -1551,55 +1763,18 @@ export const ProjectGroup: React.FC = () => {
                   Podkłady geodezyjne i branżowe
                 </span>
               </div>
-              <span
-                style={{
-                  fontSize: '9px',
-                  fontWeight: 800,
-                  backgroundColor: 'var(--accent-indigo)',
-                  color: '#ffffff',
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                }}
-              >
-                PRO
-              </span>
-            </div>
-
-            {/* A. Ortofotomapa HR GUGiK */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
               <button
                 type="button"
-                onClick={() => setShowOrthophotoLayer(!showOrthophotoLayer)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: 'none',
-                  border: 'none',
-                  color: '#f8fafc',
-                  cursor: 'pointer',
-                  padding: 0,
-                  width: '100%',
-                }}
+                onClick={() => setShowGeoOverlayGroup(!showGeoOverlayGroup)}
+                title="Włącz / wyłącz wszystkie podkłady geodezyjne naraz (KIUT, MPZP, BDOT, NMT)"
+                style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span
-                    style={{
-                      width: '7px',
-                      height: '7px',
-                      borderRadius: '50%',
-                      backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#64748b',
-                      boxShadow: showOrthophotoLayer ? '0 0 6px rgba(56, 189, 248, 0.6)' : 'none',
-                    }}
-                  />
-                  <span style={{ fontSize: '11px', fontWeight: 500 }}>Ortofotomapa HR (&le;10 cm)</span>
-                </div>
                 <div
                   style={{
                     width: '28px',
                     height: '16px',
                     borderRadius: '999px',
-                    backgroundColor: showOrthophotoLayer ? '#38bdf8' : '#334155',
+                    backgroundColor: showGeoOverlayGroup ? 'var(--accent-indigo)' : '#334155',
                     position: 'relative',
                     transition: 'background-color 0.2s ease',
                     flexShrink: 0,
@@ -1613,31 +1788,16 @@ export const ProjectGroup: React.FC = () => {
                       backgroundColor: '#ffffff',
                       position: 'absolute',
                       top: '2px',
-                      left: showOrthophotoLayer ? '14px' : '2px',
+                      left: showGeoOverlayGroup ? '14px' : '2px',
                       transition: 'left 0.2s ease',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
                     }}
                   />
                 </div>
               </button>
-              {showOrthophotoLayer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8' }}>
-                    <span>Krycie:</span>
-                    <span style={{ fontWeight: 700, color: '#e2e8f0' }}>{Math.round(orthophotoOpacity * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1.0"
-                    step="0.05"
-                    value={orthophotoOpacity}
-                    onChange={(e) => setOrthophotoOpacity(parseFloat(e.target.value))}
-                    style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
-                  />
-                </div>
-              )}
             </div>
+
+            {/* Ortofotomapa HR GUGiK — dostępna teraz z poziomu przełącznika "Dostawca mapy" w sekcji "Podkład satelitarny" */}
 
             {/* B. Sieci uzbrojenia terenu GESUT (KIUT) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
@@ -1915,58 +2075,28 @@ export const ProjectGroup: React.FC = () => {
               </button>
             </div>
 
-            {/* F. Ewidencja gruntów i budynków (KIEG) */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    width: '7px',
-                    height: '7px',
-                    borderRadius: '50%',
-                    backgroundColor: showEgibLayer ? '#f43f5e' : '#64748b',
-                    boxShadow: showEgibLayer ? '0 0 6px rgba(244, 63, 94, 0.6)' : 'none',
-                  }}
-                />
-                <span style={{ fontSize: '11px', fontWeight: 500, color: '#f8fafc' }}>Ewidencja gruntów (KIEG)</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowEgibLayer(!showEgibLayer)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
-              >
-                <div
-                  style={{
-                    width: '28px',
-                    height: '16px',
-                    borderRadius: '999px',
-                    backgroundColor: showEgibLayer ? '#f43f5e' : '#334155',
-                    position: 'relative',
-                    transition: 'background-color 0.2s ease',
-                    flexShrink: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '12px',
-                      height: '12px',
-                      borderRadius: '50%',
-                      backgroundColor: '#ffffff',
-                      position: 'absolute',
-                      top: '2px',
-                      left: showEgibLayer ? '14px' : '2px',
-                      transition: 'left 0.2s ease',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-                    }}
-                  />
-                </div>
-              </button>
+            {/* F. Warstwa kontekstowa Overture Maps (zieleń — land_use/land_cover, wrapper REST).
+                Drogi/koleje/wody przez surowe partycje Overture świadomie wycofane — patrz
+                komentarz przy ensureOvertureContextLoaded(). */}
+            <SimpleLayerToggle
+              label={overtureLoading ? 'Overture: zieleń (wczytywanie…)' : 'Overture: zieleń'}
+              active={showOvertureGreenAreas}
+              dotColor="#4ade80"
+              onToggle={toggleOvertureGreenAreas}
+            />
+
+            {/* G. Strefy MPZP (wektor, pilot Warszawa) — geometria + atrybuty przeznaczenia terenu
+                z usługi REST BGiK "PrzeznaczenieTerenow", patrz ensureMpzpZonesLoaded(). */}
+            <div
+              style={{ opacity: isMpzpZonesAvailableHere ? 1 : 0.45 }}
+              title={isMpzpZonesAvailableHere ? undefined : 'Dostępne tylko dla Warszawy (pilot)'}
+            >
+              <SimpleLayerToggle
+                label={mpzpZonesLoading ? 'Strefy MPZP — wektor (wczytywanie…)' : 'Strefy MPZP — wektor (Warszawa)'}
+                active={showMpzpZonesLayer}
+                dotColor="#60a5fa"
+                onToggle={isMpzpZonesAvailableHere ? toggleMpzpZonesLayer : () => {}}
+              />
             </div>
           </div>
           )}

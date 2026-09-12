@@ -3,6 +3,8 @@
  * Obsługuje dowolne serwisy WMS (NMT, EGiB, BDOT10k).
  */
 
+import { computeTileRange, tileKeysInRange, ProtectedLruCache } from '../../../utils/tilePrefetchMath';
+
 export interface WmsTileConfig {
   baseUrl: string;
   layers: string;
@@ -18,15 +20,14 @@ const DEFAULT_CONFIG: Partial<WmsTileConfig> = {
 };
 
 export class WmsTileManager {
-  private cache: Map<string, HTMLImageElement> = new Map();
+  private cache: ProtectedLruCache<HTMLImageElement>;
   private pending: Set<string> = new Set();
-  private maxCacheSize: number;
   private config: WmsTileConfig;
   private onTileLoaded?: () => void;
 
   constructor(config: WmsTileConfig, maxCacheSize = 200, onTileLoaded?: () => void) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.maxCacheSize = maxCacheSize;
+    this.cache = new ProtectedLruCache<HTMLImageElement>(maxCacheSize);
     this.onTileLoaded = onTileLoaded;
   }
 
@@ -48,10 +49,8 @@ export class WmsTileManager {
 
     const key = `${z}/${normX}/${normY}`;
 
-    if (this.cache.has(key)) {
-      const img = this.cache.get(key)!;
-      this.cache.delete(key);
-      this.cache.set(key, img);
+    const img = this.cache.get(key);
+    if (img) {
       return img.complete && img.naturalWidth > 0 ? img : null;
     }
 
@@ -73,6 +72,7 @@ export class WmsTileManager {
       version: '1.3.0',
       request: 'GetMap',
       layers,
+      styles: '',
       bbox: bbox.join(','),
       width: String(size),
       height: String(size),
@@ -86,7 +86,7 @@ export class WmsTileManager {
 
     img.onload = () => {
       this.pending.delete(key);
-      this.addToCache(key, img);
+      this.cache.set(key, img);
       this.onTileLoaded?.();
     };
 
@@ -107,11 +107,21 @@ export class WmsTileManager {
     return [minX, minY, maxX, maxY];
   }
 
-  private addToCache(key: string, img: HTMLImageElement) {
-    if (this.cache.size >= this.maxCacheSize) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest) this.cache.delete(oldest);
+  /**
+   * Prefetch kafli WMS w obszarze okręgu wokół punktu geograficznego, i "przypięcie" ich kluczy
+   * w cache tak, by przetrwały zwykłe przewijanie/zoom poza zasięgiem projektu. Wywołaj po zmianie
+   * środka/promienia projektu lub włączeniu warstwy, żeby kafle były zawsze gotowe bez przewijania.
+   */
+  prefetchTilesInRadius(lat: number, lon: number, radiusMeters: number) {
+    const range = computeTileRange(lat, lon, radiusMeters);
+    if (!range) return;
+
+    this.cache.setProtectedKeys(tileKeysInRange(range));
+
+    for (let tx = range.startTileX; tx <= range.endTileX; tx++) {
+      for (let ty = range.startTileY; ty <= range.endTileY; ty++) {
+        this.getTile(tx, ty, range.zoom);
+      }
     }
-    this.cache.set(key, img);
   }
 }

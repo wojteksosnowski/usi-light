@@ -1,5 +1,5 @@
 import { BuildingLoop, Point2D } from '../../../types/geometry';
-import { cadPointToWgs84, CrsDetectionResult } from '../../../utils/geoTransform';
+import { cadPointToWgs84, CrsDetectionResult, LatLon } from '../../../utils/geoTransform';
 import { wgs84ToEpsg2180 } from './wgs84ToEpsg2180';
 import { AaigridData, fetchDsmBbox, fetchDtmBbox } from '../services/wcsGugikClient';
 
@@ -36,18 +36,27 @@ export function polygonCentroid(vertices: Point2D[]): Point2D {
 export interface TerrainAnalysisResult {
   buildingId: string;
   estimatedHeight: number;
+  /** Bezwzględna rzędna terenu (n.p.m.) pod budynkiem, z DTM. */
   terrainElevation: number;
   surfaceElevation: number;
+  /**
+   * Rzędna terenu względem punktu odniesienia (środek projektu) — 0 m w punkcie odniesienia.
+   * Obecna tylko gdy podano `referencePoint`; to jest to, co powinno trafić do `BuildingLoop.elevation`
+   * (posadowienie), żeby budynki na pochyłym terenie nie stały wszystkie na jednej płaskiej płaszczyźnie.
+   */
+  relativeElevation?: number;
 }
 
 /**
  * Oblicza rzeczywistą wysokość budynków na podstawie różnicy NMPT (DSM) - NMT (DTM)
- * z chmury punktów LiDAR GUGiK.
+ * z chmury punktów LiDAR GUGiK. Jeśli podano `referencePoint` (zwykle środek projektu), zwraca też
+ * rzędną terenu każdego budynku względem tego punktu (do posadowienia), próbkowaną z tej samej siatki DTM.
  */
 export async function analyzeBuildingHeights(
   buildings: BuildingLoop[],
   crsInfo: CrsDetectionResult,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  referencePoint?: LatLon
 ): Promise<TerrainAnalysisResult[]> {
   if (buildings.length === 0) return [];
 
@@ -61,6 +70,14 @@ export async function analyzeBuildingHeights(
     globalMaxY = Math.max(globalMaxY, bb.maxY);
   }
 
+  const referenceEpsg = referencePoint ? wgs84ToEpsg2180(referencePoint.lat, referencePoint.lon) : null;
+  if (referenceEpsg) {
+    globalMinX = Math.min(globalMinX, referenceEpsg.x);
+    globalMinY = Math.min(globalMinY, referenceEpsg.y);
+    globalMaxX = Math.max(globalMaxX, referenceEpsg.x);
+    globalMaxY = Math.max(globalMaxY, referenceEpsg.y);
+  }
+
   const margin = 50;
   const minX = globalMinX - margin;
   const minY = globalMinY - margin;
@@ -72,6 +89,8 @@ export async function analyzeBuildingHeights(
     fetchDsmBbox(minX, minY, maxX, maxY, 'DSM_PL-KRON86-NH', signal),
     fetchDtmBbox(minX, minY, maxX, maxY, 'DTM_PL-KRON86-NH', signal).catch(() => null),
   ]);
+
+  const referenceGroundElev = referenceEpsg && dtm ? sampleGrid(dtm, referenceEpsg.x, referenceEpsg.y) : NaN;
 
   const results: TerrainAnalysisResult[] = [];
 
@@ -99,6 +118,7 @@ export async function analyzeBuildingHeights(
       estimatedHeight,
       terrainElevation: Math.round(groundElev * 10) / 10,
       surfaceElevation: Math.round(surfaceElev * 10) / 10,
+      relativeElevation: !isNaN(referenceGroundElev) ? Math.round((groundElev - referenceGroundElev) * 10) / 10 : undefined,
     });
   }
 

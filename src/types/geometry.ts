@@ -81,6 +81,8 @@ export interface BuildingLoop {
   isCityCentre: boolean;
   buildingType: BuildingType;
   defaultHeight: number;
+  /** Skąd pochodzi `defaultHeight` — do wyświetlenia w kafelku obiektu (nie wpływa na obliczenia). */
+  heightSource?: 'manual' | 'default' | 'storeys-wfs' | 'lidar-nmt';
   hWindowBottom: number;
   vertices: Point2D[];
   segments: FacadeSegment[];

@@ -131,6 +131,11 @@ export const APP_CONFIG = {
     defaultOpacity: 0.65,
   },
 
+  // Warstwy kontekstowe Overture Maps (drogi/koleje/zieleń) przez api.overturemapsapi.com.
+  overtureMapsApi: {
+    apiKey: 'ovt_Brefj9VZ0Myvfo0v3MSi3vQBWYAmtySOumufWfOHAaZTrKyZsNW3P0tRl17XE0yB',
+  },
+
   // Konfiguracja modułu geodezyjnego (ukryta przed użytkownikiem)
   geo: {
     // Twardy clip canvas WMS do okręgu zasięgu projektu (wizualnie widoczne tylko w promieniu)
@@ -158,7 +163,7 @@ export const APP_CONFIG = {
   // Podkłady geodezyjne i branżowe (ortofotomapa, KIUT, MPZP, BDOT, NMT, EGiB) scalone z gałęzi 'survey'.
   // Panel przełączników jest gotowy w kodzie, ale nie ma być jeszcze publikowany — ukryty do odwołania.
   geoOverlays: {
-    showTogglesPanel: false,
+    showTogglesPanel: true,
   },
 } as const;
 

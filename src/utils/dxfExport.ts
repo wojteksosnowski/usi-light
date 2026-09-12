@@ -1,22 +1,39 @@
 import { BuildingLoop, PinnedFacadePoint } from '../types/geometry';
+import { CrsDetectionResult, LatLon } from './geoTransform';
+import { buildTerrainMeshDxfEntities } from '../modules/wfs-import/utils/terrainMeshDxf';
 
 interface DxfExportParams {
   buildings: BuildingLoop[];
   pinnedPoints: PinnedFacadePoint[];
+  /** Jeśli podane, do eksportu dołączana jest siatka rzeźby terenu (NMT, GUGiK WCS). */
+  terrain?: {
+    projectCenter: LatLon;
+    radiusMeters: number;
+    projectCrs: CrsDetectionResult;
+  };
 }
 
-export function exportSceneToDxf({ buildings, pinnedPoints }: DxfExportParams): void {
+export async function exportSceneToDxf({ buildings, pinnedPoints, terrain }: DxfExportParams): Promise<{ terrainWarning: string | null }> {
   const lines: string[] = [];
+  let terrainWarning: string | null = null;
+  let terrainEntityLines: string[] = [];
+
+  if (terrain) {
+    const result = await buildTerrainMeshDxfEntities(terrain.projectCenter, terrain.radiusMeters, terrain.projectCrs);
+    terrainEntityLines = result.entityLines;
+    terrainWarning = result.warning;
+  }
 
   // DXF Header
   lines.push('0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '0', 'ENDSEC');
 
   // DXF Tables
   lines.push('0', 'SECTION', '2', 'TABLES');
-  lines.push('0', 'TABLE', '2', 'LAYER', '70', '3');
+  lines.push('0', 'TABLE', '2', 'LAYER', '70', '4');
   lines.push('0', 'LAYER', '2', 'BUDYNKI', '70', '0', '62', '7', '6', 'CONTINUOUS');
   lines.push('0', 'LAYER', '2', 'GRANICE', '70', '0', '62', '1', '6', 'CONTINUOUS');
   lines.push('0', 'LAYER', '2', 'PUNKTY_POMIARU', '70', '0', '62', '3', '6', 'CONTINUOUS');
+  lines.push('0', 'LAYER', '2', 'RZEZBA_TERENU', '70', '0', '62', '8', '6', 'CONTINUOUS');
   lines.push('0', 'ENDTAB');
   lines.push('0', 'ENDSEC');
 
@@ -67,6 +84,10 @@ export function exportSceneToDxf({ buildings, pinnedPoints }: DxfExportParams): 
     }
   });
 
+  if (terrainEntityLines.length > 0) {
+    lines.push(...terrainEntityLines);
+  }
+
   lines.push('0', 'ENDSEC');
   lines.push('0', 'EOF');
 
@@ -78,4 +99,6 @@ export function exportSceneToDxf({ buildings, pinnedPoints }: DxfExportParams): 
   link.download = `usi-light-export-${new Date().toISOString().slice(0, 10)}.dxf`;
   link.click();
   URL.revokeObjectURL(url);
+
+  return { terrainWarning };
 }

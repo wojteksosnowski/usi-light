@@ -12,8 +12,10 @@ import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { HereTileManager } from '../utils/hereTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
+import { isPointInPolygon } from '@/utils/math2d';
 import { APP_CONFIG } from '../config/appConfig';
-import { useWfsStore } from '../modules/wfs-import/store/useWfsStore';
+import { useWfsStore, MpzpZoneFeature } from '../modules/wfs-import/store/useWfsStore';
+import { prefetchActiveGeoLayersInRadius } from '../modules/wfs-import/registerGeoLayers';
 import { useSolarAnalysisStore } from '../store/useSolarAnalysisStore';
 
 export { isBuildingLocked, getBuildingTopElevation };
@@ -103,7 +105,25 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     }
   }, []);
 
-  const activeTileManager = satelliteProvider === 'here' ? hereTileManagerRef.current : tileManagerRef.current;
+  const activeTileManager =
+    satelliteProvider === 'orthophoto'
+      ? null
+      : satelliteProvider === 'here'
+        ? hereTileManagerRef.current
+        : tileManagerRef.current;
+
+  // Ortofotomapa (PRO) jest osobną warstwą WMS w pipeline (zarejestrowaną przez registerGeoLayers),
+  // sterowaną przez useWfsStore — synchronizujemy ją z przełącznikiem "Dostawca mapy".
+  const setShowOrthophotoLayer = useWfsStore((s) => s.setShowOrthophotoLayer);
+  const setOrthophotoOpacity = useWfsStore((s) => s.setOrthophotoOpacity);
+
+  useEffect(() => {
+    setShowOrthophotoLayer(showSatelliteLayer && satelliteProvider === 'orthophoto');
+  }, [showSatelliteLayer, satelliteProvider, setShowOrthophotoLayer]);
+
+  useEffect(() => {
+    setOrthophotoOpacity(satelliteOpacity);
+  }, [satelliteOpacity, setOrthophotoOpacity]);
 
   // Geo module: re-render canvas when WMS tiles load or layers change
   useEffect(() => {
@@ -124,10 +144,31 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     return () => window.removeEventListener('geo-prefetch-satellite', handler);
   }, [activeTileManager]);
 
+
   // Project circle pulse animation (shows when Centruj is pressed)
   const [projectCirclePulse, setProjectCirclePulse] = useState<{ radius: number; opacity: number } | null>(null);
   const circleAnimRef = useRef<number | null>(null);
   const projectRadius = useWfsStore((s) => s.projectRadius);
+
+  // Buforowanie automatyczne (nie tylko po ręcznej synchronizacji): za każdą zmianą lokalizacji,
+  // promienia projektu, dostawcy mapy lub włączenia warstwy GEO, doprefetchowuje kafle satelitarne
+  // i WMS w zasięgu projektu (z przypięciem w cache — patrz `tilePrefetchMath.ts`). Debounced, żeby
+  // przeciąganie środka projektu nie odpalało lawiny requestów przy każdej klatce. Warstwy GEO
+  // subskrybowane jako jeden klucz (nie 5 osobnych selectorów) — treść nieużywana w efekcie,
+  // liczy się wyłącznie to, czy się zmieniła.
+  const activeGeoLayersKey = useWfsStore(
+    (s) => `${s.showOrthophotoLayer}|${s.showKiutLayer}|${s.showMpzpLayer}|${s.showBdotLayer}|${s.showTerrainLayer}`
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (activeTileManager) {
+        activeTileManager.prefetchTilesInRadius(latitude, longitude, projectRadius);
+      }
+      prefetchActiveGeoLayersInRadius(latitude, longitude, projectRadius);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [latitude, longitude, projectRadius, activeTileManager, activeGeoLayersKey]);
 
   const triggerProjectCirclePulse = useCallback((radius: number) => {
     // Cancel any running animation
@@ -199,6 +240,23 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     selectedBuildingId,
     layerSettings,
     projectRadius
+  );
+
+  // Podgląd atrybutów strefy MPZP po kliknięciu (wektor, pilot Warszawa) — niezależny od
+  // głównej logiki interakcji, aktywny tylko gdy warstwa jest widoczna.
+  const showMpzpZonesLayer = useWfsStore((s) => s.showMpzpZonesLayer);
+  const mpzpZones = useWfsStore((s) => s.mpzpZones);
+  const [selectedMpzpZone, setSelectedMpzpZone] = useState<MpzpZoneFeature | null>(null);
+
+  const handleCanvasClickForMpzpZone = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!showMpzpZonesLayer || mpzpZones.length === 0) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const { wx, wy } = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const hit = mpzpZones.find((zone) => zone.rings.some((ring) => isPointInPolygon({ x: wx, y: wy }, ring)));
+      setSelectedMpzpZone(hit ?? null);
+    },
+    [showMpzpZonesLayer, mpzpZones, screenToWorld]
   );
 
   // Canvas interaction hook
@@ -606,6 +664,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         onMouseUp={interaction.handleMouseUp}
         onMouseLeave={interaction.handleMouseUp}
         onContextMenu={interaction.handleContextMenu}
+        onClick={handleCanvasClickForMpzpZone}
         style={{
           position: 'absolute',
           top: 0,
@@ -634,6 +693,41 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           anchor={{ sx: expandedLabelAnchor.sx, sy: expandedLabelAnchor.bottomSy }}
           onClose={() => setExpandedLabelBuildingId(null)}
         />
+      )}
+      {selectedMpzpZone && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '16px',
+            left: '16px',
+            padding: '10px 12px',
+            borderRadius: '10px',
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(96, 165, 250, 0.4)',
+            color: '#e2e8f0',
+            fontSize: '11px',
+            lineHeight: 1.5,
+            maxWidth: '260px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            zIndex: 20,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <span style={{ fontWeight: 700, color: '#60a5fa' }}>Strefa MPZP {selectedMpzpZone.funSymb || ''}</span>
+            <button
+              type="button"
+              onClick={() => setSelectedMpzpZone(null)}
+              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '13px', lineHeight: 1 }}
+            >
+              ✕
+            </button>
+          </div>
+          {selectedMpzpZone.funNazwa && <div>Przeznaczenie: {selectedMpzpZone.funNazwa}</div>}
+          {selectedMpzpZone.maxWysokosc && <div>Maks. wysokość: {selectedMpzpZone.maxWysokosc} m</div>}
+          {selectedMpzpZone.intenZab && <div>Intensywność zabudowy: {selectedMpzpZone.intenZab}</div>}
+          {selectedMpzpZone.powBio && <div>Pow. biologicznie czynna: {selectedMpzpZone.powBio}%</div>}
+          {selectedMpzpZone.nazwaPlan && <div style={{ color: '#94a3b8', marginTop: '4px' }}>Plan: {selectedMpzpZone.nazwaPlan}</div>}
+        </div>
       )}
     </div>
   );

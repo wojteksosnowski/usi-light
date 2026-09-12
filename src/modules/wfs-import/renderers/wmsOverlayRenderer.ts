@@ -19,6 +19,10 @@ export interface RenderWmsOverlayOptions {
   opacity?: number;
   /** Promień zasięgu projektu w metrach CAD (środek projektu = (0,0)) */
   projectRadius?: number;
+  /** Pomija twarde przycięcie/culling do okręgu zasięgu projektu — używane przez warstwy
+   * traktowane jako "podkład satelitarny" (np. ortofotomapa), żeby zachowywały się spójnie
+   * z Google/HERE: bufor kafli w promieniu projektu, ale wyświetlanie całej mapy również poza okręgiem. */
+  skipRadiusClip?: boolean;
 }
 
 /**
@@ -43,7 +47,7 @@ function tileIntersectsCircle(
 }
 
 export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
-  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius } = options;
+  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius, skipRadiusClip = false } = options;
   const { ctx, width, height, viewState, screenToWorld, worldToScreen } = rc;
 
   const c1 = screenToWorld(0, 0);
@@ -91,7 +95,7 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
   ctx.imageSmoothingEnabled = true;
 
   // Twardy clip canvas do okręgu zasięgu projektu
-  if (radiusPx != null && APP_CONFIG.geo.wmsClipToProjectRadius) {
+  if (radiusPx != null && APP_CONFIG.geo.wmsClipToProjectRadius && !skipRadiusClip) {
     ctx.beginPath();
     ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
     ctx.clip();
@@ -100,7 +104,7 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
   for (let tx = startTileX; tx <= endTileX; tx++) {
     for (let ty = startTileY; ty <= endTileY; ty++) {
       // Tile culling: pomiń kafelki całkowicie poza okręgiem zasięgu
-      if (radiusPx != null && APP_CONFIG.geo.wmsTileCullingEnabled) {
+      if (radiusPx != null && APP_CONFIG.geo.wmsTileCullingEnabled && !skipRadiusClip) {
         // Oblicz narożniki kafelka na ekranie (przybliżenie przez środkową wgs->cad->screen)
         const wgsTileCenter = webMercatorPixelToLatLon(
           { x: (tx + 0.5) * 256, y: (ty + 0.5) * 256 },

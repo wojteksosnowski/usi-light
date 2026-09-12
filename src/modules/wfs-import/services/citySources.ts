@@ -11,6 +11,13 @@ export interface CitySource {
   fetchBuildings: (bbox: WfsBbox) => Promise<GeoJsonFeatureCollection>;
   /** Jeśli podane, lokalne działki miasta zastępują (dla tego miasta) ogólnopolski ULDK. */
   fetchParcels?: (bbox: WfsBbox) => Promise<GeoJsonFeatureCollection>;
+  /**
+   * Czy serwis realnie wypełnia atrybut KONDYGNACJE_NADZIEMNE (liczba wysokość budynku).
+   * Domyślnie `true`. Ogólnopolski fallback EGiB zwraca to pole jako puste (`None`) dla
+   * większości powiatów, więc dla niego ustawiamy `false` — wysokość trzeba dobrać inną
+   * metodą (LiDAR NMPT−NMT, patrz `terrainAnalyzer.ts`) zamiast ufać stałej wartości domyślnej.
+   */
+  hasStoreyHeights?: boolean;
 }
 
 export const CITY_SOURCES: CitySource[] = [
@@ -26,6 +33,9 @@ export const CITY_SOURCES: CitySource[] = [
     sourceCrs: EPSG_2178,
     fetchBuildings: fetchKrakowBuildings,
     fetchParcels: fetchKrakowParcels,
+    // Serwer krakowski bywa niedostępny dla KONDYGNACJE_NADZIEMNE i zwraca tekst "brak_uprawnień"
+    // zamiast liczby (patrz komentarz w wfsKrakowClient.ts) — ten sam problem co EGiB.
+    hasStoreyHeights: false,
   },
   // Ogólnopolski fallback: krajowa zbiorcza usługa WFS EGiB (GUGiK) dla budynków,
   // dla miast/gmin bez własnego dedykowanego serwisu (np. Wrocław, Gdańsk, Poznań).
@@ -38,6 +48,7 @@ export const CITY_SOURCES: CitySource[] = [
     bbox: [14.0, 49.0, 24.5, 55.0],
     sourceCrs: EPSG_2180,
     fetchBuildings: fetchEgibBuildings,
+    hasStoreyHeights: false,
   },
 ];
 

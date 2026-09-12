@@ -11,6 +11,13 @@ interface BuildingLabelMiniPanelProps {
   onClose: () => void;
 }
 
+const HEIGHT_SOURCE_LABELS: Record<NonNullable<BuildingLoop['heightSource']>, string> = {
+  manual: 'Ręczna',
+  default: 'Domyślna',
+  'storeys-wfs': 'Kondygnacje (WFS)',
+  'lidar-nmt': 'LiDAR NMT',
+};
+
 interface ToggleDef {
   key: 'isIncluded' | 'isTested' | 'isCityCentre' | 'isLocked' | 'isGhosted';
   label: string;
@@ -135,6 +142,23 @@ export const BuildingLabelMiniPanel: React.FC<BuildingLabelMiniPanelProps> = ({ 
           <span style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
             {building.defaultHeight}m
           </span>
+          {building.heightSource && (
+            <span
+              title={`Źródło wysokości: ${HEIGHT_SOURCE_LABELS[building.heightSource]}`}
+              style={{
+                fontSize: '8.5px',
+                fontWeight: 700,
+                color: 'var(--text-muted)',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-light)',
+                borderRadius: '999px',
+                padding: '1px 6px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {HEIGHT_SOURCE_LABELS[building.heightSource]}
+            </span>
+          )}
         </div>
         {typeof building.storeysCount === 'number' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--text-secondary)' }}>

@@ -438,7 +438,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     value={commonHeight}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
-                      updateLayerBuildings(selectedLayerName, { defaultHeight: val });
+                      updateLayerBuildings(selectedLayerName, { defaultHeight: val, heightSource: 'manual' });
                     }}
                     style={{
                       width: '80px',
@@ -1798,7 +1798,7 @@ export const LayersAndObjectsGroup: React.FC = () => {
                     type="number"
                     step="0.5"
                     value={selectedBuilding.defaultHeight}
-                    onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => updateSelectedBuilding({ defaultHeight: parseFloat(e.target.value) || 0, heightSource: 'manual' })}
                     style={{
                       width: '80px',
                       backgroundColor: 'var(--bg-input)',

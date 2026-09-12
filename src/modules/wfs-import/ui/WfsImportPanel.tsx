@@ -26,10 +26,8 @@ export const WfsImportPanel: React.FC = () => {
   const setTrees = useWfsStore((s) => s.setTrees);
   const setShowTreesLayer = useWfsStore((s) => s.setShowTreesLayer);
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
-  const setShowEgibLayer = useWfsStore((s) => s.setShowEgibLayer);
   const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const showTreesLayer = useWfsStore((s) => s.showTreesLayer);
-  const showEgibLayer = useWfsStore((s) => s.showEgibLayer);
   const options = useWfsStore((s) => s.options);
   const setOptions = useWfsStore((s) => s.setOptions);
   const setLastImportBbox = useWfsStore((s) => s.setLastImportBbox);
@@ -90,13 +88,12 @@ export const WfsImportPanel: React.FC = () => {
       setLastImportBbox(bbox);
 
       if (!citySource) {
-        setShowEgibLayer(true);
         setShowTerrainLayer(true);
         setStatus({
           isFetching: false,
           stage: 'done',
           error: null,
-          info: 'Brak lokalnego serwisu WFS dla tej lokalizacji — włączono podkłady krajowe (EGiB, NMT)',
+          info: 'Brak lokalnego serwisu WFS dla tej lokalizacji — włączono podkład krajowy (NMT)',
           buildingsCount: 0,
           parcelsCount: 0,
           treesCount: 0,
@@ -115,7 +112,7 @@ export const WfsImportPanel: React.FC = () => {
         treesCount: 0,
       });
     }
-  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowEgibLayer, setShowTerrainLayer, setLastImportBbox]);
+  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -159,8 +156,6 @@ export const WfsImportPanel: React.FC = () => {
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Podkłady mapowe:</span>
         <ToggleRow label="Cieniowanie terenu (NMT)" active={showTerrainLayer}
           onToggle={() => setShowTerrainLayer(!showTerrainLayer)} />
-        <ToggleRow label="EGiB — działki i budynki" active={showEgibLayer}
-          onToggle={() => setShowEgibLayer(!showEgibLayer)} />
         <ToggleRow label="Drzewa (wizualizacja)" active={showTreesLayer}
           onToggle={() => setShowTreesLayer(!showTreesLayer)} />
       </div>
