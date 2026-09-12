@@ -21,6 +21,13 @@ import { calculateOutwardNormal } from '../../../utils/math2d/vec2';
 
 const ULDK_BASE_URL = 'https://uldk.gugik.gov.pl/';
 
+/** Limity ekspansji BFS wykrywania sąsiednich działek (patrz `fetchParcelsInRadius`). */
+const UldkExpansionLimits = {
+  MIN_EXPANSION_MARGIN_METERS: 30,
+  MAX_PROBE_COUNT: 5000,
+  MAX_PARCEL_COUNT: 500,
+} as const;
+
 export interface UldkParcelRaw {
   id: string;
   plotNumber: string;
@@ -373,9 +380,9 @@ export async function fetchParcelsInRadius(
   // tuż za jej krawędziami/wierzchołkami, żeby wykryć sąsiadów niezależnie od ich
   // rozmiaru (siatka regularna sama w sobie przeoczy wąskie/małe działki między punktami).
   const expansionQueue: Ring[] = [];
-  const EXPANSION_MARGIN = Math.max(GRID_STEP_METERS, 30);
-  const MAX_PROBE_COUNT = 5000;
-  const MAX_PARCEL_COUNT = 500;
+  const EXPANSION_MARGIN = Math.max(GRID_STEP_METERS, UldkExpansionLimits.MIN_EXPANSION_MARGIN_METERS);
+  const MAX_PROBE_COUNT = UldkExpansionLimits.MAX_PROBE_COUNT;
+  const MAX_PARCEL_COUNT = UldkExpansionLimits.MAX_PARCEL_COUNT;
   let totalProbesIssued = 0;
 
   const isWithinExpandableRange = (x: number, y: number): boolean => {
