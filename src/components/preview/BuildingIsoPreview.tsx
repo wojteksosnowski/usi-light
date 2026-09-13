@@ -7,6 +7,7 @@ import type { BuildingLoop } from '@/types/geometry';
 import { getBuildingSolids } from '@/engine/preview/buildingIsoGeometry';
 import { miterOffsetPolygon } from '@/utils/math2d/miterOffset';
 import { getIsoCameraOffset, type IsoOrientation } from './isoCameraPresets';
+import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
 
 /** Clockwise cycle used for the left/right compass arrows, 45° per step. */
 const ORIENTATION_CYCLE: IsoOrientation[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -28,6 +29,9 @@ interface BuildingIsoPreviewProps {
   groupBuildings?: BuildingLoop[];
   highlightEdgeIndex?: number;
   highlightColor?: string;
+  hideToolbar?: boolean;
+  overrideOrientation?: IsoOrientation;
+  overrideIsXRay?: boolean;
 }
 
 interface FrameData {
@@ -542,9 +546,16 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
   groupBuildings,
   highlightEdgeIndex,
   highlightColor,
+  hideToolbar = false,
+  overrideOrientation,
+  overrideIsXRay,
 }) => {
-  const [orientation, setOrientationState] = useState<IsoOrientation>(loadStoredOrientation);
-  const [isXRay, setIsXRayState] = useState<boolean>(loadStoredXRay);
+  const globalOrientation = useActionRecorderStore((s) => s.settings.pipOrientation);
+  const globalIsXRay = useActionRecorderStore((s) => s.settings.pipIsXRay);
+  const updateSettings = useActionRecorderStore((s) => s.updateSettings);
+
+  const effectiveOrientation = overrideOrientation ?? globalOrientation ?? 'SW';
+  const effectiveIsXRay = overrideIsXRay ?? globalIsXRay ?? false;
 
   const effectiveBuildings = useMemo(() => {
     if (groupBuildings && groupBuildings.length > 0) {
@@ -554,7 +565,7 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
   }, [groupBuildings, building]);
 
   const setOrientation = (next: IsoOrientation) => {
-    setOrientationState(next);
+    updateSettings({ pipOrientation: next });
     try {
       localStorage.setItem(ORIENTATION_STORAGE_KEY, next);
     } catch {
@@ -563,19 +574,17 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
   };
 
   const toggleXRay = () => {
-    setIsXRayState((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(XRAY_STORAGE_KEY, String(next));
-      } catch {
-        // Ignore storage failures
-      }
-      return next;
-    });
+    const next = !effectiveIsXRay;
+    updateSettings({ pipIsXRay: next });
+    try {
+      localStorage.setItem(XRAY_STORAGE_KEY, String(next));
+    } catch {
+      // Ignore storage failures
+    }
   };
 
   const rotate = (dir: 1 | -1) => {
-    const idx = ORIENTATION_CYCLE.indexOf(orientation);
+    const idx = ORIENTATION_CYCLE.indexOf(effectiveOrientation);
     const next = ORIENTATION_CYCLE[(idx + dir + ORIENTATION_CYCLE.length) % ORIENTATION_CYCLE.length];
     setOrientation(next);
   };
@@ -592,50 +601,61 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
       }}
     >
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-        <Canvas frameloop="demand" shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.NoToneMapping }}>
+        <Canvas
+          frameloop="demand"
+          shadows
+          dpr={[1, 2]}
+          gl={{
+            preserveDrawingBuffer: true,
+            antialias: true,
+            toneMapping: THREE.NoToneMapping,
+          }}
+        >
           <DreiOrthographicCamera makeDefault position={[10, 10, 10]} near={0.1} far={1000} />
           <IsoScene
             buildings={effectiveBuildings}
             activeBuildingId={building.id}
-            isXRay={isXRay}
-            orientation={orientation}
+            isXRay={effectiveIsXRay}
+            orientation={effectiveOrientation}
             highlightEdgeIndex={highlightEdgeIndex}
             highlightColor={highlightColor}
           />
         </Canvas>
       </div>
 
-      {/* Przełącznik trybu X-Ray */}
-      <button
-        type="button"
-        onClick={toggleXRay}
-        title={isXRay ? 'Wyłącz tryb X-Ray' : 'Włącz tryb X-Ray (kolory typów obiektów)'}
-        style={{
-          position: 'absolute',
-          top: '8px',
-          right: '8px',
-          zIndex: 10,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px',
-          padding: '5px 8px',
-          borderRadius: '6px',
-          border: isXRay ? '1px solid #6366f1' : '1px solid rgba(0, 0, 0, 0.15)',
-          backgroundColor: isXRay ? 'rgba(99, 102, 241, 0.9)' : 'rgba(255, 255, 255, 0.85)',
-          color: isXRay ? '#ffffff' : '#334155',
-          backdropFilter: 'blur(4px)',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-          cursor: 'pointer',
-          fontSize: '10.5px',
-          fontWeight: 600,
-        }}
-      >
-        <Scan size={13} />
-        <span>X-Ray</span>
-      </button>
+      {/* Przełącznik trybu X-Ray (ukryty gdy hideToolbar = true) */}
+      {!hideToolbar && (
+        <button
+          type="button"
+          onClick={toggleXRay}
+          title={effectiveIsXRay ? 'Wyłącz tryb X-Ray' : 'Włącz tryb X-Ray (kolory typów obiektów)'}
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '5px 8px',
+            borderRadius: '6px',
+            border: effectiveIsXRay ? '1px solid #6366f1' : '1px solid rgba(0, 0, 0, 0.15)',
+            backgroundColor: effectiveIsXRay ? 'rgba(99, 102, 241, 0.9)' : 'rgba(255, 255, 255, 0.85)',
+            color: effectiveIsXRay ? '#ffffff' : '#334155',
+            backdropFilter: 'blur(4px)',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+            cursor: 'pointer',
+            fontSize: '10.5px',
+            fontWeight: 600,
+          }}
+        >
+          <Scan size={13} />
+          <span>X-Ray</span>
+        </button>
+      )}
 
       {/* Legenda trybu X-Ray */}
-      {isXRay && (
+      {effectiveIsXRay && (
         <div
           style={{
             position: 'absolute',
@@ -705,7 +725,7 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
       />
 
       {/* Compass strip: purely visual, ticks slide to reflect the current direction. */}
-      <CompassStrip orientation={orientation} />
+      <CompassStrip orientation={effectiveOrientation} />
     </div>
   );
 };

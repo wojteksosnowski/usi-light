@@ -1,20 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import {
-  runSolarDemo,
-  runShadowingComplianceDemo,
-  runRealtimeShadowEnvelopeDemo,
-  runPatioSunlightDemo,
-  runGeoSolarComparisonDemo,
-  runDynamicFacadeClashDemo,
-} from '../src/utils/demoRunner';
+import { wait, animateValue } from '../src/utils/demoRunner';
 
-describe('Demo Recorder & Runner Integrity', () => {
-  it('exports all 6 demo scenarios as functions', () => {
-    expect(typeof runSolarDemo).toBe('function');
-    expect(typeof runShadowingComplianceDemo).toBe('function');
-    expect(typeof runRealtimeShadowEnvelopeDemo).toBe('function');
-    expect(typeof runPatioSunlightDemo).toBe('function');
-    expect(typeof runGeoSolarComparisonDemo).toBe('function');
-    expect(typeof runDynamicFacadeClashDemo).toBe('function');
+describe('Demo Runner Helpers Integrity', () => {
+  it('exports wait and animateValue functions', () => {
+    expect(typeof wait).toBe('function');
+    expect(typeof animateValue).toBe('function');
+  });
+
+  it('wait resolves correctly', async () => {
+    const start = Date.now();
+    await wait(50);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(40);
   });
 });

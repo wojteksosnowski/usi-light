@@ -8,6 +8,8 @@ import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { useCanvasInteraction, isBuildingLocked, getBuildingTopElevation } from './cad/hooks/useCanvasInteraction';
 import { useDemoRecorder } from '../hooks/useDemoRecorder';
+import { RecorderOverlay, SessionCatalogModal } from '../modules/action-recorder';
+import { Recording3DPipWindow } from './preview/Recording3DPipWindow';
 import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
 import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
 import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
@@ -74,7 +76,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  useDemoRecorder(canvasRef);
+  useDemoRecorder(canvasRef, containerRef);
 
   const [expandedLabelBuildingId, setExpandedLabelBuildingId] = useState<string | null>(null);
   const handleLabelClick = (id: string | null) => {
@@ -717,7 +719,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         isInteractingDebounceTimer.current = null;
       }
     };
-  }, [setViewState, handleInteractionChange]);
+  }, [handleInteractionChange]);
 
   const expandedLabelBuilding = expandedLabelBuildingId
     ? buildings.find((b) => b.id === expandedLabelBuildingId) || null
@@ -770,6 +772,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           pointerEvents: 'none',
         }}
       />
+      {/* Nakładka Demo / Action Recorder (Odliczanie, Replay Bar) */}
+      <RecorderOverlay />
+      {/* Pływające okno podglądu 3D Picture-in-Picture */}
+      <Recording3DPipWindow />
+      {/* Modal Katalogu Nagrań i Sesji */}
+      <SessionCatalogModal />
+
       {expandedLabelBuilding && expandedLabelAnchor && (
         <BuildingLabelMiniPanel
           building={expandedLabelBuilding}

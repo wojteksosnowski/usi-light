@@ -1,167 +1,114 @@
-# 🎬 System Nagrywania Demo i Makro Scenariuszy (USI Light 2.5D)
+# 🎬 System Rejestracji Działań na Żywo i Odtwarzania Sesji (USI Light 2.5D)
 
-Niniejszy dokument opisuje architekturę, metodykę wyzwalania, sterowanie stanem Zustand oraz specyfikację wszystkich dostępnych funkcji i komend modułu automatycznego nagrywania demo (`DemoRecorder`).
+Niniejszy dokument opisuje architekturę, format danych, silnik przechwytywania wideo Canvas, rejestrację stanów pośrednich oraz silnik odtwarzania (Replay Engine) w aplikacji **USI Light 2.5D**.
 
 > [!IMPORTANT]
-> **Moduł lokalny (Dev-only)**: Cały kod narzędzia wykluczony jest z buildu produkcyjnego. Guard `import.meta.env.DEV` gwarantuje, że kod nie trafia do paczki `dist/` (tree-shaking Vite).
+> **Moduł lokalny (Dev-only)**: Cały kod narzędzia wykluczony jest z buildu produkcyjnego. Guard `import.meta.env.DEV` gwarantuje, że kod nie trafia do paczki produkcyjnej (tree-shaking Vite).
 
 ---
 
 ## 1. Architektura i Przepływ Danych
 
-System składa się z 3 głównych warstw:
-1. **Przechwytywanie strumienia Canvas (`src/utils/canvasRecorder.ts`)**: Używa `HTMLCanvasElement.captureStream(60fps)` i `MediaRecorder` (VP9 / 8 Mbps).
-2. **Silnik Sekwencjonowania Stanu (`src/utils/demoRunner.ts`)**: Bezpośrednia manipulacja magazynami Zustand (`useSceneStore`, `useSolarAnalysisStore`, `useCadToolStore`) poza cyklem renderowania Reacta.
-3. **Hook Wyzwalający (`src/hooks/useDemoRecorder.ts`)**: Odpowiada za detekcję URL/skrótów, dopasowanie proporcji (format 1:1) oraz zarządzanie cyklem życia nagrania.
+System oparty jest o 4 kluczowe moduły w `src/modules/action-recorder/`:
+1. **Silnik Przechwytywania Canvas i Zdarzeń (`ActionRecorderEngine.ts`)**:
+   - Wykorzystuje `HTMLCanvasElement.captureStream(60fps)` i `MediaRecorder` (VP9 / 8 Mbps).
+   - Rejestruje ruchy kursora myszy, kliknięcia (LPM, PPM, drag) i wciśnięte klawisze modyfikatorów.
+   - Subskrybuje zmiany w magazynach Zustand (`useSceneStore`, `useSolarAnalysisStore`, `useCadToolStore`) z precyzyjnymi znacznikami czasu `timestampMs`.
+2. **Warstwa Wizualna Potoku Renderowania (`RecorderVisualsLayer.ts`)**:
+   - Renderuje wirtualny kursor i rozchodzące się animowane fale kliknięć (Click Ripples) bezpośrednio na canvasie (dzięki czemu są widoczne w nagraniu wideo).
+   - Wyświetla HUD wciśniętych skrótów klawiaturowych (`Shift`, `Del`, `Ctrl`, `Fit`).
+   - Wyświetla wskaźnik nagrywania `● REC [00:04.2]`.
+3. **Deterministyczny Silnik Odtwarzania (`ActionReplayer.ts`)**:
+   - Wczytuje stan początkowy sesji i odtwarza strumień zdarzeń krok po kroku w aplikacji w zadanym tempie (0.5x, 1x, 1.5x, 2x).
+   - Umożliwia suwakowanie czasu (scrubbing), pauzowanie i inspekcję geometrii.
+4. **Katalog Nagrań i Sesji (`actionRecorderStorage.ts` & `SessionCatalogModal.tsx`)**:
+   - Magazyn IndexedDB przechowujący pliki wideo WebM oraz pliki sesji JSON.
+   - Umożliwia odtworzenie nagrania, pobranie wideo `.webm`, pobranie sesji `.json` oraz import zewnętrznych sesji JSON.
 
 ---
 
-## 2. Metody Wyzwalania Nagrywania
+## 2. Metody Wyzwalania i Sterowania
 
-### 2.1. Wyzwalacz URL (URL Query Parameter)
-Dodaj parametr `recordDemo=<nazwa_scenariusza>` do adresu URL w przeglądarce:
-- `http://localhost:3000/?recordDemo=solar`
+### 2.1. Skrót Klawiaturowy
+W dowolnym momencie w trybie deweloperskim wciśnij:
+- **`~`** (klawisz tyldy / backquote) – uruchamia lub zatrzymuje nagrywanie (zabezpieczony przed wyzwalaniem w trakcie edycji w polach tekstowych).
+- Po zatrzymaniu pliki wideo (`.webm`) i dziennik sesji (`.json`) są automatycznie pobierane oraz zapisywane w lokalnym katalogu IndexedDB.
 
-### 2.2. Skrót Klawiaturowy
-W dowolnym momencie pracy w trybie deweloperskim wciśnij:
-- `Ctrl + Shift + D` – uruchamia domyślny scenariusz (`solar`).
-
----
-
-## 3. Format i Parametry Nagrania
-
-- **Format pliku**: WebM (z priorytetem kodeka VP9: `video/webm; codecs=vp9`)
-- **Klatkarz (FPS)**: 60 FPS
-- **Bitrate**: 8,000,000 bps (8 Mbps – ostre linie wektorowe CAD)
-- **Proporcje obrazu (1:1)**: Podczas nagrywania kontener Canvas automatycznie przyjmuje wymiar `min(window.innerWidth, window.innerHeight)px`, a po zakończeniu przywraca oryginalny układ responsive.
-
----
-
-## 4. Pełna Specyfikacja API i Komend Sterujących
-
-### 4.1. Sterowanie Czasem i Animacją (`demoRunner.ts`)
-
-| Funkcja | Opis | Przykład użycia |
-| :--- | :--- | :--- |
-| `wait(ms: number)` | Wstrzymuje wykonanie scenariusza na podany czas w milisekundach. | `await wait(800);` |
-| `animateValue(durationMs, onStep)` | Animuje wartość postępu od `0` do `1` przez czas `durationMs` z wygładzeniem `easeInOutCubic`. | `await animateValue(1400, (t) => { ... });` |
+### 2.2. Kafel „Narzędzia Deweloperskie” w Panelu Bocznym
+W kafelku dostępne są:
+- Przycisk **Nagraj akcje [~]** / **Zatrzymaj nagranie**.
+- Przełącznik formatu kadru:
+  - `1:1 Kwadrat` – optymalny do mediów społecznościowych i changelogów.
+  - `16:9 Wideo` – format wideo/YouTube.
+  - `Pełny` – pełny rozmiar rzutni.
+- Szybkie przełączniki:
+  - `Kursor` – włącza/wyłącza wirtualny kursor i fale kliknięć.
+  - `HUD` – włącza/wyłącza dymek wciśniętych skrótów klawiatury.
+  - `3s` – włącza/wyłącza odliczanie 3-2-1 przed startem nagrywania.
+  - `3D` – włącza/wyłącza pływające okno podglądu 3D bryły.
+- Przycisk **Katalog Nagrań i Sesji** – otwiera pełny menedżer nagrań.
 
 ---
 
-### 4.2. Operacje na Scenie (`useSceneStore.getState()`)
+## 3. Okno Podglądu 3D (Picture-in-Picture) w Polu Nagrywania
 
-| Komenda / Metoda | Opis | Przykład użycia |
-| :--- | :--- | :--- |
-| `loadSceneData(data)` | Ładuje kompletną scenę z pliku JSON (np. `start.json`). | `scene.loadSceneData(startScene);` |
-| `setBuildings(buildings)` | Czyści lub ustawia całą tablicę obiektów. | `scene.setBuildings([]);` |
-| `setSelectedBuildingId(id)` | Zaznacza obiekt o danym ID (lub `null` aby odznaczyć). | `scene.setSelectedBuildingId('bldg-123');` |
-| `addBuilding(building)` | Dodaje nowy obiekt do sceny. | `scene.addBuilding(newBldg);` |
-| `updateBuildingVertices(id, verts)` | Płynnie podmienia wierzchołki obiektu (automatycznie przelicza segmenty i modyfikatory). | `scene.updateBuildingVertices(id, newVerts);` |
-| `addBuildingModifier(id, modifier)` | Dodaje modyfikator geometryczny (`donut`, `terrace`, `bay_window`, `story_offset`). | *patrz sekcja Modyfikatory* |
-| `updateBuildingModifier(id, modId, patch)` | Aktualizuje parametry istniejącego modyfikatora (np. `depth`, `storiesCount`). | `scene.updateBuildingModifier(id, modId, { depth: -8 });` |
-| `removeBuildingModifier(id, modId)` | Usuwa modyfikator z budynku. | `scene.removeBuildingModifier(id, modId);` |
+Podczas nagrywania lub pracy w trybie deweloperskim w rogu rzutni wyświetlane jest pływające okno 3D (`Recording3DPipWindow.tsx`):
+- **Model 3D w czasie rzeczywistym**: Prezentuje bryłę aktywnego lub projektowanego budynku wraz z kondygnacjami, uskokami, tarasami i modyfikatorami 2.5D.
+- **Pieczenie do strumienia wideo (60 FPS)**: Klatki z widoku 3D Three.js WebGL są w czasie rzeczywistym przenoszone na główny canvas CAD przez warstwę `RecorderVisualsLayer`, dzięki czemu wygenerowane wideo WebM zawiera wbudowane okno 3D.
+- **Kontrolki**:
+  - Obrót kamery (krok 45°: N, NE, E, SE, S, SW, W, NW).
+  - Przełącznik widoku rentgenowskiego kondygnacji (X-Ray).
+  - Zmiana rozmiaru (S, M, L).
+  - Pozycjonowanie (Prawy dół, Prawa góra, Lewy dół).
 
-#### Przykłady konfiguracji modyfikatorów:
+---
+
+## 3. Format Danych Sesji (`ActionSession`)
 
 ```typescript
-// Dziedziniec (Donut)
-scene.addBuildingModifier(BUILDING_ID, {
-  id: 'demo-mod-donut',
-  type: 'donut',
-  enabled: true,
-  name: 'Dziedziniec (Donat)',
-  offset: -10,      // odsunięcie 10m do wnętrza
-  storiesCount: 0,  // cała wysokość
-});
+export interface ActionSessionEvent {
+  timestampMs: number;
+  type:
+    | 'pointer_move'
+    | 'pointer_down'
+    | 'pointer_up'
+    | 'key_down'
+    | 'key_up'
+    | 'scene_state'
+    | 'solar_state'
+    | 'cad_state';
+  payload: any;
+}
 
-// Taras / Uskok (Terrace)
-scene.addBuildingModifier(BUILDING_ID, {
-  id: 'demo-mod-terrace',
-  type: 'terrace',
-  enabled: true,
-  name: 'Taras',
-  depth: -4,         // uskok -4m do wnętrza
-  storiesCount: -3,  // 3 kondygnacje od góry
-  edgeIndex: 0,      // krawędź bazowa
-});
-```
-
----
-
-### 4.3. Sterowanie Analizą Słoneczną (`useSolarAnalysisStore.getState()`)
-
-| Komenda / Metoda | Opis | Przykład użycia |
-| :--- | :--- | :--- |
-| `setShowShadowingLines(show)` | Włącza/wyłącza linie i promienie przesłaniania § 13. | `solar.setShowShadowingLines(true);` |
-| `setShowSunlightLines(show)` | Włącza/wyłącza widok linii nasłonecznienia § 60. | `solar.setShowSunlightLines(true);` |
-| `setShowShadowRange(show)` | Włącza/wyłącza zakresy/koperty cienia. | `solar.setShowShadowRange(true);` |
-| `setShowShadowFill(show)` | Włącza/wyłącza wypełnienie cienia. | `solar.setShowShadowFill(false);` |
-| `setShowNormals(show)` | Włącza/wyłącza wektory normalne elewacji. | `solar.setShowNormals(false);` |
-| `setShowAnalysisPoints(show)` | Włącza/wyłącza punkty pomiarowe na elewacji. | `solar.setShowAnalysisPoints(false);` |
-| `setSelectedCity(cityName)` | Ustawia miasto (np. `'Warszawa'`, `'Gdańsk'`, `'Poznań'`). | `solar.setSelectedCity('Poznań');` |
-| `updateSettings({ latitude, ... })` | Zmienia parametry geograficzne / datę równonocy. | `solar.updateSettings({ latitude: 54.35 });` |
-
----
-
-### 4.4. Sterowanie Viewportem i Rzutnią (`useCadToolStore.getState()`)
-
-| Komenda / Metoda | Opis | Przykład użycia |
-| :--- | :--- | :--- |
-| `triggerFit()` | Wyzwala automatyczne wycentrowanie i dopasowanie skali rzutni (Fit to Extents). | `cadTool.triggerFit();` |
-| `setViewRotationDeg(deg)` | Ustawia kąt obrotu rzutni CAD. | `cadTool.setViewRotationDeg(45);` |
-
----
-
-## 5. Przykładowy Kompletny Scenariusz Makro
-
-Oto wzorcowa struktura scenariusza z wygładzonymi zmianami wierzchołków i parametrów:
-
-```typescript
-export async function runCustomDemo(): Promise<void> {
-  const scene = useSceneStore.getState();
-  const solar = useSolarAnalysisStore.getState();
-  const cadTool = useCadToolStore.getState();
-
-  // 1. Inicjalizacja sceny ze start.json & wyłączenie analiz
-  const startScene = (await import('../../reference/start.json')).default;
-  scene.loadSceneData(startScene as any);
-  solar.setShowShadowingLines(false);
-  solar.setShowSunlightLines(false);
-
-  await wait(800);
-
-  // 2. Zoom do obszaru sceny
-  cadTool.triggerFit();
-  await wait(350);
-
-  const TARGET_ID = 'bldg-1788717474779';
-
-  // 3. Płynne przesunięcie krawędzi (animacja wierzchołków)
-  const snapVerts = scene.buildings.find(b => b.id === TARGET_ID)?.vertices.map(v => ({...v})) ?? [];
-  await animateValue(1400, (t) => {
-    const animated = snapVerts.map((v, i) =>
-      i === 0 || i === 1 ? { x: v.x, y: v.y + t * 12 } : v
-    );
-    scene.updateBuildingVertices(TARGET_ID, animated);
-  });
-
-  // 4. Modyfikacja tarasu
-  scene.addBuildingModifier(TARGET_ID, {
-    id: 'demo-terrace',
-    type: 'terrace',
-    enabled: true,
-    depth: -4,
-    storiesCount: -3,
-  });
-
-  // Płynna zmiana głębokości uskoku
-  await animateValue(1800, (t) => {
-    scene.updateBuildingModifier(TARGET_ID, 'demo-terrace', { depth: -4 + t * (-4) });
-  });
-
-  // 5. Włączenie wyników analizy
-  solar.setShowSunlightLines(true);
-  solar.setShowShadowRange(true);
-  await wait(1200);
+export interface ActionSession {
+  id: string;
+  version: 1;
+  title: string;
+  createdAt: string;
+  durationMs: number;
+  aspectRatio: '1:1' | '16:9' | 'viewport';
+  viewport: {
+    width: number;
+    height: number;
+  };
+  initialState: {
+    scene: any;
+    solar: any;
+    cad: any;
+  };
+  events: ActionSessionEvent[];
 }
 ```
+
+---
+
+## 4. Odtwarzacz Sesji (Replay Engine)
+
+Po wybraniu sesji w katalogu lub zaimportowaniu pliku JSON:
+1. Aplikacja przywraca stan początkowy sceny, analizy nasłonecznienia oraz kamery.
+2. Na dole ekranu pojawia się pływający pasek sterowania:
+   - **Play / Pause**
+   - **Przewijanie od początku**
+   - **Oś czasu / Suwak (Scrubber)**
+   - **Przełącznik prędkości (0.5x, 1x, 1.5x, 2x)**
+   - **Zamknij odtwarzacz**
