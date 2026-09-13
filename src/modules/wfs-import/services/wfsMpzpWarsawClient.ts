@@ -14,6 +14,13 @@ export interface MpzpZoneRawFeature {
   properties: Record<string, unknown> | null;
 }
 
+export interface MpzpLineRawFeature {
+  type: 'Feature';
+  geometry: { type: string; coordinates: unknown } | null;
+  properties: Record<string, unknown> | null;
+}
+
+
 /** Promień Ziemi używany do przeliczenia metrów na stopnie przy generowaniu siatki próbkującej. */
 const EARTH_RADIUS_M = 6378137;
 
@@ -75,3 +82,6 @@ export async function fetchMpzpZonesInRadius(
 
   return Array.from(byObjectId.values());
 }
+
+export const fetchWarsawMpzpZones = fetchMpzpZonesInRadius;
+

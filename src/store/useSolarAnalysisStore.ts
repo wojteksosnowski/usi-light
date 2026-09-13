@@ -21,6 +21,8 @@ export const POLISH_CITIES: PolishCity[] = [
 interface SolarAnalysisState {
   settings: ProjectSettings;
   selectedCity: string;
+  projectName: string;
+  currentProjectId: string | null;
   mapsInput: string;
   mapsParseError: boolean;
 
@@ -52,6 +54,8 @@ interface SolarAnalysisState {
   setSettings: (settings: ProjectSettings | ((prev: ProjectSettings) => ProjectSettings)) => void;
   updateSettings: (patch: Partial<ProjectSettings>) => void;
   setSelectedCity: (city: string) => void;
+  setProjectName: (name: string) => void;
+  setCurrentProjectId: (id: string | null) => void;
   setMapsInput: (input: string) => void;
   setMapsParseError: (err: boolean) => void;
 
@@ -92,6 +96,8 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
     equinoxDate: 'spring',
   },
   selectedCity: 'Warszawa',
+  projectName: '',
+  currentProjectId: null,
   mapsInput: '',
   mapsParseError: false,
 
@@ -138,6 +144,8 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
     })),
 
   setSelectedCity: (city) => set({ selectedCity: city }),
+  setProjectName: (name) => set({ projectName: name }),
+  setCurrentProjectId: (id) => set({ currentProjectId: id }),
   setMapsInput: (input) => set({ mapsInput: input }),
   setMapsParseError: (err) => set({ mapsParseError: err }),
 

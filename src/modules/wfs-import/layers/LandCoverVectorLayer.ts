@@ -30,6 +30,7 @@ export class LandCoverVectorLayer implements CadRenderLayer {
       rc: context.renderContext,
       units: this.units,
       showUnits: this.showUnits,
+      projectRadius: context.projectRadius,
     });
   }
 }

@@ -27,6 +27,8 @@ function colorForLandCoverClass(className: string | null): { fill: string; strok
     case 'railwayTracks':
     case 'roadAndRailwayTracks':
     case 'roads':
+    case 'road':
+    case 'square':
     case 'artificiallySealedAreas':
       return { fill: 'rgba(148, 163, 184, 0.22)', stroke: 'rgba(148, 163, 184, 0.55)' };
     case 'buildings':
@@ -41,6 +43,7 @@ export interface RenderLandCoverOptions {
   rc: CadRenderContext;
   units: LandCoverFeature[];
   showUnits: boolean;
+  projectRadius?: number;
 }
 
 /**
@@ -50,13 +53,21 @@ export interface RenderLandCoverOptions {
  * `mpzpZonesRenderer.ts`, który rysuje każdy pierścień niezależnie i zamalowałby otwór.
  */
 export function renderLandCover(options: RenderLandCoverOptions) {
-  const { rc, units, showUnits } = options;
+  const { rc, units, showUnits, projectRadius } = options;
   if (!showUnits || units.length === 0) return;
 
-  const { ctx } = rc;
+  const { ctx, worldToScreen, viewState } = rc;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.lineWidth = 1;
+
+  if (projectRadius != null) {
+    const originSc = worldToScreen(0, 0);
+    const radiusPx = projectRadius * viewState.scale;
+    ctx.beginPath();
+    ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+    ctx.clip();
+  }
 
   for (const unit of units) {
     if (unit.outer.length < 3) continue;

@@ -21,21 +21,31 @@ export interface OvertureLineFeature {
   className: string | null;
 }
 
+export type OvertureLandUseCategory =
+  | 'green'
+  | 'water'
+  | 'residential'
+  | 'commercial'
+  | 'industrial'
+  | 'institutional'
+  | 'agricultural'
+  | 'infrastructure'
+  | 'other';
+
 /**
- * Cecha powierzchniowa (zieleń — land_use/land_cover, lub wody — type=water) z tematu Overture
- * `base`, we współrzędnych CAD lokalnych. Zieleń pochodzi z `api.overturemapsapi.com` (`/base`),
- * wody z surowych partycji Overture przez `overtureDuckDb.ts` (wrapper REST ich nie eksponuje).
+ * Cecha powierzchniowa (zagospodarowanie/pokrycie terenu: zieleń, woda, mieszkalnictwo, usługi,
+ * przemysł itp.) z tematu Overture `base`, we współrzędnych CAD lokalnych.
  */
 export interface OverturePolygonFeature {
   id: string;
   rings: Point2D[][];
   className: string | null;
+  category?: OvertureLandUseCategory;
 }
 
 /**
- * Strefa MPZP (miejscowy plan zagospodarowania przestrzennego) z usługi REST BGiK m.st. Warszawy
- * "PrzeznaczenieTerenow" (patrz `wfsMpzpWarsawClient.ts`) — geometria + atrybuty przeznaczenia
- * terenu, we współrzędnych CAD lokalnych. Pilot ograniczony do Warszawy.
+ * Strefa MPZP (miejscowy plan zagospodarowania przestrzennego) — geometria + atrybuty przeznaczenia
+ * terenu i wskaźniki urbanistyczne, we współrzędnych CAD lokalnych.
  */
 export interface MpzpZoneFeature {
   id: string;
@@ -48,6 +58,24 @@ export interface MpzpZoneFeature {
   liczKond: string | null;
   nazwaPlan: string | null;
 }
+
+export type MpzpLineType =
+  | 'nieprzekraczalna_linia_zabudowy'
+  | 'obowiazujaca_linia_zabudowy'
+  | 'linia_rozgraniczajaca'
+  | 'inna';
+
+/**
+ * Obiekt liniowy MPZP (np. nieprzekraczalna linia zabudowy, obowiązująca linia zabudowy,
+ * linia rozgraniczająca) we współrzędnych CAD lokalnych.
+ */
+export interface MpzpLineFeature {
+  id: string;
+  points: Point2D[];
+  lineType: MpzpLineType;
+  label?: string;
+}
+
 
 /**
  * Jednostka pokrycia terenu z ogólnopolskiej usługi WFS GUGiK "wfsLCV" (INSPIRE Land Cover,
@@ -96,36 +124,35 @@ interface WfsState {
   projectRadius: ProjectRadius;
   isProjectCenterLocked: boolean;
 
-  // Warstwy podkładów geodezyjnych i branżowych (PRO)
-  showGeoOverlayGroup: boolean; // Master toggle
+  // Warstwy podkładów geodezyjnych (PRO) - Podkład (GESUT, BDOT10k)
+  showGeoOverlayGroup: boolean; // Master toggle Podkład
   showOrthophotoLayer: boolean;
   orthophotoOpacity: number;
   showKiutLayer: boolean;
   kiutOpacity: number;
-  // Warstwy KIUT/BDOT są renderowane przez GUGiK z myślą o białym tle (STYLES= puste, brak
-  // wariantu na ciemne tło) — nieczytelne na ciemnym płótnie CAD bez korekcji kolorów po
-  // stronie klienta (patrz `wmsOverlayRenderer.ts` `invertColors`).
   kiutInvertColors: boolean;
-  showMpzpLayer: boolean;
-  mpzpOpacity: number;
   showBdotLayer: boolean;
   bdotOpacity: number;
   bdotInvertColors: boolean;
+  // Wspólne krycie i inwersja kolorów dla grupy Podkład (WMS: GESUT + BDOT10k)
+  geoOverlayOpacity: number;
+  geoOverlayInvertColors: boolean;
+
+  // Warstwy planistyczne, kontekstowe i ukształtowania terenu (PRO) - Plany
+  showPlansOverlayGroup: boolean; // Master toggle Plany
+  showMpzpLayer: boolean;
+  mpzpOpacity: number;
   showTerrainLayer: boolean;
   terrainOpacity: number;
   showTreesLayer: boolean;
 
-  // Warstwa kontekstowa Overture Maps (zieleń — land_use/land_cover) przez
-  // `api.overturemapsapi.com` (`/base`). Drogi/koleje/wody przez surowe partycje Overture
-  // (`overtureDuckDb.ts`, DuckDB-WASM) świadomie wycofane z UI — w praktyce zacinały
-  // aplikację (paczki mvp/eh DuckDB-WASM są jednowątkowe, ~32-128 plików skanowanych
-  // sekwencyjnie), patrz komentarz przy ensureOvertureContextLoaded() w ProjectGroup.tsx.
+  // Warstwa kontekstowa Overture Maps (zieleń / zagospodarowanie)
   overtureGreenAreas: OverturePolygonFeature[];
   showOvertureGreenAreas: boolean;
 
-  // Strefy MPZP (wektor) — pilot Warszawa, patrz wfsMpzpWarsawClient.ts. Niezależne od
-  // showMpzpLayer (raster WMS ogólnopolski) — użytkownik może chcieć oba naraz.
+  // Strefy i linie MPZP (wektor)
   mpzpZones: MpzpZoneFeature[];
+  mpzpLines: MpzpLineFeature[];
   showMpzpZonesLayer: boolean;
 
   // Pokrycie terenu (wektor) — ogólnopolskie, patrz wfsLcvClient.ts.
@@ -144,17 +171,24 @@ interface WfsState {
   setProjectRadius: (radius: ProjectRadius) => void;
   setIsProjectCenterLocked: (locked: boolean) => void;
 
+  /** Przesuwa wszystkie zaimportowane warstwy wektorowe o wektor delta (zachowanie pozycji geograficznej przy zmianie środka projektu) */
+  shiftVectorLayers: (delta: Point2D) => void;
+
   setShowGeoOverlayGroup: (show: boolean) => void;
+  setShowPlansOverlayGroup: (show: boolean) => void;
   setShowOrthophotoLayer: (show: boolean) => void;
   setOrthophotoOpacity: (val: number) => void;
   setShowKiutLayer: (show: boolean) => void;
   setKiutOpacity: (val: number) => void;
   setKiutInvertColors: (invert: boolean) => void;
-  setShowMpzpLayer: (show: boolean) => void;
-  setMpzpOpacity: (val: number) => void;
   setShowBdotLayer: (show: boolean) => void;
   setBdotOpacity: (val: number) => void;
   setBdotInvertColors: (invert: boolean) => void;
+  setGeoOverlayOpacity: (val: number) => void;
+  setGeoOverlayInvertColors: (invert: boolean) => void;
+
+  setShowMpzpLayer: (show: boolean) => void;
+  setMpzpOpacity: (val: number) => void;
   setShowTerrainLayer: (show: boolean) => void;
   setTerrainOpacity: (val: number) => void;
   setShowTreesLayer: (show: boolean) => void;
@@ -163,6 +197,8 @@ interface WfsState {
   setShowOvertureGreenAreas: (show: boolean) => void;
 
   setMpzpZones: (zones: MpzpZoneFeature[]) => void;
+  setMpzpLines: (lines: MpzpLineFeature[]) => void;
+  setMpzpData: (zones: MpzpZoneFeature[], lines: MpzpLineFeature[]) => void;
   setShowMpzpZonesLayer: (show: boolean) => void;
 
   setLandCoverUnits: (units: LandCoverFeature[]) => void;
@@ -203,9 +239,17 @@ export function formatWfsProgress(status: WfsImportStatus): string {
   return label;
 }
 
-/** Migawka indywidualnych stanów warstw GEO, przywracana przy ponownym włączeniu master toggle'a.
- * Celowo poza stanem store'u (nie persystujemy jej) — to tylko pamięć "ostatniego układu" w ramach sesji. */
-let geoLayersSnapshot: { kiut: boolean; mpzp: boolean; bdot: boolean; terrain: boolean } | null = null;
+/** Migawka indywidualnych stanów warstw w grupie Podkład (GESUT + BDOT10k), przywracana przy ponownym włączeniu master toggle'a Podkład. */
+let geoLayersSnapshot: { kiut: boolean; bdot: boolean } | null = null;
+
+/** Migawka indywidualnych stanów warstw planistycznych, kontekstowych i ukształtowania terenu, przywracana przy ponownym włączeniu master toggle'a Plany. */
+let plansLayersSnapshot: {
+  mpzp: boolean;
+  terrain: boolean;
+  overture: boolean;
+  mpzpZones: boolean;
+  landCover: boolean;
+} | null = null;
 
 export const useWfsStore = create<WfsState>()(
   persist(
@@ -223,6 +267,7 @@ export const useWfsStore = create<WfsState>()(
       isProjectCenterLocked: true,
 
       showGeoOverlayGroup: false,
+      showPlansOverlayGroup: false,
       showOrthophotoLayer: false,
       orthophotoOpacity: 0.85,
       showKiutLayer: false,
@@ -233,6 +278,8 @@ export const useWfsStore = create<WfsState>()(
       showBdotLayer: false,
       bdotOpacity: 0.6,
       bdotInvertColors: true,
+      geoOverlayOpacity: 0.65,
+      geoOverlayInvertColors: true,
       showTerrainLayer: false,
       terrainOpacity: 0.35,
       showTreesLayer: false,
@@ -241,6 +288,7 @@ export const useWfsStore = create<WfsState>()(
   showOvertureGreenAreas: false,
 
   mpzpZones: [],
+  mpzpLines: [],
   showMpzpZonesLayer: false,
 
   landCoverUnits: [],
@@ -262,6 +310,57 @@ export const useWfsStore = create<WfsState>()(
   setProjectRadius: (radius) => set({ projectRadius: radius }),
   setIsProjectCenterLocked: (locked) => set({ isProjectCenterLocked: locked }),
 
+  shiftVectorLayers: (delta: Point2D) => {
+    if (delta.x === 0 && delta.y === 0) return;
+    set((state) => {
+      // 1. Overture polygons
+      const overtureGreenAreas = state.overtureGreenAreas.map((poly) => ({
+        ...poly,
+        rings: poly.rings.map((ring) =>
+          ring.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y }))
+        ),
+      }));
+
+      // 2. MPZP zones & lines
+      const mpzpZones = state.mpzpZones.map((zone) => ({
+        ...zone,
+        rings: zone.rings.map((ring) =>
+          ring.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y }))
+        ),
+      }));
+
+      const mpzpLines = state.mpzpLines.map((line) => ({
+        ...line,
+        points: line.points.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y })),
+      }));
+
+      // 3. Land cover units
+      const landCoverUnits = state.landCoverUnits.map((unit) => ({
+        ...unit,
+        outer: unit.outer.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y })),
+        holes: unit.holes
+          ? unit.holes.map((hole) =>
+              hole.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y }))
+            )
+          : undefined,
+      }));
+
+      // 4. Trees
+      const trees = state.trees.map((tree) => ({
+        ...tree,
+        position: { x: tree.position.x + delta.x, y: tree.position.y + delta.y },
+      }));
+
+      return {
+        overtureGreenAreas,
+        mpzpZones,
+        mpzpLines,
+        landCoverUnits,
+        trees,
+      };
+    });
+  },
+
   setShowGeoOverlayGroup: (show) => {
     const state = get();
     if (show) {
@@ -269,37 +368,65 @@ export const useWfsStore = create<WfsState>()(
       geoLayersSnapshot = null;
       set({
         showGeoOverlayGroup: true,
-        showKiutLayer: snapshot?.kiut ?? state.showKiutLayer,
-        showMpzpLayer: snapshot?.mpzp ?? state.showMpzpLayer,
+        showKiutLayer: snapshot?.kiut ?? (state.showKiutLayer || !state.showBdotLayer),
         showBdotLayer: snapshot?.bdot ?? state.showBdotLayer,
-        showTerrainLayer: snapshot?.terrain ?? state.showTerrainLayer,
       });
     } else {
       geoLayersSnapshot = {
         kiut: state.showKiutLayer,
-        mpzp: state.showMpzpLayer,
         bdot: state.showBdotLayer,
-        terrain: state.showTerrainLayer,
       };
       set({
         showGeoOverlayGroup: false,
         showKiutLayer: false,
-        showMpzpLayer: false,
         showBdotLayer: false,
+      });
+    }
+  },
+  setShowPlansOverlayGroup: (show) => {
+    const state = get();
+    if (show) {
+      const snapshot = plansLayersSnapshot;
+      plansLayersSnapshot = null;
+      set({
+        showPlansOverlayGroup: true,
+        showMpzpLayer: snapshot?.mpzp ?? (state.showMpzpLayer || (!state.showTerrainLayer && !state.showOvertureGreenAreas && !state.showMpzpZonesLayer && !state.showLandCoverLayer)),
+        showTerrainLayer: snapshot?.terrain ?? state.showTerrainLayer,
+        showOvertureGreenAreas: snapshot?.overture ?? state.showOvertureGreenAreas,
+        showMpzpZonesLayer: snapshot?.mpzpZones ?? state.showMpzpZonesLayer,
+        showLandCoverLayer: snapshot?.landCover ?? state.showLandCoverLayer,
+      });
+    } else {
+      plansLayersSnapshot = {
+        mpzp: state.showMpzpLayer,
+        terrain: state.showTerrainLayer,
+        overture: state.showOvertureGreenAreas,
+        mpzpZones: state.showMpzpZonesLayer,
+        landCover: state.showLandCoverLayer,
+      };
+      set({
+        showPlansOverlayGroup: false,
+        showMpzpLayer: false,
         showTerrainLayer: false,
+        showOvertureGreenAreas: false,
+        showMpzpZonesLayer: false,
+        showLandCoverLayer: false,
       });
     }
   },
   setShowOrthophotoLayer: (show) => set({ showOrthophotoLayer: show }),
   setOrthophotoOpacity: (val) => set({ orthophotoOpacity: val }),
   setShowKiutLayer: (show) => set({ showKiutLayer: show }),
-  setKiutOpacity: (val) => set({ kiutOpacity: val }),
-  setKiutInvertColors: (invert) => set({ kiutInvertColors: invert }),
-  setShowMpzpLayer: (show) => set({ showMpzpLayer: show }),
-  setMpzpOpacity: (val) => set({ mpzpOpacity: val }),
+  setKiutOpacity: (val) => set({ kiutOpacity: val, geoOverlayOpacity: val }),
+  setKiutInvertColors: (invert) => set({ kiutInvertColors: invert, geoOverlayInvertColors: invert }),
   setShowBdotLayer: (show) => set({ showBdotLayer: show }),
   setBdotOpacity: (val) => set({ bdotOpacity: val }),
   setBdotInvertColors: (invert) => set({ bdotInvertColors: invert }),
+  setGeoOverlayOpacity: (val) => set({ geoOverlayOpacity: val, kiutOpacity: val, bdotOpacity: val }),
+  setGeoOverlayInvertColors: (invert) => set({ geoOverlayInvertColors: invert, kiutInvertColors: invert, bdotInvertColors: invert }),
+
+  setShowMpzpLayer: (show) => set({ showMpzpLayer: show }),
+  setMpzpOpacity: (val) => set({ mpzpOpacity: val }),
   setShowTerrainLayer: (show) => set({ showTerrainLayer: show }),
   setTerrainOpacity: (val) => set({ terrainOpacity: val }),
   setShowTreesLayer: (show) => set({ showTreesLayer: show }),
@@ -308,6 +435,8 @@ export const useWfsStore = create<WfsState>()(
   setShowOvertureGreenAreas: (show) => set({ showOvertureGreenAreas: show }),
 
   setMpzpZones: (zones) => set({ mpzpZones: zones }),
+  setMpzpLines: (lines) => set({ mpzpLines: lines }),
+  setMpzpData: (zones, lines) => set({ mpzpZones: zones, mpzpLines: lines }),
   setShowMpzpZonesLayer: (show) => set({ showMpzpZonesLayer: show }),
 
   setLandCoverUnits: (units) => set({ landCoverUnits: units }),
@@ -320,6 +449,7 @@ export const useWfsStore = create<WfsState>()(
       name: 'usi-wfs-store',
       partialize: (state) => ({
         showGeoOverlayGroup: state.showGeoOverlayGroup,
+        showPlansOverlayGroup: state.showPlansOverlayGroup,
         showOrthophotoLayer: state.showOrthophotoLayer,
         orthophotoOpacity: state.orthophotoOpacity,
         showKiutLayer: state.showKiutLayer,
@@ -330,6 +460,8 @@ export const useWfsStore = create<WfsState>()(
         showBdotLayer: state.showBdotLayer,
         bdotOpacity: state.bdotOpacity,
         bdotInvertColors: state.bdotInvertColors,
+        geoOverlayOpacity: state.geoOverlayOpacity,
+        geoOverlayInvertColors: state.geoOverlayInvertColors,
         showTerrainLayer: state.showTerrainLayer,
         terrainOpacity: state.terrainOpacity,
         showTreesLayer: state.showTreesLayer,

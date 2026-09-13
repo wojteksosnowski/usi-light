@@ -7,10 +7,7 @@ import { BuildingModifiersPanel } from './components/modifiers/BuildingModifiers
 import { ProjectParametersPanel } from './components/parameters/ProjectParametersPanel';
 import { FloatingInspectorAccordion } from './components/common/FloatingInspectorAccordion';
 import { CompassRose } from './components/cad/CompassRose';
-import { ShareProjectModal } from './components/common/ShareProjectModal';
-import { PricingModal } from './components/license/PricingModal';
-import { LicenseManagementModal } from './components/license/LicenseManagementModal';
-import { PaymentSuccessModal } from './components/license/PaymentSuccessModal';
+import { ModalRoot } from './components/common/ModalRoot';
 import { DevLicenseToolbar } from './components/license/DevLicenseToolbar';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { CadTopHud } from './components/layout/CadTopHud';
@@ -42,6 +39,7 @@ import { Point2D, AnalysisPointResult } from './types/geometry';
 import { createBuildingFromVertices } from './utils/dxfParser';
 import { analyzeSegmentsStatistics } from './utils/segmentStatistics';
 import { generateSweepPolygon } from '@/utils/math2d';
+import { saveProjectToStorage } from './utils/projectStorage';
 
 const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
 
@@ -111,6 +109,8 @@ export const App: React.FC = () => {
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
 
   // Solar Analysis Store
+  const projectName = useSolarAnalysisStore((s) => s.projectName);
+  const currentProjectId = useSolarAnalysisStore((s) => s.currentProjectId);
   const settings = useSolarAnalysisStore((s) => s.settings);
   const setSettings = useSolarAnalysisStore((s) => s.setSettings);
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
@@ -455,14 +455,57 @@ export const App: React.FC = () => {
     };
     try {
       localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(scene));
+
+      // Autozapis otwartego projektu w pamięci projektów (jeśli aktywny)
+      if (currentProjectId) {
+        saveProjectToStorage(
+          {
+            name: projectName.trim() || `Projekt ${selectedCity || 'Światło'}`,
+            version: 1,
+            scene: {
+              buildings,
+              selectedBuildingId,
+              layerSettings,
+              pinnedPoints,
+              activePinnedPointId,
+              dimensions,
+              dxfUnit,
+              dxfImportInfo,
+            },
+            solar: {
+              settings,
+              selectedCity,
+              mapsInput,
+              mapsParseError,
+              sunlightMethod,
+              showNormals,
+              showShadowingLines,
+              showSunlightLines,
+              showShadowRange,
+              showShadowFill,
+              showSatelliteLayer,
+              satelliteOpacity,
+              activePointMode,
+            },
+            viewport: {
+              viewRotationDeg,
+              savedViewRotationDeg,
+            },
+          },
+          currentProjectId
+        );
+      }
     } catch (err) {
       console.warn('Nie udało się zapisać sceny:', err);
     }
   }, [
+    currentProjectId,
+    projectName,
     buildings,
     selectedBuildingId,
     pinnedPoints,
     activePinnedPointId,
+    dimensions,
     settings,
     layerSettings,
     dxfUnit,
@@ -474,6 +517,13 @@ export const App: React.FC = () => {
     selectedCity,
     mapsInput,
     mapsParseError,
+    showNormals,
+    showShadowingLines,
+    showSunlightLines,
+    showShadowRange,
+    showShadowFill,
+    showSatelliteLayer,
+    satelliteOpacity,
   ]);
 
   // Keyboard Shortcuts (F3 Osnap, Esc tool cancel, +/- height)
@@ -895,13 +945,8 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Share Project Modal */}
-        <ShareProjectModal isOpen={isShareModalOpen} onClose={() => setShareModalOpen(false)} />
-
-        {/* License & Payment Modals */}
-        <PricingModal />
-        <LicenseManagementModal />
-        <PaymentSuccessModal />
+        {/* Application Modals (Share, Pricing, License, Payment) */}
+        <ModalRoot />
 
         {/* Development Floating Toolbar */}
         <DevLicenseToolbar />

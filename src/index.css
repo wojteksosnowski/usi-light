@@ -645,3 +645,302 @@ html, body, #root {
 .overflow-hidden { overflow: hidden; }
 .select-none { user-select: none; -webkit-user-select: none; }
 .block { display: block; }
+
+/* Project Group Design System Classes */
+.project-location-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--bg-input);
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.project-location-bar.error {
+  border-color: rgba(244, 63, 94, 0.5);
+}
+
+.project-location-bar.locked {
+  opacity: 0.75;
+}
+
+.project-location-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.project-location-input:disabled {
+  cursor: not-allowed;
+}
+
+.project-lock-btn {
+  border-radius: 6px;
+  padding: 2px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.project-lock-btn.locked {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.3);
+  color: var(--accent-rose);
+}
+
+.project-lock-btn.unlocked {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+
+.project-grid-presets {
+  display: grid;
+  gap: 4px;
+  background-color: var(--bg-input);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+}
+
+.project-preset-btn {
+  padding: 6px 2px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background-color: transparent;
+  color: var(--text-secondary);
+}
+
+.project-preset-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.project-preset-btn.active-amber {
+  font-weight: 700;
+  background-color: var(--accent-amber);
+  color: #000000;
+}
+
+.project-preset-btn.active-indigo {
+  font-weight: 700;
+  background-color: var(--accent-indigo);
+  color: var(--text-primary);
+}
+
+.project-preset-btn.active-cyan {
+  font-weight: 700;
+  background-color: var(--accent-cyan);
+  color: var(--bg-main);
+}
+
+.project-coords-pill {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background-color: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.project-fit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background-color: rgba(56, 189, 248, 0.12);
+  color: var(--accent-cyan);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.project-fit-btn:hover {
+  background-color: rgba(56, 189, 248, 0.2);
+}
+
+.project-sync-btn {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-amber);
+  background: linear-gradient(135deg, var(--accent-amber), #ea580c);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+  transition: opacity 0.15s ease;
+}
+
+.project-sync-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.project-toggle-card {
+  padding: 8px 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+  border: 1px solid var(--border-color);
+  background-color: rgba(15, 23, 42, 0.5);
+}
+
+.project-toggle-card.active-emerald {
+  background-color: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.project-toggle-card.active-amber {
+  background-color: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.project-toggle-card.active-cyan {
+  background-color: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.project-toggle-card.active-indigo {
+  background-color: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.project-toggle-switch {
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background-color: var(--border-light);
+  position: relative;
+  transition: background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.project-toggle-switch.active-emerald { background-color: var(--accent-emerald); }
+.project-toggle-switch.active-amber { background-color: var(--accent-amber); }
+.project-toggle-switch.active-cyan { background-color: var(--accent-cyan); }
+.project-toggle-switch.active-indigo { background-color: var(--accent-indigo); }
+
+.project-toggle-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.project-toggle-switch.active .project-toggle-dot {
+  left: 14px;
+}
+
+.project-layer-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid rgba(51, 65, 85, 0.4);
+}
+
+/* Lista projektów w kafelku Projekt (LocalStorage) */
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.project-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.project-list-item:hover {
+  background-color: rgba(30, 41, 59, 0.6);
+  border-color: var(--border-light);
+}
+
+.project-list-item.active {
+  background-color: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.project-item-title {
+  flex: 1;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-list-item.active .project-item-title {
+  color: var(--accent-amber);
+}
+
+.project-item-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.project-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.project-delete-btn:hover {
+  color: var(--accent-rose);
+  background-color: rgba(244, 63, 94, 0.15);
+}
+

@@ -42,6 +42,15 @@ export function wgs84BboxToEpsg2178(bbox: WfsBbox): string {
   return `${minN},${minE},${maxN},${maxE}`;
 }
 
+/**
+ * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2178
+ * w kolejności easting, northing (wymaganej przez niektóre serwery MapServer/GeoServer).
+ */
+export function wgs84BboxToEpsg2178EN(bbox: WfsBbox): string {
+  const { minE, minN, maxE, maxN } = wgs84BboxToEpsg2178Bounds(bbox);
+  return `${minE},${minN},${maxE},${maxN}`;
+}
+
 export interface GeoJsonFeatureCollection {
   type: string;
   features: Array<{

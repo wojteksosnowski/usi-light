@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { importOvertureLines, importOverturePolygons } from './geoJsonImporter';
+import { importOvertureLines, importOverturePolygons, classifyOvertureFeature } from './geoJsonImporter';
 import { GeoJsonFeatureCollection } from './wfsWarsawClient';
 
 // Środek projektu w Poznaniu (ten sam punkt co reference/topoexport) — CRS lokalny CAD.
@@ -50,8 +50,25 @@ describe('importOvertureLines', () => {
   });
 });
 
+describe('classifyOvertureFeature', () => {
+  it('prawidłowo przypisuje kategorie zagospodarowania terenu', () => {
+    expect(classifyOvertureFeature({ class: 'park' })).toBe('green');
+    expect(classifyOvertureFeature({ class: 'forest' })).toBe('green');
+    expect(classifyOvertureFeature({ class: 'residential' })).toBe('residential');
+    expect(classifyOvertureFeature({ class: 'commercial' })).toBe('commercial');
+    expect(classifyOvertureFeature({ class: 'industrial' })).toBe('industrial');
+    expect(classifyOvertureFeature({ class: 'school' })).toBe('institutional');
+    expect(classifyOvertureFeature({ class: 'hospital' })).toBe('institutional');
+    expect(classifyOvertureFeature({ class: 'farmland' })).toBe('agricultural');
+    expect(classifyOvertureFeature({ class: 'parking' })).toBe('infrastructure');
+    expect(classifyOvertureFeature({ type: 'water' })).toBe('water');
+    expect(classifyOvertureFeature({ subtype: 'water' })).toBe('water');
+    expect(classifyOvertureFeature({ class: 'lake' })).toBe('water');
+  });
+});
+
 describe('importOverturePolygons', () => {
-  it('konwertuje Polygon (zieleń) na pierścienie CAD', () => {
+  it('konwertuje Polygon (zieleń) na pierścienie CAD z poprawną kategorią', () => {
     const collection: GeoJsonFeatureCollection = {
       type: 'FeatureCollection',
       features: [
@@ -76,6 +93,7 @@ describe('importOverturePolygons', () => {
     expect(polygons).toHaveLength(1);
     expect(polygons[0].id).toBe('park-1');
     expect(polygons[0].className).toBe('park');
+    expect(polygons[0].category).toBe('green');
     expect(polygons[0].rings).toHaveLength(1);
     expect(polygons[0].rings[0]).toHaveLength(4);
   });
@@ -93,5 +111,34 @@ describe('importOverturePolygons', () => {
     };
 
     expect(importOverturePolygons(collection, projectCrs, projectCenter)).toHaveLength(0);
+  });
+
+  it('importuje i kategoryzuje różnorodne strefy zagospodarowania (np. residential, industrial, commercial)', () => {
+    const collection: GeoJsonFeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[16.9252, 52.4064], [16.9262, 52.4064], [16.9262, 52.4074], [16.9252, 52.4064]]],
+          },
+          properties: { id: 'bldg-zone', class: 'residential', subtype: 'land_use' },
+        },
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[16.9252, 52.4064], [16.9262, 52.4064], [16.9262, 52.4074], [16.9252, 52.4064]]],
+          },
+          properties: { id: 'ind-zone', class: 'industrial', subtype: 'land_use' },
+        },
+      ],
+    };
+
+    const polygons = importOverturePolygons(collection, projectCrs, projectCenter);
+    expect(polygons).toHaveLength(2);
+    expect(polygons[0].category).toBe('residential');
+    expect(polygons[1].category).toBe('industrial');
   });
 });

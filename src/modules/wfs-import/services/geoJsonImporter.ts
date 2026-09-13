@@ -7,8 +7,16 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
-import { WfsTreeFeature, OvertureLineFeature, OverturePolygonFeature, MpzpZoneFeature, LandCoverFeature } from '../store/useWfsStore';
-import { MpzpZoneRawFeature } from './wfsMpzpWarsawClient';
+import {
+  WfsTreeFeature,
+  OvertureLineFeature,
+  OverturePolygonFeature,
+  MpzpZoneFeature,
+  MpzpLineFeature,
+  MpzpLineType,
+  LandCoverFeature,
+} from '../store/useWfsStore';
+import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../utils/math2d/polygons';
 import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
 import { ensureOppositeWinding } from '../../../utils/ringSegments';
@@ -334,9 +342,119 @@ export function importOvertureLines(
   return result;
 }
 
+/** Klasy Overture Maps przypisane do kategorii zieleni / rekreacji. */
+const OVERTURE_GREEN_CLASSES = new Set([
+  'park',
+  'forest',
+  'wood',
+  'grass',
+  'garden',
+  'recreation_ground',
+  'pitch',
+  'golf_course',
+  'allotments',
+  'meadow',
+  'nature_reserve',
+  'scrub',
+  'wetland',
+  'tree_row',
+  'village_green',
+  'cemetery',
+  'greenery',
+]);
+
+const OVERTURE_WATER_CLASSES = new Set([
+  'water',
+  'river',
+  'lake',
+  'pond',
+  'reservoir',
+  'basin',
+  'stream',
+  'canal',
+  'ocean',
+]);
+
+const OVERTURE_RESIDENTIAL_CLASSES = new Set([
+  'residential',
+  'housing',
+]);
+
+const OVERTURE_COMMERCIAL_CLASSES = new Set([
+  'commercial',
+  'retail',
+  'services',
+]);
+
+const OVERTURE_INDUSTRIAL_CLASSES = new Set([
+  'industrial',
+  'quarry',
+  'construction',
+  'landfill',
+]);
+
+const OVERTURE_INSTITUTIONAL_CLASSES = new Set([
+  'school',
+  'university',
+  'college',
+  'hospital',
+  'clinic',
+  'military',
+  'civic',
+  'public',
+]);
+
+const OVERTURE_AGRICULTURAL_CLASSES = new Set([
+  'farmland',
+  'farmyard',
+  'orchard',
+  'vineyard',
+  'greenhouse',
+  'agriculture',
+]);
+
+const OVERTURE_INFRASTRUCTURE_CLASSES = new Set([
+  'parking',
+  'railway',
+  'runway',
+  'aeroway',
+  'pedestrian',
+  'pier',
+  'port',
+]);
+
 /**
- * Konwertuje cechy powierzchniowe (zieleń/wody) z Overture Maps (WGS84) na OverturePolygonFeature
- * w lokalnych współrzędnych CAD.
+ * Klasyfikuje obiekt Overture Maps (temat `base`, typy `land_use`, `land_cover`, `land`, `water`, `infrastructure`)
+ * do jednej z głównych kategorii funkcjonalnych.
+ */
+export function classifyOvertureFeature(props: Record<string, unknown> | null | undefined): import('../store/useWfsStore').OvertureLandUseCategory {
+  if (!props) return 'other';
+  const rawClass = typeof props.class === 'string' ? props.class.toLowerCase().trim() : '';
+  const subtype = typeof props.subtype === 'string' ? props.subtype.toLowerCase().trim() : '';
+  const type = typeof props.type === 'string' ? props.type.toLowerCase().trim() : '';
+
+  if (type === 'water' || subtype === 'water' || OVERTURE_WATER_CLASSES.has(rawClass)) {
+    return 'water';
+  }
+
+  if (OVERTURE_GREEN_CLASSES.has(rawClass)) return 'green';
+  if (OVERTURE_RESIDENTIAL_CLASSES.has(rawClass)) return 'residential';
+  if (OVERTURE_COMMERCIAL_CLASSES.has(rawClass)) return 'commercial';
+  if (OVERTURE_INDUSTRIAL_CLASSES.has(rawClass)) return 'industrial';
+  if (OVERTURE_INSTITUTIONAL_CLASSES.has(rawClass)) return 'institutional';
+  if (OVERTURE_AGRICULTURAL_CLASSES.has(rawClass)) return 'agricultural';
+  if (OVERTURE_INFRASTRUCTURE_CLASSES.has(rawClass)) return 'infrastructure';
+
+  if (subtype === 'land_cover') {
+    return 'green';
+  }
+
+  return 'other';
+}
+
+/**
+ * Konwertuje cechy powierzchniowe zagospodarowania/pokrycia terenu z Overture Maps (WGS84)
+ * na OverturePolygonFeature w lokalnych współrzędnych CAD z przypisaną kategorią użytkowania.
  */
 export function importOverturePolygons(
   collection: GeoJsonFeatureCollection,
@@ -355,6 +473,7 @@ export function importOverturePolygons(
     const props = feature.properties || {};
     const featureId = str(props.id) || `overture-poly-${fi}`;
     const className = strOrUndefined(props.class) ?? null;
+    const category = classifyOvertureFeature(props);
 
     const rings: Point2D[][] = rawRings
       .map((ring) => ring.map(([lon, lat]) => wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)))
@@ -362,15 +481,15 @@ export function importOverturePolygons(
 
     if (rings.length === 0) continue;
 
-    result.push({ id: featureId, rings, className });
+    result.push({ id: featureId, rings, className, category });
   }
 
   return result;
 }
 
 /**
- * Konwertuje surowe strefy MPZP z usługi REST BGiK "PrzeznaczenieTerenow" (WGS84, patrz
- * `wfsMpzpWarsawClient.ts`) na MpzpZoneFeature w lokalnych współrzędnych CAD.
+ * Konwertuje surowe strefy MPZP z serwisów miejskich (Warszawa REST, Kraków/Wrocław/Poznań WFS)
+ * na MpzpZoneFeature w lokalnych współrzędnych CAD z ujednoliconymi atrybutami.
  */
 export function importMpzpZonesFromGeoJson(
   features: MpzpZoneRawFeature[],
@@ -387,7 +506,11 @@ export function importMpzpZonesFromGeoJson(
     if (rawRings.length === 0) continue;
 
     const props = feature.properties || {};
-    const featureId = strOrNullIfMissing(props.objectid) ?? `mpzp-zone-${fi}`;
+    const featureId =
+      strOrNullIfMissing(props.objectid) ||
+      strOrNullIfMissing(props.ID) ||
+      strOrNullIfMissing(props.id) ||
+      `mpzp-zone-${fi}`;
 
     const rings: Point2D[][] = rawRings
       .map((ring) => ring.map(([lon, lat]) => wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)))
@@ -395,21 +518,122 @@ export function importMpzpZonesFromGeoJson(
 
     if (rings.length === 0) continue;
 
+    const funSymb =
+      strOrNullIfMissing(props.fun_symb) ||
+      strOrNullIfMissing(props.SYMBOL) ||
+      strOrNullIfMissing(props.symbol) ||
+      strOrNullIfMissing(props.PRZEZNACZENIE);
+
+    const funNazwa =
+      strOrNullIfMissing(props.fun_nazwa) ||
+      strOrNullIfMissing(props.PRZEZNACZENIE) ||
+      strOrNullIfMissing(props.OPIS) ||
+      strOrNullIfMissing(props.opis);
+
+    const maxWysokosc =
+      strOrNullIfMissing(props.max_wys) ||
+      strOrNullIfMissing(props.MAX_WYSOKOSC) ||
+      strOrNullIfMissing(props.wysokosc_max);
+
+    const intenZab =
+      strOrNullIfMissing(props.inten_zab) ||
+      strOrNullIfMissing(props.INTENSYWNOSC) ||
+      strOrNullIfMissing(props.intensywnosc);
+
+    const powBio =
+      strOrNullIfMissing(props.pow_bio) ||
+      strOrNullIfMissing(props.POW_BIOLOGICZNA) ||
+      strOrNullIfMissing(props.pbc);
+
+    const liczKond =
+      strOrNullIfMissing(props.licz_kond) ||
+      strOrNullIfMissing(props.KONDYGNACJE);
+
+    const nazwaPlan =
+      strOrNullIfMissing(props.nazwa_plan) ||
+      strOrNullIfMissing(props.NAZWA_PLANU) ||
+      strOrNullIfMissing(props.plan);
+
     result.push({
       id: featureId,
       rings,
-      funSymb: strOrNullIfMissing(props.fun_symb),
-      funNazwa: strOrNullIfMissing(props.fun_nazwa),
-      maxWysokosc: strOrNullIfMissing(props.max_wys),
-      intenZab: strOrNullIfMissing(props.inten_zab),
-      powBio: strOrNullIfMissing(props.pow_bio),
-      liczKond: strOrNullIfMissing(props.licz_kond),
-      nazwaPlan: strOrNullIfMissing(props.nazwa_plan),
+      funSymb,
+      funNazwa,
+      maxWysokosc,
+      intenZab,
+      powBio,
+      liczKond,
+      nazwaPlan,
     });
   }
 
   return result;
 }
+
+/**
+ * Konwertuje obiekty liniowe MPZP (np. nieprzekraczalne linie zabudowy, obowiązujące linie zabudowy,
+ * linie rozgraniczające) na MpzpLineFeature w lokalnych współrzędnych CAD.
+ */
+export function importMpzpLinesFromGeoJson(
+  features: MpzpLineRawFeature[],
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): MpzpLineFeature[] {
+  const result: MpzpLineFeature[] = [];
+
+  for (let fi = 0; fi < features.length; fi++) {
+    const feature = features[fi];
+    if (!feature.geometry) continue;
+
+    const geom = feature.geometry as { type: string; coordinates: unknown };
+    let rawLines: number[][][] = [];
+
+    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+      rawLines = [geom.coordinates as number[][]];
+    } else if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
+      rawLines = geom.coordinates as number[][][];
+    }
+
+    const props = feature.properties || {};
+    const typRaw = (
+      strOrNullIfMissing(props.TYP_LINII) ||
+      strOrNullIfMissing(props.TYP) ||
+      strOrNullIfMissing(props.RODZAJ) ||
+      strOrNullIfMissing(props.OPIS) ||
+      ''
+    ).toLowerCase();
+
+    let lineType: MpzpLineType = 'inna';
+    if (typRaw.includes('nieprzekraczaln')) {
+      lineType = 'nieprzekraczalna_linia_zabudowy';
+    } else if (typRaw.includes('obowi') || typRaw.includes('nakazan')) {
+      lineType = 'obowiazujaca_linia_zabudowy';
+    } else if (typRaw.includes('rozgranicz') || typRaw.includes('granic')) {
+      lineType = 'linia_rozgraniczajaca';
+    }
+
+    const label = strOrNullIfMissing(props.OPIS) || strOrNullIfMissing(props.RODZAJ) || undefined;
+
+    for (let li = 0; li < rawLines.length; li++) {
+      const lineCoords = rawLines[li];
+      if (!Array.isArray(lineCoords) || lineCoords.length < 2) continue;
+
+      const points: Point2D[] = lineCoords.map(([lon, lat]) =>
+        wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)
+      );
+
+      result.push({
+        id: `mpzp-line-${fi}-${li}`,
+        points,
+        lineType,
+        label,
+      });
+    }
+  }
+
+  return result;
+}
+
 
 /**
  * Konwertuje jednostki pokrycia terenu z ogólnopolskiej usługi WFS GUGiK "wfsLCV" (patrz

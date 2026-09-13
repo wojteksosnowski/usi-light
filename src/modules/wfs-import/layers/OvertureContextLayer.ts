@@ -33,6 +33,7 @@ export class OvertureContextLayer implements CadRenderLayer {
       rc: context.renderContext,
       greenAreas: this.greenAreas,
       showGreenAreas: this.showGreenAreas,
+      projectRadius: context.projectRadius,
     });
   }
 }

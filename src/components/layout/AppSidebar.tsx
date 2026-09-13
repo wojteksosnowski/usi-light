@@ -1,17 +1,17 @@
-import React from 'react';
 import {
   Sun,
   ChevronLeft,
   ChevronDown,
   ChevronRight,
   FolderKanban,
+  Sliders,
   Layers,
   Wrench,
-  Map,
 } from 'lucide-react';
 import { useUiStore } from '../../store';
 import { ProBadge } from '../license/ProBadge';
 import { ProjectGroup } from './ProjectGroup';
+import { AnalysesGroup } from './AnalysesGroup';
 import { LayersAndObjectsGroup } from './LayersAndObjectsGroup';
 import { ToolsGroup } from './ToolsGroup';
 
@@ -22,6 +22,7 @@ export const AppSidebar: React.FC = () => {
   const toggleSidebarGroup = useUiStore((s) => s.toggleSidebarGroup);
 
   const isProjectGroupOpen = openSidebarGroup === 'project';
+  const isAnalysesGroupOpen = openSidebarGroup === 'analyses';
   const isLayersGroupOpen = openSidebarGroup === 'layers';
   const isToolsGroupOpen = openSidebarGroup === 'tools';
 
@@ -85,7 +86,26 @@ export const AppSidebar: React.FC = () => {
           {isProjectGroupOpen && <ProjectGroup />}
         </div>
 
-        {/* GRUPA 2: WARSTWY I OBIEKTY */}
+        {/* GRUPA 2: ANALIZY */}
+        <div className="sidebar-group-divider" />
+        <div className="sidebar-group">
+          <button
+            type="button"
+            className="sidebar-group-header"
+            onClick={() => toggleSidebarGroup('analyses')}
+            title="Zwiń / rozwiń grupę: Analizy"
+          >
+            <div className="sidebar-group-title">
+              <Sliders size={15} color="#f59e0b" />
+              <span>Analizy</span>
+            </div>
+            {isAnalysesGroupOpen ? <ChevronDown size={16} color="#94a3b8" /> : <ChevronRight size={16} color="#94a3b8" />}
+          </button>
+
+          {isAnalysesGroupOpen && <AnalysesGroup />}
+        </div>
+
+        {/* GRUPA 3: WARSTWY I OBIEKTY */}
         <div className="sidebar-group-divider" />
         <div className="sidebar-group">
           <button

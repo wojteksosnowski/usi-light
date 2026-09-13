@@ -69,6 +69,7 @@ export function useSharedProjectLoader() {
 
   const setSettings = useSolarAnalysisStore((s) => s.setSettings);
   const setSelectedCity = useSolarAnalysisStore((s) => s.setSelectedCity);
+  const setProjectName = useSolarAnalysisStore((s) => s.setProjectName);
   const setMapsInput = useSolarAnalysisStore((s) => s.setMapsInput);
   const setShowNormals = useSolarAnalysisStore((s) => s.setShowNormals);
   const setShowShadowingLines = useSolarAnalysisStore((s) => s.setShowShadowingLines);
@@ -151,6 +152,10 @@ export function useSharedProjectLoader() {
         }
 
         // 4. Hydratacja stanu do store'ów aplikacji (Pełny edytor bez trybu prezentacji)
+        if (payload.metadata?.name) {
+          setProjectName(payload.metadata.name);
+        }
+
         if (payload.scene) {
           const buildings =
             payload.v === 2
@@ -256,6 +261,7 @@ export function useSharedProjectLoader() {
     setDxfImportInfo,
     setSettings,
     setSelectedCity,
+    setProjectName,
     setMapsInput,
     setShowNormals,
     setShowShadowingLines,

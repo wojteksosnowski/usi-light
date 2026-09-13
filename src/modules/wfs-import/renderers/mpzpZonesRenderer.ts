@@ -21,16 +21,25 @@ export interface RenderMpzpZonesOptions {
   rc: CadRenderContext;
   zones: MpzpZoneFeature[];
   showZones: boolean;
+  projectRadius?: number;
 }
 
 export function renderMpzpZones(options: RenderMpzpZonesOptions) {
-  const { rc, zones, showZones } = options;
+  const { rc, zones, showZones, projectRadius } = options;
   if (!showZones || zones.length === 0) return;
 
-  const { ctx } = rc;
+  const { ctx, worldToScreen, viewState } = rc;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.lineWidth = 1;
+
+  if (projectRadius != null) {
+    const originSc = worldToScreen(0, 0);
+    const radiusPx = projectRadius * viewState.scale;
+    ctx.beginPath();
+    ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+    ctx.clip();
+  }
 
   for (const zone of zones) {
     const { fill, stroke } = colorForFunSymb(zone.funSymb);

@@ -1,21 +1,23 @@
 import { CadRenderLayer, CadRenderFrameContext } from '../../../components/cad/pipeline/types';
 import { renderMpzpZones } from '../renderers/mpzpZonesRenderer';
-import { MpzpZoneFeature } from '../store/useWfsStore';
+import { renderMpzpLines } from '../renderers/mpzpLinesRenderer';
+import { MpzpZoneFeature, MpzpLineFeature } from '../store/useWfsStore';
 
 /**
- * Warstwa wektorowa stref MPZP (pilot Warszawa) — geometria + atrybuty z usługi REST BGiK
- * "PrzeznaczenieTerenow" (patrz `wfsMpzpWarsawClient.ts`). Niezależna od `MpzpOverlayLayer`
- * (raster WMS ogólnopolski) — obie warstwy mogą być włączone jednocześnie.
+ * Warstwa wektorowa stref i linii MPZP — geometria + atrybuty z serwisów miejskich.
+ * Niezależna od `MpzpOverlayLayer` (raster WMS ogólnopolski) — obie warstwy mogą być włączone jednocześnie.
  */
 export class MpzpZonesVectorLayer implements CadRenderLayer {
   readonly id = 'wfs_mpzp_zones_vector';
   readonly zIndex = 5;
 
   private zones: MpzpZoneFeature[] = [];
+  private lines: MpzpLineFeature[] = [];
   private showZones = false;
 
-  setData(zones: MpzpZoneFeature[]) {
+  setData(zones: MpzpZoneFeature[], lines: MpzpLineFeature[] = []) {
     this.zones = zones;
+    this.lines = lines;
   }
 
   setVisibility(show: boolean) {
@@ -23,14 +25,27 @@ export class MpzpZonesVectorLayer implements CadRenderLayer {
   }
 
   shouldRender(_context: CadRenderFrameContext): boolean {
-    return this.showZones && this.zones.length > 0;
+    return this.showZones && (this.zones.length > 0 || this.lines.length > 0);
   }
 
   render(context: CadRenderFrameContext): void {
-    renderMpzpZones({
-      rc: context.renderContext,
-      zones: this.zones,
-      showZones: this.showZones,
-    });
+    if (this.zones.length > 0) {
+      renderMpzpZones({
+        rc: context.renderContext,
+        zones: this.zones,
+        showZones: this.showZones,
+        projectRadius: context.projectRadius,
+      });
+    }
+
+    if (this.lines.length > 0) {
+      renderMpzpLines({
+        rc: context.renderContext,
+        lines: this.lines,
+        showLines: this.showZones,
+        projectRadius: context.projectRadius,
+      });
+    }
   }
 }
+
