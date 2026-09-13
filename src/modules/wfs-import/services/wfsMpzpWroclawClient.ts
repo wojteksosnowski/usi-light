@@ -1,28 +1,29 @@
 /**
- * Klient WFS dla wrocławskiego serwisu MPZP (Geoportal Wrocław / GeoServer):
- * Warstwy planistyczne: strefy przeznaczenia oraz linie zabudowy / rozgraniczające.
+ * Klient WFS dla wrocławskiego serwisu MPZP (Geoportal Wrocław / ArcGIS Server):
+ * Warstwy planistyczne: strefy przeznaczenia (tereny) oraz linie zabudowy / rozgraniczające.
+ * Upstream: http://gis1.um.wroc.pl/arcgis/services/ogc/OGC_mpzp/MapServer/WFSServer
  */
 
-import { WfsBbox, wgs84BboxToEpsg2178EN } from './wfsWarsawClient';
+import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
 import { parseWfsPolygonGml, parseWfsLineStringGml } from './wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
-const WROCLAW_WFS_URL = '/api/wroclaw-wfs';
+const WROCLAW_WFS_URL = '/api/wroclaw-mpzp-wfs';
 
 export async function fetchWroclawMpzp(bbox: WfsBbox): Promise<{
   zones: MpzpZoneRawFeature[];
   lines: MpzpLineRawFeature[];
 }> {
-  const bboxStr = wgs84BboxToEpsg2178EN(bbox);
+  const bboxStr = `${wgs84BboxToEpsg2177(bbox)},urn:ogc:def:crs:EPSG:6.9:2177`;
 
-  // 1. Strefy przeznaczenia
+  // 1. Strefy przeznaczenia / tereny
   let zones: MpzpZoneRawFeature[] = [];
   try {
     const paramsZones = new URLSearchParams({
       SERVICE: 'WFS',
       VERSION: '1.1.0',
       REQUEST: 'GetFeature',
-      TYPENAME: 'wroclaw:mpzp_przeznaczenie',
+      TYPENAME: 'OGC_mpzp:tereny',
       BBOX: bboxStr,
     });
     const res = await fetch(`${WROCLAW_WFS_URL}?${paramsZones}`);
@@ -31,8 +32,17 @@ export async function fetchWroclawMpzp(bbox: WfsBbox): Promise<{
       const parsed = parseWfsPolygonGml(
         gml,
         'featureMember',
-        'mpzp_przeznaczenie',
-        ['SYMBOL', 'OPIS', 'NAZWA_PLANU', 'MAX_WYSOKOSC', 'INTENSYWNOSC', 'POW_BIOLOGICZNA']
+        'tereny',
+        [
+          'symbol',
+          'kod_przeznaczenia_glownego',
+          'przeznaczenie_glowne',
+          'opis',
+          'nazwa_planu',
+          'nr_planu',
+          'nr_uchwaly',
+          'url',
+        ]
       );
       zones = parsed.features as unknown as MpzpZoneRawFeature[];
     }
@@ -47,13 +57,18 @@ export async function fetchWroclawMpzp(bbox: WfsBbox): Promise<{
       SERVICE: 'WFS',
       VERSION: '1.1.0',
       REQUEST: 'GetFeature',
-      TYPENAME: 'wroclaw:mpzp_linie_zabudowy',
+      TYPENAME: 'OGC_mpzp:linie_zabudowy',
       BBOX: bboxStr,
     });
     const res = await fetch(`${WROCLAW_WFS_URL}?${paramsLines}`);
     if (res.ok) {
       const gml = await res.text();
-      const parsed = parseWfsLineStringGml(gml, 'mpzp_linie_zabudowy', ['TYP', 'RODZAJ', 'OPIS']);
+      const parsed = parseWfsLineStringGml(gml, 'linie_zabudowy', [
+        'rodzaj_linii',
+        'opis',
+        'nazwa_planu',
+        'nr_planu',
+      ]);
       lines = parsed.features as unknown as MpzpLineRawFeature[];
     }
   } catch (e) {

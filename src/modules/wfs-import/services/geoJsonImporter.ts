@@ -488,15 +488,25 @@ export function importOverturePolygons(
 }
 
 /**
- * Konwertuje surowe strefy MPZP z serwisów miejskich (Warszawa REST, Kraków/Wrocław/Poznań WFS)
+ * Konwertuje surowe strefy MPZP z serwisów miejskich (Warszawa REST, Kraków/Wrocław/Poznań/Gdynia WFS)
  * na MpzpZoneFeature w lokalnych współrzędnych CAD z ujednoliconymi atrybutami.
  */
 export function importMpzpZonesFromGeoJson(
   features: MpzpZoneRawFeature[],
   projectCrs: CrsDetectionResult,
-  projectCenter: LatLon
+  projectCenter: LatLon,
+  sourceCrs?: CrsDetectionResult
 ): MpzpZoneFeature[] {
   const result: MpzpZoneFeature[] = [];
+
+  const convertPoint = (p0: number, p1: number): Point2D => {
+    // Jeśli współrzędne są poza zakresem stopni WGS84 (-180..180, -90..90), traktujemy je jako metryczne
+    const isProjected = Math.abs(p0) > 180 || Math.abs(p1) > 90;
+    if (isProjected && sourceCrs) {
+      return wfsCoordToCad(p0, p1, sourceCrs, projectCrs, projectCenter);
+    }
+    return wgs84ToCadPoint({ lat: p1, lon: p0 }, projectCrs, projectCenter);
+  };
 
   for (let fi = 0; fi < features.length; fi++) {
     const feature = features[fi];
@@ -508,41 +518,56 @@ export function importMpzpZonesFromGeoJson(
     const props = feature.properties || {};
     const featureId =
       strOrNullIfMissing(props.objectid) ||
+      strOrNullIfMissing(props.OBJECTID) ||
+      strOrNullIfMissing(props.lokalnyId) ||
       strOrNullIfMissing(props.ID) ||
       strOrNullIfMissing(props.id) ||
       `mpzp-zone-${fi}`;
 
     const rings: Point2D[][] = rawRings
-      .map((ring) => ring.map(([lon, lat]) => wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)))
+      .map((ring) => ring.map(([c0, c1]) => convertPoint(c0, c1)))
       .filter((ring) => ring.length >= 3);
 
     if (rings.length === 0) continue;
 
     const funSymb =
       strOrNullIfMissing(props.fun_symb) ||
-      strOrNullIfMissing(props.SYMBOL) ||
+      strOrNullIfMissing(props.oznaczenie) ||
       strOrNullIfMissing(props.symbol) ||
+      strOrNullIfMissing(props.symb_t_o) ||
+      strOrNullIfMissing(props.symb_t) ||
+      strOrNullIfMissing(props.SYMBOL) ||
+      strOrNullIfMissing(props.kod_przeznaczenia_glownego) ||
+      strOrNullIfMissing(props.przeznaczenie_kod) ||
       strOrNullIfMissing(props.PRZEZNACZENIE);
 
     const funNazwa =
       strOrNullIfMissing(props.fun_nazwa) ||
+      strOrNullIfMissing(props.opis_oznaczenia) ||
+      strOrNullIfMissing(props.przeznaczenie_glowne) ||
+      strOrNullIfMissing(props.przeznaczenie_nazwa) ||
       strOrNullIfMissing(props.PRZEZNACZENIE) ||
       strOrNullIfMissing(props.OPIS) ||
-      strOrNullIfMissing(props.opis);
+      strOrNullIfMissing(props.opis) ||
+      strOrNullIfMissing(props.rodz_zab) ||
+      strOrNullIfMissing(props.status);
 
     const maxWysokosc =
       strOrNullIfMissing(props.max_wys) ||
       strOrNullIfMissing(props.MAX_WYSOKOSC) ||
-      strOrNullIfMissing(props.wysokosc_max);
+      strOrNullIfMissing(props.wysokosc_max) ||
+      strOrNullIfMissing(props.WYSOKOSC_ZABUDOWY);
 
     const intenZab =
       strOrNullIfMissing(props.inten_zab) ||
       strOrNullIfMissing(props.INTENSYWNOSC) ||
-      strOrNullIfMissing(props.intensywnosc);
+      strOrNullIfMissing(props.intensywnosc) ||
+      strOrNullIfMissing(props.INTENSYWNOSC_MAX);
 
     const powBio =
       strOrNullIfMissing(props.pow_bio) ||
       strOrNullIfMissing(props.POW_BIOLOGICZNA) ||
+      strOrNullIfMissing(props.POW_BIOLOGICZNIE_CZYNNA) ||
       strOrNullIfMissing(props.pbc);
 
     const liczKond =
@@ -552,6 +577,10 @@ export function importMpzpZonesFromGeoJson(
     const nazwaPlan =
       strOrNullIfMissing(props.nazwa_plan) ||
       strOrNullIfMissing(props.NAZWA_PLANU) ||
+      strOrNullIfMissing(props.nazwa_mpzp) ||
+      strOrNullIfMissing(props.nazwa_planu) ||
+      strOrNullIfMissing(props.tytul) ||
+      strOrNullIfMissing(props.nazwaWlasna) ||
       strOrNullIfMissing(props.plan);
 
     result.push({
@@ -577,9 +606,18 @@ export function importMpzpZonesFromGeoJson(
 export function importMpzpLinesFromGeoJson(
   features: MpzpLineRawFeature[],
   projectCrs: CrsDetectionResult,
-  projectCenter: LatLon
+  projectCenter: LatLon,
+  sourceCrs?: CrsDetectionResult
 ): MpzpLineFeature[] {
   const result: MpzpLineFeature[] = [];
+
+  const convertPoint = (p0: number, p1: number): Point2D => {
+    const isProjected = Math.abs(p0) > 180 || Math.abs(p1) > 90;
+    if (isProjected && sourceCrs) {
+      return wfsCoordToCad(p0, p1, sourceCrs, projectCrs, projectCenter);
+    }
+    return wgs84ToCadPoint({ lat: p1, lon: p0 }, projectCrs, projectCenter);
+  };
 
   for (let fi = 0; fi < features.length; fi++) {
     const feature = features[fi];
@@ -597,9 +635,13 @@ export function importMpzpLinesFromGeoJson(
     const props = feature.properties || {};
     const typRaw = (
       strOrNullIfMissing(props.TYP_LINII) ||
+      strOrNullIfMissing(props.typ_linii) ||
+      strOrNullIfMissing(props.rodzajLinii) ||
+      strOrNullIfMissing(props.rodzaj_linii) ||
       strOrNullIfMissing(props.TYP) ||
       strOrNullIfMissing(props.RODZAJ) ||
       strOrNullIfMissing(props.OPIS) ||
+      strOrNullIfMissing(props.opis) ||
       ''
     ).toLowerCase();
 
@@ -612,15 +654,19 @@ export function importMpzpLinesFromGeoJson(
       lineType = 'linia_rozgraniczajaca';
     }
 
-    const label = strOrNullIfMissing(props.OPIS) || strOrNullIfMissing(props.RODZAJ) || undefined;
+    const label =
+      strOrNullIfMissing(props.OPIS) ||
+      strOrNullIfMissing(props.opis) ||
+      strOrNullIfMissing(props.rodzaj_linii) ||
+      strOrNullIfMissing(props.rodzajLinii) ||
+      strOrNullIfMissing(props.RODZAJ) ||
+      undefined;
 
     for (let li = 0; li < rawLines.length; li++) {
       const lineCoords = rawLines[li];
       if (!Array.isArray(lineCoords) || lineCoords.length < 2) continue;
 
-      const points: Point2D[] = lineCoords.map(([lon, lat]) =>
-        wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)
-      );
+      const points: Point2D[] = lineCoords.map(([c0, c1]) => convertPoint(c0, c1));
 
       result.push({
         id: `mpzp-line-${fi}-${li}`,

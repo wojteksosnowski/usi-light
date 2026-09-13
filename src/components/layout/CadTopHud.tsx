@@ -93,6 +93,9 @@ export const CadTopHud: React.FC = () => {
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
 
+  const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
+  const showPlansOverlayGroup = useWfsStore((s) => s.showPlansOverlayGroup);
+
   // Idle-glint: 1. błysk po 30s bezczynności, 2. błysk po kolejnych 15s (łącznie 45s), potem stop
   const isShareGlinting = useIdleGlint([30000, 45000]);
 
@@ -293,7 +296,7 @@ export const CadTopHud: React.FC = () => {
       {APP_CONFIG.geoOverlays.showTogglesPanel && isPro && (
         <>
           <GeoOverlayToggleButton
-            active={useWfsStore((s) => s.showGeoOverlayGroup)}
+            active={showGeoOverlayGroup}
             onToggle={() => {
               const s = useWfsStore.getState();
               s.setShowGeoOverlayGroup(!s.showGeoOverlayGroup);
@@ -306,7 +309,7 @@ export const CadTopHud: React.FC = () => {
           />
 
           <GeoOverlayToggleButton
-            active={useWfsStore((s) => s.showPlansOverlayGroup)}
+            active={showPlansOverlayGroup}
             onToggle={() => {
               const s = useWfsStore.getState();
               s.setShowPlansOverlayGroup(!s.showPlansOverlayGroup);

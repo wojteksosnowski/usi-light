@@ -14,6 +14,8 @@ export const ProjectOverlaysCard: React.FC = () => {
   const setShowMpzpLayer = useWfsStore((s) => s.setShowMpzpLayer);
   const mpzpOpacity = useWfsStore((s) => s.mpzpOpacity);
   const setMpzpOpacity = useWfsStore((s) => s.setMpzpOpacity);
+  const mpzpInvertColors = useWfsStore((s) => s.mpzpInvertColors);
+  const setMpzpInvertColors = useWfsStore((s) => s.setMpzpInvertColors);
   const showBdotLayer = useWfsStore((s) => s.showBdotLayer);
   const setShowBdotLayer = useWfsStore((s) => s.setShowBdotLayer);
   const geoOverlayOpacity = useWfsStore((s) => s.geoOverlayOpacity);
@@ -222,7 +224,7 @@ export const ProjectOverlaysCard: React.FC = () => {
                 </div>
               </button>
               {showMpzpLayer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '15px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--text-secondary)' }}>
                     <span>Krycie:</span>
                     <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(mpzpOpacity * 100)}%</span>
@@ -236,6 +238,15 @@ export const ProjectOverlaysCard: React.FC = () => {
                     onChange={(e) => setMpzpOpacity(parseFloat(e.target.value))}
                     style={{ width: '100%', accentColor: 'var(--accent-indigo)', cursor: 'pointer' }}
                   />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none', paddingTop: '2px' }}>
+                    <input
+                      type="checkbox"
+                      checked={mpzpInvertColors}
+                      onChange={(e) => setMpzpInvertColors(e.target.checked)}
+                      style={{ accentColor: 'var(--accent-indigo)', cursor: 'pointer' }}
+                    />
+                    <span>Odwróć kolory (czytelność na ciemnym tle)</span>
+                  </label>
                 </div>
               )}
             </div>
@@ -243,7 +254,7 @@ export const ProjectOverlaysCard: React.FC = () => {
             {/* B. Strefy i linie MPZP (wektor) */}
             <div
               style={{ opacity: isMpzpZonesAvailableHere ? 1 : 0.45 }}
-              title={isMpzpZonesAvailableHere ? undefined : 'Dostępne dla wybranych miast (Warszawa, Kraków, Wrocław, Poznań)'}
+              title={isMpzpZonesAvailableHere ? undefined : 'Dostępne dla wybranych miast (Warszawa, Kraków, Wrocław, Poznań, Gdynia)'}
             >
               <SimpleLayerToggle
                 label={

@@ -114,10 +114,18 @@ export function registerGeoLayers(): () => void {
   const pipeline = CadRenderPipeline.getDefault();
 
   let prevShowOrtho = false;
+  let prevOrthoOpacity = 0.85;
   let prevShowKiut = false;
+  let prevKiutOpacity = 0.65;
+  let prevKiutInvert = true;
   let prevShowMpzp = false;
+  let prevMpzpOpacity = 0.5;
+  let prevMpzpInvert = false;
   let prevShowBdot = false;
+  let prevBdotOpacity = 0.6;
+  let prevBdotInvert = true;
   let prevShowTerrain = false;
+  let prevTerrainOpacity = 0.35;
   let prevShowTrees = false;
   let prevTreesLen = 0;
   let prevLoadingParcelsLen = 0;
@@ -139,10 +147,12 @@ export function registerGeoLayers(): () => void {
       kiutInvertColors,
       showMpzpLayer,
       mpzpOpacity,
+      mpzpInvertColors,
       showBdotLayer,
       bdotOpacity,
       bdotInvertColors,
       showTerrainLayer,
+      terrainOpacity,
       showTreesLayer,
       trees,
       loadingParcels,
@@ -161,27 +171,39 @@ export function registerGeoLayers(): () => void {
     orthophotoLayer.setOpacity(orthophotoOpacity);
     const activeOrtho = isPro && showOrthophotoLayer;
     if (toggleMainLayer(pipeline, orthophotoLayer, 'wfs_orthophoto', activeOrtho, prevShowOrtho)) changed = true;
+    if (activeOrtho && orthophotoOpacity !== prevOrthoOpacity) changed = true;
     prevShowOrtho = activeOrtho;
+    prevOrthoOpacity = orthophotoOpacity;
 
     // 2. Sieci GESUT (KIUT) (PRO)
     kiutLayer.setOpacity(kiutOpacity);
     kiutLayer.setInvertColors(kiutInvertColors);
     const activeKiut = isPro && showKiutLayer;
     if (toggleMainLayer(pipeline, kiutLayer, 'wfs_kiut_overlay', activeKiut, prevShowKiut)) changed = true;
+    if (activeKiut && (kiutOpacity !== prevKiutOpacity || kiutInvertColors !== prevKiutInvert)) changed = true;
     prevShowKiut = activeKiut;
+    prevKiutOpacity = kiutOpacity;
+    prevKiutInvert = kiutInvertColors;
 
     // 3. MPZP (PRO)
     mpzpLayer.setOpacity(mpzpOpacity);
+    mpzpLayer.setInvertColors(mpzpInvertColors);
     const activeMpzp = isPro && showMpzpLayer;
     if (toggleMainLayer(pipeline, mpzpLayer, 'wfs_mpzp_overlay', activeMpzp, prevShowMpzp)) changed = true;
+    if (activeMpzp && (mpzpOpacity !== prevMpzpOpacity || mpzpInvertColors !== prevMpzpInvert)) changed = true;
     prevShowMpzp = activeMpzp;
+    prevMpzpOpacity = mpzpOpacity;
+    prevMpzpInvert = mpzpInvertColors;
 
     // 4. BDOT10k (PRO)
     bdotLayer.setOpacity(bdotOpacity);
     bdotLayer.setInvertColors(bdotInvertColors);
     const activeBdot = isPro && showBdotLayer;
     if (toggleMainLayer(pipeline, bdotLayer, 'wfs_bdot_overlay', activeBdot, prevShowBdot)) changed = true;
+    if (activeBdot && (bdotOpacity !== prevBdotOpacity || bdotInvertColors !== prevBdotInvert)) changed = true;
     prevShowBdot = activeBdot;
+    prevBdotOpacity = bdotOpacity;
+    prevBdotInvert = bdotInvertColors;
 
     // 5. Cieniowanie NMT (PRO)
     const activeTerrain = isPro && showTerrainLayer;

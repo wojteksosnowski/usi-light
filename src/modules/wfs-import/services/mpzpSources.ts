@@ -3,16 +3,16 @@
  *
  * Umożliwia pobieranie wektorowych stref przeznaczenia oraz linii planistycznych
  * (linie zabudowy nieprzekraczalne, obowiązujące, linie rozgraniczające)
- * z serwisów miejskich (Warszawa, Kraków, Wrocław, Poznań) oraz usług krajowych.
+ * z serwisów miejskich (Warszawa, Kraków, Wrocław, Poznań, Gdynia) oraz usług krajowych.
  */
 
 import { CrsDetectionResult } from '../../../utils/geoTransform';
-import { WfsBbox, EPSG_2178 } from './wfsWarsawClient';
-import { EPSG_2180 } from './wfsEgibClient';
+import { WfsBbox, EPSG_2178, EPSG_2177 } from './wfsWarsawClient';
 import { fetchWarsawMpzpZones, MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 import { fetchKrakowMpzp } from './wfsMpzpKrakowClient';
 import { fetchWroclawMpzp } from './wfsMpzpWroclawClient';
 import { fetchPoznanMpzp } from './wfsMpzpPoznanClient';
+import { fetchGdyniaMpzp } from './wfsMpzpGdyniaClient';
 
 export interface MpzpFetchResult {
   zones: MpzpZoneRawFeature[];
@@ -53,7 +53,7 @@ export const MPZP_SOURCES: MpzpSource[] = [
   {
     name: 'Wrocław',
     bbox: [16.80, 51.02, 17.20, 51.21],
-    sourceCrs: EPSG_2178,
+    sourceCrs: EPSG_2177,
     fetchMpzp: async (bbox) => {
       return fetchWroclawMpzp(bbox);
     },
@@ -61,9 +61,17 @@ export const MPZP_SOURCES: MpzpSource[] = [
   {
     name: 'Poznań',
     bbox: [16.70, 52.30, 17.15, 52.50],
-    sourceCrs: EPSG_2178,
+    sourceCrs: EPSG_2177,
     fetchMpzp: async (bbox) => {
       return fetchPoznanMpzp(bbox);
+    },
+  },
+  {
+    name: 'Gdynia',
+    bbox: [18.35, 54.42, 18.65, 54.60],
+    sourceCrs: EPSG_2177,
+    fetchMpzp: async (bbox) => {
+      return fetchGdyniaMpzp(bbox);
     },
   },
 ];

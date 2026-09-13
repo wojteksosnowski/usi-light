@@ -142,6 +142,7 @@ interface WfsState {
   showPlansOverlayGroup: boolean; // Master toggle Plany
   showMpzpLayer: boolean;
   mpzpOpacity: number;
+  mpzpInvertColors: boolean;
   showTerrainLayer: boolean;
   terrainOpacity: number;
   showTreesLayer: boolean;
@@ -189,6 +190,7 @@ interface WfsState {
 
   setShowMpzpLayer: (show: boolean) => void;
   setMpzpOpacity: (val: number) => void;
+  setMpzpInvertColors: (invert: boolean) => void;
   setShowTerrainLayer: (show: boolean) => void;
   setTerrainOpacity: (val: number) => void;
   setShowTreesLayer: (show: boolean) => void;
@@ -275,6 +277,7 @@ export const useWfsStore = create<WfsState>()(
       kiutInvertColors: true,
       showMpzpLayer: false,
       mpzpOpacity: 0.5,
+      mpzpInvertColors: false,
       showBdotLayer: false,
       bdotOpacity: 0.6,
       bdotInvertColors: true,
@@ -427,6 +430,7 @@ export const useWfsStore = create<WfsState>()(
 
   setShowMpzpLayer: (show) => set({ showMpzpLayer: show }),
   setMpzpOpacity: (val) => set({ mpzpOpacity: val }),
+  setMpzpInvertColors: (invert) => set({ mpzpInvertColors: invert }),
   setShowTerrainLayer: (show) => set({ showTerrainLayer: show }),
   setTerrainOpacity: (val) => set({ terrainOpacity: val }),
   setShowTreesLayer: (show) => set({ showTreesLayer: show }),
@@ -457,6 +461,7 @@ export const useWfsStore = create<WfsState>()(
         kiutInvertColors: state.kiutInvertColors,
         showMpzpLayer: state.showMpzpLayer,
         mpzpOpacity: state.mpzpOpacity,
+        mpzpInvertColors: state.mpzpInvertColors,
         showBdotLayer: state.showBdotLayer,
         bdotOpacity: state.bdotOpacity,
         bdotInvertColors: state.bdotInvertColors,

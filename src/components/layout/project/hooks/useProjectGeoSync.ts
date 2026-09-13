@@ -274,8 +274,8 @@ export const useProjectGeoSync = () => {
       if (!mpzpSource) return { zones: [], lines: [] };
       const bbox = latLonToBbox(settings.latitude, settings.longitude, projectRadius);
       const res = await mpzpSource.fetchMpzp(bbox, projectRadius, settings.latitude, settings.longitude);
-      const zones = importMpzpZonesFromGeoJson(res.zones, projectCrs, projectCenter);
-      const lines = importMpzpLinesFromGeoJson(res.lines, projectCrs, projectCenter);
+      const zones = importMpzpZonesFromGeoJson(res.zones, projectCrs, projectCenter, mpzpSource.sourceCrs);
+      const lines = importMpzpLinesFromGeoJson(res.lines, projectCrs, projectCenter, mpzpSource.sourceCrs);
       return { zones, lines };
     },
     ({ zones, lines }) => {

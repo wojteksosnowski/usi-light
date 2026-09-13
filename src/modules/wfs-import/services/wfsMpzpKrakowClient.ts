@@ -1,19 +1,20 @@
 /**
- * Klient WFS dla krakowskiego serwisu MPZP (Geoserver / MapServer):
- * Warstwy planistyczne: strefy przeznaczenia oraz linie planu.
+ * Klient WFS dla krakowskiego serwisu MPZP (MSIP Kraków / ArcGIS Server):
+ * Warstwy planistyczne: strefy przeznaczenia oraz granice planów obowiązujących.
+ * Upstream: https://msip3.um.krakow.pl/server/services/Pobieranie/BP_MPZP_POBIERANIE/MapServer/WFSServer
  */
 
-import { WfsBbox, wgs84BboxToEpsg2178EN } from './wfsWarsawClient';
-import { parseWfsPolygonGml, parseWfsLineStringGml } from './wfsGmlUtils';
+import { WfsBbox, wgs84BboxToEpsg2178 } from './wfsWarsawClient';
+import { parseWfsPolygonGml } from './wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
-const KRAKOW_WFS_URL = '/api/krakow-wfs';
+const KRAKOW_WFS_URL = '/api/krakow-mpzp-wfs';
 
 export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
   zones: MpzpZoneRawFeature[];
   lines: MpzpLineRawFeature[];
 }> {
-  const bboxStr = wgs84BboxToEpsg2178EN(bbox);
+  const bboxStr = `${wgs84BboxToEpsg2178(bbox)},urn:ogc:def:crs:EPSG::2178`;
 
   // 1. Strefy przeznaczenia
   let zones: MpzpZoneRawFeature[] = [];
@@ -22,7 +23,7 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
       SERVICE: 'WFS',
       VERSION: '1.1.0',
       REQUEST: 'GetFeature',
-      TYPENAME: 'ms:mpzp_strefy',
+      TYPENAME: 'BP_MPZP_POBIERANIE:Przeznaczenia_MPZP',
       BBOX: bboxStr,
     });
     const res = await fetch(`${KRAKOW_WFS_URL}?${paramsZones}`);
@@ -31,8 +32,21 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
       const parsed = parseWfsPolygonGml(
         gml,
         'featureMember',
-        'mpzp_strefy',
-        ['SYMBOL', 'PRZEZNACZENIE', 'NAZWA_PLANU', 'MAX_WYSOKOSC', 'INTENSYWNOSC', 'POW_BIOLOGICZNA']
+        'Przeznaczenia_MPZP',
+        [
+          'oznaczenie',
+          'opis_oznaczenia',
+          'nazwa_mpzp',
+          'rodzaj_oznaczenia',
+          'SYMBOL',
+          'PRZEZNACZENIE',
+          'NAZWA_PLANU',
+          'WYSOKOSC_ZABUDOWY',
+          'INTENSYWNOSC_MAX',
+          'INTENSYWNOSC_MIN',
+          'POW_BIOLOGICZNIE_CZYNNA',
+          'www',
+        ]
       );
       zones = parsed.features as unknown as MpzpZoneRawFeature[];
     }
@@ -40,25 +54,5 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
     console.warn('Błąd pobierania stref MPZP Kraków:', e);
   }
 
-  // 2. Linie planistyczne / zabudowy
-  let lines: MpzpLineRawFeature[] = [];
-  try {
-    const paramsLines = new URLSearchParams({
-      SERVICE: 'WFS',
-      VERSION: '1.1.0',
-      REQUEST: 'GetFeature',
-      TYPENAME: 'ms:mpzp_linie',
-      BBOX: bboxStr,
-    });
-    const res = await fetch(`${KRAKOW_WFS_URL}?${paramsLines}`);
-    if (res.ok) {
-      const gml = await res.text();
-      const parsed = parseWfsLineStringGml(gml, 'mpzp_linie', ['TYP_LINII', 'RODZAJ', 'OPIS']);
-      lines = parsed.features as unknown as MpzpLineRawFeature[];
-    }
-  } catch (e) {
-    console.warn('Błąd pobierania linii MPZP Kraków:', e);
-  }
-
-  return { zones, lines };
+  return { zones, lines: [] };
 }
