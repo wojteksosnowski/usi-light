@@ -8,6 +8,7 @@ export interface LabeledNumberFieldProps {
   unit?: string;
   step?: number;
   min?: number;
+  max?: number;
   hint?: string;
   hintColor?: string;
 }
@@ -22,6 +23,7 @@ export const LabeledNumberField: React.FC<LabeledNumberFieldProps> = ({
   onChange,
   step = 0.5,
   min,
+  max,
   hint,
   hintColor = 'var(--text-muted)',
 }) => {
@@ -32,6 +34,7 @@ export const LabeledNumberField: React.FC<LabeledNumberFieldProps> = ({
         type="number"
         step={step}
         min={min}
+        max={max}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
         style={{ ...FIELD_INPUT_STYLE, fontFamily: 'monospace', fontWeight: 600 }}

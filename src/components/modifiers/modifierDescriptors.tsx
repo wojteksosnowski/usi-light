@@ -2,12 +2,13 @@ import {
   createDefaultBayWindowModifier,
   createDefaultCornerCutModifier,
   createDefaultDonutModifier,
+  createDefaultGateModifier,
   createDefaultStoryOffsetModifier,
   createDefaultTerraceModifier,
   createDefaultZoneOffsetModifier,
 } from '../../types/modifiers';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { BayWindowIcon, TerraceIcon, DonutIcon, ZoneBufferIcon, ChamferIcon } from '../common/CustomCadIcons';
+import { BayWindowIcon, TerraceIcon, DonutIcon, ZoneBufferIcon, ChamferIcon, GatePassageIcon } from '../common/CustomCadIcons';
 import { ModifierDescriptorMap } from './modifierDescriptorTypes';
 import { StoryOffsetFields } from './panels/StoryOffsetFields';
 import { ZoneOffsetFields } from './panels/ZoneOffsetFields';
@@ -15,6 +16,7 @@ import { BayWindowFields } from './panels/BayWindowFields';
 import { TerraceFields } from './panels/TerraceFields';
 import { DonutFields } from './panels/DonutFields';
 import { CornerCutFields } from './panels/CornerCutFields';
+import { GateFields } from './panels/GateFields';
 
 function formatSigned(value: number): string {
   return value > 0 ? `+${value}m` : `${value}m`;
@@ -88,4 +90,26 @@ export const MODIFIER_DESCRIPTORS: ModifierDescriptorMap = {
     renderFields: CornerCutFields,
     formatSummary: (m) => `d=${m.depth}m ${formatStoriesSuffix(m.storiesCount)}`,
   },
+  gate: {
+    type: 'gate',
+    title: 'Brama (prześwit)',
+    Icon: GatePassageIcon,
+    accentVar: 'var(--accent-emerald)',
+    createDefault: createDefaultGateModifier,
+    renderFields: GateFields,
+    formatSummary: (m) => `a=${m.width}m ${formatStoriesSuffix(m.storiesCount)}`,
+  },
 };
+
+/** Modyfikatory bryły budynku (Grupa 2 w toolbarze): uskok, taras, donat, wykusz, sciecie, brama */
+export const TOOLBAR_BUILDING_MODIFIER_TYPES = [
+  'story_offset',
+  'terrace',
+  'donut',
+  'gate',
+  'bay_window',
+  'corner_cut',
+] as const;
+
+/** Modyfikator bufora/strefy (Grupa 3 w toolbarze) */
+export const TOOLBAR_BUFFER_MODIFIER_TYPE = 'zone_offset' as const;

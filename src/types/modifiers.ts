@@ -1,6 +1,6 @@
-import { Point2D } from './geometry';
+import { AreaType, Point2D } from './geometry';
 
-export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window' | 'terrace' | 'donut' | 'corner_cut';
+export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window' | 'terrace' | 'donut' | 'corner_cut' | 'gate';
 
 export interface BaseModifier {
   id: string;
@@ -20,7 +20,7 @@ export type ZoneCornerType = 'miter' | 'round' | 'chamfer';
 export interface ZoneOffsetModifier extends BaseModifier {
   type: 'zone_offset';
   distance: number;      // metry (+ na zewnątrz bufor, - do wnętrza obiektu)
-  areaType?: 'plot' | 'playground';
+  areaType?: AreaType;
   cornerType?: ZoneCornerType; // proste (miter) | zaokrąglone (round, r=|distance|) | ścięte (chamfer, d=|distance|); domyślnie 'miter'
   name?: string;
 }
@@ -37,11 +37,15 @@ export interface BayWindowModifier extends BaseModifier {
   positionRatio?: number;  // Położenie wzdłuż krawędzi: 0.0 (początek) .. 0.5 (środek) .. 1.0 (koniec)
 }
 
+export type TerraceVariant = 'drop' | 'steps';
+
 export interface TerraceModifier extends BaseModifier {
   type: 'terrace';
-  depth: number;           // Głębokość uskoku krawędzi (metry, domyślnie -4m, <0 cofnięcie, >0 nadwieszenie)
+  depth: number;           // 'a' - łączny uskok krawędzi (metry, domyślnie -4m, <0 cofnięcie, >0 nadwieszenie)
   storiesCount: number;    // Kondygnacja: <0 od góry (np. -1 penthouse), >0 od dołu, 0 cała bryła
   edgeIndex?: number;      // Indeks modyfikowanej krawędzi (domyślnie najdłuższa lub 0)
+  variant?: TerraceVariant; // 'drop' (uskok) | 'steps' (stopnie), domyślnie 'drop'
+  autoDistance?: boolean;   // Czy tryb automatycznego mierzenia 'a' jest aktywny na żywo
 }
 
 export interface DonutModifier extends BaseModifier {
@@ -63,7 +67,16 @@ export interface CornerCutModifier extends BaseModifier {
   vertexIndex?: number;    // Indeks wierzchołka gdy scope === 'vertex' (ta sama konwencja globalnego indeksu, dla wierzchołków)
 }
 
-export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier | CornerCutModifier;
+export interface GateModifier extends BaseModifier {
+  type: 'gate';
+  width: number;           // 'a' - szerokość bramy (metry)
+  storiesCount: number;    // Kondygnacja: >0 od dołu (+1 parter), <0 od góry, 0 cała bryła
+  edgeIndex?: number;      // Indeks krawędzi wejściowej (domyślnie najdłuższa lub 0)
+  positionRatio?: number;  // Położenie wzdłuż dopuszczalnego odcinka: 0.0 (początek) .. 0.5 (środek) .. 1.0 (koniec)
+  autoWidth?: boolean;     // Czy tryb automatycznej maksymalnej szerokości jest aktywny
+}
+
+export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier | CornerCutModifier | GateModifier;
 
 function newModifierId(prefix: string): string {
   return `mod-${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
@@ -113,6 +126,7 @@ export function createDefaultTerraceModifier(): TerraceModifier {
     enabled: true,
     depth: -4.0, // domyślnie -4m głębokość uskoku
     storiesCount: -1, // domyślnie ostatnia kondygnacja (penthouse)
+    variant: 'drop',
   };
 }
 
@@ -141,6 +155,21 @@ export function createDefaultCornerCutModifier(): CornerCutModifier {
   };
 }
 
+/**
+ * Tworzy domyślny modyfikator "Brama (prześwit / przejazd)"
+ */
+export function createDefaultGateModifier(): GateModifier {
+  return {
+    id: newModifierId('gate'),
+    type: 'gate',
+    enabled: true,
+    width: 4.0,           // domyślnie 4m szerokości
+    storiesCount: 1,      // domyślnie parter (+1)
+    positionRatio: 0.5,   // domyślnie środek
+    autoWidth: false,
+  };
+}
+
 
 export interface StoryFootprint {
   storyIndex: number;    // Indeks kondygnacji 0 .. K-1
@@ -152,7 +181,7 @@ export interface StoryFootprint {
 
 export interface ZoneFootprint {
   id: string;
-  areaType?: 'plot' | 'playground';
+  areaType?: AreaType;
   distance: number;
   polygon: Point2D[];    // zewnętrzna granica pasa strefy
   holes?: Point2D[][];   // wewnętrzna granica pasa strefy (jak StoryFootprint.holes); brak = pełny wielokąt, fallback

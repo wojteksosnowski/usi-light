@@ -161,6 +161,56 @@ export const TerraceIcon: React.FC<IconProps> = ({
 );
 
 /**
+ * Ikona wariantu "Uskok" (drop) dla tarasu - pojedynczy blok uskoku
+ */
+export const TerraceDropIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path d="M3 21h18V10h-8V3H3v18z" />
+  </svg>
+);
+
+/**
+ * Ikona wariantu "Stopnie" (steps) dla tarasu - kaskada schodkowa
+ */
+export const TerraceStepsIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path d="M3 21h18v-5h-5v-5h-5V3H3v18z" />
+  </svg>
+);
+
+/**
  * Ikona modyfikatora "Donat" (wewnętrzny otwór / patio) (zgodna ze stylem Lucide)
  */
 export const DonutIcon: React.FC<IconProps> = ({
@@ -299,3 +349,33 @@ export const AlignDirectionIcon: React.FC<IconProps> = ({
     <polyline points="15.5 8.5 18.5 12.5 21.5 9" />
   </svg>
 );
+
+/**
+ * Ikona modyfikatora "Brama" (prześwit / przejazd bramowy) (zgodna ze stylem Lucide)
+ */
+export const GatePassageIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    {/* Obrys bryły budynku z wyciętym przejazdem bramowym w parterze */}
+    <path d="M3 21V3h18v18h-5v-8H8v8H3z" />
+    <line x1="3" y1="8" x2="21" y2="8" strokeDasharray="2 2" strokeWidth="1.5" />
+  </svg>
+);
+
+export const GateIcon: React.FC<IconProps> = GatePassageIcon;
+

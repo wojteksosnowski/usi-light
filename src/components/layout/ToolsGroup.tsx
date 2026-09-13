@@ -28,7 +28,7 @@ const UNION_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'union')!;
 /** Układ przycisków "dodaj modyfikator" — jeden wiersz = jeden rząd siatki w kolejności deklaracji. */
 const ADD_MODIFIER_ROWS: ModifierType[][] = [
   ['story_offset', 'terrace', 'donut'],
-  ['bay_window'],
+  ['gate', 'bay_window'],
   ['corner_cut'],
 ];
 

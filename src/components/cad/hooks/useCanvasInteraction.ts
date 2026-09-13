@@ -1,7 +1,8 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
-import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType } from '../../../types/geometry';
+import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType, DEFAULT_SWEEP_WIDTH } from '../../../types/geometry';
 import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180, getPolygonCentroid, getRotateHandleScreenPos } from '@/utils/math2d';
 import { useUiStore } from '../../../store/useUiStore';
+import { useCadToolStore } from '../../../store/useCadToolStore';
 import {
   calculateDirectionSnap,
   DirectionSnapResult,
@@ -238,7 +239,7 @@ export function useCanvasInteraction({
   linkingSourceId = null,
   drawingMode = 'none',
   onDrawingModeChange,
-  sweepWidth = 5.0,
+  sweepWidth = DEFAULT_SWEEP_WIDTH,
   sweepAlignment = 'center',
   onFinishDrawing,
   onCancelDrawing,
@@ -530,6 +531,36 @@ export function useCanvasInteraction({
       rotAngleDeg,
       onBuildingRotate,
     ]
+  );
+
+  const handleAdjustObjectParam = useCallback(
+    (direction: 'dec' | 'inc', isLargeStep?: boolean) => {
+      const step = isLargeStep ? 1.0 : 0.5;
+      const factor = direction === 'inc' ? 1 : -1;
+
+      // 1. Jeśli zaznaczony jest budynek z wstęgą
+      if (selectedBuildingId) {
+        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg && (selBldg.sweepPath || selBldg.sweepWidth !== undefined)) {
+          const currentWidth = selBldg.sweepWidth ?? DEFAULT_SWEEP_WIDTH;
+          const nextWidth = Math.max(0.5, Math.round((currentWidth + factor * step) * 10) / 10);
+          onUpdateBuildingSweepPath?.(
+            selectedBuildingId,
+            selBldg.sweepPath || [],
+            nextWidth,
+            selBldg.sweepAlignment
+          );
+          useCadToolStore.getState().setSweepWidth(nextWidth);
+          return;
+        }
+      }
+
+      // 2. Globalny/aktywny parametr narzędzia Wstęga
+      const currentToolWidth = useCadToolStore.getState().sweepWidth || DEFAULT_SWEEP_WIDTH;
+      const nextToolWidth = Math.max(0.5, Math.round((currentToolWidth + factor * step) * 10) / 10);
+      useCadToolStore.getState().setSweepWidth(nextToolWidth);
+    },
+    [selectedBuildingId, buildings, onUpdateBuildingSweepPath]
   );
 
   useEffect(() => {
@@ -2029,6 +2060,7 @@ export function useCanvasInteraction({
     handleDeleteSelectedVertex,
     handleCycleVertexSelection,
     handleStepRotateBuilding,
+    handleAdjustObjectParam,
     handleAdjustEdgeLengthStep,
     handleEdgeLengthInputChar,
     handleEdgeLengthBackspace,

@@ -1361,6 +1361,15 @@ export function runFullAnalysis(
 
     const tLoop0 = performance.now();
     for (const bldg of testedBuildings) {
+      const bldgType = bldg.buildingType || 'residential';
+      // Obiekty typu garaż nie muszą spełniać § 12 ani § 56
+      if (bldgType === 'garage') {
+        continue;
+      }
+      // Obiekty typu usługi nie muszą spełniać § 56 (nasłonecznienie), ale podlegają § 12 (przesłanianie)
+      const bldgSunlightEnabled = isSunlightEnabled && bldgType === 'residential';
+      const bldgShadowingEnabled = isShadowingEnabled;
+
       const tBldg0 = performance.now();
       for (const seg of bldg.segments) {
         const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
@@ -1377,10 +1386,10 @@ export function runFullAnalysis(
         const n2 = { x: -Math.sin(a2), y: Math.cos(a2) };
         const pointBaseH = seg.hBase ?? 0.0;
 
-        const shadowingCandidates = isShadowingEnabled
+        const shadowingCandidates = bldgShadowingEnabled
           ? prefilterShadowingCandidatesForSegment(seg, buildings, bldg.id)
           : null;
-        const sunlightCandidates = isSunlightEnabled
+        const sunlightCandidates = bldgSunlightEnabled
           ? prefilterSunlightCandidatesForSegment(seg, buildings, bldg.id)
           : null;
 
@@ -1389,7 +1398,7 @@ export function runFullAnalysis(
 
           let shadowing: ShadowingResult;
           let pointShadowMs = 0;
-          if (isShadowingEnabled) {
+          if (bldgShadowingEnabled) {
             const prefilteredShadowing = filterPointShadowingFromCandidates(sample.point, shadowingCandidates!, n1, n2);
             const tShadow0 = performance.now();
             shadowing = analyzeShadowingAtPoint(
@@ -1412,7 +1421,7 @@ export function runFullAnalysis(
 
           let sunlight: SunlightResult;
           let pointSunlightMs = 0;
-          if (isSunlightEnabled) {
+          if (bldgSunlightEnabled) {
             const prefilteredSunlight = filterPointSunlightFromCandidates(sample.point, sunlightCandidates!, pointBaseH, n1, n2);
             const tSun0 = performance.now();
             sunlight =

@@ -131,6 +131,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         const seg = bldg.segments.find((s) => s.id === pt.segmentId);
         if (!seg) return null;
 
+        const bType = bldg.buildingType || 'residential';
+        if (bType === 'garage') return null;
+
         const r = pt.offsetRatio;
         const exactPoint = {
           x: seg.p1.x + r * (seg.p2.x - seg.p1.x),
@@ -138,7 +141,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         };
 
         const prefilteredShadowing = prefilterShadowingObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
-        const prefilteredSunlight = prefilterSunlightObstacles(exactPoint, seg, effectiveBuildings, bldg.id);
+        const prefilteredSunlight = bType === 'residential' ? prefilterSunlightObstacles(exactPoint, seg, effectiveBuildings, bldg.id) : null;
 
         let baseHeightOverride: number | undefined;
         if (pt.storeyIndex !== undefined) {
@@ -159,33 +162,44 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         );
 
         const sunRes =
-          sunlightMethod === 'segments'
-            ? analyzeSunlightAtPointSegments(
-                exactPoint,
-                seg,
-                r,
-                effectiveBuildings,
-                bldg.id,
-                settings,
-                prefilteredSunlight,
-                undefined,
-                undefined,
-                baseHeightOverride
-              )
-            : analyzeSunlightAtPoint(
-                exactPoint,
-                seg,
-                r,
-                effectiveBuildings,
-                bldg.id,
-                settings,
-                currentAccuracyOptions.sunlightStepMinutes,
-                undefined,
-                prefilteredSunlight,
-                undefined,
-                undefined,
-                baseHeightOverride
-              );
+          bType === 'residential'
+            ? (sunlightMethod === 'segments'
+                ? analyzeSunlightAtPointSegments(
+                    exactPoint,
+                    seg,
+                    r,
+                    effectiveBuildings,
+                    bldg.id,
+                    settings,
+                    prefilteredSunlight!,
+                    undefined,
+                    undefined,
+                    baseHeightOverride
+                  )
+                : analyzeSunlightAtPoint(
+                    exactPoint,
+                    seg,
+                    r,
+                    effectiveBuildings,
+                    bldg.id,
+                    settings,
+                    currentAccuracyOptions.sunlightStepMinutes,
+                    undefined,
+                    prefilteredSunlight!,
+                    undefined,
+                    undefined,
+                    baseHeightOverride
+                  ))
+            : {
+                point: exactPoint,
+                segmentId: seg.id,
+                offsetRatio: r,
+                totalMinutes: 0,
+                totalHours: 0,
+                isCompliant: true,
+                timeSlots: [],
+                sectors: [],
+              };
 
         return {
           id: pt.id,

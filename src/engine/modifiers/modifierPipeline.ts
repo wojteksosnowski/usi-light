@@ -168,7 +168,7 @@ export function generateTerracePolygon(
     return vertices.map((p) => ({ ...p }));
   }
 
-  return result;
+  return cleanPolygonRing(result, isCCW);
 }
 
 /**
@@ -305,6 +305,69 @@ export function generateBayWindowPolygon(
   return result;
 }
 
+export function cleanPolygonRing(pts: Point2D[], enforceCCW = true): Point2D[] {
+  if (!pts || pts.length < 3) return [];
+
+  // 1. Usuń duplikaty bezpośrednich sąsiadów
+  const noDups: Point2D[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const prev = noDups[noDups.length - 1];
+    if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 1e-4) {
+      noDups.push({
+        x: Math.abs(p.x) < 1e-9 ? 0 : p.x,
+        y: Math.abs(p.y) < 1e-9 ? 0 : p.y,
+      });
+    }
+  }
+  // Sprawdź czy ostatni nie jest zbieżny z pierwszym
+  if (
+    noDups.length >= 2 &&
+    Math.hypot(noDups[0].x - noDups[noDups.length - 1].x, noDups[0].y - noDups[noDups.length - 1].y) < 1e-4
+  ) {
+    noDups.pop();
+  }
+
+  if (noDups.length < 3) return [];
+
+  // 2. Usuń punkty współliniowe
+  const noCollinear: Point2D[] = [];
+  const m = noDups.length;
+  for (let i = 0; i < m; i++) {
+    const prev = noDups[(i - 1 + m) % m];
+    const curr = noDups[i];
+    const next = noDups[(i + 1) % m];
+
+    const v1x = curr.x - prev.x;
+    const v1y = curr.y - prev.y;
+    const v2x = next.x - curr.x;
+    const v2y = next.y - curr.y;
+
+    const cross = v1x * v2y - v1y * v2x;
+    const dot = v1x * v2x + v1y * v2y;
+    const len1 = Math.hypot(v1x, v1y);
+    const len2 = Math.hypot(v2x, v2y);
+
+    // Jeśli wektory są współliniowe w tym samym kierunku (kąt 180° między krawędziami = prosta linia)
+    if (len1 > 1e-4 && len2 > 1e-4) {
+      const normalizedCross = Math.abs(cross) / (len1 * len2);
+      if (normalizedCross < 1e-4 && dot > 0) {
+        // Punkt leży na prostej między prev a next i nie zmienia kierunku - pomijamy go
+        continue;
+      }
+    }
+    noCollinear.push(curr);
+  }
+
+  if (noCollinear.length < 3) return [];
+
+  if (enforceCCW) {
+    const ccw = isPolygonCCW(noCollinear);
+    return ccw ? noCollinear : [...noCollinear].reverse();
+  }
+  return noCollinear;
+}
+
 const CORNER_CUT_ARC_SEGMENTS = 8;
 
 /**
@@ -322,8 +385,13 @@ export function generateCornerCutPolygon(
     return vertices ? vertices.map((p) => ({ ...p })) : [];
   }
 
-  const n = vertices.length;
-  const origSignedArea = calculateSignedArea(vertices);
+  const cleanInput = cleanPolygonRing(vertices, true);
+  if (cleanInput.length < 3) {
+    return vertices.map((p) => ({ ...p }));
+  }
+
+  const n = cleanInput.length;
+  const origSignedArea = calculateSignedArea(cleanInput);
   const isCCW = origSignedArea > 0;
 
   const targetIndices = new Set<number>();
@@ -341,13 +409,13 @@ export function generateCornerCutPolygon(
   const result: Point2D[] = [];
   for (let i = 0; i < n; i++) {
     if (!targetIndices.has(i)) {
-      result.push({ ...vertices[i] });
+      result.push({ ...cleanInput[i] });
       continue;
     }
 
-    const prev = vertices[(i - 1 + n) % n];
-    const curr = vertices[i];
-    const next = vertices[(i + 1) % n];
+    const prev = cleanInput[(i - 1 + n) % n];
+    const curr = cleanInput[i];
+    const next = cleanInput[(i + 1) % n];
 
     const lenPrev = distance(curr, prev);
     const lenNext = distance(curr, next);
@@ -362,6 +430,13 @@ export function generateCornerCutPolygon(
     const uPrevY = (prev.y - curr.y) / lenPrev;
     const uNextX = (next.x - curr.x) / lenNext;
     const uNextY = (next.y - curr.y) / lenNext;
+
+    // Sprawdzenie czy krawędzie nie są współliniowe lub prawie równoległe (|cross| < 1e-4)
+    const cross = uPrevX * uNextY - uPrevY * uNextX;
+    if (Math.abs(cross) < 1e-4) {
+      result.push({ ...curr });
+      continue;
+    }
 
     const A: Point2D = { x: curr.x + uPrevX * dEff, y: curr.y + uPrevY * dEff };
     const B: Point2D = { x: curr.x + uNextX * dEff, y: curr.y + uNextY * dEff };
@@ -391,10 +466,10 @@ export function generateCornerCutPolygon(
   const orientationKept = isCCW ? newArea > 0 : newArea < 0;
 
   if (!orientationKept || Math.abs(newArea) < 0.01 || Math.abs(newArea) > origArea * 1.05) {
-    return vertices.map((p) => ({ ...p }));
+    return cleanInput.map((p) => ({ ...p }));
   }
 
-  return result;
+  return cleanPolygonRing(result, isCCW);
 }
 
 /**
@@ -498,30 +573,8 @@ function fromClosedRing(ring: [number, number][], enforceCCW = true): Point2D[] 
   const isClosed =
     Math.hypot(ring[0][0] - ring[ring.length - 1][0], ring[0][1] - ring[ring.length - 1][1]) < 1e-6;
   const raw = isClosed ? ring.slice(0, -1) : ring;
-
-  // Usuń punkty powtarzające się / zdegenerowane krawędzie o długości < 1e-4m
-  const pts: Point2D[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    const p = raw[i];
-    const prev = pts[pts.length - 1];
-    if (!prev || Math.hypot(p[0] - prev.x, p[1] - prev.y) > 1e-4) {
-      pts.push({
-        x: Math.abs(p[0]) < 1e-9 ? 0 : p[0],
-        y: Math.abs(p[1]) < 1e-9 ? 0 : p[1],
-      });
-    }
-  }
-  // Sprawdź czy ostatni nie jest zbieżny z pierwszym
-  if (pts.length >= 2 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 1e-4) {
-    pts.pop();
-  }
-  if (pts.length < 3) return [];
-
-  if (enforceCCW) {
-    const ccw = isPolygonCCW(pts);
-    return ccw ? pts : [...pts].reverse();
-  }
-  return pts;
+  const pts: Point2D[] = raw.map(([x, y]) => ({ x, y }));
+  return cleanPolygonRing(pts, enforceCCW);
 }
 
 /**
@@ -632,9 +685,67 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
 }
 
 /**
+ * Wycina korytarz bramy z pojedynczego obrysu kondygnacji (footprint).
+ * Jeśli wycięcie dzieli kondygnację na niezależne bryły (skrzydła), zwraca tablicę wynikowych footprints.
+ */
+export function cutGateFromFootprint(
+  footprint: StoryFootprint,
+  cuttingPolygon: Point2D[]
+): StoryFootprint[] {
+  if (!footprint.polygon || footprint.polygon.length < 3 || !cuttingPolygon || cuttingPolygon.length < 3) {
+    return [footprint];
+  }
+
+  try {
+    const outerRing = toClosedRing(footprint.polygon);
+    if (outerRing.length < 4) return [footprint];
+
+    const validHoles = (footprint.holes || []).filter((h) => h && h.length >= 3);
+    const subjectRings: [number, number][][] = [outerRing, ...validHoles.map(toClosedRing)];
+
+    const clipRing = toClosedRing(cuttingPolygon);
+    if (clipRing.length < 4) return [footprint];
+
+    const diff = polygonClipping.difference([subjectRings], [[clipRing]]);
+    if (!diff || diff.length === 0) {
+      return [footprint];
+    }
+
+    const results: StoryFootprint[] = [];
+    for (const poly of diff) {
+      if (!poly || poly.length === 0) continue;
+      const outerPts = fromClosedRing(poly[0], true);
+      if (outerPts.length < 3) continue;
+      const area = Math.abs(calculateSignedArea(outerPts));
+      if (area < 0.1) continue;
+
+      const holesPts: Point2D[][] = [];
+      for (let h = 1; h < poly.length; h++) {
+        const holePts = fromClosedRing(poly[h], true);
+        if (holePts.length >= 3 && Math.abs(calculateSignedArea(holePts)) >= 0.1) {
+          holesPts.push(holePts);
+        }
+      }
+
+      results.push({
+        storyIndex: footprint.storyIndex,
+        hBottom: footprint.hBottom,
+        hTop: footprint.hTop,
+        polygon: outerPts,
+        holes: holesPts,
+      });
+    }
+
+    return results.length > 0 ? results : [footprint];
+  } catch {
+    return [footprint];
+  }
+}
+
+/**
  * Główny potok przetwarzania modyfikatorów na budynku:
  * 1. Inicjalizuje obrysy kondygnacji (story footprints 0..K-1) z geometrii bazowej
- * 2. Nakłada po kolei aktywne modyfikatory ze stosu (Uskok, Strefa, Wykusz, Taras, Donat)
+ * 2. Nakłada po kolei aktywne modyfikatory ze stosu (Uskok, Strefa, Wykusz, Taras, Donat, Brama)
  * 3. Ekstrahuje pionowe krawędzie ścian (zewnętrznych i wewnętrznych dziedzińca) i scala współliniowe odcinki w segmenty [Hbase, Htotal]
  */
 export function applyBuildingModifiers(building: BuildingLoop): ModifierPipelineResult {
@@ -695,7 +806,7 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
   }
 
   // 2.5 Sanityzacja i uniwersalne docinanie boolowskie kondygnacji
-  const sanitizedStoryFootprints = storyFootprints.map(sanitizeStoryFootprint);
+  const sanitizedStoryFootprints = applyCtx.storyFootprints.map(sanitizeStoryFootprint);
 
   // 3. Ekstrakcja krawędzi pionowych ścian i scalanie w pionie
   interface RawEdge {

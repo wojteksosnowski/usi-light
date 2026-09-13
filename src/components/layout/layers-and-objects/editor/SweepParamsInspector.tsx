@@ -1,5 +1,5 @@
 import React from 'react';
-import { BuildingLoop } from '@/types/geometry';
+import { BuildingLoop, DEFAULT_SWEEP_WIDTH } from '@/types/geometry';
 
 interface SweepParamsInspectorProps {
   building: BuildingLoop;
@@ -35,7 +35,7 @@ export const SweepParamsInspector: React.FC<SweepParamsInspectorProps> = ({
           type="number"
           step="0.5"
           min="0.5"
-          value={building.sweepWidth ?? 6.0}
+          value={building.sweepWidth ?? DEFAULT_SWEEP_WIDTH}
           onChange={(e) => onUpdate({ sweepWidth: parseFloat(e.target.value) || 1.0 })}
           style={{
             width: '70px',

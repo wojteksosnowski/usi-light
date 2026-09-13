@@ -3,6 +3,7 @@ import {
   BayWindowModifier,
   CornerCutModifier,
   DonutModifier,
+  GateModifier,
   Modifier,
   ModifierType,
   StoryFootprint,
@@ -12,13 +13,16 @@ import {
   ZoneOffsetModifier,
 } from '../../types/modifiers';
 import { miterOffsetPolygon } from '../../utils/math2d/miterOffset';
+import { generateGateCorridor } from '../../utils/math2d/gateGeometry';
 import {
+  cutGateFromFootprint,
   generateBayWindowPolygon,
   generateCornerCutPolygon,
   generateDonutHoles,
   generateTerracePolygon,
   generateZoneBand,
   resolveStoryModifierSteps,
+  sanitizeStoryFootprint,
 } from './modifierPipeline';
 import { resolveIndexTarget } from './modifierIndexTarget';
 
@@ -96,12 +100,16 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
   },
 
   terrace: (modifier: TerraceModifier, ctx) => {
-    const { depth, storiesCount, edgeIndex } = modifier;
+    const { depth, storiesCount, edgeIndex, variant } = modifier;
     if (Math.abs(depth) < 1e-4) return;
 
-    const steps = resolveStoryModifierSteps(ctx.K, storiesCount, { cascade: true });
+    const isCascade = variant === 'steps';
+    const steps = resolveStoryModifierSteps(ctx.K, storiesCount, { cascade: isCascade });
+    const maxMultiplier = isCascade && steps.length > 0 ? Math.max(...steps.map((s) => s.stepMultiplier)) : 1;
+    const baseStepDepth = depth / maxMultiplier;
+
     for (const { storyIndex, stepMultiplier } of steps) {
-      const storyDepth = depth * stepMultiplier;
+      const storyDepth = isCascade ? baseStepDepth * stepMultiplier : depth;
       const footprint = ctx.storyFootprints[storyIndex];
       const target = resolveIndexTarget(footprint, edgeIndex);
 
@@ -155,9 +163,45 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
       }
     }
   },
+
+  gate: (modifier: GateModifier, ctx) => {
+    const { width, storiesCount, edgeIndex, positionRatio } = modifier;
+    if (width <= 1e-4) return;
+
+    const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
+    const targetStoryIndices = new Set(steps.map((s) => s.storyIndex));
+
+    const newFootprints: StoryFootprint[] = [];
+    for (const sf of ctx.storyFootprints) {
+      if (targetStoryIndices.has(sf.storyIndex)) {
+        const corridor = generateGateCorridor(
+          sf.polygon,
+          sf.holes,
+          width,
+          positionRatio ?? 0.5,
+          edgeIndex
+        );
+        if (corridor) {
+          const cutResults = cutGateFromFootprint(sf, corridor.cuttingPolygon);
+          newFootprints.push(...cutResults);
+        } else {
+          newFootprints.push(sf);
+        }
+      } else {
+        newFootprints.push(sf);
+      }
+    }
+
+    ctx.storyFootprints = newFootprints;
+  },
 };
 
 export function applyModifier(modifier: Modifier, ctx: ModifierApplyContext): void {
   const applier = MODIFIER_APPLIERS[modifier.type] as ModifierApplyFn<Modifier>;
   applier(modifier, ctx);
+
+  // Systemowa sanityzacja obrysów kondygnacji po każdym kroku modyfikatora
+  for (let s = 0; s < ctx.storyFootprints.length; s++) {
+    ctx.storyFootprints[s] = sanitizeStoryFootprint(ctx.storyFootprints[s]);
+  }
 }

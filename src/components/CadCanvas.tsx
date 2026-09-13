@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { Point2D, AnalysisPointResult } from '../types/geometry';
+import { Point2D, AnalysisPointResult, DEFAULT_SWEEP_WIDTH } from '../types/geometry';
 import { computeCombinedShadowEnvelope } from '@/utils/math2d';
 import { computeHourlyShadowsLive } from '@/utils/math2d/shadowEnvelope';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
@@ -46,7 +46,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     onCancelDrawing,
     onFinishDrawing,
     drawingMode = 'none',
-    sweepWidth = 5.0,
+    sweepWidth = DEFAULT_SWEEP_WIDTH,
     sweepAlignment = 'center',
     pinnedPoints = [],
     pinnedPointResults: propPinnedPointResults,
@@ -299,7 +299,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     selectedVertexIndex: interaction.selectedVertexIndex,
     onDeleteSelectedVertex: interaction.handleDeleteSelectedVertex,
     onCycleVertexSelection: interaction.handleCycleVertexSelection,
-    onStepRotateBuilding: interaction.handleStepRotateBuilding,
+    onAdjustObjectParam: interaction.handleAdjustObjectParam,
     onCancelDrawing,
     onFinishDrawing,
     setDrawingVertices: interaction.setDrawingVertices,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Loader2, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { FloatingInspectorAccordion } from '@/components/common/FloatingInspectorAccordion';
 import { PointInspectorModal } from '@/components/PointInspectorModal';
+import { BuildingPreviewPanel } from '@/components/preview/BuildingPreviewPanel';
 import { BuildingModifiersPanel } from '@/components/modifiers/BuildingModifiersPanel';
 import { ProjectParametersPanel } from '@/components/parameters/ProjectParametersPanel';
 import { CompassRose } from '@/components/cad/CompassRose';
@@ -23,7 +24,14 @@ export const FloatingPanelsHost: React.FC<FloatingPanelsHostProps> = ({
   onDismissStatus,
 }) => {
   // Scene Store
+  const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
+
+  const selectedBuilding = React.useMemo(
+    () => buildings.find((b) => b.id === selectedBuildingId) || null,
+    [buildings, selectedBuildingId]
+  );
+  const isBuilding3D = !!(selectedBuilding && selectedBuilding.category !== 'boundary');
 
   // CAD Tool Store
   const showModifiersPanel = useCadToolStore((s) => s.showModifiersPanel);
@@ -77,6 +85,9 @@ export const FloatingPanelsHost: React.FC<FloatingPanelsHostProps> = ({
     <>
       {/* Floating Inspector Accordion (Right Side) */}
       <FloatingInspectorAccordion>
+        {/* Section: Frameless 4:3 3D Building Preview (Automatic for 3D buildings) */}
+        {isBuilding3D && <BuildingPreviewPanel />}
+
         {/* Section 1: Facade Point Inspector */}
         {hasPoints && (
           <PointInspectorModal

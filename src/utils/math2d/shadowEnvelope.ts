@@ -91,14 +91,15 @@ export function computeFastShadowPolygon(
   hTop: number,
   hBase: number = 0
 ): Point2D[] {
-  if (!polygon || polygon.length < 3 || hTop <= 0 || sunElevationRad <= 0.001 || hTop <= hBase) {
-    return polygon ? [...polygon] : [];
+  const effectiveBase = Math.max(0, hBase);
+  if (!polygon || polygon.length < 3 || hTop <= 0 || sunElevationRad <= 0.001 || hTop <= effectiveBase) {
+    return [];
   }
 
   const topOffset = getShadowOffsetVector(sunAzimuthRad, sunElevationRad, hTop);
-  const baseOffset = hBase > 0 ? getShadowOffsetVector(sunAzimuthRad, sunElevationRad, hBase) : { x: 0, y: 0 };
+  const baseOffset = effectiveBase > 0 ? getShadowOffsetVector(sunAzimuthRad, sunElevationRad, effectiveBase) : { x: 0, y: 0 };
 
-  if (topOffset.x === baseOffset.x && topOffset.y === baseOffset.y) return [...polygon];
+  if (topOffset.x === baseOffset.x && topOffset.y === baseOffset.y) return [];
 
   // Dla wielokątów wypukłych: otoczka wypukła (zrzutowana podstawa + zrzutowany dach)
   if (isPolygonConvex(polygon)) {
@@ -202,10 +203,14 @@ export function computeBuildingShadowEnvelope(
   const vertices = building.vertices;
   if (!vertices || vertices.length < 3) return [];
 
-  const height = building.defaultHeight;
-  if (height <= 0) return [...vertices];
+  const hBase = building.elevation ?? 0.0;
+  const hTop = hBase + building.defaultHeight;
+  if (hTop <= 0) return [];
 
-  const cacheKey = `${building.id}|${height}|${latitude}|${longitude}|${equinoxDate}|${isChildcare}|${vertices[0].x.toFixed(2)},${vertices[0].y.toFixed(2)},${vertices.length}`;
+  const effectiveBase = Math.max(0, hBase);
+  if (hTop <= effectiveBase) return [];
+
+  const cacheKey = `${building.id}|${hTop}|${hBase}|${latitude}|${longitude}|${equinoxDate}|${isChildcare}|${vertices[0].x.toFixed(2)},${vertices[0].y.toFixed(2)},${vertices.length}`;
   const cached = buildingEnvelopeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -219,7 +224,7 @@ export function computeBuildingShadowEnvelope(
   const isConvex = isPolygonConvex(vertices);
 
   if (isConvex) {
-    const shadowPoints: Point2D[] = [...vertices];
+    const shadowPoints: Point2D[] = [];
 
     for (const offset of hourOffsets) {
       const hour = noonHour + offset;
@@ -227,14 +232,16 @@ export function computeBuildingShadowEnvelope(
       if (pos.elevationDeg > 0.5) {
         const azRad = pos.azimuthDeg * (Math.PI / 180);
         const elevRad = pos.elevationDeg * (Math.PI / 180);
-        const sOffset = getShadowOffsetVector(azRad, elevRad, height);
+        const sOffsetTop = getShadowOffsetVector(azRad, elevRad, hTop);
+        const sOffsetBase = effectiveBase > 0 ? getShadowOffsetVector(azRad, elevRad, effectiveBase) : { x: 0, y: 0 };
         for (const v of vertices) {
-          shadowPoints.push({ x: v.x + sOffset.x, y: v.y + sOffset.y });
+          shadowPoints.push({ x: v.x + sOffsetBase.x, y: v.y + sOffsetBase.y });
+          shadowPoints.push({ x: v.x + sOffsetTop.x, y: v.y + sOffsetTop.y });
         }
       }
     }
 
-    const result = computeConvexHull(shadowPoints);
+    const result = shadowPoints.length > 0 ? computeConvexHull(shadowPoints) : [];
     if (buildingEnvelopeCache.size > 2000) buildingEnvelopeCache.clear();
     buildingEnvelopeCache.set(cacheKey, result);
     return result;
@@ -248,7 +255,7 @@ export function computeBuildingShadowEnvelope(
     if (pos.elevationDeg > 0.5) {
       const azRad = pos.azimuthDeg * (Math.PI / 180);
       const elevRad = pos.elevationDeg * (Math.PI / 180);
-      const poly = computeFastShadowPolygon(vertices, azRad, elevRad, height);
+      const poly = computeFastShadowPolygon(vertices, azRad, elevRad, hTop, hBase);
       if (poly.length >= 3) {
         hourlyPolys.push(poly);
       }
@@ -273,7 +280,7 @@ export function computeCombinedShadowEnvelope(
   longitude: number = 21.01
 ): Point2D[][] {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
   if (testedBuildings.length === 0) return [];
 
@@ -299,7 +306,7 @@ export function computeFullShadowAnalysis(
   const t0 = performance.now();
 
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
 
   if (testedBuildings.length === 0) {
@@ -313,7 +320,7 @@ export function computeFullShadowAnalysis(
 
   // Budynki ograniczające ("negatywny cień")
   const blockingBuildings = buildings.filter(
-    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
+    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
 
   // Prekalkulacja bazowych AABB dla budynków blokujących (eliminuje tysiące iteracji po wierzchołkach w każdej godzinie)
@@ -355,16 +362,20 @@ export function computeFullShadowAnalysis(
     for (const bldg of testedBuildings) {
       if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
         for (const sf of bldg.storyPolygons) {
-          if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > (sf.hBottom || 0)) {
+          if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
             const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
             if (p.length >= 3) hourPolys.push(p);
           }
         }
       } else {
-        const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+        const bHBase = bldg.elevation ?? 0.0;
+        const bHTop = bHBase + bldg.defaultHeight;
+        if (bHTop <= 0) continue;
+
+        const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
         let poly = buildingFastShadowCache.get(fastKey);
         if (!poly) {
-          poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight, bldg.elevation || 0);
+          poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
           if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
           if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
         }
@@ -395,8 +406,12 @@ export function computeFullShadowAnalysis(
         for (let i = 0; i < blockingWithAABB.length; i++) {
           const item = blockingWithAABB[i];
           const bldg = item.bldg;
-          const offX = bldg.defaultHeight * uShadow.x;
-          const offY = bldg.defaultHeight * uShadow.y;
+          const bHBase = bldg.elevation ?? 0.0;
+          const bHTop = bHBase + bldg.defaultHeight;
+          if (bHTop <= 0) continue;
+
+          const offX = bHTop * uShadow.x;
+          const offY = bHTop * uShadow.y;
 
           const sMinX = Math.min(item.bMinX, item.bMinX + offX);
           const sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
@@ -410,16 +425,16 @@ export function computeFullShadowAnalysis(
 
           if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
             for (const sf of bldg.storyPolygons) {
-              if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > (sf.hBottom || 0)) {
+              if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
                 const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
                 if (p.length >= 3) blockingHourPolys.push(p);
               }
             }
           } else {
-            const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+            const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
             let poly = buildingFastShadowCache.get(fastKey);
             if (!poly) {
-              poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight, bldg.elevation || 0);
+              poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
               if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
               if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
             }
@@ -500,12 +515,12 @@ export function computeHourlyShadowsLive(
   sunlightMethod: 'raycasting' | 'segments' = 'raycasting'
 ): { hourlyShadows: HourlyShadowLoop[]; envelopeLoops: Point2D[][] } {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
   if (testedBuildings.length === 0) return { hourlyShadows: [], envelopeLoops: [] };
 
   const blockingBuildings = buildings.filter(
-    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
+    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
 
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);
@@ -528,10 +543,14 @@ export function computeHourlyShadowsLive(
 
     const polys: Point2D[][] = [];
     for (const bldg of testedBuildings) {
-      const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${o}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+      const bHBase = bldg.elevation ?? 0.0;
+      const bHTop = bHBase + bldg.defaultHeight;
+      if (bHTop <= 0) continue;
+
+      const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${o}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
       let poly = buildingFastShadowCache.get(fastKey);
       if (!poly) {
-        poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
+        poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
         if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
         if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
       }
@@ -555,7 +574,11 @@ export function computeHourlyShadowsLive(
 
         const blockingPolys: Point2D[][] = [];
         for (const bldg of blockingBuildings) {
-          const offsetVec = { x: bldg.defaultHeight * uShadow.x, y: bldg.defaultHeight * uShadow.y };
+          const bHBase = bldg.elevation ?? 0.0;
+          const bHTop = bHBase + bldg.defaultHeight;
+          if (bHTop <= 0) continue;
+
+          const offsetVec = { x: bHTop * uShadow.x, y: bHTop * uShadow.y };
           let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
           for (const v of bldg.vertices) {
             if (v.x < bMinX) bMinX = v.x;
@@ -572,10 +595,10 @@ export function computeHourlyShadowsLive(
             continue;
           }
 
-          const fastKey = `${bldg.id}|${bldg.defaultHeight}|${sunlightMethod}|${o}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+          const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${o}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
           let poly = buildingFastShadowCache.get(fastKey);
           if (!poly) {
-            poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bldg.defaultHeight);
+            poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
             if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
             if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
           }

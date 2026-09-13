@@ -35,4 +35,31 @@ describe('Shadow Parallax Base Calculation', () => {
     expect(minY).toBeCloseTo(10, 1);
     expect(maxY).toBeCloseTo(30, 1);
   });
+
+  it('object placed at elevation -3 with height 3 (hTop=0) does NOT cast shadow on plane 0', () => {
+    const azRad = Math.PI;
+    const elevRad = Math.PI / 4;
+    // hTop = 0, hBase = -3 -> entire volume is underground / at plane 0 -> no shadow
+    const poly = computeFastShadowPolygon(square, azRad, elevRad, 0, -3);
+    expect(poly.length).toBe(0);
+  });
+
+  it('object placed at elevation -5 with height 3 (hTop=-2) does NOT cast shadow on plane 0', () => {
+    const azRad = Math.PI;
+    const elevRad = Math.PI / 4;
+    const poly = computeFastShadowPolygon(square, azRad, elevRad, -2, -5);
+    expect(poly.length).toBe(0);
+  });
+
+  it('object placed at elevation -2 with height 5 (hTop=3) casts shadow only for the 3m above ground', () => {
+    const azRad = Math.PI;
+    const elevRad = Math.PI / 4; // tan(45) = 1 -> top offset = 3m
+    const poly = computeFastShadowPolygon(square, azRad, elevRad, 3, -2);
+    expect(poly.length).toBeGreaterThanOrEqual(4);
+    // Base is at ground 0 (Y=0), Top is at Y=10 + 3 = 13
+    const minY = Math.min(...poly.map((p) => p.y));
+    const maxY = Math.max(...poly.map((p) => p.y));
+    expect(minY).toBeCloseTo(0, 1);
+    expect(maxY).toBeCloseTo(13, 1);
+  });
 });

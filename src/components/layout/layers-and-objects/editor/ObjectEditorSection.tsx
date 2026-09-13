@@ -129,12 +129,12 @@ export const ObjectEditorSection: React.FC = () => {
               <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
                 Typ obszaru
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
                 <button
                   type="button"
                   onClick={() => updateSelectedBuilding({ areaType: 'plot' })}
                   style={{
-                    padding: '5px 8px',
+                    padding: '5px 6px',
                     borderRadius: '6px',
                     border: !selectedBuilding.areaType || selectedBuilding.areaType === 'plot'
                       ? '1px solid var(--accent-rose)'
@@ -146,7 +146,7 @@ export const ObjectEditorSection: React.FC = () => {
                       ? 'var(--accent-rose)'
                       : 'var(--text-secondary)',
                     fontWeight: !selectedBuilding.areaType || selectedBuilding.areaType === 'plot' ? 700 : 500,
-                    fontSize: '11px',
+                    fontSize: '10.5px',
                     cursor: 'pointer',
                   }}
                 >
@@ -157,7 +157,7 @@ export const ObjectEditorSection: React.FC = () => {
                   type="button"
                   onClick={() => updateSelectedBuilding({ areaType: 'playground' })}
                   style={{
-                    padding: '5px 8px',
+                    padding: '5px 6px',
                     borderRadius: '6px',
                     border: isPlayground
                       ? '1px solid var(--accent-emerald)'
@@ -167,11 +167,32 @@ export const ObjectEditorSection: React.FC = () => {
                       : 'var(--bg-input)',
                     color: isPlayground ? 'var(--accent-emerald)' : 'var(--text-secondary)',
                     fontWeight: isPlayground ? 700 : 500,
-                    fontSize: '11px',
+                    fontSize: '10.5px',
                     cursor: 'pointer',
                   }}
                 >
                   Plac zabaw
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => updateSelectedBuilding({ areaType: 'paved' })}
+                  style={{
+                    padding: '5px 6px',
+                    borderRadius: '6px',
+                    border: selectedBuilding.areaType === 'paved'
+                      ? '1px solid var(--accent-slate, #94a3b8)'
+                      : '1px solid var(--border-light)',
+                    backgroundColor: selectedBuilding.areaType === 'paved'
+                      ? 'rgba(148, 163, 184, 0.25)'
+                      : 'var(--bg-input)',
+                    color: selectedBuilding.areaType === 'paved' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontWeight: selectedBuilding.areaType === 'paved' ? 700 : 500,
+                    fontSize: '10.5px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Utwardzenie
                 </button>
               </div>
             </div>
@@ -184,6 +205,32 @@ export const ObjectEditorSection: React.FC = () => {
                 sunlightMethod={sunlightMethod}
                 onUpdate={updateSelectedBuilding}
               />
+            ) : selectedBuilding.areaType === 'paved' ? (
+              /* Nawierzchnia utwardzona */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(148, 163, 184, 0.12)',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    fontSize: '11px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Pow. utwardzona:</span>
+                    <b style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>
+                      {selectedBuildingArea.toFixed(1)} m²
+                    </b>
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                    • Nawierzchnia nieprzepuszczalna (drogi, chodniki, place manewrowe) – odliczana od gruntu rodzimego.
+                  </div>
+                </div>
+              </div>
             ) : (
               /* Działka */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

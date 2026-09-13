@@ -10,6 +10,8 @@ export interface Vector2D {
 
 export type BuildingType = 'residential' | 'service' | 'garage';
 
+export const DEFAULT_SWEEP_WIDTH = 12.0;
+
 export interface LineEquation2D {
   A: number; // A*x + B*y + C = 0 (normalized: A^2 + B^2 = 1)
   B: number;
@@ -42,7 +44,7 @@ import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
 
 
 export type ObjectCategory = 'building' | 'boundary' | 'balcony';
-export type AreaType = 'plot' | 'playground';
+export type AreaType = 'plot' | 'playground' | 'paved';
 
 export interface PlaygroundSamplePoint {
   point: Point2D;

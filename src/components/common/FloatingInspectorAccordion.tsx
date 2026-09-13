@@ -11,7 +11,7 @@ export const FloatingInspectorAccordion: React.FC<FloatingInspectorAccordionProp
   children,
   width = 360,
   top = '70px',
-  right = '20px',
+  right = '16px',
 }) => {
   const validChildren = React.Children.toArray(children).filter(Boolean);
   if (validChildren.length === 0) return null;

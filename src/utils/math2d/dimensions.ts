@@ -170,4 +170,63 @@ export function computeAngularDimension(
   };
 }
 
+/**
+ * Wylicza prostopadłą odległość od wybranej krawędzi do najbliższego wierzchołka
+ * wzdłuż krawędzi wychodzących/przyległych z tej krawędzi.
+ *
+ * Dla krawędzi E = P1 -> P2, krawędziami wychodzącymi są P_prev -> P1 oraz P2 -> P_next.
+ * Odległość jest mierzona jako rzut wektorów przyległych wierzchołków na normalną krawędzi E.
+ */
+export function computeEdgeAdjacentPerpendicularDistance(
+  vertices: Point2D[],
+  edgeIndex?: number
+): number | null {
+  if (!vertices || vertices.length < 3) return null;
+  const n = vertices.length;
 
+  let bestEdgeIdx = 0;
+  let maxEdgeLen = 0;
+  for (let i = 0; i < n; i++) {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % n];
+    const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (len > maxEdgeLen) {
+      maxEdgeLen = len;
+      bestEdgeIdx = i;
+    }
+  }
+
+  const targetIdx =
+    edgeIndex !== undefined && edgeIndex >= 0 && edgeIndex < n ? edgeIndex : bestEdgeIdx;
+
+  const prevIdx = (targetIdx - 1 + n) % n;
+  const nextIdx = (targetIdx + 1) % n;
+  const nextNextIdx = (targetIdx + 2) % n;
+
+  const pPrev = vertices[prevIdx];
+  const p1 = vertices[targetIdx];
+  const p2 = vertices[nextIdx];
+  const pNext = vertices[nextNextIdx];
+
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const edgeLen = Math.hypot(dx, dy);
+  if (edgeLen < 1e-6) return null;
+
+  // Wektor jednostkowy normalnej (dowolnej orientacji prostopadłej do krawędzi)
+  const nx = -dy / edgeLen;
+  const ny = dx / edgeLen;
+
+  // Rzuty prostopadłe wektorów (P_prev - P1) oraz (P_next - P2) na normalną krawędzi
+  const d1 = Math.abs((pPrev.x - p1.x) * nx + (pPrev.y - p1.y) * ny);
+  const d2 = Math.abs((pNext.x - p2.x) * nx + (pNext.y - p2.y) * ny);
+
+  const candidates = [d1, d2].filter((d) => d > 1e-4);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const minDistance = Math.min(...candidates);
+  // Zaokrąglij do 2 miejsc po przecinku
+  return Math.round(minDistance * 100) / 100;
+}

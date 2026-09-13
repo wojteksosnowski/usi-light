@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
-import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference } from '../types/geometry';
+import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference, DEFAULT_SWEEP_WIDTH } from '../types/geometry';
 import { createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { rebuildBuildingSegments } from '../utils/segmentStatistics';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
@@ -300,7 +300,7 @@ export const useSceneStore = create<SceneState>()(
           updated.sweepPath.length >= 2 &&
           (fields.sweepWidth !== undefined || fields.sweepAlignment !== undefined)
         ) {
-          const w = updated.sweepWidth ?? 6.0;
+          const w = updated.sweepWidth ?? DEFAULT_SWEEP_WIDTH;
           const align = updated.sweepAlignment ?? 'center';
           const newVerts = generateSweepPolygon(updated.sweepPath, w, align);
           if (newVerts.length >= 3) {
@@ -407,7 +407,7 @@ export const useSceneStore = create<SceneState>()(
     set((state) => ({
       buildings: state.buildings.map((bldg) => {
         if (bldg.id !== buildingId) return bldg;
-        const effectiveWidth = width ?? bldg.sweepWidth ?? 6.0;
+        const effectiveWidth = width ?? bldg.sweepWidth ?? DEFAULT_SWEEP_WIDTH;
         const effectiveAlignment = alignment ?? bldg.sweepAlignment ?? 'center';
         const newVertices = generateSweepPolygon(newSweepPath, effectiveWidth, effectiveAlignment);
 
@@ -549,7 +549,7 @@ export const useSceneStore = create<SceneState>()(
           if (edgeIndex >= 0 && edgeIndex < bldg.sweepPath.length - 1) {
             const nextSweepPath = offsetOpenPolylineEdge(bldg.sweepPath, edgeIndex, { x: dx, y: dy });
 
-            const effectiveWidth = bldg.sweepWidth ?? 6.0;
+            const effectiveWidth = bldg.sweepWidth ?? DEFAULT_SWEEP_WIDTH;
             const effectiveAlignment = bldg.sweepAlignment ?? 'center';
             const newVertices = generateSweepPolygon(nextSweepPath, effectiveWidth, effectiveAlignment);
 

@@ -368,18 +368,18 @@ html, body, #root {
 /* Inspector Floating Modal */
 .inspector-card {
   position: absolute;
-  top: 16px;
+  top: 70px;
   right: 16px;
-  width: 380px;
-  max-height: calc(100vh - 32px);
+  width: 360px;
+  max-height: calc(100vh - 120px);
   overflow-y: auto;
   background-color: rgba(11, 19, 41, 0.95);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-light);
-  border-radius: 18px;
-  padding: 18px;
-  z-index: 40;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  border-radius: 12px;
+  padding: 14px 16px;
+  z-index: 50;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
 }
 
 /* Interactive Button Elements */

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { DimensionItem, DimensionReference, DimensionType, Point2D } from '../types/geometry';
+import { DEFAULT_SWEEP_WIDTH, DimensionItem, DimensionReference, DimensionType, Point2D } from '../types/geometry';
 import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 import { useSceneStore } from './useSceneStore';
@@ -88,7 +88,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   drawingMode: 'none',
   drawingVerticesCount: 0,
 
-  sweepWidth: 5.0,
+  sweepWidth: DEFAULT_SWEEP_WIDTH,
   sweepAlignment: 'center',
 
   isEditMode: false,
@@ -114,7 +114,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   setDrawingMode: (mode) => set({ drawingMode: mode }),
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
-  setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : 5.0) }),
+  setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : DEFAULT_SWEEP_WIDTH) }),
   setSweepAlignment: (alignment) => set({ sweepAlignment: alignment }),
   setIsEditMode: (active) => set({ isEditMode: active }),
   setFacadePointMode: (active) => set({ facadePointMode: active }),

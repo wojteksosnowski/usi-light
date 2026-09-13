@@ -76,8 +76,9 @@ export const useSceneObjectsList = () => {
       items: group.items,
     }));
 
-    const plotList = areaList.filter((b) => b.areaType !== 'playground');
+    const plotList = areaList.filter((b) => !b.areaType || b.areaType === 'plot');
     const playgroundList = areaList.filter((b) => b.areaType === 'playground');
+    const pavedList = areaList.filter((b) => b.areaType === 'paved');
 
     return {
       buildingList,
@@ -85,6 +86,7 @@ export const useSceneObjectsList = () => {
       areaList,
       plotList,
       playgroundList,
+      pavedList,
       balconyList,
     };
   }, [buildings]);

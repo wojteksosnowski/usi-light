@@ -3,7 +3,6 @@ import { useSceneStore } from '../../store';
 import { Modifier, StoryFootprint } from '../../types/modifiers';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
-import { BuildingIsoPreview } from '../preview/BuildingIsoPreview';
 import { ModifierCard } from './ModifierCard';
 import { MODIFIER_DESCRIPTORS } from './modifierDescriptors';
 import { buildGlobalIndexOptions } from './modifierIndexOptions';
@@ -58,7 +57,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
 
   if (!selectedBuilding) return null;
 
-  const fieldContext = { availableEdges, availableVertices };
+  const fieldContext = { availableEdges, availableVertices, building: selectedBuilding };
 
   return (
     <FloatingInspectorCard
@@ -72,13 +71,8 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
       isCollapsed={isCollapsed}
       onToggleCollapse={onToggleCollapse}
     >
-      {/* 1:1 Isometric Preview */}
-      <div style={{ marginBottom: '14px' }}>
-        <BuildingIsoPreview building={selectedBuilding} />
-      </div>
-
       {/* Modifier Stack List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '0px' }}>
         {modifiers.length === 0 ? (
           <div
             style={{
