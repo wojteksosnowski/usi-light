@@ -16,8 +16,6 @@ export const ProjectCadCard: React.FC = () => {
   const { dxfUnit, dxfImportInfo, handleFileUpload, handleDxfUnitChange } = useProjectIO();
   const {
     isPro,
-    includeTerrainMesh,
-    setIncludeTerrainMesh,
     terrainExportBusy,
     exportWarning,
     handleExportDxf,
@@ -82,24 +80,6 @@ export const ProjectCadCard: React.FC = () => {
         {exportWarning && (
           <div style={{ fontSize: '10.5px', color: 'var(--accent-amber)', textAlign: 'center', fontWeight: 600 }}>
             {exportWarning}
-          </div>
-        )}
-
-        {isPro && (
-          <div className="project-layer-toggle-row">
-            <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>
-              Dołącz rzeźbę terenu (NMT) do DXF
-            </span>
-            <button
-              type="button"
-              onClick={() => setIncludeTerrainMesh(!includeTerrainMesh)}
-              title="Dołącz do eksportu DXF siatkę rzeźby terenu (NMT, GUGiK) — wymaga dodatkowego zapytania sieciowego"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-              <div className={`project-toggle-switch ${includeTerrainMesh ? 'active active-cyan' : ''}`}>
-                <div className="project-toggle-dot" />
-              </div>
-            </button>
           </div>
         )}
 

@@ -371,8 +371,10 @@ export const useWfsStore = create<WfsState>()(
       geoLayersSnapshot = null;
       set({
         showGeoOverlayGroup: true,
-        showKiutLayer: snapshot?.kiut ?? (state.showKiutLayer || !state.showBdotLayer),
-        showBdotLayer: snapshot?.bdot ?? state.showBdotLayer,
+        // Przy pierwszym włączeniu (brak migawki) włącz WSZYSTKIE warstwy podkładu na raz —
+        // wcześniej fallback `state.showKiutLayer || !state.showBdotLayer` włączał tylko GESUT.
+        showKiutLayer: snapshot?.kiut ?? true,
+        showBdotLayer: snapshot?.bdot ?? true,
       });
     } else {
       geoLayersSnapshot = {

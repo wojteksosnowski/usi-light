@@ -191,14 +191,13 @@ export class GoogleTileManager implements ISatelliteTileManager {
   }
 
   /**
-   * Cichy prefetch kafli dla poziomów zoom w zadanym promieniu projektu. Gdy podano `currentZoom`,
-   * chroni w cache tylko okno wokół aktualnie widocznego poziomu (zamiast całego 14..maxNativeZoom) —
-   * ogranicza to rozmiar zbioru chronionych kluczy i koszt ewentualnej eviction w ProtectedLruCache.
-   * "Przypina" klucze w cache i pobiera je w tle za pośrednictwem kolejki z limitem współbieżności.
+   * Cichy prefetch kafli dla ustalonego zakresu poziomów zoom (16..20, niezależnie od bieżącego
+   * poziomu widoku) w zadanym promieniu projektu — "przypina" klucze w cache (chroni przed
+   * eviction) i pobiera je w tle za pośrednictwem kolejki z limitem współbieżności.
    */
-  public prefetchAllZoomsInRadius(lat: number, lon: number, radiusMeters: number, minZoom = 14, currentZoom?: number) {
-    const effectiveMinZoom = currentZoom != null ? Math.max(minZoom, Math.floor(currentZoom) - 1) : minZoom;
-    const effectiveMaxZoom = currentZoom != null ? Math.min(this.maxNativeZoom, Math.ceil(currentZoom) + 1) : this.maxNativeZoom;
+  public prefetchAllZoomsInRadius(lat: number, lon: number, radiusMeters: number, minZoom = 16, _currentZoom?: number) {
+    const effectiveMinZoom = minZoom;
+    const effectiveMaxZoom = Math.min(this.maxNativeZoom, 20);
     const ranges = computeAllZoomTileRanges(lat, lon, radiusMeters, effectiveMinZoom, effectiveMaxZoom);
     this.cache.setProtectedKeys(allTileKeysInRanges(ranges));
 
@@ -223,6 +222,6 @@ export class GoogleTileManager implements ISatelliteTileManager {
    * Prefetch kafelków w promieniu projektu (wspiera wsteczną kompatybilność, uruchamia prefetchAllZoomsInRadius).
    */
   public prefetchTilesInRadius(lat: number, lon: number, radiusMeters: number, currentZoom?: number) {
-    this.prefetchAllZoomsInRadius(lat, lon, radiusMeters, 14, currentZoom);
+    this.prefetchAllZoomsInRadius(lat, lon, radiusMeters, 16, currentZoom);
   }
 }
