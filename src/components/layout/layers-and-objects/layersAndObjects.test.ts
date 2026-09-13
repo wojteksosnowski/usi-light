@@ -6,6 +6,7 @@ import {
   ObjectEditorSection,
   CircleSelectionIcon,
 } from './index';
+import { computeObjectTree } from './objects/hooks/useSceneObjectsList';
 
 describe('LayersAndObjects module exports & store integration', () => {
   beforeEach(() => {
@@ -82,5 +83,68 @@ describe('LayersAndObjects module exports & store integration', () => {
 
     useSceneStore.getState().toggleLayerVisibility('Architektura');
     expect(useSceneStore.getState().layerSettings['Architektura']?.isVisible).toBe(false);
+  });
+
+  it('correctly categorizes objects into inProject and outsideProject for each type', () => {
+    const prevBuildings = useSceneStore.getState().buildings;
+    useSceneStore.setState({
+      buildings: [
+        ...prevBuildings,
+        {
+          id: 'b2_context',
+          name: 'Budynek Istniejący',
+          layer: 'Otoczenie',
+          category: 'building',
+          isTested: false,
+          isIncluded: true,
+          isCityCentre: false,
+          buildingType: 'residential',
+          defaultHeight: 25,
+          elevation: 2,
+          hWindowBottom: 0.85,
+          vertices: [{ x: 30, y: 30 }, { x: 40, y: 30 }, { x: 40, y: 40 }, { x: 30, y: 40 }],
+          segments: [],
+          transform: { tx: 0, ty: 0, rotationDeg: 0 },
+        },
+        {
+          id: 'pg1',
+          name: 'Plac Zabaw A',
+          layer: 'Zieleń',
+          category: 'boundary',
+          areaType: 'playground',
+          isTested: true,
+          isIncluded: true,
+          isCityCentre: false,
+          buildingType: 'residential',
+          defaultHeight: 0,
+          hWindowBottom: 0,
+          vertices: [{ x: 0, y: 15 }, { x: 10, y: 15 }, { x: 10, y: 25 }, { x: 0, y: 25 }],
+          segments: [],
+          transform: { tx: 0, ty: 0, rotationDeg: 0 },
+        },
+      ],
+    });
+
+    const currentBuildings = useSceneStore.getState().buildings;
+    const tree = computeObjectTree(currentBuildings);
+
+    // Budynki
+    expect(tree.buildings.all.length).toBe(2);
+    expect(tree.buildings.inProject.length).toBe(1);
+    expect(tree.buildings.inProject[0].id).toBe('b1');
+    expect(tree.buildings.outsideProject.length).toBe(1);
+    expect(tree.buildings.outsideProject[0].id).toBe('b2_context');
+
+    // Działki
+    expect(tree.plots.all.length).toBe(1);
+    expect(tree.plots.inProject.length).toBe(0);
+    expect(tree.plots.outsideProject.length).toBe(1);
+    expect(tree.plots.outsideProject[0].id).toBe('plot1');
+
+    // Place zabaw
+    expect(tree.playgrounds.all.length).toBe(1);
+    expect(tree.playgrounds.inProject.length).toBe(1);
+    expect(tree.playgrounds.inProject[0].id).toBe('pg1');
+    expect(tree.playgrounds.outsideProject.length).toBe(0);
   });
 });
