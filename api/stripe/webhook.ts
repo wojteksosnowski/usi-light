@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { nanoid } from 'nanoid';
-import { getStripe, getRedisAndRatelimit, formatLicenseKey, LicenseRecord } from '../lib/serverStripe.js';
+import { getStripe, getRedisAndRatelimit, formatLicenseKey, LicenseRecord } from '../_lib/serverStripe.js';
 
 // Helper do pobierania surowego bufora żądania dla weryfikacji podpisu Stripe
 async function getRawBody(req: VercelRequest): Promise<Buffer> {

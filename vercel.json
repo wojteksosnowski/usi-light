@@ -2,6 +2,34 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
+      "source": "/api/egib-wfs",
+      "destination": "/api/wfs?target=egib"
+    },
+    {
+      "source": "/api/krakow-wfs",
+      "destination": "/api/wfs?target=krakow"
+    },
+    {
+      "source": "/api/lcv-wfs",
+      "destination": "/api/wfs?target=lcv"
+    },
+    {
+      "source": "/api/gdynia-mpzp-wfs",
+      "destination": "/api/wfs?target=gdynia-mpzp"
+    },
+    {
+      "source": "/api/krakow-mpzp-wfs",
+      "destination": "/api/wfs?target=krakow-mpzp"
+    },
+    {
+      "source": "/api/poznan-mpzp-wfs",
+      "destination": "/api/wfs?target=poznan-mpzp"
+    },
+    {
+      "source": "/api/wroclaw-mpzp-wfs",
+      "destination": "/api/wfs?target=wroclaw-mpzp"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

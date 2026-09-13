@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import handler from './share';
+import handler from '../api/share';
 
 const mockRedisGet = vi.fn();
 const mockRedisSet = vi.fn();
