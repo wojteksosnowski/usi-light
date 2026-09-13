@@ -7,6 +7,7 @@ import { CadRenderFrameContext } from './cad/pipeline/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { useCanvasInteraction, isBuildingLocked, getBuildingTopElevation } from './cad/hooks/useCanvasInteraction';
+import { useDemoRecorder } from '../hooks/useDemoRecorder';
 import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
 import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
 import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
@@ -72,6 +73,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useDemoRecorder(canvasRef);
 
   const [expandedLabelBuildingId, setExpandedLabelBuildingId] = useState<string | null>(null);
   const handleLabelClick = (id: string | null) => {
