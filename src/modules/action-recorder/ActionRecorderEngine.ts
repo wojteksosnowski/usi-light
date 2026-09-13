@@ -131,11 +131,10 @@ export class ActionRecorderEngine {
         buildings: JSON.parse(JSON.stringify(sceneState.buildings || [])),
         selectedBuildingId: sceneState.selectedBuildingId,
         selectedBuildingIds: [...(sceneState.selectedBuildingIds || [])],
-        pinnedPoints: JSON.parse(JSON.stringify(sceneState.pinnedPoints || [])),
-        dimensions: JSON.parse(JSON.stringify(sceneState.dimensions || [])),
         layerSettings: JSON.parse(JSON.stringify(sceneState.layerSettings || {})),
       },
       solar: {
+        pinnedPoints: JSON.parse(JSON.stringify(solarState.pinnedPoints || [])),
         showShadowingLines: solarState.showShadowingLines,
         showSunlightLines: solarState.showSunlightLines,
         showShadowRange: solarState.showShadowRange,
@@ -147,10 +146,11 @@ export class ActionRecorderEngine {
         sunlightMethod: solarState.sunlightMethod,
       },
       cad: {
+        dimensions: JSON.parse(JSON.stringify(cadState.dimensions || [])),
         viewRotationDeg: cadState.viewRotationDeg,
         drawingMode: cadState.drawingMode,
         isEditMode: cadState.isEditMode,
-        isDimensionMode: cadState.isDimensionMode,
+        isDimensionToolActive: cadState.isDimensionToolActive,
       },
     };
 
@@ -231,16 +231,12 @@ export class ActionRecorderEngine {
         state.buildings !== prev.buildings ||
         state.selectedBuildingId !== prev.selectedBuildingId ||
         state.selectedBuildingIds !== prev.selectedBuildingIds ||
-        state.pinnedPoints !== prev.pinnedPoints ||
-        state.dimensions !== prev.dimensions ||
         state.layerSettings !== prev.layerSettings
       ) {
         this.recordEvent('scene_state', {
           buildings: JSON.parse(JSON.stringify(state.buildings || [])),
           selectedBuildingId: state.selectedBuildingId,
           selectedBuildingIds: [...(state.selectedBuildingIds || [])],
-          pinnedPoints: JSON.parse(JSON.stringify(state.pinnedPoints || [])),
-          dimensions: JSON.parse(JSON.stringify(state.dimensions || [])),
           layerSettings: JSON.parse(JSON.stringify(state.layerSettings || {})),
         });
       }
@@ -250,6 +246,7 @@ export class ActionRecorderEngine {
     const unsubSolar = useSolarAnalysisStore.subscribe((state, prev) => {
       if (!this.isRecording()) return;
       if (
+        state.pinnedPoints !== prev.pinnedPoints ||
         state.showShadowingLines !== prev.showShadowingLines ||
         state.showSunlightLines !== prev.showSunlightLines ||
         state.showShadowRange !== prev.showShadowRange ||
@@ -260,6 +257,7 @@ export class ActionRecorderEngine {
         state.settings !== prev.settings
       ) {
         this.recordEvent('solar_state', {
+          pinnedPoints: JSON.parse(JSON.stringify(state.pinnedPoints || [])),
           showShadowingLines: state.showShadowingLines,
           showSunlightLines: state.showSunlightLines,
           showShadowRange: state.showShadowRange,
@@ -276,16 +274,18 @@ export class ActionRecorderEngine {
     const unsubCad = useCadToolStore.subscribe((state, prev) => {
       if (!this.isRecording()) return;
       if (
+        state.dimensions !== prev.dimensions ||
         state.viewRotationDeg !== prev.viewRotationDeg ||
         state.drawingMode !== prev.drawingMode ||
         state.isEditMode !== prev.isEditMode ||
-        state.isDimensionMode !== prev.isDimensionMode
+        state.isDimensionToolActive !== prev.isDimensionToolActive
       ) {
         this.recordEvent('cad_state', {
+          dimensions: JSON.parse(JSON.stringify(state.dimensions || [])),
           viewRotationDeg: state.viewRotationDeg,
           drawingMode: state.drawingMode,
           isEditMode: state.isEditMode,
-          isDimensionMode: state.isDimensionMode,
+          isDimensionToolActive: state.isDimensionToolActive,
         });
       }
     });

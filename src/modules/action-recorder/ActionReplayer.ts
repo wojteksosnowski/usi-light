@@ -59,15 +59,13 @@ export class ActionReplayer {
       if (init.scene.selectedBuildingIds) {
         scene.setSelectedBuildingIds(init.scene.selectedBuildingIds);
       }
-      if (init.scene.pinnedPoints) {
-        scene.setPinnedPoints(JSON.parse(JSON.stringify(init.scene.pinnedPoints)));
-      }
-      if (init.scene.dimensions) {
-        scene.setDimensions(JSON.parse(JSON.stringify(init.scene.dimensions)));
-      }
     }
 
-    // 2. Analiza Słoneczna
+    // 2. Analiza Słoneczna (w tym Pinned Points)
+    const pinned = init.solar?.pinnedPoints || init.scene?.pinnedPoints;
+    if (pinned) {
+      useSolarAnalysisStore.getState().setPinnedPoints(JSON.parse(JSON.stringify(pinned)));
+    }
     if (init.solar) {
       const solar = useSolarAnalysisStore.getState();
       if (init.solar.showShadowingLines !== undefined)
@@ -88,7 +86,11 @@ export class ActionReplayer {
         solar.updateSettings(init.solar.settings);
     }
 
-    // 3. Widok CAD
+    // 3. Widok CAD i Wymiarowanie
+    const dims = init.cad?.dimensions || init.scene?.dimensions;
+    if (dims) {
+      useCadToolStore.getState().setDimensions(JSON.parse(JSON.stringify(dims)));
+    }
     if (init.cad) {
       const cad = useCadToolStore.getState();
       if (init.cad.viewRotationDeg !== undefined) {
@@ -287,18 +289,15 @@ export class ActionReplayer {
         if (ev.payload.selectedBuildingIds) {
           scene.setSelectedBuildingIds(ev.payload.selectedBuildingIds);
         }
-        if (ev.payload.pinnedPoints) {
-          scene.setPinnedPoints(
-            JSON.parse(JSON.stringify(ev.payload.pinnedPoints))
-          );
-        }
-        if (ev.payload.dimensions) {
-          scene.setDimensions(JSON.parse(JSON.stringify(ev.payload.dimensions)));
-        }
         break;
       }
       case 'solar_state': {
         const solar = useSolarAnalysisStore.getState();
+        if (ev.payload.pinnedPoints) {
+          solar.setPinnedPoints(
+            JSON.parse(JSON.stringify(ev.payload.pinnedPoints))
+          );
+        }
         if (ev.payload.showShadowingLines !== undefined)
           solar.setShowShadowingLines(ev.payload.showShadowingLines);
         if (ev.payload.showSunlightLines !== undefined)
@@ -319,8 +318,14 @@ export class ActionReplayer {
       }
       case 'cad_state': {
         const cad = useCadToolStore.getState();
+        if (ev.payload.dimensions) {
+          cad.setDimensions(JSON.parse(JSON.stringify(ev.payload.dimensions)));
+        }
         if (ev.payload.viewRotationDeg !== undefined) {
           cad.setViewRotationDeg(ev.payload.viewRotationDeg);
+        }
+        if (ev.payload.isDimensionToolActive !== undefined) {
+          cad.setIsDimensionToolActive(ev.payload.isDimensionToolActive);
         }
         break;
       }
