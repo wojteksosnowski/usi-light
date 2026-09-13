@@ -1,18 +1,20 @@
-// src/modules/action-recorder/ActionRecorderEngine.ts
-// Silnik przechwytywania strumienia Canvas, śledzenia zdarzeń myszy/klawiatury i stanu Zustand
-
 import { useSceneStore } from '../../store/useSceneStore';
 import { useSolarAnalysisStore } from '../../store/useSolarAnalysisStore';
 import { useCadToolStore } from '../../store/useCadToolStore';
 import { useActionRecorderStore } from './useActionRecorderStore';
-import { ActionSession, ActionSessionEvent } from './types';
+import { ActionSession, ActionSessionEvent, VideoFormatOption } from './types';
 import { saveRecording } from './actionRecorderStorage';
+import { SimpleGifEncoder } from './gifEncoder';
 
 export class ActionRecorderEngine {
   private static instance: ActionRecorderEngine | null = null;
 
   private mediaRecorder: MediaRecorder | null = null;
   private recordedChunks: Blob[] = [];
+  private gifEncoder: SimpleGifEncoder | null = null;
+  private gifInterval: any = null;
+  private currentExtension = 'webm';
+  private currentMimeType = 'video/webm';
   private events: ActionSessionEvent[] = [];
   private startTimeMs = 0;
   private timerInterval: any = null;
@@ -33,6 +35,41 @@ export class ActionRecorderEngine {
 
   isRecording(): boolean {
     return useActionRecorderStore.getState().isRecording;
+  }
+
+  private getOptimalMimeType(format: VideoFormatOption): { mimeType: string; extension: string } {
+    if (format === 'mp4') {
+      if (typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function') {
+        if (MediaRecorder.isTypeSupported('video/mp4; codecs=avc1.42E01E,mp4a.40.2')) {
+          return { mimeType: 'video/mp4; codecs=avc1.42E01E,mp4a.40.2', extension: 'mp4' };
+        }
+        if (MediaRecorder.isTypeSupported('video/mp4; codecs=avc1')) {
+          return { mimeType: 'video/mp4; codecs=avc1', extension: 'mp4' };
+        }
+        if (MediaRecorder.isTypeSupported('video/mp4')) {
+          return { mimeType: 'video/mp4', extension: 'mp4' };
+        }
+      }
+      // Fallback do WebM VP9 jeśli MP4 nie jest wspierany przez przeglądarkę
+      if (typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function') {
+        if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
+          return { mimeType: 'video/webm; codecs=vp9', extension: 'webm' };
+        }
+      }
+      return { mimeType: 'video/webm', extension: 'webm' };
+    }
+
+    if (format === 'gif') {
+      return { mimeType: 'image/gif', extension: 'gif' };
+    }
+
+    // Domyślny format: WebM
+    if (typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function') {
+      if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
+        return { mimeType: 'video/webm; codecs=vp9', extension: 'webm' };
+      }
+    }
+    return { mimeType: 'video/webm', extension: 'webm' };
   }
 
   async start(
@@ -122,25 +159,55 @@ export class ActionRecorderEngine {
     this.startTimeMs = performance.now();
     this.activeKeySet.clear();
 
-    // ── 4. MediaRecorder na strumieniu Canvas ─────────────────────────
-    const fps = settings.fps || 60;
-    const stream = canvas.captureStream(fps);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp9')
-      ? 'video/webm; codecs=vp9'
-      : 'video/webm';
+    // ── 4. Inicjalizacja Nagrywania (Wideo MediaRecorder lub GIF) ─────
+    const optimal = this.getOptimalMimeType(settings.videoFormat);
+    this.currentExtension = optimal.extension;
+    this.currentMimeType = optimal.mimeType;
 
-    this.mediaRecorder = new MediaRecorder(stream, {
-      mimeType,
-      videoBitsPerSecond: settings.bitrate || 8_000_000,
-    });
+    if (settings.videoFormat === 'gif') {
+      const maxGifW = 640;
+      const scale = Math.min(1, maxGifW / (canvas.width || 640));
+      const targetW = Math.max(320, Math.round((canvas.width || 640) * scale));
+      const targetH = Math.max(240, Math.round((canvas.height || 480) * scale));
 
-    this.mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        this.recordedChunks.push(e.data);
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = targetW;
+      offCanvas.height = targetH;
+      const offCtx = offCanvas.getContext('2d');
+
+      this.gifEncoder = new SimpleGifEncoder(targetW, targetH);
+      const frameDelayMs = 100; // 10 FPS dla GIF
+
+      this.gifInterval = setInterval(() => {
+        if (!this.isRecording() || !offCtx) return;
+        try {
+          offCtx.clearRect(0, 0, targetW, targetH);
+          offCtx.drawImage(canvas, 0, 0, targetW, targetH);
+          const imgData = offCtx.getImageData(0, 0, targetW, targetH);
+          this.gifEncoder?.addFrame(imgData, frameDelayMs);
+        } catch (e) {
+          console.warn('[ActionRecorderEngine] Błąd klatki GIF:', e);
+        }
+      }, frameDelayMs);
+    } else {
+      const fps = settings.fps || 60;
+      const stream = canvas.captureStream ? canvas.captureStream(fps) : (canvas as any).mozCaptureStream?.(fps);
+
+      if (stream && typeof MediaRecorder !== 'undefined') {
+        this.mediaRecorder = new MediaRecorder(stream, {
+          mimeType: optimal.mimeType,
+          videoBitsPerSecond: settings.bitrate || 8_000_000,
+        });
+
+        this.mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            this.recordedChunks.push(e.data);
+          }
+        };
+
+        this.mediaRecorder.start(100);
       }
-    };
-
-    this.mediaRecorder.start(100);
+    }
 
     // ── 5. Rejestracja listenerów Store i DOM ──────────────────────────
     this.setupStoreListeners();
@@ -352,11 +419,21 @@ export class ActionRecorderEngine {
     });
   }
 
-  async stop(): Promise<{ session: ActionSession; videoBlob: Blob } | null> {
-    if (!this.mediaRecorder) return null;
+  async stop(): Promise<{
+    session: ActionSession;
+    videoBlob: Blob;
+    extension: string;
+    mimeType: string;
+  } | null> {
+    if (!this.mediaRecorder && !this.gifEncoder) return null;
 
     clearInterval(this.timerInterval);
     this.timerInterval = null;
+
+    if (this.gifInterval) {
+      clearInterval(this.gifInterval);
+      this.gifInterval = null;
+    }
 
     this.unsubscribeStores.forEach((fn) => fn());
     this.unsubscribeStores = [];
@@ -368,17 +445,24 @@ export class ActionRecorderEngine {
     const store = useActionRecorderStore.getState();
     const settings = store.settings;
 
-    const videoBlob: Blob = await new Promise((resolve) => {
-      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
-        resolve(new Blob(this.recordedChunks, { type: 'video/webm' }));
-        return;
-      }
-      this.mediaRecorder.onstop = () => {
-        const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
-        resolve(blob);
-      };
-      this.mediaRecorder.stop();
-    });
+    let videoBlob: Blob;
+    if (this.gifEncoder) {
+      videoBlob = this.gifEncoder.encode();
+      this.gifEncoder = null;
+    } else {
+      videoBlob = await new Promise((resolve) => {
+        if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
+          resolve(new Blob(this.recordedChunks, { type: this.currentMimeType }));
+          return;
+        }
+        this.mediaRecorder.onstop = () => {
+          const blob = new Blob(this.recordedChunks, { type: this.currentMimeType });
+          resolve(blob);
+        };
+        this.mediaRecorder.stop();
+      });
+      this.mediaRecorder = null;
+    }
 
     // Przywróć oryginalne wymiary kontenera
     if (this.boundContainer && this.containerOriginalStyle) {
@@ -398,6 +482,7 @@ export class ActionRecorderEngine {
       createdAt: new Date().toISOString(),
       durationMs,
       aspectRatio: settings.aspectRatio,
+      videoFormat: settings.videoFormat,
       viewport: {
         width: Math.round(rect.width),
         height: Math.round(rect.height),
@@ -423,6 +508,11 @@ export class ActionRecorderEngine {
     store.setActiveKeys([]);
     store.setVirtualPointer({ visible: false, isDown: false });
 
-    return { session, videoBlob };
+    return {
+      session,
+      videoBlob,
+      extension: this.currentExtension,
+      mimeType: this.currentMimeType,
+    };
   }
 }

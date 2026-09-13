@@ -2,6 +2,7 @@
 // ⚠️ MODUŁ NAGRYWANIA I ODTWARZANIA SESJI AKCJI (DEV / LOCAL)
 
 export type AspectRatioOption = '1:1' | '16:9' | 'viewport';
+export type VideoFormatOption = 'mp4' | 'webm' | 'gif';
 
 export interface ActionSessionEvent {
   timestampMs: number;
@@ -24,6 +25,7 @@ export interface ActionSession {
   createdAt: string;
   durationMs: number;
   aspectRatio: AspectRatioOption;
+  videoFormat?: VideoFormatOption;
   viewport: {
     width: number;
     height: number;
@@ -42,6 +44,7 @@ export interface CatalogItem {
   createdAt: string;
   durationMs: number;
   aspectRatio: AspectRatioOption;
+  videoFormat?: VideoFormatOption;
   eventCount: number;
   hasVideo: boolean;
   hasSessionData: boolean;
@@ -53,6 +56,7 @@ export type PipSize = 'small' | 'medium' | 'large';
 
 export interface RecorderSettings {
   aspectRatio: AspectRatioOption;
+  videoFormat: VideoFormatOption;
   countdownSeconds: number; // 0, 3
   showVirtualCursor: boolean;
   showKeystrokes: boolean;

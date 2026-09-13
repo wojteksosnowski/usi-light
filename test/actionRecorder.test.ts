@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useActionRecorderStore } from '../src/modules/action-recorder/useActionRecorderStore';
 import { ActionReplayer } from '../src/modules/action-recorder/ActionReplayer';
 import { ActionSession } from '../src/modules/action-recorder/types';
+import { SimpleGifEncoder } from '../src/modules/action-recorder/gifEncoder';
 import { useSceneStore } from '../src/store/useSceneStore';
 import { useSolarAnalysisStore } from '../src/store/useSolarAnalysisStore';
 
@@ -16,6 +17,7 @@ describe('Action Recorder & Replayer Tests', () => {
       isCatalogOpen: false,
       settings: {
         aspectRatio: '1:1',
+        videoFormat: 'mp4',
         countdownSeconds: 3,
         showVirtualCursor: true,
         showKeystrokes: true,
@@ -125,5 +127,33 @@ describe('Action Recorder & Replayer Tests', () => {
     const status = useActionRecorderStore.getState().replayerStatus;
     expect(status.totalDurationMs).toBe(2000);
     expect(status.activeSession?.id).toBe('test-session-1');
+  });
+
+  it('handles videoFormat options correctly in settings', () => {
+    const store = useActionRecorderStore.getState();
+    expect(store.settings.videoFormat).toBe('mp4');
+
+    store.updateSettings({ videoFormat: 'webm' });
+    expect(useActionRecorderStore.getState().settings.videoFormat).toBe('webm');
+
+    store.updateSettings({ videoFormat: 'gif' });
+    expect(useActionRecorderStore.getState().settings.videoFormat).toBe('gif');
+  });
+
+  it('SimpleGifEncoder creates a valid GIF Blob with GIF89a header', () => {
+    const encoder = new SimpleGifEncoder(10, 10);
+    const dummyImageData = {
+      width: 10,
+      height: 10,
+      data: new Uint8ClampedArray(10 * 10 * 4).fill(128),
+    } as ImageData;
+
+    encoder.addFrame(dummyImageData, 100);
+    encoder.addFrame(dummyImageData, 100);
+
+    const blob = encoder.encode();
+    expect(blob).toBeDefined();
+    expect(blob.type).toBe('image/gif');
+    expect(blob.size).toBeGreaterThan(0);
   });
 });

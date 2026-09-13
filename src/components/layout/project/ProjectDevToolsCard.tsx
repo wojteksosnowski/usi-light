@@ -18,7 +18,7 @@ import { useProjectIO } from './hooks/useProjectIO';
 import { useActionRecorderStore } from '../../../modules/action-recorder/useActionRecorderStore';
 import { ActionRecorderEngine } from '../../../modules/action-recorder/ActionRecorderEngine';
 import { downloadBlob, downloadJson } from '../../../modules/action-recorder/actionRecorderStorage';
-import { AspectRatioOption } from '../../../modules/action-recorder/types';
+import { AspectRatioOption, VideoFormatOption } from '../../../modules/action-recorder/types';
 
 export const ProjectDevToolsCard: React.FC = () => {
   const { handleSceneFileUpload, handleSceneDownload } = useProjectIO();
@@ -51,7 +51,8 @@ export const ProjectDevToolsCard: React.FC = () => {
       const result = await engine.stop();
       if (result) {
         const titleSafe = result.session.title.replace(/\s+/g, '_');
-        downloadBlob(result.videoBlob, `${titleSafe}.webm`);
+        const ext = result.extension || 'webm';
+        downloadBlob(result.videoBlob, `${titleSafe}.${ext}`);
         downloadJson(result.session, `${titleSafe}.json`);
       }
     } else {
@@ -138,6 +139,43 @@ export const ProjectDevToolsCard: React.FC = () => {
               }}
             >
               {aspect === '1:1' ? '1:1 Kwadrat' : aspect === '16:9' ? '16:9 Wideo' : 'Pełny'}
+            </button>
+          ))}
+        </div>
+
+        {/* Wybór formatu pliku (MP4 / WebM / GIF) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {(['mp4', 'webm', 'gif'] as VideoFormatOption[]).map((fmt) => (
+            <button
+              key={fmt}
+              type="button"
+              onClick={() => updateSettings({ videoFormat: fmt })}
+              style={{
+                flex: 1,
+                padding: '3px 2px',
+                borderRadius: '6px',
+                fontSize: '9.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                border: '1px solid var(--border-color)',
+                background:
+                  settings.videoFormat === fmt
+                    ? 'var(--accent-cyan)'
+                    : 'var(--bg-input)',
+                color:
+                  settings.videoFormat === fmt
+                    ? 'var(--bg-card)'
+                    : 'var(--text-secondary)',
+              }}
+              title={
+                fmt === 'mp4'
+                  ? 'Format MP4 (H.264 / AVC) - idealny do uniwersalnego odtwarzania'
+                  : fmt === 'webm'
+                  ? 'Format WebM (VP9) - wysoka kompresja wideo'
+                  : 'Animowany GIF - bezstratna animacja do dokumentacji/chatów'
+              }
+            >
+              {fmt.toUpperCase()}
             </button>
           ))}
         </div>

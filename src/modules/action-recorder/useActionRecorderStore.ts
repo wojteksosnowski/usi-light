@@ -64,6 +64,7 @@ export const useActionRecorderStore = create<ActionRecorderStoreState>(
 
     settings: {
       aspectRatio: '1:1',
+      videoFormat: 'mp4',
       countdownSeconds: 3,
       showVirtualCursor: true,
       showKeystrokes: true,

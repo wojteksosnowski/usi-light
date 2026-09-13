@@ -41,7 +41,8 @@ export function useDemoRecorder(
         console.info(`[ActionRecorder] ✅ Zapisano sesję: ${result.session.id}`);
         // Automatyczne pobranie wygenerowanych plików
         const titleSafe = result.session.title.replace(/\s+/g, '_');
-        downloadBlob(result.videoBlob, `${titleSafe}.webm`);
+        const ext = result.extension || 'webm';
+        downloadBlob(result.videoBlob, `${titleSafe}.${ext}`);
         downloadJson(result.session, `${titleSafe}.json`);
       }
     } finally {

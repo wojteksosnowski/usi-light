@@ -1,6 +1,4 @@
-// src/modules/action-recorder/actionRecorderStorage.ts
-// Magazyn IndexedDB dla nagrań (wideo WebM + sesje JSON)
-
+import { zipSync, strToU8 } from 'fflate';
 import { ActionSession, CatalogItem } from './types';
 
 const DB_NAME = 'usi_action_recorder_db';
@@ -78,6 +76,7 @@ export async function getAllCatalogItems(): Promise<CatalogItem[]> {
         createdAt: s.createdAt,
         durationMs: s.durationMs,
         aspectRatio: s.aspectRatio,
+        videoFormat: s.videoFormat || 'mp4',
         eventCount: s.events?.length ?? 0,
         hasVideo: videoKeySet.has(s.id),
         hasSessionData: true,
@@ -155,6 +154,45 @@ export async function renameRecording(id: string, newTitle: string): Promise<voi
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+export async function downloadSessionZip(id: string): Promise<void> {
+  const session = await getSession(id);
+  if (!session) return;
+
+  const videoBlob = await getVideoBlob(id);
+  const titleSafe = (session.title || `sesja_${id}`).replace(/\s+/g, '_');
+
+  const zipEntries: Record<string, Uint8Array> = {};
+
+  // 1. Zapis sesji JSON
+  const jsonStr = JSON.stringify(session, null, 2);
+  zipEntries[`${titleSafe}.json`] = strToU8(jsonStr);
+
+  // 2. Zapis pliku wideo / animacji
+  if (videoBlob) {
+    const arrayBuffer = await videoBlob.arrayBuffer();
+    const ext = videoBlob.type.includes('mp4')
+      ? 'mp4'
+      : videoBlob.type.includes('gif')
+      ? 'gif'
+      : 'webm';
+    zipEntries[`${titleSafe}.${ext}`] = new Uint8Array(arrayBuffer);
+  }
+
+  // 3. Plik README / metadane
+  const infoText = `USI Light - Klip Sesji Demo
+Tytuł: ${session.title}
+Data: ${new Date(session.createdAt).toLocaleString('pl-PL')}
+Czas trwania: ${(session.durationMs / 1000).toFixed(1)}s
+Format rzutni: ${session.aspectRatio}
+Liczba zarejestrowanych operacji: ${session.events?.length ?? 0}
+`;
+  zipEntries['info.txt'] = strToU8(infoText);
+
+  const zipped = zipSync(zipEntries);
+  const zipBlob = new Blob([zipped as any], { type: 'application/zip' });
+  downloadBlob(zipBlob, `${titleSafe}.zip`);
 }
 
 export function downloadJson(data: any, fileName: string): void {

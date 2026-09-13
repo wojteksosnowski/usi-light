@@ -1,6 +1,3 @@
-// src/modules/action-recorder/components/SessionCatalogModal.tsx
-// Modal Katalogu Nagrań i Sesji Działań
-
 import React, { useEffect, useState } from 'react';
 import {
   X,
@@ -13,6 +10,7 @@ import {
   Clock,
   Layers,
   FolderOpen,
+  Archive,
 } from 'lucide-react';
 import { useActionRecorderStore } from '../useActionRecorderStore';
 import {
@@ -23,6 +21,7 @@ import {
   saveRecording,
   downloadBlob,
   downloadJson,
+  downloadSessionZip,
 } from '../actionRecorderStorage';
 import { ActionReplayer } from '../ActionReplayer';
 import { CatalogItem, ActionSession } from '../types';
@@ -65,8 +64,17 @@ export const SessionCatalogModal: React.FC = () => {
   const handleDownloadVideo = async (id: string, title: string) => {
     const blob = await getVideoBlob(id);
     if (blob) {
-      downloadBlob(blob, `${title.replace(/\s+/g, '_')}.webm`);
+      const ext = blob.type.includes('mp4')
+        ? 'mp4'
+        : blob.type.includes('gif')
+        ? 'gif'
+        : 'webm';
+      downloadBlob(blob, `${title.replace(/\s+/g, '_')}.${ext}`);
     }
+  };
+
+  const handleDownloadZip = async (id: string) => {
+    await downloadSessionZip(id);
   };
 
   const handleDownloadJson = async (id: string, title: string) => {
@@ -290,6 +298,21 @@ export const SessionCatalogModal: React.FC = () => {
                     >
                       {item.aspectRatio}
                     </span>
+                    {item.videoFormat && (
+                      <span
+                        style={{
+                          fontSize: '9.5px',
+                          padding: '1px 5px',
+                          borderRadius: '4px',
+                          background: 'rgba(56, 189, 248, 0.15)',
+                          color: 'var(--accent-cyan)',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {item.videoFormat}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '10.5px', color: 'var(--text-muted)' }}>
@@ -303,7 +326,9 @@ export const SessionCatalogModal: React.FC = () => {
                       {new Date(item.createdAt).toLocaleDateString()} {new Date(item.createdAt).toLocaleTimeString()}
                     </span>
                     {item.videoBlobSize && (
-                      <span>{(item.videoBlobSize / 1024 / 1024).toFixed(1)} MB (WebM)</span>
+                      <span>
+                        {(item.videoBlobSize / 1024 / 1024).toFixed(1)} MB ({(item.videoFormat || 'wideo').toUpperCase()})
+                      </span>
                     )}
                   </div>
                 </div>
@@ -330,7 +355,7 @@ export const SessionCatalogModal: React.FC = () => {
                     <span>Odtwórz</span>
                   </button>
 
-                  {/* Pobierz WebM */}
+                  {/* Pobierz Wideo / GIF */}
                   {item.hasVideo && (
                     <button
                       type="button"
@@ -345,12 +370,32 @@ export const SessionCatalogModal: React.FC = () => {
                         borderRadius: '8px',
                         cursor: 'pointer',
                       }}
-                      title="Pobierz plik wideo WebM"
+                      title={`Pobierz plik ${(item.videoFormat || 'wideo').toUpperCase()}`}
                     >
                       <Video size={12} />
-                      <span>WebM</span>
+                      <span>{(item.videoFormat || 'wideo').toUpperCase()}</span>
                     </button>
                   )}
+
+                  {/* Pobierz Paczkę ZIP */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadZip(item.id)}
+                    className="btn-secondary"
+                    style={{
+                      padding: '6px 8px',
+                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                    }}
+                    title="Pobierz kompletną paczkę ZIP (Wideo + Sesja JSON + Raport)"
+                  >
+                    <Archive size={12} color="var(--accent-blue)" />
+                    <span>ZIP</span>
+                  </button>
 
                   {/* Pobierz JSON */}
                   <button

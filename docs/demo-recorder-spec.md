@@ -41,12 +41,16 @@ W kafelku dostępne są:
   - `1:1 Kwadrat` – optymalny do mediów społecznościowych i changelogów.
   - `16:9 Wideo` – format wideo/YouTube.
   - `Pełny` – pełny rozmiar rzutni.
+- Przełącznik formatu wyjściowego pliku:
+  - `MP4` – uniwersalny kodek H.264 / AVC z automatycznym fallbackiem przeglądarkowym.
+  - `WEBM` – wysoka kompresja VP9.
+  - `GIF` – lekka animacja poklatkowa (Pure TypeScript Canvas LZW encoder) do dokumentacji i czatów.
 - Szybkie przełączniki:
   - `Kursor` – włącza/wyłącza wirtualny kursor i fale kliknięć.
   - `HUD` – włącza/wyłącza dymek wciśniętych skrótów klawiatury.
   - `3s` – włącza/wyłącza odliczanie 3-2-1 przed startem nagrywania.
   - `3D` – włącza/wyłącza pływające okno podglądu 3D bryły.
-- Przycisk **Katalog Nagrań i Sesji** – otwiera pełny menedżer nagrań.
+- Przycisk **Katalog Nagrań i Sesji** – otwiera pełny menedżer nagrań z możliwością pobierania wideo, sesji JSON oraz kompletnych paczek archiwalnych **ZIP** (Wideo + JSON + Raport `info.txt`).
 
 ---
 
@@ -54,7 +58,7 @@ W kafelku dostępne są:
 
 Podczas nagrywania lub pracy w trybie deweloperskim w rogu rzutni wyświetlane jest pływające okno 3D (`Recording3DPipWindow.tsx`):
 - **Model 3D w czasie rzeczywistym**: Prezentuje bryłę aktywnego lub projektowanego budynku wraz z kondygnacjami, uskokami, tarasami i modyfikatorami 2.5D.
-- **Pieczenie do strumienia wideo (60 FPS)**: Klatki z widoku 3D Three.js WebGL są w czasie rzeczywistym przenoszone na główny canvas CAD przez warstwę `RecorderVisualsLayer`, dzięki czemu wygenerowane wideo WebM zawiera wbudowane okno 3D.
+- **Pieczenie do strumienia wideo (60 FPS)**: Klatki z widoku 3D Three.js WebGL są w czasie rzeczywistym przenoszone na główny canvas CAD przez warstwę `RecorderVisualsLayer`, dzięki czemu wygenerowane wideo WebM/MP4/GIF zawiera wbudowane okno 3D.
 - **Kontrolki**:
   - Obrót kamery (krok 45°: N, NE, E, SE, S, SW, W, NW).
   - Przełącznik widoku rentgenowskiego kondygnacji (X-Ray).
