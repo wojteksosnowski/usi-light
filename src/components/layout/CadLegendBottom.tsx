@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { Activity, Timer, Globe } from 'lucide-react';
-import { useSolarAnalysisStore, useSceneStore } from '../../store';
+import { Activity, Timer, Globe, ZoomIn } from 'lucide-react';
+import { useSolarAnalysisStore, useSceneStore, useUiStore } from '../../store';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { Point2D } from '../../types/geometry';
 
@@ -11,6 +11,7 @@ export const CadLegendBottom: React.FC = () => {
   const analysisOutput = useSolarAnalysisStore((s) => s.analysisOutput);
   const buildings = useSceneStore((s) => s.buildings);
   const settings = useSolarAnalysisStore((s) => s.settings);
+  const viewportScale = useUiStore((s) => s.viewportScale);
 
   const crsInfo = useMemo(() => {
     const allPts: Point2D[] = [];
@@ -19,6 +20,20 @@ export const CadLegendBottom: React.FC = () => {
     }
     return detectCoordinateSystem(allPts, { lat: settings.latitude, lon: settings.longitude });
   }, [buildings, settings.latitude, settings.longitude]);
+
+  const zoomInfo = useMemo(() => {
+    const lat = settings.latitude || 52.23;
+    const metersPerPixel = 1 / Math.max(0.0001, viewportScale);
+    const metersPerTileAtLat = 40075016.686 * Math.cos((lat * Math.PI) / 180);
+    const exactZoom = Math.log2(metersPerTileAtLat / (256 * metersPerPixel));
+    const targetZoom = Math.round(exactZoom);
+    return {
+      scale: viewportScale,
+      metersPerPixel,
+      exactZoom,
+      targetZoom,
+    };
+  }, [viewportScale, settings.latitude]);
 
   const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
   const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
@@ -83,11 +98,36 @@ export const CadLegendBottom: React.FC = () => {
         }}
         title={`Państwowy układ współrzędnych sceny CAD: ${crsInfo.description}`}
       >
-        <Globe size={11} color="#38bdf8" />
+        <Globe size={11} color="var(--accent-cyan, #38bdf8)" />
         <span>{crsInfo.geodeticLabel}</span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light, #334155)' }} />
+
+      {/* Zoom / Scale Debug Badge */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '5px',
+          padding: '2px 7px',
+          borderRadius: '5px',
+          backgroundColor: 'rgba(192, 132, 252, 0.12)',
+          border: '1px solid rgba(192, 132, 252, 0.3)',
+          color: 'var(--accent-purple, #c084fc)',
+          fontSize: '10px',
+          fontWeight: 600,
+          fontFamily: 'monospace',
+        }}
+        title={`Poziom zoomu Web Mercator dla kafli WMS/Satelitarnych:\n• Dokładny zoom (exact): ${zoomInfo.exactZoom.toFixed(3)}\n• Kafelki (target): Z${zoomInfo.targetZoom}\n• Rozdzielczość: ${zoomInfo.metersPerPixel.toFixed(3)} m/px\n• Skala widoku: ${zoomInfo.scale.toFixed(2)} px/m`}
+      >
+        <ZoomIn size={11} color="var(--accent-purple, #c084fc)" />
+        <span>Z{zoomInfo.targetZoom} ({zoomInfo.exactZoom.toFixed(2)})</span>
+        <span style={{ color: 'var(--text-muted, #64748b)' }}>·</span>
+        <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>{zoomInfo.scale.toFixed(1)}px/m</span>
+      </div>
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light, #334155)' }} />
 
       {/* Dynamic Accuracy Refinement Badge */}
       <div

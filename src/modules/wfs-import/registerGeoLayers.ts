@@ -20,8 +20,14 @@ const MPZP_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMie
 const BDOT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaBazDanychObiektowTopograficznych';
 const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
 
+let renderRafPending = false;
 const triggerRender = () => {
-  window.dispatchEvent(new Event('geo-render-needed'));
+  if (renderRafPending) return;
+  renderRafPending = true;
+  requestAnimationFrame(() => {
+    renderRafPending = false;
+    window.dispatchEvent(new Event('geo-render-needed'));
+  });
 };
 
 /** Rejestruje/wyrejestrowuje warstwę w pipeline gdy jej widoczność się zmienia. Zwraca true jeśli coś się zmieniło. */
@@ -97,14 +103,14 @@ terrainLayer.setTileManager(terrainTileManager);
  * włączonych warstw GEO (Ortofotomapa/KIUT/MPZP/BDOT/NMT). Wywoływane z `CadCanvas.tsx` przy
  * zmianie środka/promienia projektu lub włączeniu warstwy — patrz `tilePrefetchMath.ts`.
  */
-export function prefetchActiveGeoLayersInRadius(lat: number, lon: number, radiusMeters: number) {
+export function prefetchActiveGeoLayersInRadius(lat: number, lon: number, radiusMeters: number, currentZoom?: number) {
   if (!useLicenseStore.getState().isPro) return;
   const state = useWfsStore.getState();
-  if (state.showOrthophotoLayer) orthophotoTileManager.prefetchTilesInRadius(lat, lon, radiusMeters);
-  if (state.showKiutLayer) kiutTileManager.prefetchTilesInRadius(lat, lon, radiusMeters);
-  if (state.showMpzpLayer) mpzpTileManager.prefetchTilesInRadius(lat, lon, radiusMeters);
-  if (state.showBdotLayer) bdotTileManager.prefetchTilesInRadius(lat, lon, radiusMeters);
-  if (state.showTerrainLayer) terrainTileManager.prefetchTilesInRadius(lat, lon, radiusMeters);
+  if (state.showOrthophotoLayer) orthophotoTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showKiutLayer) kiutTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showMpzpLayer) mpzpTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showBdotLayer) bdotTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showTerrainLayer) terrainTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
 }
 
 export function registerGeoLayers(): () => void {

@@ -3,6 +3,7 @@ import { Point2D, AnalysisPointResult } from '../types/geometry';
 import { computeCombinedShadowEnvelope } from '@/utils/math2d';
 import { computeHourlyShadowsLive } from '@/utils/math2d/shadowEnvelope';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
+import { CadRenderFrameContext } from './cad/pipeline/types';
 import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { useCanvasInteraction, isBuildingLocked, getBuildingTopElevation } from './cad/hooks/useCanvasInteraction';
@@ -78,32 +79,50 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   };
 
   // Menedżery kafelków satelitarnych (Google i HERE) — instancjonowane oba, aktywny wybierany przez satelliteProvider
-  const [tileRenderTick, setTileRenderTick] = useState<number>(0);
+  const latestRenderFrameContextRef = useRef<CadRenderFrameContext | null>(null);
   const tileManagerRef = useRef<GoogleTileManager | null>(null);
   const hereTileManagerRef = useRef<HereTileManager | null>(null);
   const satelliteProvider = useSolarAnalysisStore((s) => s.satelliteProvider);
+  const tileRafIdRef = useRef<number | null>(null);
+
+  const scheduleTileRedraw = useCallback(() => {
+    if (tileRafIdRef.current !== null) return;
+    tileRafIdRef.current = requestAnimationFrame(() => {
+      tileRafIdRef.current = null;
+      if (latestRenderFrameContextRef.current) {
+        CadRenderPipeline.renderMain(latestRenderFrameContextRef.current);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (tileRafIdRef.current !== null) {
+        cancelAnimationFrame(tileRafIdRef.current);
+        tileRafIdRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const effectiveKey = googleMapsApiKey || APP_CONFIG.googleMaps.apiKey;
     if (!tileManagerRef.current) {
-      tileManagerRef.current = new GoogleTileManager(effectiveKey, () => {
-        setTileRenderTick((t) => t + 1);
-      });
+      tileManagerRef.current = new GoogleTileManager(effectiveKey, scheduleTileRedraw);
     } else {
       tileManagerRef.current.setApiKey(effectiveKey);
+      tileManagerRef.current.setOnTileLoaded(scheduleTileRedraw);
     }
-  }, [googleMapsApiKey]);
+  }, [googleMapsApiKey, scheduleTileRedraw]);
 
   useEffect(() => {
     const effectiveKey = APP_CONFIG.hereMaps.apiKey;
     if (!hereTileManagerRef.current) {
-      hereTileManagerRef.current = new HereTileManager(effectiveKey, () => {
-        setTileRenderTick((t) => t + 1);
-      });
+      hereTileManagerRef.current = new HereTileManager(effectiveKey, scheduleTileRedraw);
     } else {
       hereTileManagerRef.current.setApiKey(effectiveKey);
+      hereTileManagerRef.current.setOnTileLoaded(scheduleTileRedraw);
     }
-  }, []);
+  }, [scheduleTileRedraw]);
 
   const activeTileManager =
     satelliteProvider === 'orthophoto'
@@ -125,12 +144,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     setOrthophotoOpacity(satelliteOpacity);
   }, [satelliteOpacity, setOrthophotoOpacity]);
 
-  // Geo module: re-render canvas when WMS tiles load or layers change
+  // Geo module: re-render canvas when WMS tiles load or layers change (throttled via RAF)
   useEffect(() => {
-    const handler = () => setTileRenderTick((t) => t + 1);
+    const handler = () => scheduleTileRedraw();
     window.addEventListener('geo-render-needed', handler);
     return () => window.removeEventListener('geo-render-needed', handler);
-  }, []);
+  }, [scheduleTileRedraw]);
 
   // Prefetch mapy satelitarnej po synchronizacji danych geo
   useEffect(() => {
@@ -149,26 +168,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const [projectCirclePulse, setProjectCirclePulse] = useState<{ radius: number; opacity: number } | null>(null);
   const circleAnimRef = useRef<number | null>(null);
   const projectRadius = useWfsStore((s) => s.projectRadius);
-
-  // Buforowanie automatyczne (nie tylko po ręcznej synchronizacji): za każdą zmianą lokalizacji,
-  // promienia projektu, dostawcy mapy lub włączenia warstwy GEO, doprefetchowuje kafle satelitarne
-  // i WMS w zasięgu projektu (z przypięciem w cache — patrz `tilePrefetchMath.ts`). Debounced, żeby
-  // przeciąganie środka projektu nie odpalało lawiny requestów przy każdej klatce. Warstwy GEO
-  // subskrybowane jako jeden klucz (nie 5 osobnych selectorów) — treść nieużywana w efekcie,
-  // liczy się wyłącznie to, czy się zmieniła.
-  const activeGeoLayersKey = useWfsStore(
-    (s) => `${s.showOrthophotoLayer}|${s.showKiutLayer}|${s.showMpzpLayer}|${s.showBdotLayer}|${s.showTerrainLayer}`
-  );
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (activeTileManager) {
-        activeTileManager.prefetchTilesInRadius(latitude, longitude, projectRadius);
-      }
-      prefetchActiveGeoLayersInRadius(latitude, longitude, projectRadius);
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [latitude, longitude, projectRadius, activeTileManager, activeGeoLayersKey]);
 
   const triggerProjectCirclePulse = useCallback((radius: number) => {
     // Cancel any running animation
@@ -241,6 +240,27 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     layerSettings,
     projectRadius
   );
+
+  // Buforowanie automatyczne wyprzedzające (Look-Ahead): przy zmianie lokalizacji, promienia
+  // lub poziomu zoomu, prefetchuje kafle wokół bieżącej skali, dzięki czemu przejścia
+  // między progami całkowitymi (np. 18.01, 19.02, 20.02) korzystają z kafli już obecnych w RAM.
+  const activeGeoLayersKey = useWfsStore(
+    (s) => `${s.showOrthophotoLayer}|${s.showKiutLayer}|${s.showMpzpLayer}|${s.showBdotLayer}|${s.showTerrainLayer}`
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const metersPerPixel = 1 / Math.max(0.0001, viewState.scale);
+      const metersPerTileAtLat = 40075016.686 * Math.cos((latitude * Math.PI) / 180);
+      const currentZoom = Math.log2(metersPerTileAtLat / (256 * metersPerPixel));
+
+      if (showSatelliteLayer && activeTileManager) {
+        activeTileManager.prefetchTilesInRadius(latitude, longitude, projectRadius, currentZoom);
+      }
+      prefetchActiveGeoLayersInRadius(latitude, longitude, projectRadius, currentZoom);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [latitude, longitude, projectRadius, activeTileManager, showSatelliteLayer, activeGeoLayersKey, viewState.scale]);
 
   // Podgląd atrybutów strefy MPZP po kliknięciu (wektor, pilot Warszawa) — niezależny od
   // głównej logiki interakcji, aktywny tylko gdy warstwa jest widoczna.
@@ -441,7 +461,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       isInteracting: interaction.effectiveIsInteracting,
     };
 
-    CadRenderPipeline.renderMain({
+    const frameContext: CadRenderFrameContext = {
       renderContext,
       buildings,
       selectedBuildingId,
@@ -487,7 +507,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       dragVertexPreviewPt: interaction.dragVertexPreviewPt,
       projectCirclePulse,
       projectRadius,
-    });
+    };
+
+    latestRenderFrameContextRef.current = frameContext;
+    CadRenderPipeline.renderMain(frameContext);
   }, [
     buildings,
     selectedBuildingId,
@@ -536,7 +559,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     showSatelliteLayer,
     satelliteOpacity,
     showAnalysisPoints,
-    tileRenderTick,
     activeTileManager,
     crsInfo,
     interaction.draggedVertexIndex,
@@ -635,6 +657,65 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     interaction.effectiveIsInteracting,
   ]);
 
+  // 3. Natywny nasłuchiwacz zdarzenia wheel z { passive: false }
+  // Rozwiązuje problem gubienia klatek i szarpania przy gładziku na macOS oraz kółku myszy.
+  const handleInteractionChange = props.onInteractionChange;
+  const isInteractingDebounceTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Obsługa gestu pinch-to-zoom na gładziku (e.ctrlKey === true) oraz klasycznego scrolla
+      let zoomFactor: number;
+      if (e.ctrlKey) {
+        // macOS trackpad pinch
+        zoomFactor = Math.exp(-e.deltaY * 0.008);
+      } else {
+        // Mysz / standardowy trackpad scroll
+        const rawDelta = e.deltaMode === 1 ? e.deltaY * 20 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
+        const clampedDelta = Math.max(-120, Math.min(120, rawDelta));
+        zoomFactor = Math.exp(-clampedDelta * 0.0018);
+      }
+
+      setViewState((prev) => {
+        const newScale = Math.max(0.001, Math.min(100, prev.scale * zoomFactor));
+        if (Math.abs(newScale - prev.scale) < 1e-6) return prev;
+        const ratio = newScale / prev.scale;
+        return {
+          scale: newScale,
+          panX: mouseX - (mouseX - prev.panX) * ratio,
+          panY: mouseY - (mouseY - prev.panY) * ratio,
+        };
+      });
+
+      // Flaga interakcji z debouncem (zapobiega ciężkim przeliczeniom podczas ciągłego zoomowania)
+      handleInteractionChange?.(true);
+      if (isInteractingDebounceTimer.current !== null) {
+        window.clearTimeout(isInteractingDebounceTimer.current);
+      }
+      isInteractingDebounceTimer.current = window.setTimeout(() => {
+        handleInteractionChange?.(false);
+        isInteractingDebounceTimer.current = null;
+      }, 150);
+    };
+
+    canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', handleNativeWheel);
+      if (isInteractingDebounceTimer.current !== null) {
+        window.clearTimeout(isInteractingDebounceTimer.current);
+        isInteractingDebounceTimer.current = null;
+      }
+    };
+  }, [setViewState, handleInteractionChange]);
+
   const expandedLabelBuilding = expandedLabelBuildingId
     ? buildings.find((b) => b.id === expandedLabelBuildingId) || null
     : null;
@@ -657,7 +738,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     >
       <canvas
         ref={canvasRef}
-        onWheel={interaction.handleWheel}
         onMouseDown={interaction.handleMouseDown}
         onDoubleClick={interaction.handleDoubleClick}
         onMouseMove={interaction.handleMouseMove}

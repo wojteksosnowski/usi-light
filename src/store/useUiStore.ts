@@ -16,6 +16,7 @@ interface UiState {
   isPaymentSuccessModalOpen: boolean;
   isConfirmDeleteModalOpen: boolean;
   paymentSuccessSessionId: string | null;
+  viewportScale: number;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -29,6 +30,7 @@ interface UiState {
   setLicenseModalOpen: (open: boolean) => void;
   setPaymentSuccessModalOpen: (open: boolean) => void;
   setPaymentSuccessSessionId: (sessionId: string | null) => void;
+  setViewportScale: (scale: number) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -43,6 +45,9 @@ export const useUiStore = create<UiState>((set) => ({
   isPaymentSuccessModalOpen: false,
   isConfirmDeleteModalOpen: false,
   paymentSuccessSessionId: null,
+  viewportScale: 14,
+
+  setViewportScale: (scale) => set((state) => (Math.abs(state.viewportScale - scale) > 1e-4 ? { viewportScale: scale } : state)),
 
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),

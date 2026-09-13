@@ -12,6 +12,7 @@ export class BdotOverlayLayer implements CadRenderLayer {
 
   setTileManager(manager: WmsTileManager | null) {
     this.tileManager = manager;
+    this.tileManager?.setInvertColors(this.invertColors);
   }
 
   setOpacity(opacity: number) {
@@ -20,6 +21,7 @@ export class BdotOverlayLayer implements CadRenderLayer {
 
   setInvertColors(invert: boolean) {
     this.invertColors = invert;
+    this.tileManager?.setInvertColors(invert);
   }
 
   shouldRender(context: CadRenderFrameContext): boolean {
@@ -41,7 +43,6 @@ export class BdotOverlayLayer implements CadRenderLayer {
       },
       opacity: this.opacity,
       projectRadius: context.projectRadius,
-      invertColors: this.invertColors,
     });
   }
 }
