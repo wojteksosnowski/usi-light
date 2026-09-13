@@ -1,6 +1,6 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import polygonClipping from 'polygon-clipping';
-import { calculateOutwardNormal } from './vec2';
+import { buildRingSegments } from '../ringSegments';
 
 /**
  * Calculates the signed area of a 2D polygon using the Shoelace formula / Green's theorem.
@@ -260,6 +260,48 @@ function clippingResultToLoops(unionResult: polygonClipping.MultiPolygon | polyg
   return resultLoops;
 }
 
+export interface PolygonWithHoles {
+  outer: Point2D[];
+  holes: Point2D[][];
+}
+
+function clippingRingToPoints(ring: polygonClipping.Ring): Point2D[] | null {
+  if (!ring || ring.length < 3) return null;
+  const isClosed = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1];
+  const sliceEnd = isClosed && ring.length > 3 ? ring.length - 1 : ring.length;
+  const pts = ring.slice(0, sliceEnd).map(([x, y]) => ({ x, y }));
+  return pts.length >= 3 ? pts : null;
+}
+
+/**
+ * Konwertuje wynik polygonClipping (MultiPolygon lub Polygon) zachowując hierarchię
+ * obrys zewnętrzny / otwory wewnętrzne zamiast spłaszczać wszystkie pierścienie.
+ */
+function clippingResultToPolygonsWithHoles(
+  unionResult: polygonClipping.MultiPolygon | polygonClipping.Polygon
+): PolygonWithHoles[] {
+  const result: PolygonWithHoles[] = [];
+  for (const poly of unionResult) {
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    if (typeof poly[0][0] === 'number') {
+      // poly jest pojedynczym Ring (unionResult to Polygon)
+      const outer = clippingRingToPoints(poly as unknown as polygonClipping.Ring);
+      if (outer) result.push({ outer, holes: [] });
+    } else {
+      const rings = poly as polygonClipping.Polygon;
+      const outer = clippingRingToPoints(rings[0]);
+      if (!outer) continue;
+      const holes: Point2D[][] = [];
+      for (let i = 1; i < rings.length; i++) {
+        const hole = clippingRingToPoints(rings[i]);
+        if (hole) holes.push(hole);
+      }
+      result.push({ outer, holes });
+    }
+  }
+  return result;
+}
+
 /**
  * Odporna unia hierarchiczna (Batch Union) zabezpieczająca algorytm Sweep-Line
  * przed przepełnieniem kolejki zdarzeń i mikrodegeneracjami zmiennoprzecinkowymi.
@@ -457,46 +499,36 @@ export function booleanUnionBuildings(
       };
     }
 
-    const outerRing = unionRes[0][0];
-    if (!outerRing || outerRing.length < 4) {
+    const pwh = clippingResultToPolygonsWithHoles(unionRes)[0];
+    if (!pwh || pwh.outer.length < 4) {
       return { success: false, error: 'Wynik sumy nie tworzy poprawnego wielokąta.' };
     }
 
-    const isClosed =
-      outerRing[0][0] === outerRing[outerRing.length - 1][0] &&
-      outerRing[0][1] === outerRing[outerRing.length - 1][1];
-    const pointsRaw = isClosed ? outerRing.slice(0, -1) : outerRing;
-    const vertices: Point2D[] = pointsRaw.map(([x, y]) => ({ x, y }));
-
-    const isCCW = isPolygonCCW(vertices);
-    const finalVertices = isCCW ? vertices : [...vertices].reverse();
+    const isCCW = isPolygonCCW(pwh.outer);
+    const finalVertices = isCCW ? pwh.outer : [...pwh.outer].reverse();
+    const finalHoles = pwh.holes.length > 0 ? pwh.holes.map((h) => (isCCW ? h : [...h].reverse())) : undefined;
 
     const newId = `bldg-union-${Date.now().toString(36)}`;
     const maxHeight = Math.max(bldgA.defaultHeight || 15, bldgB.defaultHeight || 15);
     const mergedName = `${bldgA.name || 'Obiekt'} + ${bldgB.name || 'Obiekt'}`;
+    const mergedMeta = {
+      id: newId,
+      elevation: 0,
+      defaultHeight: maxHeight,
+      hWindowBottom: bldgA.hWindowBottom ?? 0.85,
+      isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
+      buildingType: bldgA.buildingType || 'residential',
+    } as const;
 
-    const segments: import('../../types/geometry').FacadeSegment[] = [];
-
-    const n = finalVertices.length;
-    for (let i = 0; i < n; i++) {
-      const p1 = finalVertices[i];
-      const p2 = finalVertices[(i + 1) % n];
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const len = Math.hypot(dx, dy);
-      const normal = calculateOutwardNormal(p1, p2, isCCW);
-      segments.push({
-        id: `${newId}-seg-${i + 1}`,
-        p1,
-        p2,
-        normal,
-        length: len,
-        angleRad: Math.atan2(dy, dx),
-        hTop: maxHeight,
-        hWindowBottom: bldgA.hWindowBottom ?? 0.85,
-        isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
-        buildingType: bldgA.buildingType || 'residential',
-      });
+    const segments = buildRingSegments(mergedMeta, finalVertices, isCCW, `${newId}-seg`, 0);
+    if (finalHoles) {
+      for (let h = 0; h < finalHoles.length; h++) {
+        // Hole rings wind opposite to the outer ring (evenodd fill). `buildRingSegments`'s normal
+        // formula returns the direction away from a ring's own interior when given its true
+        // winding — for a hole we want the opposite (pointing INTO the void), so we deliberately
+        // pass `isCCW` (the outer ring's winding, i.e. the complement of this hole ring's actual one).
+        segments.push(...buildRingSegments(mergedMeta, finalHoles[h], isCCW, `${newId}-hole${h}-seg`, h + 1));
+      }
     }
 
     const mergedBuilding: BuildingLoop = {
@@ -505,11 +537,12 @@ export function booleanUnionBuildings(
       layer: bldgA.layer || 'Domyślna (0)',
       isTested: bldgA.isTested || bldgB.isTested || false,
       isIncluded: true,
-      isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
-      buildingType: bldgA.buildingType || 'residential',
+      isCityCentre: mergedMeta.isCityCentre,
+      buildingType: mergedMeta.buildingType,
       defaultHeight: maxHeight,
-      hWindowBottom: bldgA.hWindowBottom ?? 0.85,
+      hWindowBottom: mergedMeta.hWindowBottom,
       vertices: finalVertices,
+      holes: finalHoles,
       segments,
       isClockwise: !isCCW,
       transform: {

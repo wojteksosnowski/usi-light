@@ -14,12 +14,11 @@ import {
   CrsDetectionResult,
   cadPointToWgs84,
   latLonToWebMercatorPixel,
-  webMercatorPixelToLatLon,
-  wgs84ToCadPoint,
   LatLon,
 } from '../../../utils/geoTransform';
 import { ISatelliteTileManager } from '../../../utils/googleTileManager';
 import { Point2D } from '../../../types/geometry';
+import { TileZoomHysteresis, clampTileRangeEnd, computeTileGridScreenTransform } from '../../../utils/tileGridProjection';
 
 export interface RenderSatelliteMapOptions {
   rc: CadRenderContext;
@@ -58,16 +57,18 @@ export function renderSatelliteMap(options: RenderSatelliteMapOptions) {
     cadPointToWgs84(p, crsInfo, projectCenterLatLon)
   );
 
-  // 3. Wyznacz optymalny poziom zoomu Web Mercator
-  // Oblicz ile metrów świata odpowiada jednemu pikselowi ekranu: metersPerPixel = 1 / scale
+  // 3. Wyznacz optymalny poziom zoomu z histerezą +/-0.35 (zapobiega skokom rozdzielczości na granicach skali)
   const metersPerPixel = 1 / Math.max(0.0001, viewState.scale);
   const centerLat = wgsCorners[0].lat;
   const metersPerTileAtEquator = 40075016.686;
   const metersPerTileAtLat = metersPerTileAtEquator * Math.cos((centerLat * Math.PI) / 180);
 
-  // zoom = log2(metersPerTileAtLat / (256 * metersPerPixel))
-  let targetZoom = Math.round(Math.log2(metersPerTileAtLat / (256 * metersPerPixel)));
-  targetZoom = Math.max(2, Math.min(21, targetZoom));
+  const maxAllowedZoom = tileManager.maxNativeZoom ?? 20;
+  const exactZoom = Math.log2(metersPerTileAtLat / (256 * metersPerPixel));
+
+  const targetZoom = tileManager.resolveTargetZoom
+    ? tileManager.resolveTargetZoom(exactZoom, 2)
+    : Math.max(2, Math.min(maxAllowedZoom, Math.round(exactZoom)));
 
   // 4. Wyznacz zakres kafelków (minTileX..maxTileX, minTileY..maxTileY)
   const mercatorPixels = wgsCorners.map((wgs) => latLonToWebMercatorPixel(wgs, targetZoom));
@@ -81,54 +82,84 @@ export function renderSatelliteMap(options: RenderSatelliteMapOptions) {
   const startTileY = Math.floor(minMercY / 256);
   const endTileY = Math.floor(maxMercY / 256);
 
-  // Zabezpieczenie przed zbyt dużą liczbą kafelków naraz (np. przy silnym oddaleniu)
-  const tileCountX = endTileX - startTileX + 1;
-  const tileCountY = endTileY - startTileY + 1;
-  if (tileCountX * tileCountY > 120) {
-    return;
-  }
+  // Bezpieczne ograniczenie liczby kafli na klatkę (ochrona przed zawieszeniem przy drastycznym oddaleniu)
+  const effectiveEndX = clampTileRangeEnd(startTileX, endTileX);
+  const effectiveEndY = clampTileRangeEnd(startTileY, endTileY);
 
-  // 5. Rysuj kafelki za pomocą transformacji afinicznej
+  // 5. Rysuj kafelki za pomocą zoptymalizowanej transformacji afinicznej
   ctx.save();
   ctx.globalAlpha = Math.max(0.05, Math.min(1.0, opacity));
   ctx.imageSmoothingEnabled = true;
+  // Celowo BEZ imageSmoothingQuality='high' — przy powiększaniu (upscaling) kafli powyżej
+  // natywnych 256px 'high' jest realnym Canvas 2D wąskim gardłem na niektórych silnikach
+  // (np. Microsoft Edge), niewidocznym w testach z zamockowanym/headless Canvas. Domyślna
+  // jakość ('low') jest najszybsza i w praktyce nieodróżnialna dla rastrów satelitarnych.
+  // main (bez tej linii) działa płynnie na produkcji — to jedyna realna różnica w hot-pathcie.
 
-  for (let tx = startTileX; tx <= endTileX; tx++) {
-    for (let ty = startTileY; ty <= endTileY; ty++) {
+  // Jednorazowe wyznaczenie wektorów bazowych siatki kafelków (256px w Mercatorze)
+  const { baseSTL, stepXx, stepXy, stepYx, stepYy, vXx, vXy, vYx, vYy } = computeTileGridScreenTransform(
+    startTileX,
+    startTileY,
+    targetZoom,
+    crsInfo,
+    projectCenterLatLon,
+    worldToScreen
+  );
+
+  for (let tx = startTileX; tx <= effectiveEndX; tx++) {
+    const dX = tx - startTileX;
+    for (let ty = startTileY; ty <= effectiveEndY; ty++) {
+      const dY = ty - startTileY;
+      const sTLx = baseSTL.sx + dX * stepXx + dY * stepYx;
+      const sTLy = baseSTL.sy + dX * stepXy + dY * stepYy;
+
+      // 1. Viewport Frustum Culling — pomijaj kafle całkowicie poza widocznym ekranem [0..width, 0..height]
+      const sTRx = sTLx + stepXx;
+      const sTRy = sTLy + stepXy;
+      const sBLx = sTLx + stepYx;
+      const sBLy = sTLy + stepYy;
+      const sBRx = sTRx + stepYx;
+      const sBRy = sTRy + stepYy;
+
+      const minTileSx = Math.min(sTLx, sTRx, sBLx, sBRx);
+      const maxTileSx = Math.max(sTLx, sTRx, sBLx, sBRx);
+      const minTileSy = Math.min(sTLy, sTRy, sBLy, sBRy);
+      const maxTileSy = Math.max(sTLy, sTRy, sBLy, sBRy);
+
+      if (maxTileSx < 0 || minTileSx > width || maxTileSy < 0 || minTileSy > height) {
+        continue;
+      }
+
       const tileImg = tileManager.getTile(tx, ty, targetZoom);
-      if (!tileImg) continue;
 
-      // Narożniki kafelka w pikselach Web Mercator (rozmiar 256x256)
-      const mercTL = { x: tx * 256, y: ty * 256 };
-      const mercTR = { x: (tx + 1) * 256, y: ty * 256 };
-      const mercBL = { x: tx * 256, y: (ty + 1) * 256 };
-
-      // Przeliczenie narożników na WGS84
-      const wgsTL = webMercatorPixelToLatLon(mercTL, targetZoom);
-      const wgsTR = webMercatorPixelToLatLon(mercTR, targetZoom);
-      const wgsBL = webMercatorPixelToLatLon(mercBL, targetZoom);
-
-      // Przeliczenie na współrzędne CAD świata
-      const cadTL = wgs84ToCadPoint(wgsTL, crsInfo, projectCenterLatLon);
-      const cadTR = wgs84ToCadPoint(wgsTR, crsInfo, projectCenterLatLon);
-      const cadBL = wgs84ToCadPoint(wgsBL, crsInfo, projectCenterLatLon);
-
-      // Przeliczenie na współrzędne ekranu (uwzględniające skalę, pan oraz obrót viewRotationDeg)
-      const sTL = worldToScreen(cadTL.x, cadTL.y);
-      const sTR = worldToScreen(cadTR.x, cadTR.y);
-      const sBL = worldToScreen(cadBL.x, cadBL.y);
-
-      // Wektory bazowe kafelka na ekranie (dla osi X i Y obrazu 256x256)
-      const vXx = (sTR.sx - sTL.sx) / 256;
-      const vXy = (sTR.sy - sTL.sy) / 256;
-      const vYx = (sBL.sx - sTL.sx) / 256;
-      const vYy = (sBL.sy - sTL.sy) / 256;
-
-      // Zastosowanie macierzy transformacji 2D: [vXx, vXy, vYx, vYy, sTL.sx, sTL.sy]
-      ctx.save();
-      ctx.setTransform(vXx, vXy, vYx, vYy, sTL.sx, sTL.sy);
-      ctx.drawImage(tileImg, 0, 0, 256, 256);
-      ctx.restore();
+      if (tileImg) {
+        ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+        ctx.drawImage(tileImg, 0, 0, 256, 256);
+      } else if (targetZoom > 2) {
+        // 1. Sprawdź kafel rodzica (z-1) w pamięci RAM (zero zapytań sieciowych dla fallbacku)
+        const parentZoom = targetZoom - 1;
+        const pTx = Math.floor(tx / 2);
+        const pTy = Math.floor(ty / 2);
+        const parentImg = tileManager.getTileFromMemory ? tileManager.getTileFromMemory(pTx, pTy, parentZoom) : null;
+        if (parentImg) {
+          const subX = (tx % 2) * 128;
+          const subY = (ty % 2) * 128;
+          ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+          ctx.drawImage(parentImg, subX, subY, 128, 128, 0, 0, 256, 256);
+        } else if (targetZoom > 3) {
+          // 2. Sprawdź kafel dziadka (z-2) w pamięci RAM
+          const gpZoom = targetZoom - 2;
+          const gpTx = Math.floor(tx / 4);
+          const gpTy = Math.floor(ty / 4);
+          const gpImg = tileManager.getTileFromMemory ? tileManager.getTileFromMemory(gpTx, gpTy, gpZoom) : null;
+          if (gpImg) {
+            const subX = (tx % 4) * 64;
+            const subY = (ty % 4) * 64;
+            ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+            ctx.drawImage(gpImg, subX, subY, 64, 64, 0, 0, 256, 256);
+          }
+        }
+      }
     }
   }
 

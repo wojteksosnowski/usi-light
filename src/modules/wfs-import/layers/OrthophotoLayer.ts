@@ -36,6 +36,9 @@ export class OrthophotoLayer implements CadRenderLayer {
       },
       opacity: this.opacity,
       projectRadius: context.projectRadius,
+      // Traktowana jak "podkład satelitarny" (Google/HERE): bufor kafli w promieniu projektu,
+      // ale wyświetlanie całej mapy również poza okręgiem — bez twardego przycięcia.
+      skipRadiusClip: true,
     });
   }
 }

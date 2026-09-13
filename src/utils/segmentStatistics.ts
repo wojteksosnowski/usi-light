@@ -1,54 +1,13 @@
-import { BuildingLoop, FacadeSegment, LineEquation2D, Point2D } from '../types/geometry';
-import { calculateOutwardNormal, isPolygonCCW } from '@/utils/math2d';
+import { BuildingLoop, Point2D } from '../types/geometry';
+import { isPolygonCCW } from '@/utils/math2d';
+import { buildRingSegments, computeLineEquation, ensureOppositeWinding } from './ringSegments';
 
-/**
- * Computes general (Ax + By + C = 0) and slope-intercept (y = ax + b) line equations for a segment.
- */
-export function computeLineEquation(p1: Point2D, p2: Point2D, normal?: { x: number; y: number }): LineEquation2D {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
-  const len = Math.hypot(dx, dy) || 1e-6;
-
-  // Normalized general equation coefficients where A^2 + B^2 = 1
-  let A = -dy / len;
-  let B = dx / len;
-  if (normal) {
-    const dot = A * normal.x + B * normal.y;
-    if (dot < 0) {
-      A = -A;
-      B = -B;
-    }
-  }
-  const C = -(A * p1.x + B * p1.y);
-
-  const isVertical = Math.abs(dx) < 1e-4;
-  const slope = isVertical ? undefined : dy / dx;
-  const intercept = isVertical ? undefined : p1.y - slope! * p1.x;
-
-  // Line orientation angle in [0, 180) degrees
-  let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
-  if (angleDeg < 0) angleDeg += 180;
-  if (angleDeg >= 180) angleDeg -= 180;
-
-  // Outward normal azimuth in [0, 360) degrees
-  const nx = normal ? normal.x : A;
-  const ny = normal ? normal.y : B;
-  const azimuthDeg = ((Math.atan2(nx, ny) * 180) / Math.PI + 360) % 360;
-
-  return {
-    A,
-    B,
-    C,
-    slope,
-    intercept,
-    isVertical,
-    angleDeg,
-    azimuthDeg,
-  };
-}
+export { computeLineEquation };
 
 /**
  * Rebuilds building loop segments, outward normals, line equations and CCW winding for updated vertices.
+ * Also regenerates segments for `bldg.holes` (interior rings, e.g. courtyards or parcel enclaves),
+ * forcing their winding opposite to the outer ring so normals point into the void.
  */
 export function rebuildBuildingSegments(bldg: BuildingLoop, newVertices: Point2D[]): BuildingLoop {
   if (newVertices.length < 3) {
@@ -60,36 +19,16 @@ export function rebuildBuildingSegments(bldg: BuildingLoop, newVertices: Point2D
   }
 
   const isCCW = isPolygonCCW(newVertices);
-  const segments: FacadeSegment[] = [];
+  const segments = buildRingSegments(bldg, newVertices, isCCW, `${bldg.id}-seg`, 0);
 
-  for (let i = 0; i < newVertices.length; i++) {
-    const p1 = newVertices[i];
-    const p2 = newVertices[(i + 1) % newVertices.length];
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-4) continue;
-
-    const normal = calculateOutwardNormal(p1, p2, isCCW);
-    const lineEq = computeLineEquation(p1, p2, normal);
-
-    const hBase = bldg.elevation ?? 0.0;
-    const hTop = hBase + bldg.defaultHeight;
-
-    segments.push({
-      id: `${bldg.id}-seg-${i + 1}`,
-      p1: { x: p1.x, y: p1.y },
-      p2: { x: p2.x, y: p2.y },
-      normal,
-      length: len,
-      angleRad: Math.atan2(dy, dx),
-      hTop,
-      hBase,
-      hWindowBottom: bldg.hWindowBottom || 0.85,
-      isCityCentre: bldg.isCityCentre,
-      buildingType: bldg.buildingType,
-      lineEquation: lineEq,
-    });
+  const holes = bldg.holes;
+  if (holes && holes.length > 0) {
+    for (let h = 0; h < holes.length; h++) {
+      const hole = holes[h];
+      if (hole.length < 3) continue;
+      const ring = ensureOppositeWinding(hole, isPolygonCCW(hole), isCCW);
+      segments.push(...buildRingSegments(bldg, ring, isCCW, `${bldg.id}-hole${h}-seg`, h + 1));
+    }
   }
 
   return {

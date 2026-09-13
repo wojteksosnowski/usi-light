@@ -611,24 +611,6 @@ export function useCanvasInteraction({
     draggingPinnedPointId !== null
   );
 
-  // Mouse Interactions
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    const newScale = Math.max(0.001, Math.min(100, viewState.scale * zoomFactor));
-
-    setViewState((prev) => ({
-      scale: newScale,
-      panX: mouseX - (mouseX - prev.panX) * (newScale / prev.scale),
-      panY: mouseY - (mouseY - prev.panY) * (newScale / prev.scale),
-    }));
-  };
-
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -2039,7 +2021,6 @@ export function useCanvasInteraction({
     setCurrentMouseWorld,
     setHoveredBuildingIndex,
 
-    handleWheel,
     handleMouseDown,
     handleDoubleClick,
     handleMouseMove,

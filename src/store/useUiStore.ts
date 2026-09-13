@@ -1,36 +1,53 @@
 import { create } from 'zustand';
 
+export type ActiveModalType = 'share' | 'pricing' | 'license' | 'paymentSuccess' | 'confirmDelete' | null;
+
+export type SidebarGroupType = 'project' | 'analyses' | 'layers' | 'tools';
+
 interface UiState {
   isSidebarOpen: boolean;
-  openSidebarGroup: 'project' | 'layers' | 'tools' | null;
+  openSidebarGroup: SidebarGroupType | null;
   copiedToast: string | null;
+  activeModal: ActiveModalType;
+  modalPayload?: Record<string, unknown> | null;
   isShareModalOpen: boolean;
   isPricingModalOpen: boolean;
   isLicenseModalOpen: boolean;
   isPaymentSuccessModalOpen: boolean;
+  isConfirmDeleteModalOpen: boolean;
   paymentSuccessSessionId: string | null;
+  viewportScale: number;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
-  setOpenSidebarGroup: (group: 'project' | 'layers' | 'tools' | null) => void;
-  toggleSidebarGroup: (group: 'project' | 'layers' | 'tools') => void;
+  setOpenSidebarGroup: (group: SidebarGroupType | null) => void;
+  toggleSidebarGroup: (group: SidebarGroupType) => void;
   showCopiedToast: (msg: string) => void;
+  openModal: (modal: ActiveModalType, payload?: Record<string, unknown> | null) => void;
+  closeModal: () => void;
   setShareModalOpen: (open: boolean) => void;
   setPricingModalOpen: (open: boolean) => void;
   setLicenseModalOpen: (open: boolean) => void;
   setPaymentSuccessModalOpen: (open: boolean) => void;
   setPaymentSuccessSessionId: (sessionId: string | null) => void;
+  setViewportScale: (scale: number) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   isSidebarOpen: true,
   openSidebarGroup: 'project',
   copiedToast: null,
+  activeModal: null,
+  modalPayload: null,
   isShareModalOpen: false,
   isPricingModalOpen: false,
   isLicenseModalOpen: false,
   isPaymentSuccessModalOpen: false,
+  isConfirmDeleteModalOpen: false,
   paymentSuccessSessionId: null,
+  viewportScale: 14,
+
+  setViewportScale: (scale) => set((state) => (Math.abs(state.viewportScale - scale) > 1e-4 ? { viewportScale: scale } : state)),
 
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
@@ -48,9 +65,47 @@ export const useUiStore = create<UiState>((set) => ({
     }, 2500);
   },
 
-  setShareModalOpen: (open) => set({ isShareModalOpen: open }),
-  setPricingModalOpen: (open) => set({ isPricingModalOpen: open }),
-  setLicenseModalOpen: (open) => set({ isLicenseModalOpen: open }),
-  setPaymentSuccessModalOpen: (open) => set({ isPaymentSuccessModalOpen: open }),
+  openModal: (modal, payload = null) =>
+    set({
+      activeModal: modal,
+      modalPayload: payload,
+      isShareModalOpen: modal === 'share',
+      isPricingModalOpen: modal === 'pricing',
+      isLicenseModalOpen: modal === 'license',
+      isPaymentSuccessModalOpen: modal === 'paymentSuccess',
+      isConfirmDeleteModalOpen: modal === 'confirmDelete',
+    }),
+
+  closeModal: () =>
+    set({
+      activeModal: null,
+      modalPayload: null,
+      isShareModalOpen: false,
+      isPricingModalOpen: false,
+      isLicenseModalOpen: false,
+      isPaymentSuccessModalOpen: false,
+      isConfirmDeleteModalOpen: false,
+    }),
+
+  setShareModalOpen: (open) =>
+    set({
+      isShareModalOpen: open,
+      activeModal: open ? 'share' : null,
+    }),
+  setPricingModalOpen: (open) =>
+    set({
+      isPricingModalOpen: open,
+      activeModal: open ? 'pricing' : null,
+    }),
+  setLicenseModalOpen: (open) =>
+    set({
+      isLicenseModalOpen: open,
+      activeModal: open ? 'license' : null,
+    }),
+  setPaymentSuccessModalOpen: (open) =>
+    set({
+      isPaymentSuccessModalOpen: open,
+      activeModal: open ? 'paymentSuccess' : null,
+    }),
   setPaymentSuccessSessionId: (sessionId) => set({ paymentSuccessSessionId: sessionId }),
 }));

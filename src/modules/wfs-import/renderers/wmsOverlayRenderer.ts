@@ -3,13 +3,12 @@ import {
   CrsDetectionResult,
   cadPointToWgs84,
   latLonToWebMercatorPixel,
-  webMercatorPixelToLatLon,
-  wgs84ToCadPoint,
   LatLon,
 } from '../../../utils/geoTransform';
 import { WmsTileManager } from './wmsTileManager';
 import { Point2D } from '../../../types/geometry';
 import { APP_CONFIG } from '../../../config/appConfig';
+import { TileZoomHysteresis, clampTileRangeEnd, computeTileGridScreenTransform } from '../../../utils/tileGridProjection';
 
 export interface RenderWmsOverlayOptions {
   rc: CadRenderContext;
@@ -19,6 +18,10 @@ export interface RenderWmsOverlayOptions {
   opacity?: number;
   /** Promień zasięgu projektu w metrach CAD (środek projektu = (0,0)) */
   projectRadius?: number;
+  /** Pomija twarde przycięcie/culling do okręgu zasięgu projektu — używane przez warstwy
+   * traktowane jako "podkład satelitarny" (np. ortofotomapa), żeby zachowywały się spójnie
+   * z Google/HERE: bufor kafli w promieniu projektu, ale wyświetlanie całej mapy również poza okręgiem. */
+  skipRadiusClip?: boolean;
 }
 
 /**
@@ -43,7 +46,7 @@ function tileIntersectsCircle(
 }
 
 export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
-  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius } = options;
+  const { rc, tileManager, crsInfo, projectCenterLatLon, opacity = 0.45, projectRadius, skipRadiusClip = false } = options;
   const { ctx, width, height, viewState, screenToWorld, worldToScreen } = rc;
 
   const c1 = screenToWorld(0, 0);
@@ -66,8 +69,12 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
   const centerLat = wgsCorners[0].lat;
   const metersPerTileAtLat = 40075016.686 * Math.cos((centerLat * Math.PI) / 180);
 
-  let targetZoom = Math.round(Math.log2(metersPerTileAtLat / (256 * metersPerPixel)));
-  targetZoom = Math.max(2, Math.min(21, targetZoom));
+  const maxAllowedZoom = tileManager.maxNativeZoom ?? 19;
+  const exactZoom = Math.log2(metersPerTileAtLat / (256 * metersPerPixel));
+
+  const targetZoom = tileManager.resolveTargetZoom
+    ? tileManager.resolveTargetZoom(exactZoom, 2)
+    : Math.max(2, Math.min(maxAllowedZoom, Math.round(exactZoom)));
 
   const mercatorPixels = wgsCorners.map((wgs) => latLonToWebMercatorPixel(wgs, targetZoom));
   const minMercX = Math.min(...mercatorPixels.map((p) => p.x));
@@ -80,78 +87,110 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
   const startTileY = Math.floor(minMercY / 256);
   const endTileY = Math.floor(maxMercY / 256);
 
-  if ((endTileX - startTileX + 1) * (endTileY - startTileY + 1) > 120) return;
+  // Bezpieczne ograniczenie liczby kafli na klatkę (ochrona przed zawieszeniem przy drastycznym oddaleniu)
+  const effectiveEndX = clampTileRangeEnd(startTileX, endTileX);
+  const effectiveEndY = clampTileRangeEnd(startTileY, endTileY);
 
   // Oblicz pozycję środka projektu na ekranie dla clip/culling
   const originSc = worldToScreen(0, 0);
   const radiusPx = projectRadius != null ? projectRadius * viewState.scale : null;
 
+  // 5. Rysuj kafelki za pomocą zoptymalizowanej transformacji afinicznej (bez wolnego ctx.filter)
   ctx.save();
   ctx.globalAlpha = Math.max(0.05, Math.min(1.0, opacity));
   ctx.imageSmoothingEnabled = true;
+  // Celowo BEZ imageSmoothingQuality='high' — patrz komentarz w satelliteMapRenderer.ts.
 
   // Twardy clip canvas do okręgu zasięgu projektu
-  if (radiusPx != null && APP_CONFIG.geo.wmsClipToProjectRadius) {
+  if (radiusPx != null && APP_CONFIG.geo.wmsClipToProjectRadius && !skipRadiusClip) {
     ctx.beginPath();
     ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
     ctx.clip();
   }
 
-  for (let tx = startTileX; tx <= endTileX; tx++) {
-    for (let ty = startTileY; ty <= endTileY; ty++) {
-      // Tile culling: pomiń kafelki całkowicie poza okręgiem zasięgu
-      if (radiusPx != null && APP_CONFIG.geo.wmsTileCullingEnabled) {
-        // Oblicz narożniki kafelka na ekranie (przybliżenie przez środkową wgs->cad->screen)
-        const wgsTileCenter = webMercatorPixelToLatLon(
-          { x: (tx + 0.5) * 256, y: (ty + 0.5) * 256 },
-          targetZoom
-        );
-        const cadTileCenter = wgs84ToCadPoint(wgsTileCenter, crsInfo, projectCenterLatLon);
-        const sTileCenter = worldToScreen(cadTileCenter.x, cadTileCenter.y);
+  // Jednorazowe wyznaczenie wektorów bazowych siatki kafelków (256px w Mercatorze)
+  const { baseSTL, stepXx, stepXy, stepYx, stepYy, vXx, vXy, vYx, vYy } = computeTileGridScreenTransform(
+    startTileX,
+    startTileY,
+    targetZoom,
+    crsInfo,
+    projectCenterLatLon,
+    worldToScreen
+  );
+  const halfStepXx = stepXx * 0.5;
+  const halfStepXy = stepXy * 0.5;
+  const halfStepYx = stepYx * 0.5;
+  const halfStepYy = stepYy * 0.5;
+  const halfDiag = Math.hypot(halfStepXx + halfStepYx, halfStepXy + halfStepYy);
+  const checkRadius = radiusPx != null ? radiusPx + halfDiag : null;
+  const checkRadiusSq = checkRadius != null ? checkRadius * checkRadius : 0;
 
-        // Rozmiar kafelka na ekranie (256px / skala kafelka w pikselu)
-        const wgsTL = webMercatorPixelToLatLon({ x: tx * 256, y: ty * 256 }, targetZoom);
-        const wgsTR = webMercatorPixelToLatLon({ x: (tx + 1) * 256, y: ty * 256 }, targetZoom);
-        const cadTL = wgs84ToCadPoint(wgsTL, crsInfo, projectCenterLatLon);
-        const cadTR = wgs84ToCadPoint(wgsTR, crsInfo, projectCenterLatLon);
-        const sTL = worldToScreen(cadTL.x, cadTL.y);
-        const sTR = worldToScreen(cadTR.x, cadTR.y);
-        const tileSizePx = Math.hypot(sTR.sx - sTL.sx, sTR.sy - sTL.sy);
+  for (let tx = startTileX; tx <= effectiveEndX; tx++) {
+    const dX = tx - startTileX;
+    for (let ty = startTileY; ty <= effectiveEndY; ty++) {
+      const dY = ty - startTileY;
+      const sTLx = baseSTL.sx + dX * stepXx + dY * stepYx;
+      const sTLy = baseSTL.sy + dX * stepXy + dY * stepYy;
 
-        const minTileSx = sTileCenter.sx - tileSizePx / 2;
-        const maxTileSx = sTileCenter.sx + tileSizePx / 2;
-        const minTileSy = sTileCenter.sy - tileSizePx / 2;
-        const maxTileSy = sTileCenter.sy + tileSizePx / 2;
+      // 1. Viewport Frustum Culling — pomijaj kafle całkowicie poza widocznym ekranem [0..width, 0..height]
+      const sTRx = sTLx + stepXx;
+      const sTRy = sTLy + stepXy;
+      const sBLx = sTLx + stepYx;
+      const sBLy = sTLy + stepYy;
+      const sBRx = sTRx + stepYx;
+      const sBRy = sTRy + stepYy;
 
-        if (!tileIntersectsCircle(minTileSx, minTileSy, maxTileSx, maxTileSy, originSc.sx, originSc.sy, radiusPx)) {
+      const minTileSx = Math.min(sTLx, sTRx, sBLx, sBRx);
+      const maxTileSx = Math.max(sTLx, sTRx, sBLx, sBRx);
+      const minTileSy = Math.min(sTLy, sTRy, sBLy, sBRy);
+      const maxTileSy = Math.max(sTLy, sTRy, sBLy, sBRy);
+
+      if (maxTileSx < 0 || minTileSx > width || maxTileSy < 0 || minTileSy > height) {
+        continue;
+      }
+
+      // 2. Szybki culling do okręgu projektu (odległość środka kafla od środka projektu na ekranie)
+      if (checkRadius != null && APP_CONFIG.geo.wmsTileCullingEnabled && !skipRadiusClip) {
+        const centerSx = sTLx + halfStepXx + halfStepYx;
+        const centerSy = sTLy + halfStepXy + halfStepYy;
+        const distSq = (centerSx - originSc.sx) ** 2 + (centerSy - originSc.sy) ** 2;
+        if (distSq > checkRadiusSq) {
           continue;
         }
       }
 
+      // Kafelki inwertowane pobierane są bezpośrednio z pamięci podręcznej (OffscreenCanvas), przeliczone
+      // przy załadowaniu kafla, nie w tej pętli — bez użycia powolnego ctx.filter per-frame
       const tileImg = tileManager.getTile(tx, ty, targetZoom);
-      if (!tileImg) continue;
 
-      const wgsTL = webMercatorPixelToLatLon({ x: tx * 256, y: ty * 256 }, targetZoom);
-      const wgsTR = webMercatorPixelToLatLon({ x: (tx + 1) * 256, y: ty * 256 }, targetZoom);
-      const wgsBL = webMercatorPixelToLatLon({ x: tx * 256, y: (ty + 1) * 256 }, targetZoom);
-
-      const cadTL = wgs84ToCadPoint(wgsTL, crsInfo, projectCenterLatLon);
-      const cadTR = wgs84ToCadPoint(wgsTR, crsInfo, projectCenterLatLon);
-      const cadBL = wgs84ToCadPoint(wgsBL, crsInfo, projectCenterLatLon);
-
-      const sTL = worldToScreen(cadTL.x, cadTL.y);
-      const sTR = worldToScreen(cadTR.x, cadTR.y);
-      const sBL = worldToScreen(cadBL.x, cadBL.y);
-
-      const vXx = (sTR.sx - sTL.sx) / 256;
-      const vXy = (sTR.sy - sTL.sy) / 256;
-      const vYx = (sBL.sx - sTL.sx) / 256;
-      const vYy = (sBL.sy - sTL.sy) / 256;
-
-      ctx.save();
-      ctx.setTransform(vXx, vXy, vYx, vYy, sTL.sx, sTL.sy);
-      ctx.drawImage(tileImg, 0, 0, 256, 256);
-      ctx.restore();
+      if (tileImg) {
+        ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+        ctx.drawImage(tileImg, 0, 0, 256, 256);
+      } else if (targetZoom > 2) {
+        // Fallback do kafelka rodzica (zoom - 1) z pamięci RAM (zero żądań sieciowych w pętli renderowania)
+        const parentZoom = targetZoom - 1;
+        const pTx = Math.floor(tx / 2);
+        const pTy = Math.floor(ty / 2);
+        const parentImg = tileManager.getTileFromMemory(pTx, pTy, parentZoom);
+        if (parentImg) {
+          const subX = (tx % 2) * 128;
+          const subY = (ty % 2) * 128;
+          ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+          ctx.drawImage(parentImg, subX, subY, 128, 128, 0, 0, 256, 256);
+        } else if (targetZoom > 3) {
+          // Fallback do kafelka dziadka (zoom - 2) z pamięci RAM
+          const gpZoom = targetZoom - 2;
+          const gpTx = Math.floor(tx / 4);
+          const gpTy = Math.floor(ty / 4);
+          const gpImg = tileManager.getTileFromMemory(gpTx, gpTy, gpZoom);
+          if (gpImg) {
+            const subX = (tx % 4) * 64;
+            const subY = (ty % 4) * 64;
+            ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+            ctx.drawImage(gpImg, subX, subY, 64, 64, 0, 0, 256, 256);
+          }
+        }
+      }
     }
   }
 

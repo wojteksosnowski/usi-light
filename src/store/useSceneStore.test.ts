@@ -169,6 +169,19 @@ describe('useSceneStore', () => {
   });
 
   describe('Undo / Redo (zundo temporal)', () => {
+    beforeEach(() => {
+      const bldg = {
+        ...createBuildingFromVertices(
+          [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+          'Initial Test Building',
+          15
+        ),
+        id: 'bldg-1',
+      };
+      useSceneStore.getState().setBuildings([bldg]);
+      useSceneStore.temporal.getState().clear();
+    });
+
     it('supports undo and redo for adding and updating buildings', () => {
       useSceneStore.temporal.getState().clear();
       const initialCount = useSceneStore.getState().buildings.length;

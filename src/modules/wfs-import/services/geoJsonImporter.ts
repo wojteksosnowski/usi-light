@@ -7,8 +7,19 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
-import { WfsTreeFeature } from '../store/useWfsStore';
-import { polygonCircleIntersectionRatio } from '../../../utils/math2d/polygons';
+import {
+  WfsTreeFeature,
+  OvertureLineFeature,
+  OverturePolygonFeature,
+  MpzpZoneFeature,
+  MpzpLineFeature,
+  MpzpLineType,
+  LandCoverFeature,
+} from '../store/useWfsStore';
+import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
+import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../utils/math2d/polygons';
+import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
+import { ensureOppositeWinding } from '../../../utils/ringSegments';
 
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
@@ -28,6 +39,19 @@ function str(v: unknown): string {
 
 function strOrUndefined(v: unknown): string | undefined {
   return v != null ? String(v) : undefined;
+}
+
+/**
+ * Odczytuje atrybut tekstowy WFS odrzucając wartości niereprezentujące realnych danych — serwisy GUGiK
+ * (EGiB, Kraków) potrafią zwrócić dosłowny tekst "None" (serializacja Pythonowego None) zamiast pustej
+ * wartości, gdy atrybut jest niedostępny. Traktowanie "None" jak prawdziwego ID powodowało kolizje —
+ * wiele budynków bez ID_BUDYNKU dostawało ten sam identyfikator "None" i były traktowane jako jeden obiekt.
+ */
+function strOrNullIfMissing(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (s === '' || s.toLowerCase() === 'none') return null;
+  return s;
 }
 
 /**
@@ -56,6 +80,29 @@ function extractRings(geometry: { type: string; coordinates: unknown }): number[
   return [];
 }
 
+interface PolygonStructure {
+  outer: number[][];
+  holes: number[][][];
+}
+
+/**
+ * Jak `extractRings`, ale zachowuje hierarchię obrys-zewnętrzny/otwory zamiast spłaszczać
+ * wszystkie pierścienie do jednej listy (GeoJSON `Polygon.coordinates[0]` = obrys, `[1..]` = otwory;
+ * `MultiPolygon` = lista takich struktur, po jednej na część).
+ */
+function extractPolygonStructures(geometry: { type: string; coordinates: unknown }): PolygonStructure[] {
+  if (geometry.type === 'Polygon') {
+    const coords = geometry.coordinates as number[][][];
+    if (coords.length === 0) return [];
+    return [{ outer: coords[0], holes: coords.slice(1) }];
+  }
+  if (geometry.type === 'MultiPolygon') {
+    const mp = geometry.coordinates as number[][][][];
+    return mp.filter((poly) => poly.length > 0).map((poly) => ({ outer: poly[0], holes: poly.slice(1) }));
+  }
+  return [];
+}
+
 function estimateHeight(storeys: number | null): number {
   if (storeys == null || storeys <= 0) return DEFAULT_HEIGHT;
   if (storeys === 1) return FIRST_FLOOR_HEIGHT;
@@ -77,22 +124,26 @@ export function importBuildingsFromGeoJson(
     const feature = collection.features[fi];
     if (!feature.geometry) continue;
 
-    const rings = extractRings(feature.geometry);
+    const structures = extractPolygonStructures(feature.geometry);
     const props = feature.properties || {};
     const storeys = props.KONDYGNACJE_NADZIEMNE != null
       ? Math.round(Number(props.KONDYGNACJE_NADZIEMNE))
       : null;
     const height = estimateHeight(storeys);
-    const buildingId = str(props.ID_BUDYNKU) || `wfs-bld-${now}-${fi}`;
+    const heightSource: BuildingLoop['heightSource'] = storeys != null ? 'storeys-wfs' : 'default';
+    const rawBuildingId = strOrNullIfMissing(props.ID_BUDYNKU);
+    const buildingId = rawBuildingId || `wfs-bld-${now}-${fi}`;
 
-    for (let ri = 0; ri < rings.length; ri++) {
-      const ring = rings[ri];
-      const rawPoints: Point2D[] = ring.map(([x, y]) =>
+    for (let si = 0; si < structures.length; si++) {
+      const struct = structures[si];
+      const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
         wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
       );
 
+      const id = si === 0 ? buildingId : `${buildingId}-p${si}`;
+
       const sanitized = sanitizePolygon(rawPoints, {
-        buildingId: ri === 0 ? buildingId : `${buildingId}-r${ri}`,
+        buildingId: id,
         defaultHeight: height,
         buildingType: 'residential',
         isCityCentre: false,
@@ -109,12 +160,26 @@ export function importBuildingsFromGeoJson(
         if (ratio < 0.1) continue;
       }
 
-      const id = ri === 0 ? buildingId : `${buildingId}-r${ri}`;
       const storeysCount = storeys ?? DEFAULT_STOREYS;
+      const outerIsCCW = isPolygonCCW(sanitized.vertices);
+      const holes: Point2D[][] = [];
+      for (const rawHole of struct.holes) {
+        const rawHolePoints: Point2D[] = rawHole.map(([x, y]) =>
+          wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+        );
+        const sanitizedHole = sanitizePolygon(rawHolePoints, {
+          buildingId: `${id}-hole`,
+          defaultHeight: height,
+          buildingType: 'residential',
+          isCityCentre: false,
+        });
+        if (!sanitizedHole.valid) continue;
+        holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+      }
 
-      buildings.push({
+      const buildingBase: BuildingLoop = {
         id,
-        name: `WFS ${str(props.ID_BUDYNKU) || `#${fi + 1}`}`,
+        name: `WFS ${rawBuildingId || `#${fi + 1}`}`,
         layer: 'WFS_BUDYNKI',
         category: 'building',
         isTested: false,
@@ -123,16 +188,20 @@ export function importBuildingsFromGeoJson(
         isCityCentre: false,
         buildingType: 'residential',
         defaultHeight: height,
+        heightSource,
         hWindowBottom: 0.85,
         elevation: 0.0,
         firstFloorHeight: FIRST_FLOOR_HEIGHT,
         typicalFloorHeight: DEFAULT_FLOOR_HEIGHT,
         storeysCount,
         vertices: sanitized.vertices,
+        holes: holes.length > 0 ? holes : undefined,
         segments: sanitized.segments,
         isClockwise: !sanitized.isCCW,
         transform: { tx: 0, ty: 0, rotationDeg: 0 },
-      });
+      };
+
+      buildings.push(rebuildBuildingSegments(buildingBase, sanitized.vertices));
     }
   }
 
@@ -153,19 +222,21 @@ export function importParcelsFromGeoJson(
     const feature = collection.features[fi];
     if (!feature.geometry) continue;
 
-    const rings = extractRings(feature.geometry);
+    const structures = extractPolygonStructures(feature.geometry);
     const props = feature.properties || {};
-    const parcelId = str(props.ID_DZIALKI) || `wfs-parcel-${now}-${fi}`;
+    const parcelId = strOrNullIfMissing(props.ID_DZIALKI) || `wfs-parcel-${now}-${fi}`;
     const plotNumber = str(props.NUMER_DZIALKI);
 
-    for (let ri = 0; ri < rings.length; ri++) {
-      const ring = rings[ri];
-      const rawPoints: Point2D[] = ring.map(([x, y]) =>
+    for (let si = 0; si < structures.length; si++) {
+      const struct = structures[si];
+      const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
         wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
       );
 
+      const id = si === 0 ? parcelId : `${parcelId}-p${si}`;
+
       const sanitized = sanitizePolygon(rawPoints, {
-        buildingId: ri === 0 ? parcelId : `${parcelId}-r${ri}`,
+        buildingId: id,
         defaultHeight: 0,
         buildingType: 'residential',
         isCityCentre: false,
@@ -176,9 +247,23 @@ export function importParcelsFromGeoJson(
         continue;
       }
 
-      const id = ri === 0 ? parcelId : `${parcelId}-r${ri}`;
+      const outerIsCCW = isPolygonCCW(sanitized.vertices);
+      const holes: Point2D[][] = [];
+      for (const rawHole of struct.holes) {
+        const rawHolePoints: Point2D[] = rawHole.map(([x, y]) =>
+          wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+        );
+        const sanitizedHole = sanitizePolygon(rawHolePoints, {
+          buildingId: `${id}-hole`,
+          defaultHeight: 0,
+          buildingType: 'residential',
+          isCityCentre: false,
+        });
+        if (!sanitizedHole.valid) continue;
+        holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+      }
 
-      parcels.push({
+      const parcelBase: BuildingLoop = {
         id,
         name: `Działka ${plotNumber || `#${fi + 1}`}`,
         layer: 'WFS_DZIALKI',
@@ -197,14 +282,461 @@ export function importParcelsFromGeoJson(
         typicalFloorHeight: 0,
         storeysCount: 0,
         vertices: sanitized.vertices,
+        holes: holes.length > 0 ? holes : undefined,
         segments: sanitized.segments,
         isClockwise: !sanitized.isCCW,
         transform: { tx: 0, ty: 0, rotationDeg: 0 },
-      });
+      };
+
+      parcels.push(rebuildBuildingSegments(parcelBase, sanitized.vertices));
     }
   }
 
   return { buildings: [], parcels, warnings };
+}
+
+function extractLineStrings(geometry: { type: string; coordinates: unknown }): number[][][] {
+  if (geometry.type === 'LineString') {
+    return [geometry.coordinates as number[][]];
+  }
+  if (geometry.type === 'MultiLineString') {
+    return geometry.coordinates as number[][][];
+  }
+  return [];
+}
+
+/**
+ * Konwertuje cechy liniowe (drogi/koleje) z Overture Maps (WGS84) na OvertureLineFeature
+ * w lokalnych współrzędnych CAD. Overture nie wymaga kroku EPSG→WGS84 (dane są już WGS84).
+ */
+export function importOvertureLines(
+  collection: GeoJsonFeatureCollection,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): OvertureLineFeature[] {
+  const result: OvertureLineFeature[] = [];
+
+  for (let fi = 0; fi < collection.features.length; fi++) {
+    const feature = collection.features[fi];
+    if (!feature.geometry) continue;
+
+    const lines = extractLineStrings(feature.geometry);
+    const props = feature.properties || {};
+    const featureId = str(props.id) || `overture-line-${fi}`;
+    const className = strOrUndefined(props.class) ?? null;
+
+    for (let li = 0; li < lines.length; li++) {
+      const points: Point2D[] = lines[li].map(([lon, lat]) =>
+        wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)
+      );
+      if (points.length < 2) continue;
+
+      result.push({
+        id: li === 0 ? featureId : `${featureId}-${li}`,
+        points,
+        className,
+      });
+    }
+  }
+
+  return result;
+}
+
+/** Klasy Overture Maps przypisane do kategorii zieleni / rekreacji. */
+const OVERTURE_GREEN_CLASSES = new Set([
+  'park',
+  'forest',
+  'wood',
+  'grass',
+  'garden',
+  'recreation_ground',
+  'pitch',
+  'golf_course',
+  'allotments',
+  'meadow',
+  'nature_reserve',
+  'scrub',
+  'wetland',
+  'tree_row',
+  'village_green',
+  'cemetery',
+  'greenery',
+]);
+
+const OVERTURE_WATER_CLASSES = new Set([
+  'water',
+  'river',
+  'lake',
+  'pond',
+  'reservoir',
+  'basin',
+  'stream',
+  'canal',
+  'ocean',
+]);
+
+const OVERTURE_RESIDENTIAL_CLASSES = new Set([
+  'residential',
+  'housing',
+]);
+
+const OVERTURE_COMMERCIAL_CLASSES = new Set([
+  'commercial',
+  'retail',
+  'services',
+]);
+
+const OVERTURE_INDUSTRIAL_CLASSES = new Set([
+  'industrial',
+  'quarry',
+  'construction',
+  'landfill',
+]);
+
+const OVERTURE_INSTITUTIONAL_CLASSES = new Set([
+  'school',
+  'university',
+  'college',
+  'hospital',
+  'clinic',
+  'military',
+  'civic',
+  'public',
+]);
+
+const OVERTURE_AGRICULTURAL_CLASSES = new Set([
+  'farmland',
+  'farmyard',
+  'orchard',
+  'vineyard',
+  'greenhouse',
+  'agriculture',
+]);
+
+const OVERTURE_INFRASTRUCTURE_CLASSES = new Set([
+  'parking',
+  'railway',
+  'runway',
+  'aeroway',
+  'pedestrian',
+  'pier',
+  'port',
+]);
+
+/**
+ * Klasyfikuje obiekt Overture Maps (temat `base`, typy `land_use`, `land_cover`, `land`, `water`, `infrastructure`)
+ * do jednej z głównych kategorii funkcjonalnych.
+ */
+export function classifyOvertureFeature(props: Record<string, unknown> | null | undefined): import('../store/useWfsStore').OvertureLandUseCategory {
+  if (!props) return 'other';
+  const rawClass = typeof props.class === 'string' ? props.class.toLowerCase().trim() : '';
+  const subtype = typeof props.subtype === 'string' ? props.subtype.toLowerCase().trim() : '';
+  const type = typeof props.type === 'string' ? props.type.toLowerCase().trim() : '';
+
+  if (type === 'water' || subtype === 'water' || OVERTURE_WATER_CLASSES.has(rawClass)) {
+    return 'water';
+  }
+
+  if (OVERTURE_GREEN_CLASSES.has(rawClass)) return 'green';
+  if (OVERTURE_RESIDENTIAL_CLASSES.has(rawClass)) return 'residential';
+  if (OVERTURE_COMMERCIAL_CLASSES.has(rawClass)) return 'commercial';
+  if (OVERTURE_INDUSTRIAL_CLASSES.has(rawClass)) return 'industrial';
+  if (OVERTURE_INSTITUTIONAL_CLASSES.has(rawClass)) return 'institutional';
+  if (OVERTURE_AGRICULTURAL_CLASSES.has(rawClass)) return 'agricultural';
+  if (OVERTURE_INFRASTRUCTURE_CLASSES.has(rawClass)) return 'infrastructure';
+
+  if (subtype === 'land_cover') {
+    return 'green';
+  }
+
+  return 'other';
+}
+
+/**
+ * Konwertuje cechy powierzchniowe zagospodarowania/pokrycia terenu z Overture Maps (WGS84)
+ * na OverturePolygonFeature w lokalnych współrzędnych CAD z przypisaną kategorią użytkowania.
+ */
+export function importOverturePolygons(
+  collection: GeoJsonFeatureCollection,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): OverturePolygonFeature[] {
+  const result: OverturePolygonFeature[] = [];
+
+  for (let fi = 0; fi < collection.features.length; fi++) {
+    const feature = collection.features[fi];
+    if (!feature.geometry) continue;
+
+    const rawRings = extractRings(feature.geometry);
+    if (rawRings.length === 0) continue;
+
+    const props = feature.properties || {};
+    const featureId = str(props.id) || `overture-poly-${fi}`;
+    const className = strOrUndefined(props.class) ?? null;
+    const category = classifyOvertureFeature(props);
+
+    const rings: Point2D[][] = rawRings
+      .map((ring) => ring.map(([lon, lat]) => wgs84ToCadPoint({ lat, lon }, projectCrs, projectCenter)))
+      .filter((ring) => ring.length >= 3);
+
+    if (rings.length === 0) continue;
+
+    result.push({ id: featureId, rings, className, category });
+  }
+
+  return result;
+}
+
+/**
+ * Konwertuje surowe strefy MPZP z serwisów miejskich (Warszawa REST, Kraków/Wrocław/Poznań/Gdynia WFS)
+ * na MpzpZoneFeature w lokalnych współrzędnych CAD z ujednoliconymi atrybutami.
+ */
+export function importMpzpZonesFromGeoJson(
+  features: MpzpZoneRawFeature[],
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon,
+  sourceCrs?: CrsDetectionResult
+): MpzpZoneFeature[] {
+  const result: MpzpZoneFeature[] = [];
+
+  const convertPoint = (p0: number, p1: number): Point2D => {
+    // Jeśli współrzędne są poza zakresem stopni WGS84 (-180..180, -90..90), traktujemy je jako metryczne
+    const isProjected = Math.abs(p0) > 180 || Math.abs(p1) > 90;
+    if (isProjected && sourceCrs) {
+      return wfsCoordToCad(p0, p1, sourceCrs, projectCrs, projectCenter);
+    }
+    return wgs84ToCadPoint({ lat: p1, lon: p0 }, projectCrs, projectCenter);
+  };
+
+  for (let fi = 0; fi < features.length; fi++) {
+    const feature = features[fi];
+    if (!feature.geometry) continue;
+
+    const rawRings = extractRings(feature.geometry as { type: string; coordinates: unknown });
+    if (rawRings.length === 0) continue;
+
+    const props = feature.properties || {};
+    const featureId =
+      strOrNullIfMissing(props.objectid) ||
+      strOrNullIfMissing(props.OBJECTID) ||
+      strOrNullIfMissing(props.lokalnyId) ||
+      strOrNullIfMissing(props.ID) ||
+      strOrNullIfMissing(props.id) ||
+      `mpzp-zone-${fi}`;
+
+    const rings: Point2D[][] = rawRings
+      .map((ring) => ring.map(([c0, c1]) => convertPoint(c0, c1)))
+      .filter((ring) => ring.length >= 3);
+
+    if (rings.length === 0) continue;
+
+    const funSymb =
+      strOrNullIfMissing(props.fun_symb) ||
+      strOrNullIfMissing(props.oznaczenie) ||
+      strOrNullIfMissing(props.symbol) ||
+      strOrNullIfMissing(props.symb_t_o) ||
+      strOrNullIfMissing(props.symb_t) ||
+      strOrNullIfMissing(props.SYMBOL) ||
+      strOrNullIfMissing(props.kod_przeznaczenia_glownego) ||
+      strOrNullIfMissing(props.przeznaczenie_kod) ||
+      strOrNullIfMissing(props.PRZEZNACZENIE);
+
+    const funNazwa =
+      strOrNullIfMissing(props.fun_nazwa) ||
+      strOrNullIfMissing(props.opis_oznaczenia) ||
+      strOrNullIfMissing(props.przeznaczenie_glowne) ||
+      strOrNullIfMissing(props.przeznaczenie_nazwa) ||
+      strOrNullIfMissing(props.PRZEZNACZENIE) ||
+      strOrNullIfMissing(props.OPIS) ||
+      strOrNullIfMissing(props.opis) ||
+      strOrNullIfMissing(props.rodz_zab) ||
+      strOrNullIfMissing(props.status);
+
+    const maxWysokosc =
+      strOrNullIfMissing(props.max_wys) ||
+      strOrNullIfMissing(props.MAX_WYSOKOSC) ||
+      strOrNullIfMissing(props.wysokosc_max) ||
+      strOrNullIfMissing(props.WYSOKOSC_ZABUDOWY);
+
+    const intenZab =
+      strOrNullIfMissing(props.inten_zab) ||
+      strOrNullIfMissing(props.INTENSYWNOSC) ||
+      strOrNullIfMissing(props.intensywnosc) ||
+      strOrNullIfMissing(props.INTENSYWNOSC_MAX);
+
+    const powBio =
+      strOrNullIfMissing(props.pow_bio) ||
+      strOrNullIfMissing(props.POW_BIOLOGICZNA) ||
+      strOrNullIfMissing(props.POW_BIOLOGICZNIE_CZYNNA) ||
+      strOrNullIfMissing(props.pbc);
+
+    const liczKond =
+      strOrNullIfMissing(props.licz_kond) ||
+      strOrNullIfMissing(props.KONDYGNACJE);
+
+    const nazwaPlan =
+      strOrNullIfMissing(props.nazwa_plan) ||
+      strOrNullIfMissing(props.NAZWA_PLANU) ||
+      strOrNullIfMissing(props.nazwa_mpzp) ||
+      strOrNullIfMissing(props.nazwa_planu) ||
+      strOrNullIfMissing(props.tytul) ||
+      strOrNullIfMissing(props.nazwaWlasna) ||
+      strOrNullIfMissing(props.plan);
+
+    result.push({
+      id: featureId,
+      rings,
+      funSymb,
+      funNazwa,
+      maxWysokosc,
+      intenZab,
+      powBio,
+      liczKond,
+      nazwaPlan,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Konwertuje obiekty liniowe MPZP (np. nieprzekraczalne linie zabudowy, obowiązujące linie zabudowy,
+ * linie rozgraniczające) na MpzpLineFeature w lokalnych współrzędnych CAD.
+ */
+export function importMpzpLinesFromGeoJson(
+  features: MpzpLineRawFeature[],
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon,
+  sourceCrs?: CrsDetectionResult
+): MpzpLineFeature[] {
+  const result: MpzpLineFeature[] = [];
+
+  const convertPoint = (p0: number, p1: number): Point2D => {
+    const isProjected = Math.abs(p0) > 180 || Math.abs(p1) > 90;
+    if (isProjected && sourceCrs) {
+      return wfsCoordToCad(p0, p1, sourceCrs, projectCrs, projectCenter);
+    }
+    return wgs84ToCadPoint({ lat: p1, lon: p0 }, projectCrs, projectCenter);
+  };
+
+  for (let fi = 0; fi < features.length; fi++) {
+    const feature = features[fi];
+    if (!feature.geometry) continue;
+
+    const geom = feature.geometry as { type: string; coordinates: unknown };
+    let rawLines: number[][][] = [];
+
+    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+      rawLines = [geom.coordinates as number[][]];
+    } else if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
+      rawLines = geom.coordinates as number[][][];
+    }
+
+    const props = feature.properties || {};
+    const typRaw = (
+      strOrNullIfMissing(props.TYP_LINII) ||
+      strOrNullIfMissing(props.typ_linii) ||
+      strOrNullIfMissing(props.rodzajLinii) ||
+      strOrNullIfMissing(props.rodzaj_linii) ||
+      strOrNullIfMissing(props.TYP) ||
+      strOrNullIfMissing(props.RODZAJ) ||
+      strOrNullIfMissing(props.OPIS) ||
+      strOrNullIfMissing(props.opis) ||
+      ''
+    ).toLowerCase();
+
+    let lineType: MpzpLineType = 'inna';
+    if (typRaw.includes('nieprzekraczaln')) {
+      lineType = 'nieprzekraczalna_linia_zabudowy';
+    } else if (typRaw.includes('obowi') || typRaw.includes('nakazan')) {
+      lineType = 'obowiazujaca_linia_zabudowy';
+    } else if (typRaw.includes('rozgranicz') || typRaw.includes('granic')) {
+      lineType = 'linia_rozgraniczajaca';
+    }
+
+    const label =
+      strOrNullIfMissing(props.OPIS) ||
+      strOrNullIfMissing(props.opis) ||
+      strOrNullIfMissing(props.rodzaj_linii) ||
+      strOrNullIfMissing(props.rodzajLinii) ||
+      strOrNullIfMissing(props.RODZAJ) ||
+      undefined;
+
+    for (let li = 0; li < rawLines.length; li++) {
+      const lineCoords = rawLines[li];
+      if (!Array.isArray(lineCoords) || lineCoords.length < 2) continue;
+
+      const points: Point2D[] = lineCoords.map(([c0, c1]) => convertPoint(c0, c1));
+
+      result.push({
+        id: `mpzp-line-${fi}-${li}`,
+        points,
+        lineType,
+        label,
+      });
+    }
+  }
+
+  return result;
+}
+
+
+/**
+ * Konwertuje jednostki pokrycia terenu z ogólnopolskiej usługi WFS GUGiK "wfsLCV" (patrz
+ * `wfsLcvClient.ts`) na LandCoverFeature w lokalnych współrzędnych CAD. Zachowuje otwory
+ * wewnętrzne (`extractPolygonStructures()`) — te geometrie realnie mają enklawy/wyspy.
+ * Bez sanityzacji do segmentów budynku (`sanitizePolygon` tu służy tylko do odrzucenia
+ * zdegenerowanych punktów/krawędzi i wyznaczenia kierunku nawijania) — to czysta geometria
+ * referencyjna, nie `BuildingLoop`.
+ */
+export function importLandCoverFromGeoJson(
+  collection: GeoJsonFeatureCollection,
+  sourceCrs: CrsDetectionResult,
+  projectCrs: CrsDetectionResult,
+  projectCenter: LatLon
+): LandCoverFeature[] {
+  const result: LandCoverFeature[] = [];
+
+  for (let fi = 0; fi < collection.features.length; fi++) {
+    const feature = collection.features[fi];
+    if (!feature.geometry) continue;
+
+    const structures = extractPolygonStructures(feature.geometry);
+    const props = feature.properties || {};
+    const classHref = strOrNullIfMissing(props.class);
+    const landCoverClass = classHref ? classHref.split('/').filter(Boolean).pop() ?? null : null;
+
+    for (let si = 0; si < structures.length; si++) {
+      const struct = structures[si];
+      const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
+        wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+      );
+
+      const id = `lcv-${fi}-${si}`;
+      const sanitized = sanitizePolygon(rawPoints, { buildingId: id, defaultHeight: 0 });
+      if (!sanitized.valid) continue;
+
+      const outerIsCCW = isPolygonCCW(sanitized.vertices);
+      const holes: Point2D[][] = [];
+      for (const rawHole of struct.holes) {
+        const rawHolePoints: Point2D[] = rawHole.map(([x, y]) =>
+          wfsCoordToCad(x, y, sourceCrs, projectCrs, projectCenter)
+        );
+        const sanitizedHole = sanitizePolygon(rawHolePoints, { buildingId: `${id}-hole`, defaultHeight: 0 });
+        if (!sanitizedHole.valid) continue;
+        holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
+      }
+
+      result.push({
+        id,
+        outer: sanitized.vertices,
+        holes: holes.length > 0 ? holes : undefined,
+        landCoverClass,
+      });
+    }
+  }
+
+  return result;
 }
 
 /**

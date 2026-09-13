@@ -45,6 +45,25 @@ describe('shareSerializer', () => {
     expect(restored.scene.buildings.length).toBe(buildings.length);
     expect(restored.solar.latitude).toBe(52.2297);
     expect(restored.solar.selectedCity).toBe('Warszawa');
+    expect(restored.metadata.name).toBe('Projekt Warszawa');
+  });
+
+  it('poprawnie zapisuje niestandardową nazwę projektu w metadata.name', () => {
+    const buildings = createSampleBuildings();
+    const payload = createSharedPayloadFromState({
+      buildings,
+      settings: {
+        latitude: 52.2297,
+        longitude: 21.0122,
+        equinoxDate: 'spring',
+      },
+      projectName: 'Osiedle Słoneczne Etap 1',
+    });
+
+    expect(payload.metadata.name).toBe('Osiedle Słoneczne Etap 1');
+    const compressed = compressProjectData(payload);
+    const restored = decompressProjectData(compressed);
+    expect(restored.metadata.name).toBe('Osiedle Słoneczne Etap 1');
   });
 
   it('nie zapisuje pól z wartością domyślną i nie zaokrągla współrzędnych', () => {

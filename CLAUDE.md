@@ -48,23 +48,30 @@ Scene is persisted to `localStorage` under key `usi-light.scene.v1`.
 - **`solar/`** — solar position engines: `LutSolarEngine` (LUT-based fast lookup), `AnalyticalSolarEngine` (precise)
 
 ### Core Data Model (`src/types/geometry.ts`)
-- **`BuildingLoop`** — central entity: polygon (`vertices: Point2D[]`) + elevation metadata + `segments: FacadeSegment[]`. Key flags: `isTested` (object under analysis vs. obstacle), `isIncluded`, `isLocked`, `isGhosted`, `category` (`building` | `boundary`)
-- **`FacadeSegment`** — wall edge with outward unit normal, `hTop`/`hWindowBottom`, and precomputed `lineEquation`
+- **`BuildingLoop`** — central entity: outer polygon (`vertices: Point2D[]`) + optional interior holes (`holes?: Point2D[][]`, e.g. courtyards from cadastral imports) + elevation metadata + `segments: FacadeSegment[]`. Key flags: `isTested` (object under analysis vs. obstacle), `isIncluded`, `isLocked`, `isGhosted`, `category` (`building` | `boundary`)
+- **`FacadeSegment`** — wall edge with outward unit normal, `hTop`/`hWindowBottom`, precomputed `lineEquation`, and `ringIndex` (`0`/undefined = outer ring, `1+` = hole index + 1)
 - **`PinnedFacadePoint`** — persistent measurement point: `{ buildingId, segmentId, offsetRatio }` (P1, P2, P3)
+- Segment generation (including holes, opposite-winding correction, inward normals for hole boundaries) lives in `src/utils/ringSegments.ts` — a dependency-free module (imports only `math2d/vec2.ts`) shared by `src/utils/segmentStatistics.ts` (`rebuildBuildingSegments`) and `src/utils/math2d/polygons.ts` (`booleanUnionBuildings`) specifically to avoid a circular import through the `@/utils/math2d` barrel.
 
 ### Geo Module (`src/modules/wfs-import/`)
-WMS/WFS overlays from Polish geodata services (GUGiK Geoportal). Layers are registered into the `CadRenderPipeline` singleton via `registerGeoLayers()` called once in `App.tsx`. Render repaint is triggered by dispatching `new Event('geo-render-needed')` on `window`.
+WMS/WFS overlays and vector imports from Polish geodata services (GUGiK Geoportal + city-specific WFS). Layers are registered into the `CadRenderPipeline` singleton via `registerGeoLayers()` called once in `App.tsx`; each layer/render-layer pair follows the same pattern (Zustand store slice → layer class implementing `CadRenderLayer` → renderer function drawing via `rc.worldToScreen()`). Render repaint is triggered by dispatching `new Event('geo-render-needed')` on `window`.
 
-Services: `uldkClient.ts` (ULDK parcel lookup), `geoJsonImporter.ts` (WFS import), `wcsGugikClient.ts`, `wfsWarsawClient.ts`.
+- **Parcels/buildings**: `uldkClient.ts` (nationwide ULDK parcel lookup, WKT), `citySources.ts` (per-city WFS building/parcel source registry — Warsaw, Kraków, national EGiB fallback), `geoJsonImporter.ts` (shared GeoJSON→`BuildingLoop`/feature conversion, incl. hole-preserving `extractPolygonStructures()`), `wfsGmlUtils.ts` (manual GML parsing for servers without JSON output; `parseWfsPolygonGmlWithHoles` also captures interior rings and `xlink:href` reference attributes).
+- **Elevation**: `wcsGugikClient.ts` (WCS `GetCoverage` DSM/NMPT + DTM/NMT raster sampling) + `terrainAnalyzer.ts` (derives real building height from DSM−DTM).
+- **Reference vector layers** (read-only, lazy-loaded on first toggle via `ensureGeoContextLoaded()` in `ProjectGroup.tsx`): MPZP zones (`wfsMpzpWarsawClient.ts`), land cover (`wfsLcvClient.ts`, WFS `lcv:LandCoverUnit`, holes-aware).
+- Services on hosts without CORS headers (Kraków, national EGiB, `wfsLCV`) are routed through Vercel serverless proxies (`api/krakow-wfs.ts`, `api/egib-wfs.ts`, `api/lcv-wfs.ts`, all built on `api/_lib/wfsProxy.ts`) rather than fetched directly from the browser.
 
 ### Math Utilities (`src/utils/math2d/`)
-Zero-allocation geometric primitives: `raySegmentDistance2D`, `offsetPolygonEdge`, `computeFullShadowAnalysis`, `generateSweepPolygon`, polygon boolean operations (wrapping `polygon-clipping`), R-Tree spatial indexing (wrapping `rbush`).
+Zero-allocation geometric primitives: `raySegmentDistance2D`, `offsetPolygonEdge`, `computeFullShadowAnalysis`, `generateSweepPolygon`, polygon boolean operations (wrapping `polygon-clipping`, hole-aware via `clippingResultToPolygonsWithHoles`), R-Tree spatial indexing (wrapping `rbush`).
 
-### Sharing (`api/share.ts`)
-Vercel serverless function storing compressed scene JSON in Upstash Redis with rate limiting. Dev server proxies `/api/share` via a Vite middleware.
+### Licensing (Pro gating)
+`useLicenseStore` (`src/store/useLicenseStore.ts`) holds `isPro`/license status, cached to `localStorage` (`usi_license_key`, `usi_license_cache`) and checked/activated via `api/license/{check,activate,trial}.ts`. Paid upgrade flow goes through `api/stripe/{checkout,webhook,verify-session}.ts`. UI gates Pro-only features by checking `isPro` before the action (e.g. see `ProjectGroup.tsx`).
+
+### Serverless Functions (`api/`)
+Vercel functions: `share.ts` (compressed scene JSON in Upstash Redis with rate limiting), `license/*`, `stripe/*`, and the WFS CORS proxies above. Locally, `npm run dev`'s Vite config has a generic middleware that maps any `/api/**` request to the matching `api/**.ts` file and invokes it with a `VercelRequest`/`VercelResponse` shim — no separate dev server needed.
 
 ## Key Conventions
 - Analysis pre-filter cone: ±78° from facade normal (12° dead zone from wall surface); backface and AABB culling applied before raycasting.
-- Tests (`*.test.ts`) live alongside source files in the same directory.
-- Buildings from DXF: parsed via `src/utils/dxfParser.ts` with auto-detected unit scale.
+- Most tests (`*.test.ts`) live alongside source files in the same directory; a legacy `test/` directory at the repo root also holds older suites (both are picked up by `npm test`).
+- Buildings from DXF: parsed via `src/utils/dxfParser.ts` with auto-detected unit scale (no hole support — DXF `LWPOLYLINE` has no native hole concept).
 - `rbush` R-Tree and `polygon-clipping` are in the `vendor-geo` build chunk; `three`/react-three in `vendor-three`; `jspdf` in `vendor-pdf`.

@@ -10,13 +10,61 @@ import {
   Share2,
   FileSpreadsheet,
   Layers,
+  Map,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
+import { useLicenseStore } from '../../store/useLicenseStore';
 import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
 import { useIdleGlint } from '../../hooks/useIdleGlint';
 import { APP_CONFIG } from '../../config/appConfig';
 
+interface GeoOverlayToggleButtonProps {
+  active: boolean;
+  onToggle: () => void;
+  activeBg: string;
+  activeColor: string;
+  title: string;
+  icon: React.ReactNode;
+  label: string;
+}
+
+const GeoOverlayToggleButton: React.FC<GeoOverlayToggleButtonProps> = ({
+  active,
+  onToggle,
+  activeBg,
+  activeColor,
+  title,
+  icon,
+  label,
+}) => (
+  <button
+    onClick={onToggle}
+    style={{
+      height: '28px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '4px',
+      padding: '0 8px',
+      borderRadius: '6px',
+      fontSize: '11px',
+      fontWeight: 600,
+      cursor: 'pointer',
+      border: 'none',
+      backgroundColor: active ? activeBg : 'transparent',
+      color: active ? activeColor : '#94a3b8',
+      transition: 'all 0.15s ease',
+      flexShrink: 0,
+    }}
+    title={title}
+  >
+    {icon}
+    <span className="hud-btn-label">{label}</span>
+  </button>
+);
+
 export const CadTopHud: React.FC = () => {
+  const isPro = useLicenseStore((s) => s.isPro);
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
@@ -44,6 +92,9 @@ export const CadTopHud: React.FC = () => {
   const toggleUcsRotation = useCadToolStore((s) => s.toggleUcsRotation);
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
+
+  const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
+  const showPlansOverlayGroup = useWfsStore((s) => s.showPlansOverlayGroup);
 
   // Idle-glint: 1. błysk po 30s bezczynności, 2. błysk po kolejnych 15s (łącznie 45s), potem stop
   const isShareGlinting = useIdleGlint([30000, 45000]);
@@ -240,50 +291,36 @@ export const CadTopHud: React.FC = () => {
         <span className="hud-btn-label">Parametry</span>
       </button>
 
-      {/* Podkłady GEO (PRO) button — ukryte do czasu publikacji, patrz APP_CONFIG.geoOverlays */}
-      {APP_CONFIG.geoOverlays.showTogglesPanel && (
-        <button
-          onClick={() => {
-            const s = useWfsStore.getState();
-            const anyActive = s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer;
-            if (anyActive) {
-              s.setShowOrthophotoLayer(false);
-              s.setShowKiutLayer(false);
-              s.setShowMpzpLayer(false);
-              s.setShowBdotLayer(false);
-              s.setShowTerrainLayer(false);
-              s.setShowEgibLayer(false);
-            } else {
-              s.setShowOrthophotoLayer(true);
-              s.setShowKiutLayer(true);
-            }
-          }}
-          style={{
-            height: '28px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            padding: '0 8px',
-            borderRadius: '6px',
-            fontSize: '11px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            border: 'none',
-            backgroundColor: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
-              ? 'rgba(99, 102, 241, 0.2)'
-              : 'transparent',
-            color: useWfsStore((s) => s.showOrthophotoLayer || s.showKiutLayer || s.showMpzpLayer || s.showBdotLayer || s.showTerrainLayer || s.showEgibLayer)
-              ? '#a5b4fc'
-              : '#94a3b8',
-            transition: 'all 0.15s ease',
-            flexShrink: 0,
-          }}
-          title="Włącz / wyłącz podkłady geodezyjne i branżowe GEO (Ortofotomapa HR / Uzbrojenie GESUT / BDOT / MPZP) [Wersja PRO]"
-        >
-          <Layers size={13} />
-          <span className="hud-btn-label">Podkład GEO</span>
-        </button>
+      {/* Podkłady GEO (PRO) i Plany buttons — ukryte do czasu publikacji i dla darmowych użytkowników, patrz APP_CONFIG.geoOverlays oraz isPro.
+          Sterują warstwami GEO (GESUT/BDOT) i Planistycznymi (MPZP/NMT/itp.). */}
+      {APP_CONFIG.geoOverlays.showTogglesPanel && isPro && (
+        <>
+          <GeoOverlayToggleButton
+            active={showGeoOverlayGroup}
+            onToggle={() => {
+              const s = useWfsStore.getState();
+              s.setShowGeoOverlayGroup(!s.showGeoOverlayGroup);
+            }}
+            activeBg="rgba(99, 102, 241, 0.2)"
+            activeColor="#a5b4fc"
+            title="Włącz / wyłącz podkłady geodezyjne (Uzbrojenie GESUT / BDOT10k) [Wersja PRO]"
+            icon={<Layers size={13} />}
+            label="Podkład"
+          />
+
+          <GeoOverlayToggleButton
+            active={showPlansOverlayGroup}
+            onToggle={() => {
+              const s = useWfsStore.getState();
+              s.setShowPlansOverlayGroup(!s.showPlansOverlayGroup);
+            }}
+            activeBg="rgba(56, 189, 248, 0.2)"
+            activeColor="#7dd3fc"
+            title="Włącz / wyłącz warstwy planistyczne i ukształtowania terenu (MPZP / NMT / Overture / Pokrycie terenu) [Wersja PRO]"
+            icon={<Map size={13} />}
+            label="Plany"
+          />
+        </>
       )}
 
       <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />

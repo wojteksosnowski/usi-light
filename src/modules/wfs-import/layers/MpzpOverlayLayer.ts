@@ -8,13 +8,20 @@ export class MpzpOverlayLayer implements CadRenderLayer {
 
   private tileManager: WmsTileManager | null = null;
   private opacity = 0.5;
+  private invertColors = false;
 
   setTileManager(manager: WmsTileManager | null) {
     this.tileManager = manager;
+    this.tileManager?.setInvertColors(this.invertColors);
   }
 
   setOpacity(opacity: number) {
     this.opacity = opacity;
+  }
+
+  setInvertColors(invert: boolean) {
+    this.invertColors = invert;
+    this.tileManager?.setInvertColors(invert);
   }
 
   shouldRender(context: CadRenderFrameContext): boolean {

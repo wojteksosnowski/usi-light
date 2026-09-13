@@ -42,6 +42,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
 
   const settings = useSolarAnalysisStore((s) => s.settings);
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
+  const projectName = useSolarAnalysisStore((s) => s.projectName);
   const mapsInput = useSolarAnalysisStore((s) => s.mapsInput);
   const showNormals = useSolarAnalysisStore((s) => s.showNormals);
   const showShadowingLines = useSolarAnalysisStore((s) => s.showShadowingLines);
@@ -123,6 +124,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
         dxfImportInfo,
         settings,
         selectedCity,
+        projectName: projectName.trim() || undefined,
         mapsInput,
         showNormals,
         showShadowingLines,
@@ -282,6 +284,12 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
             gap: '8px',
           }}
         >
+          {projectName.trim() && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Nazwa projektu:</span>
+              <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>{projectName.trim()}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
             <span style={{ color: 'var(--text-secondary)' }}>Lokalizacja projektu:</span>
             <span style={{ fontWeight: 600, color: 'var(--accent-amber)' }}>{selectedCity} ({settings.latitude.toFixed(2)}°N)</span>

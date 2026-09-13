@@ -5,21 +5,29 @@ import { KiutOverlayLayer } from './layers/KiutOverlayLayer';
 import { MpzpOverlayLayer } from './layers/MpzpOverlayLayer';
 import { BdotOverlayLayer } from './layers/BdotOverlayLayer';
 import { TerrainShadingLayer } from './layers/TerrainShadingLayer';
-import { EgibOverlayLayer } from './layers/EgibOverlayLayer';
 import { WfsTreesLayer } from './layers/WfsTreesLayer';
 import { ParcelLoadingPreviewLayer } from './layers/ParcelLoadingPreviewLayer';
+import { OvertureContextLayer } from './layers/OvertureContextLayer';
+import { MpzpZonesVectorLayer } from './layers/MpzpZonesVectorLayer';
+import { LandCoverVectorLayer } from './layers/LandCoverVectorLayer';
 import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
+import { useLicenseStore } from '../../store/useLicenseStore';
 
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';
 const MPZP_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego';
 const BDOT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaBazDanychObiektowTopograficznych';
 const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
-const EGIB_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
 
+let renderRafPending = false;
 const triggerRender = () => {
-  window.dispatchEvent(new Event('geo-render-needed'));
+  if (renderRafPending) return;
+  renderRafPending = true;
+  requestAnimationFrame(() => {
+    renderRafPending = false;
+    window.dispatchEvent(new Event('geo-render-needed'));
+  });
 };
 
 /** Rejestruje/wyrejestrowuje warstwę w pipeline gdy jej widoczność się zmienia. Zwraca true jeśli coś się zmieniło. */
@@ -43,13 +51,15 @@ const kiutLayer = new KiutOverlayLayer();
 const mpzpLayer = new MpzpOverlayLayer();
 const bdotLayer = new BdotOverlayLayer();
 const terrainLayer = new TerrainShadingLayer();
-const egibLayer = new EgibOverlayLayer();
 const treesLayer = new WfsTreesLayer();
 const parcelLoadingPreviewLayer = new ParcelLoadingPreviewLayer();
+const overtureContextLayer = new OvertureContextLayer();
+const mpzpZonesVectorLayer = new MpzpZonesVectorLayer();
+const landCoverVectorLayer = new LandCoverVectorLayer();
 
 const orthophotoTileManager = new WmsTileManager({
   baseUrl: ORTO_WMS_URL,
-  layers: 'Raster',
+  layers: 'Image',
   format: 'image/jpeg',
   crs: 'EPSG:3857',
 }, 200, triggerRender);
@@ -82,19 +92,26 @@ const terrainTileManager = new WmsTileManager({
   crs: 'EPSG:3857',
 }, 200, triggerRender);
 
-const egibTileManager = new WmsTileManager({
-  baseUrl: EGIB_WMS_URL,
-  layers: 'dzialki,budynki',
-  format: 'image/png',
-  crs: 'EPSG:3857',
-}, 200, triggerRender);
-
 orthophotoLayer.setTileManager(orthophotoTileManager);
 kiutLayer.setTileManager(kiutTileManager);
 mpzpLayer.setTileManager(mpzpTileManager);
 bdotLayer.setTileManager(bdotTileManager);
 terrainLayer.setTileManager(terrainTileManager);
-egibLayer.setTileManager(egibTileManager);
+
+/**
+ * Prefetchuje (i "przypina" w cache) kafle WMS w zasięgu projektu dla wszystkich aktualnie
+ * włączonych warstw GEO (Ortofotomapa/KIUT/MPZP/BDOT/NMT). Wywoływane z `CadCanvas.tsx` przy
+ * zmianie środka/promienia projektu lub włączeniu warstwy — patrz `tilePrefetchMath.ts`.
+ */
+export function prefetchActiveGeoLayersInRadius(lat: number, lon: number, radiusMeters: number, currentZoom?: number) {
+  if (!useLicenseStore.getState().isPro) return;
+  const state = useWfsStore.getState();
+  if (state.showOrthophotoLayer) orthophotoTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showKiutLayer) kiutTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showMpzpLayer) mpzpTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showBdotLayer) bdotTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+  if (state.showTerrainLayer) terrainTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+}
 
 export function registerGeoLayers(): () => void {
   if (registered) return () => {};
@@ -103,61 +120,101 @@ export function registerGeoLayers(): () => void {
   const pipeline = CadRenderPipeline.getDefault();
 
   let prevShowOrtho = false;
+  let prevOrthoOpacity = 0.85;
   let prevShowKiut = false;
+  let prevKiutOpacity = 0.65;
+  let prevKiutInvert = true;
   let prevShowMpzp = false;
+  let prevMpzpOpacity = 0.5;
+  let prevMpzpInvert = false;
   let prevShowBdot = false;
+  let prevBdotOpacity = 0.6;
+  let prevBdotInvert = true;
   let prevShowTerrain = false;
-  let prevShowEgib = false;
+  let prevTerrainOpacity = 0.35;
   let prevShowTrees = false;
   let prevTreesLen = 0;
   let prevLoadingParcelsLen = 0;
+  let prevShowOverture = false;
+  let prevOvertureFeaturesLen = 0;
+  let prevShowMpzpZones = false;
+  let prevMpzpZonesLen = 0;
+  let prevShowLandCover = false;
+  let prevLandCoverLen = 0;
 
-  const unsub = useWfsStore.subscribe((state) => {
+  const updateLayers = () => {
+    const isPro = useLicenseStore.getState().isPro;
+    const state = useWfsStore.getState();
     const {
       showOrthophotoLayer,
       orthophotoOpacity,
       showKiutLayer,
       kiutOpacity,
+      kiutInvertColors,
       showMpzpLayer,
       mpzpOpacity,
+      mpzpInvertColors,
       showBdotLayer,
       bdotOpacity,
+      bdotInvertColors,
       showTerrainLayer,
-      showEgibLayer,
+      terrainOpacity,
       showTreesLayer,
       trees,
       loadingParcels,
+      overtureGreenAreas,
+      showOvertureGreenAreas,
+      mpzpZones,
+      mpzpLines,
+      showMpzpZonesLayer,
+      landCoverUnits,
+      showLandCoverLayer,
     } = state;
 
     let changed = false;
 
-    // 1. Ortofotomapa
+    // 1. Ortofotomapa (PRO)
     orthophotoLayer.setOpacity(orthophotoOpacity);
-    if (toggleMainLayer(pipeline, orthophotoLayer, 'wfs_orthophoto', showOrthophotoLayer, prevShowOrtho)) changed = true;
-    prevShowOrtho = showOrthophotoLayer;
+    const activeOrtho = isPro && showOrthophotoLayer;
+    if (toggleMainLayer(pipeline, orthophotoLayer, 'wfs_orthophoto', activeOrtho, prevShowOrtho)) changed = true;
+    if (activeOrtho && orthophotoOpacity !== prevOrthoOpacity) changed = true;
+    prevShowOrtho = activeOrtho;
+    prevOrthoOpacity = orthophotoOpacity;
 
-    // 2. Sieci GESUT (KIUT)
+    // 2. Sieci GESUT (KIUT) (PRO)
     kiutLayer.setOpacity(kiutOpacity);
-    if (toggleMainLayer(pipeline, kiutLayer, 'wfs_kiut_overlay', showKiutLayer, prevShowKiut)) changed = true;
-    prevShowKiut = showKiutLayer;
+    kiutLayer.setInvertColors(kiutInvertColors);
+    const activeKiut = isPro && showKiutLayer;
+    if (toggleMainLayer(pipeline, kiutLayer, 'wfs_kiut_overlay', activeKiut, prevShowKiut)) changed = true;
+    if (activeKiut && (kiutOpacity !== prevKiutOpacity || kiutInvertColors !== prevKiutInvert)) changed = true;
+    prevShowKiut = activeKiut;
+    prevKiutOpacity = kiutOpacity;
+    prevKiutInvert = kiutInvertColors;
 
-    // 3. MPZP
+    // 3. MPZP (PRO)
     mpzpLayer.setOpacity(mpzpOpacity);
-    if (toggleMainLayer(pipeline, mpzpLayer, 'wfs_mpzp_overlay', showMpzpLayer, prevShowMpzp)) changed = true;
-    prevShowMpzp = showMpzpLayer;
+    mpzpLayer.setInvertColors(mpzpInvertColors);
+    const activeMpzp = isPro && showMpzpLayer;
+    if (toggleMainLayer(pipeline, mpzpLayer, 'wfs_mpzp_overlay', activeMpzp, prevShowMpzp)) changed = true;
+    if (activeMpzp && (mpzpOpacity !== prevMpzpOpacity || mpzpInvertColors !== prevMpzpInvert)) changed = true;
+    prevShowMpzp = activeMpzp;
+    prevMpzpOpacity = mpzpOpacity;
+    prevMpzpInvert = mpzpInvertColors;
 
-    // 4. BDOT10k
+    // 4. BDOT10k (PRO)
     bdotLayer.setOpacity(bdotOpacity);
-    if (toggleMainLayer(pipeline, bdotLayer, 'wfs_bdot_overlay', showBdotLayer, prevShowBdot)) changed = true;
-    prevShowBdot = showBdotLayer;
+    bdotLayer.setInvertColors(bdotInvertColors);
+    const activeBdot = isPro && showBdotLayer;
+    if (toggleMainLayer(pipeline, bdotLayer, 'wfs_bdot_overlay', activeBdot, prevShowBdot)) changed = true;
+    if (activeBdot && (bdotOpacity !== prevBdotOpacity || bdotInvertColors !== prevBdotInvert)) changed = true;
+    prevShowBdot = activeBdot;
+    prevBdotOpacity = bdotOpacity;
+    prevBdotInvert = bdotInvertColors;
 
-    // 5. Cieniowanie NMT
-    if (toggleMainLayer(pipeline, terrainLayer, 'wfs_terrain_shading', showTerrainLayer, prevShowTerrain)) changed = true;
-    prevShowTerrain = showTerrainLayer;
-
-    // 6. EGiB
-    if (toggleMainLayer(pipeline, egibLayer, 'wfs_egib_overlay', showEgibLayer, prevShowEgib)) changed = true;
-    prevShowEgib = showEgibLayer;
+    // 5. Cieniowanie NMT (PRO)
+    const activeTerrain = isPro && showTerrainLayer;
+    if (toggleMainLayer(pipeline, terrainLayer, 'wfs_terrain_shading', activeTerrain, prevShowTerrain)) changed = true;
+    prevShowTerrain = activeTerrain;
 
     // 7. Drzewa
     treesLayer.setTrees(trees);
@@ -180,19 +237,60 @@ export function registerGeoLayers(): () => void {
       changed = true;
     }
 
+    // 9. Warstwa kontekstowa Overture Maps (zieleń) (PRO)
+    overtureContextLayer.setData({ greenAreas: overtureGreenAreas });
+    overtureContextLayer.setVisibility({ showGreenAreas: showOvertureGreenAreas });
+    const shouldShowOverture = isPro && showOvertureGreenAreas && overtureGreenAreas.length > 0;
+    const overtureFeaturesLen = overtureGreenAreas.length;
+    if (shouldShowOverture !== prevShowOverture || overtureFeaturesLen !== prevOvertureFeaturesLen) {
+      toggleMainLayer(pipeline, overtureContextLayer, 'wfs_overture_context', shouldShowOverture, prevShowOverture);
+      prevShowOverture = shouldShowOverture;
+      prevOvertureFeaturesLen = overtureFeaturesLen;
+      changed = true;
+    }
+
+    // 10. Strefy i linie MPZP (wektor) (PRO)
+    mpzpZonesVectorLayer.setData(mpzpZones, mpzpLines);
+    mpzpZonesVectorLayer.setVisibility(showMpzpZonesLayer);
+    const mpzpFeaturesLen = mpzpZones.length + mpzpLines.length;
+    const shouldShowMpzpZones = isPro && showMpzpZonesLayer && mpzpFeaturesLen > 0;
+    if (shouldShowMpzpZones !== prevShowMpzpZones || mpzpFeaturesLen !== prevMpzpZonesLen) {
+      toggleMainLayer(pipeline, mpzpZonesVectorLayer, 'wfs_mpzp_zones_vector', shouldShowMpzpZones, prevShowMpzpZones);
+      prevShowMpzpZones = shouldShowMpzpZones;
+      prevMpzpZonesLen = mpzpFeaturesLen;
+      changed = true;
+    }
+
+    // 11. Pokrycie terenu (wektor, ogólnopolskie) (PRO)
+    landCoverVectorLayer.setData(landCoverUnits);
+    landCoverVectorLayer.setVisibility(showLandCoverLayer);
+    const shouldShowLandCover = isPro && showLandCoverLayer && landCoverUnits.length > 0;
+    if (shouldShowLandCover !== prevShowLandCover || landCoverUnits.length !== prevLandCoverLen) {
+      toggleMainLayer(pipeline, landCoverVectorLayer, 'wfs_land_cover_vector', shouldShowLandCover, prevShowLandCover);
+      prevShowLandCover = shouldShowLandCover;
+      prevLandCoverLen = landCoverUnits.length;
+      changed = true;
+    }
+
     if (changed) triggerRender();
-  });
+  };
+
+  const unsubWfs = useWfsStore.subscribe(updateLayers);
+  const unsubLicense = useLicenseStore.subscribe(updateLayers);
 
   return () => {
-    unsub();
+    unsubWfs();
+    unsubLicense();
     pipeline.unregisterMainLayer('wfs_orthophoto');
     pipeline.unregisterMainLayer('wfs_kiut_overlay');
     pipeline.unregisterMainLayer('wfs_mpzp_overlay');
     pipeline.unregisterMainLayer('wfs_bdot_overlay');
     pipeline.unregisterMainLayer('wfs_terrain_shading');
-    pipeline.unregisterMainLayer('wfs_egib_overlay');
     pipeline.unregisterMainLayer('wfs_trees');
     pipeline.unregisterMainLayer('wfs_parcels_loading');
+    pipeline.unregisterMainLayer('wfs_overture_context');
+    pipeline.unregisterMainLayer('wfs_mpzp_zones_vector');
+    pipeline.unregisterMainLayer('wfs_land_cover_vector');
     registered = false;
   };
 }

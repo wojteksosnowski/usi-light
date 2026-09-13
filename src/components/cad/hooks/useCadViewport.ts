@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewportState } from '../types';
 import { BuildingLoop } from '../../../types/geometry';
+import { useUiStore } from '../../../store/useUiStore';
 
 export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -18,6 +19,10 @@ export function useCadViewport(
   });
 
   const prevRotationRef = useRef<number>(viewRotationDeg);
+
+  useEffect(() => {
+    useUiStore.getState().setViewportScale(viewState.scale);
+  }, [viewState.scale]);
 
   // Zabezpieczenie środka ekranu przy obrocie widoku (obrót wokół centrum ekranu, a nie wokół (0,0))
   useEffect(() => {
