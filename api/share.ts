@@ -148,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const sanitizedId = id.trim();
-      const raw = await redis.get<string>(`project:${sanitizedId}`);
+      const raw = await redis.get<string | Record<string, any>>(`project:${sanitizedId}`);
 
       if (!raw) {
         return res.status(404).json({
@@ -156,18 +156,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // Nowy format (E2EE): JSON { version, iv, ciphertext }. Format legacy (linki utworzone
-      // przed wdrożeniem szyfrowania): surowy ciąg base64-gzip — nie parsuje się jako JSON.
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.version === 1 && parsed.iv && parsed.ciphertext) {
-          return res.status(200).json({ version: 1, iv: parsed.iv, ciphertext: parsed.ciphertext });
+      // Nowy format (E2EE): { version: 1, iv, ciphertext }.
+      // Upstash Redis SDK domyślnie deserializuje JSON do obiektu JS.
+      let record: any = raw;
+      if (typeof raw === 'string') {
+        try {
+          record = JSON.parse(raw);
+        } catch {
+          record = null;
         }
-      } catch {
-        // nie JSON -> format legacy, kontynuuj poniżej
       }
 
-      return res.status(200).json({ compressedData: raw });
+      if (
+        record &&
+        typeof record === 'object' &&
+        record.version === 1 &&
+        typeof record.iv === 'string' &&
+        typeof record.ciphertext === 'string'
+      ) {
+        return res.status(200).json({ version: 1, iv: record.iv, ciphertext: record.ciphertext });
+      }
+
+      // Format legacy (linki utworzone przed wdrożeniem szyfrowania): surowy ciąg base64-gzip
+      if (typeof raw === 'string') {
+        return res.status(200).json({ compressedData: raw });
+      }
+
+      return res.status(400).json({ error: 'Nieprawidłowy format danych projektu w bazie.' });
     } catch (err: any) {
       console.error('Błąd przy pobieraniu projektu z Redis:', err);
       return res.status(500).json({ error: 'Wystąpił błąd podczas odczytu projektu.' });

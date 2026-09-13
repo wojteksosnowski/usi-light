@@ -147,7 +147,23 @@ describe('Vercel Serverless Function /api/share', () => {
       expect(res.data.error).toMatch(/wygasł lub nie istnieje/);
     });
 
-    it('powinien zwrócić { version, iv, ciphertext } dla nowego (zaszyfrowanego) rekordu', async () => {
+    it('powinien zwrócić { version, iv, ciphertext } gdy Upstash Redis zwróci sparsowany obiekt JS', async () => {
+      mockRedisGet.mockResolvedValueOnce({
+        version: 1,
+        iv: 'ivBase64Url',
+        ciphertext: 'cipherBase64Url',
+        createdAt: 123,
+      });
+      const req: any = { method: 'GET', headers: {}, query: { id: 'test123456' } };
+      const res = createMockRes();
+
+      await handler(req, res);
+      expect(res.statusCode).toBe(200);
+      expect(res.data).toEqual({ version: 1, iv: 'ivBase64Url', ciphertext: 'cipherBase64Url' });
+      expect(mockRedisGet).toHaveBeenCalledWith('project:test123456');
+    });
+
+    it('powinien zwrócić { version, iv, ciphertext } gdy Redis zwróci JSON w postaci stringa', async () => {
       mockRedisGet.mockResolvedValueOnce(
         JSON.stringify({ version: 1, iv: 'ivBase64Url', ciphertext: 'cipherBase64Url', createdAt: 123 })
       );
@@ -168,6 +184,16 @@ describe('Vercel Serverless Function /api/share', () => {
       await handler(req, res);
       expect(res.statusCode).toBe(200);
       expect(res.data.compressedData).toBe('compressed-payload-string');
+    });
+
+    it('powinien zwrócić 400 dla uszkodzonego rekordu w bazie', async () => {
+      mockRedisGet.mockResolvedValueOnce({ invalid: 'structure' });
+      const req: any = { method: 'GET', headers: {}, query: { id: 'badid123' } };
+      const res = createMockRes();
+
+      await handler(req, res);
+      expect(res.statusCode).toBe(400);
+      expect(res.data.error).toMatch(/Nieprawidłowy format/);
     });
   });
 });

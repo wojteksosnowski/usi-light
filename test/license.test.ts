@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { formatLicenseKey } from '../api/lib/serverStripe';
+import { formatLicenseKey } from '../api/_lib/serverStripe';
 import { useLicenseStore } from '../src/store/useLicenseStore';
 
 const mockStorage: Record<string, string> = {};
