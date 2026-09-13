@@ -8,6 +8,8 @@ import { useActionRecorderStore } from '../../modules/action-recorder/useActionR
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
 export const Recording3DPipWindow: React.FC = () => {
+  const isRecording = useActionRecorderStore((s) => s.isRecording);
+  const isCountingDown = useActionRecorderStore((s) => s.isCountingDown);
   const show3DPreview = useActionRecorderStore((s) => s.settings.show3DPreview);
   const pipPosition = useActionRecorderStore((s) => s.settings.pipPosition);
   const pipSize = useActionRecorderStore((s) => s.settings.pipSize);
@@ -17,6 +19,8 @@ export const Recording3DPipWindow: React.FC = () => {
 
   const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
+
+  const isDemoRecordingActive = (isRecording || isCountingDown) && show3DPreview;
 
   // Aktywny budynek: zaznaczony -> projektowany (isTested) -> pierwszy na liście
   const activeBuilding = useMemo(() => {
@@ -61,7 +65,7 @@ export const Recording3DPipWindow: React.FC = () => {
 
   // Rejestracja Canvasu WebGL Three.js w store do nagrywania wideo
   useEffect(() => {
-    if (!show3DPreview || !containerRef.current) {
+    if (!isDemoRecordingActive || !containerRef.current) {
       setPipCanvas(null);
       return;
     }
@@ -71,7 +75,7 @@ export const Recording3DPipWindow: React.FC = () => {
     }
   });
 
-  if (!show3DPreview || !activeBuilding) {
+  if (!isDemoRecordingActive || !activeBuilding) {
     return null;
   }
 
