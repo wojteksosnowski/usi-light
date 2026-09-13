@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Point2D } from '../../../types/geometry';
 import { useCadToolStore, useSceneStore } from '../../../store';
 import type { DrawingMode } from '../../../store/useCadToolStore';
+import { isTypingTarget } from '../../../utils/keyboardUtils';
 
 export function useCadHotkeys({
   drawingMode,
@@ -47,14 +48,7 @@ export function useCadHotkeys({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept when user is typing inside an HTML input/textarea
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
+      if (isTypingTarget(e.target)) {
         return;
       }
 

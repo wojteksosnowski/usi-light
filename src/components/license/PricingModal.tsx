@@ -17,10 +17,12 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
+  Link2,
 } from 'lucide-react';
 import { useUiStore, useLicenseStore } from '../../store';
 import { APP_CONFIG } from '../../config/appConfig';
 import { fetchJson, downloadLicenseKeyFile } from '../../utils/apiFetch';
+import { createActivationUrl } from '../../utils/licenseUrl';
 
 const PREVIEW_MODE = APP_CONFIG.previewMode.enabled;
 
@@ -85,8 +87,8 @@ export const PricingModal: React.FC = () => {
   const [trialLoading, setTrialLoading] = useState(false);
   const [trialError, setTrialError] = useState<string | null>(null);
   const [trialKey, setTrialKey] = useState<string | null>(null);
-  const [trialActivating, setTrialActivating] = useState(false);
   const [trialCopied, setTrialCopied] = useState(false);
+  const [trialLinkCopied, setTrialLinkCopied] = useState(false);
 
   const keyInfo = parseLicenseKeyInput(inputKey);
 
@@ -128,6 +130,15 @@ export const PricingModal: React.FC = () => {
       setTrialKey(data.licenseKey);
       setInputKey(data.licenseKey);
 
+      // Klucz z endpointu trial jest od razu aktywny na serwerze - aktywujemy go również lokalnie w store
+      const actRes = await activateLicense(data.licenseKey);
+      if (actRes.success) {
+        setActivationFeedback({
+          type: 'success',
+          message: 'Bezpłatny klucz 7-dniowy został wygenerowany i od razu aktywowany!',
+        });
+      }
+
       // Automatyczne pobranie pliku TXT z kluczem
       try {
         downloadLicenseKeyFile(data.licenseKey, 7, 'Bezpłatny Dostęp Zapoznawczy (7 dni)');
@@ -148,17 +159,12 @@ export const PricingModal: React.FC = () => {
     setTimeout(() => setTrialCopied(false), 2000);
   };
 
-  const handleActivateTrialKey = async () => {
+  const handleCopyTrialLink = () => {
     if (!trialKey) return;
-    setTrialActivating(true);
-    setActivationFeedback(null);
-    const res = await activateLicense(trialKey);
-    setTrialActivating(false);
-    if (res.success) {
-      setActivationFeedback({ type: 'success', message: 'Klucz próbny 7-dniowy został aktywowany!' });
-    } else {
-      setTrialError(res.error || 'Błąd aktywacji klucza próbnego.');
-    }
+    const directUrl = createActivationUrl(trialKey);
+    navigator.clipboard.writeText(directUrl);
+    setTrialLinkCopied(true);
+    setTimeout(() => setTrialLinkCopied(false), 2000);
   };
 
   const handleCheckout = async (plan: '7d' | '30d') => {
@@ -659,26 +665,30 @@ export const PricingModal: React.FC = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={handleActivateTrialKey}
-                      disabled={trialActivating}
+                      onClick={handleCopyTrialLink}
                       className="btn-primary"
                       style={{
                         padding: '9px 14px',
                         fontSize: '12px',
                         fontWeight: 700,
                         background: 'linear-gradient(135deg, #10b981, #059669)',
-                        cursor: trialActivating ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
                       }}
+                      title="Skopiuj bezpośredni link z dołączonym kodem aktywacyjnym"
                     >
-                      {trialActivating ? (
+                      {trialLinkCopied ? (
                         <>
-                          <Loader2 size={14} className="animate-spin" />
-                          <span>Aktywowanie...</span>
+                          <Check size={14} color="#ffffff" />
+                          <span>Skopiowano link aktywacyjny!</span>
                         </>
                       ) : (
                         <>
-                          <Sparkles size={14} />
-                          <span>Aktywuj ten klucz natychmiast</span>
+                          <Link2 size={14} />
+                          <span>Kopiuj bezpośredni link z kodem</span>
                         </>
                       )}
                     </button>
