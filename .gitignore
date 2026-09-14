@@ -41,3 +41,7 @@ pnpm-debug.log*
 Thumbs.db
 .vercel
 .env*
+
+# Local agent tooling
+.agents/
+.claude/
