@@ -74,16 +74,25 @@ function isIndexWithinFootprint(footprint: StoryFootprint, globalIndex: number):
  * Indeksy otworów (>= baseVertices.length, czyli już poza pierwotnym obrysem zewnętrznym) nie są
  * tu obsługiwane — otwory nie mają odpowiednika w `baseVertices`, więc zostają przy kontroli zakresu.
  */
-function resolveOuterEdgeIndexForFragment(
+function resolveGlobalIndexForFragment(
   footprint: StoryFootprint,
   globalIndex: number | undefined,
-  baseVertices: Point2D[]
+  baseVertices: Point2D[],
+  resolveGeometric: (footprint: StoryFootprint, index: number, baseVertices: Point2D[]) => number | null
 ): number | undefined | null {
   if (globalIndex === undefined) return undefined;
   if (globalIndex >= baseVertices.length) {
     return isIndexWithinFootprint(footprint, globalIndex) ? globalIndex : null;
   }
-  return resolveFragmentEdgeIndex(footprint, globalIndex, baseVertices);
+  return resolveGeometric(footprint, globalIndex, baseVertices);
+}
+
+function resolveOuterEdgeIndexForFragment(
+  footprint: StoryFootprint,
+  globalIndex: number | undefined,
+  baseVertices: Point2D[]
+): number | undefined | null {
+  return resolveGlobalIndexForFragment(footprint, globalIndex, baseVertices, resolveFragmentEdgeIndex);
 }
 
 /** Analogiczne dopasowanie dla indeksu wierzchołka (używane przez corner_cut scope='vertex'). */
@@ -92,11 +101,7 @@ function resolveVertexIndexForFragment(
   globalIndex: number | undefined,
   baseVertices: Point2D[]
 ): number | undefined | null {
-  if (globalIndex === undefined) return undefined;
-  if (globalIndex >= baseVertices.length) {
-    return isIndexWithinFootprint(footprint, globalIndex) ? globalIndex : null;
-  }
-  return resolveFragmentVertexIndex(footprint, globalIndex, baseVertices);
+  return resolveGlobalIndexForFragment(footprint, globalIndex, baseVertices, resolveFragmentVertexIndex);
 }
 
 /**

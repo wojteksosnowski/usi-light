@@ -1180,7 +1180,7 @@ describe('modifierPipeline', () => {
     });
   });
 
-describe('Real-world reference files: geometry stability', () => {
+  describe('Real-world reference files: geometry stability', () => {
     // `reference/` is gitignored (local scratch/debug fixtures), so these files may not exist in
     // every checkout or in CI. These tests are a bonus stability check when the fixtures happen to
     // be present locally; they skip cleanly (rather than failing) when they're not.
@@ -1197,6 +1197,10 @@ describe('Real-world reference files: geometry stability', () => {
     };
 
     const area = (poly: Point2D[]) => Math.abs(calculateSignedArea(poly));
+    const sortedAreas = (wings: { polygon: Point2D[] }[]) =>
+      wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+    const gateOnly = (building: BuildingLoop) =>
+      applyBuildingModifiers({ ...building, modifiers: building.modifiers!.filter((m) => m.type === 'gate') });
 
     it.skipIf(!referenceFileExists('mod-test2.json'))(
       'mod-test2.json: gate splits stories 2-4 into wings, story_offset only insets story 4 (both wings)',
@@ -1213,13 +1217,13 @@ describe('Real-world reference files: geometry stability', () => {
 
       // Story 2 and 3 are both untouched by story_offset (only story 4 = storiesCount:-1 is targeted),
       // so their wing areas (purely a function of the gate cut, same footprint shape) must match.
-      const story2Areas = story2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
-      const story3Areas = story3Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const story2Areas = sortedAreas(story2Wings);
+      const story3Areas = sortedAreas(story3Wings);
       expect(story3Areas[0]).toBeCloseTo(story2Areas[0], 3);
       expect(story3Areas[1]).toBeCloseTo(story2Areas[1], 3);
 
       // Story 4 must be inset (smaller area than story 3's matching wing) by the -2m offset.
-      const story4Areas = story4Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const story4Areas = sortedAreas(story4Wings);
       expect(story4Areas[0]).toBeLessThan(story3Areas[0]);
       expect(story4Areas[1]).toBeLessThan(story3Areas[1]);
       }
@@ -1235,16 +1239,12 @@ describe('Real-world reference files: geometry stability', () => {
       expect(story2Wings.length).toBe(2);
 
       // Compute what gate alone (no terrace) would have produced for story 2, to diff against.
-      const gateOnlyBuilding: BuildingLoop = {
-        ...building,
-        modifiers: building.modifiers!.filter((m) => m.type === 'gate'),
-      };
-      const gateOnlyRes = applyBuildingModifiers(gateOnlyBuilding);
+      const gateOnlyRes = gateOnly(building);
       const gateOnlyStory2Wings = gateOnlyRes.storyPolygons.filter((s) => s.storyIndex === 2);
       expect(gateOnlyStory2Wings.length).toBe(2);
 
-      const gateOnlyAreas = gateOnlyStory2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
-      const afterTerraceAreas = story2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const gateOnlyAreas = sortedAreas(gateOnlyStory2Wings);
+      const afterTerraceAreas = sortedAreas(story2Wings);
 
       // Exactly one wing must differ from its gate-only shape (the terrace target);
       // the other must be unchanged (no leakage into the second loop).
@@ -1298,16 +1298,12 @@ describe('Real-world reference files: geometry stability', () => {
       const story2Wings = resOn.storyPolygons.filter((p) => p.storyIndex === 2);
       expect(story2Wings.length).toBe(2);
 
-      const gateOnlyBuilding: BuildingLoop = {
-        ...gateEnabled,
-        modifiers: gateEnabled.modifiers!.filter((m) => m.type === 'gate'),
-      };
-      const gateOnlyRes = applyBuildingModifiers(gateOnlyBuilding);
+      const gateOnlyRes = gateOnly(gateEnabled);
       const gateOnlyStory2Wings = gateOnlyRes.storyPolygons.filter((p) => p.storyIndex === 2);
       expect(gateOnlyStory2Wings.length).toBe(2);
 
-      const gateOnlyAreas = gateOnlyStory2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
-      const afterTerraceAreas = story2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const gateOnlyAreas = sortedAreas(gateOnlyStory2Wings);
+      const afterTerraceAreas = sortedAreas(story2Wings);
       const diffs = [0, 1].map((i) => Math.abs(afterTerraceAreas[i] - gateOnlyAreas[i]));
       expect(diffs.filter((d) => d > 1e-3).length).toBe(1);
       }

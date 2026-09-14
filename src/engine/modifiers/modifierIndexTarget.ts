@@ -1,5 +1,6 @@
 import { Point2D } from '../../types/geometry';
 import { StoryFootprint } from '../../types/modifiers';
+import { distance } from '../../utils/math2d/vec2';
 
 export interface IndexTargetResolution {
   isHole: boolean;
@@ -93,7 +94,7 @@ export function resolveFragmentVertexIndex(
   let bestIdx: number | null = null;
   let bestDist = tol;
   for (let i = 0; i < fragment.polygon.length; i++) {
-    const dist = Math.hypot(fragment.polygon[i].x - target.x, fragment.polygon[i].y - target.y);
+    const dist = distance(fragment.polygon[i], target);
     if (dist <= bestDist) {
       bestDist = dist;
       bestIdx = i;
