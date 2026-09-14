@@ -6,10 +6,13 @@ import {
   GateModifier,
   Modifier,
   ModifierType,
+  PilaModifier,
   StoryFootprint,
   StoryOffsetModifier,
+  SztycaModifier,
   TerraceModifier,
   ZoneFootprint,
+  ZoneFunctionModifier,
   ZoneOffsetModifier,
 } from '../../types/modifiers';
 import { miterOffsetPolygon } from '../../utils/math2d/miterOffset';
@@ -19,10 +22,12 @@ import {
   generateBayWindowPolygon,
   generateCornerCutPolygon,
   generateDonutHoles,
+  generatePilaPolygon,
   generateTerracePolygon,
   generateZoneBand,
   resolveStoryModifierSteps,
   sanitizeStoryFootprint,
+  splitFootprintByEdgeOffset,
 } from './modifierPipeline';
 import {
   deriveEdgeOrigins,
@@ -327,6 +332,127 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
     }
 
     ctx.storyFootprints = newFootprints;
+  },
+
+  sztyca: (modifier: SztycaModifier, ctx) => {
+    const { storiesCount, storeyHeight, offset } = modifier;
+    if (storiesCount <= 0 || storeyHeight <= 0) return;
+    if (ctx.storyFootprints.length === 0) return;
+
+    // Znajdź najwyższą rzędną hTop wśród aktualnych kondygnacji
+    let maxHTop = -Infinity;
+    for (const sf of ctx.storyFootprints) {
+      if (sf.hTop > maxHTop) {
+        maxHTop = sf.hTop;
+      }
+    }
+
+    // Wybierz obrysy z najwyższego poziomu
+    const topFootprints = ctx.storyFootprints.filter(
+      (sf) => Math.abs(sf.hTop - maxHTop) < 1e-4
+    );
+    if (topFootprints.length === 0) return;
+
+    let currentBase = maxHTop;
+    let nextIndex = ctx.K;
+
+    for (let i = 0; i < storiesCount; i++) {
+      const hBot = currentBase;
+      const hTop = currentBase + storeyHeight;
+      currentBase = hTop;
+
+      for (const topSf of topFootprints) {
+        let poly = topSf.polygon.map((p) => ({ ...p }));
+        if (offset && Math.abs(offset) > 1e-4) {
+          poly = miterOffsetPolygon(poly, offset);
+        }
+        let holes: Point2D[][] | undefined = undefined;
+        if (topSf.holes && topSf.holes.length > 0) {
+          holes = topSf.holes.map((h) => {
+            if (offset && Math.abs(offset) > 1e-4) {
+              return miterOffsetPolygon(h, -offset);
+            }
+            return h.map((p) => ({ ...p }));
+          });
+        }
+
+        ctx.storyFootprints.push({
+          storyIndex: nextIndex,
+          hBottom: hBot,
+          hTop: hTop,
+          polygon: poly,
+          holes: holes,
+          buildingType: topSf.buildingType,
+        });
+      }
+      nextIndex++;
+    }
+
+    ctx.K += storiesCount;
+  },
+
+  pila: (modifier: PilaModifier, ctx) => {
+    const { teethCount, storiesCount, edgeIndex, toothAngle, alignment } = modifier;
+    if (teethCount < 1) return;
+
+    const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
+    for (const { storyIndex } of steps) {
+      const footprint = ctx.storyFootprints[storyIndex];
+      const target = resolveIndexTarget(footprint, edgeIndex);
+
+      if (target.isHole) {
+        footprint.holes![target.holeIndex!] = generatePilaPolygon(
+          footprint.holes![target.holeIndex!],
+          teethCount,
+          target.localIndex,
+          toothAngle ?? 90,
+          alignment ?? 'perpendicular'
+        );
+      } else {
+        footprint.polygon = generatePilaPolygon(
+          footprint.polygon,
+          teethCount,
+          edgeIndex,
+          toothAngle ?? 90,
+          alignment ?? 'perpendicular'
+        );
+      }
+    }
+  },
+
+  zone_function: (modifier: ZoneFunctionModifier, ctx) => {
+    const { buildingType, scope, storiesCount, edgeIndex, depth } = modifier;
+    if (!buildingType) return;
+
+    const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
+    const targetStoryIndices = new Set(steps.map((s) => s.storyIndex));
+
+    if (scope === 'storeys') {
+      for (const sf of ctx.storyFootprints) {
+        if (targetStoryIndices.has(sf.storyIndex)) {
+          sf.buildingType = buildingType;
+        }
+      }
+    } else if (scope === 'edge_offset') {
+      const offsetDepth = depth ?? 10.0;
+      if (offsetDepth <= 1e-4) return;
+
+      const newFootprints: StoryFootprint[] = [];
+      for (const sf of ctx.storyFootprints) {
+        if (targetStoryIndices.has(sf.storyIndex)) {
+          const splitResults = splitFootprintByEdgeOffset(
+            sf,
+            edgeIndex,
+            offsetDepth,
+            buildingType
+          );
+          newFootprints.push(...splitResults);
+        } else {
+          newFootprints.push(sf);
+        }
+      }
+      ctx.storyFootprints = newFootprints;
+    }
   },
 };
 

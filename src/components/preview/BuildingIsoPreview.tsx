@@ -157,7 +157,20 @@ function buildGeometryGroup(
       const outerDepth = Math.max(0.1, solid.hTop - solid.hBottom);
 
       // W trybie X-Ray generujemy wewnętrzną bryłę kondygnacji (offset -0.4m, obniżenie o 0.4m)
-      if (isXRay && innerMaterial) {
+      if (isXRay) {
+        const solidType = solid.buildingType || bType;
+        const solidTypeColor = XRAY_COLORS[solidType] || XRAY_COLORS.residential;
+        const solidInnerMaterial = new THREE.MeshStandardMaterial({
+          color: solidTypeColor,
+          roughness: 0.35,
+          metalness: 0.05,
+          transparent: false,
+          opacity: 1.0,
+          depthWrite: true,
+          side: THREE.DoubleSide,
+        });
+        createdMaterials.push(solidInnerMaterial);
+
         const innerPolygon = miterOffsetPolygon(solid.polygon, -0.4);
         const innerHoles = (solid.holes ?? []).map((h) => miterOffsetPolygon(h, 0.4));
         const innerShape = pointsToPath(innerPolygon, new THREE.Shape());
@@ -167,7 +180,7 @@ function buildGeometryGroup(
 
         const innerDepth = Math.max(0.05, outerDepth - 0.4);
         const innerGeometry = new THREE.ExtrudeGeometry(innerShape, { depth: innerDepth, bevelEnabled: false });
-        const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+        const innerMesh = new THREE.Mesh(innerGeometry, solidInnerMaterial);
         innerMesh.castShadow = true;
         innerMesh.receiveShadow = true;
         innerMesh.renderOrder = 0;

@@ -379,3 +379,86 @@ export const GatePassageIcon: React.FC<IconProps> = ({
 
 export const GateIcon: React.FC<IconProps> = GatePassageIcon;
 
+/**
+ * Ikona modyfikatora "Sztyca" (nadbudówka / wieża / dodatkowa kondygnacja na dachu)
+ */
+export const SpireIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    {/* Dolny główny korpus budynku */}
+    <rect x="3" y="11" width="18" height="10" />
+    {/* Nadbudówka / sztyca na szczycie */}
+    <rect x="7" y="3" width="10" height="8" />
+  </svg>
+);
+
+/**
+ * Ikona modyfikatora "Piła" (schodkowanie krawędzi w zęby piły)
+ */
+export const SawtoothIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    {/* Bryła ze schodkowaną krawędzią w kształt zębów piły */}
+    <path d="M4 21V3h8l4 4-4 4 4 4-4 4h-4v2z" />
+  </svg>
+);
+
+/**
+ * Ikona modyfikatora "Strefa funkcji" (podział na funkcje mieszkalne/usługi/garaż)
+ */
+export const ZoneFunctionIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    {/* Obrys budynku podzielony na strefy funkcyjne */}
+    <rect x="3" y="3" width="18" height="18" rx="1" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <line x1="12" y1="12" x2="12" y2="21" />
+  </svg>
+);
+
+

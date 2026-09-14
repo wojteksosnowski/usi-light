@@ -1,4 +1,4 @@
-import type { BuildingLoop, Point2D } from '@/types/geometry';
+import type { BuildingLoop, BuildingType, Point2D } from '@/types/geometry';
 
 export interface IsoSolid {
   polygon: Point2D[];
@@ -9,6 +9,7 @@ export interface IsoSolid {
   // podświetlić DOKŁADNIE tę samą ścianę na każdej kondygnacji zamiast surowego indeksu pozycyjnego,
   // który może wskazywać różne, niepowiązane krawędzie na różnych kondygnacjach (patrz BuildingIsoPreview.tsx).
   edgeOrigins?: (number | null)[];
+  buildingType?: BuildingType;
 }
 
 /**
@@ -33,6 +34,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
         hBottom: story.hBottom,
         hTop: story.hTop,
         edgeOrigins: story.edgeOrigins,
+        buildingType: story.buildingType ?? building.buildingType ?? 'residential',
       }));
   }
 
@@ -47,6 +49,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
       holes: [],
       hBottom,
       hTop: hBottom + building.defaultHeight,
+      buildingType: building.buildingType ?? 'residential',
     },
   ];
 }

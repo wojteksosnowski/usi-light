@@ -10,11 +10,15 @@ import {
   generateTerracePolygon,
   generateDonutHoles,
   generateCornerCutPolygon,
+  generatePilaPolygon,
+  calculatePilaMetrics,
+  splitFootprintByEdgeOffset,
   resolveStoryModifierSteps,
   sanitizeStoryFootprint,
 } from './modifierPipeline';
 import { BuildingLoop, Point2D } from '../../types/geometry';
 import { calculateSignedArea, isPolygonCCW } from '../../utils/math2d/polygons';
+import { getBuildingSolids } from '../preview/buildingIsoGeometry';
 
 describe('modifierPipeline', () => {
   const baseBuilding: BuildingLoop = {
@@ -1432,6 +1436,303 @@ describe('modifierPipeline', () => {
         }
       }
     );
+  });
+
+  describe('Modifier: Sztyca (Vertical extension / additional storeys on roof)', () => {
+    it('adds 2 extra storeys on top of base 5 storeys, updating elevation to 21m', () => {
+      const bldgSztyca: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-sztyca-1',
+            type: 'sztyca',
+            enabled: true,
+            storiesCount: 2,
+            storeyHeight: 3.0,
+            offset: 0.0,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgSztyca);
+      expect(res.storyPolygons.length).toBe(7); // 5 base + 2 extra
+      expect(res.storyPolygons[5].hBottom).toBe(15.0);
+      expect(res.storyPolygons[5].hTop).toBe(18.0);
+      expect(res.storyPolygons[6].hBottom).toBe(18.0);
+      expect(res.storyPolygons[6].hTop).toBe(21.0);
+
+      const topSegs = res.segments.filter((s) => s.hTop === 21.0);
+      expect(topSegs.length).toBeGreaterThan(0);
+    });
+
+    it('adds a set-back spire with offset -1.0m on top', () => {
+      const bldgSztycaSetback: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-sztyca-2',
+            type: 'sztyca',
+            enabled: true,
+            storiesCount: 1,
+            storeyHeight: 4.0,
+            offset: -1.0,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgSztycaSetback);
+      expect(res.storyPolygons.length).toBe(6);
+      const topStory = res.storyPolygons[5];
+      expect(topStory.hBottom).toBe(15.0);
+      expect(topStory.hTop).toBe(19.0);
+      expect(topStory.polygon).toEqual([
+        { x: 1, y: 1 },
+        { x: 9, y: 1 },
+        { x: 9, y: 9 },
+        { x: 1, y: 9 },
+      ]);
+    });
+  });
+
+  describe('Modifier: Pila (Analytical Sawtooth / Edge Step Notches b-a-b-a)', () => {
+    it('generates 1 step (2 subsegments b-a) along edge of length 10m connecting P1 and P2 exactly', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const poly = generatePilaPolygon(pts, 1, 0, 90, 'prev_edge');
+      expect(poly.length).toBe(5);
+      expect(poly.some((p) => Math.abs(p.x) < 0.01 && Math.abs(p.y - 10) < 0.01)).toBe(true);
+      expect(poly.some((p) => Math.abs(p.x - 10) < 0.01 && Math.abs(p.y - 10) < 0.01)).toBe(true);
+      expect(poly.some((p) => Math.abs(p.x - 10) < 0.01 && Math.abs(p.y) < 0.01)).toBe(true);
+    });
+
+    it('generates 2 steps (4 subsegments b-a-b-a) along edge of length 30m', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const poly = generatePilaPolygon(pts, 2, 0, 90, 'prev_edge');
+      expect(poly.length).toBe(7);
+      expect(poly.some((p) => Math.abs(p.x - 30) < 0.01 && Math.abs(p.y) < 0.01)).toBe(true);
+    });
+
+    it('calculates metrics for 90, 120, 135, and 150 degree angles', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const m90 = calculatePilaMetrics(pts, 1, 0, 90, 'prev_edge');
+      expect(m90).not.toBeNull();
+      expect(m90!.totalSubsegments).toBe(2);
+      expect(m90!.edgeLen).toBe(20);
+
+      const m120 = calculatePilaMetrics(pts, 1, 0, 120, 'prev_edge');
+      expect(m120).not.toBeNull();
+      expect(m120!.angle).toBe(120);
+
+      const m135 = calculatePilaMetrics(pts, 1, 0, 135, 'prev_edge');
+      expect(m135).not.toBeNull();
+      expect(m135!.angle).toBe(135);
+
+      const m150 = calculatePilaMetrics(pts, 1, 0, 150, 'prev_edge');
+      expect(m150).not.toBeNull();
+      expect(m150!.angle).toBe(150);
+    });
+
+    it('supports prev_edge and next_edge alignment modes', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const poly135 = generatePilaPolygon(pts, 1, 0, 135, 'prev_edge');
+      expect(poly135.length).toBeGreaterThanOrEqual(4);
+      expect(poly135.some((p) => Math.abs(p.x - 20) < 0.01 && Math.abs(p.y) < 0.01)).toBe(true);
+
+      const m135 = calculatePilaMetrics(pts, 1, 0, 135, 'prev_edge');
+      expect(m135).not.toBeNull();
+      expect(m135!.lenA).toBeGreaterThan(0);
+      expect(m135!.lenB).toBeGreaterThan(0);
+
+      const polyNext = generatePilaPolygon(pts, 1, 0, 90, 'next_edge');
+      expect(polyNext.length).toBeGreaterThanOrEqual(4);
+      expect(polyNext.some((p) => Math.abs(p.x - 20) < 0.01)).toBe(true);
+    });
+
+    it('applies Pila modifier within applyBuildingModifiers to specific story', () => {
+      const bldgPila: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-pila-1',
+            type: 'pila',
+            enabled: true,
+            teethCount: 1, // b-a
+            toothAngle: 90,
+            alignment: 'prev_edge',
+            storiesCount: 1, // parter tylko
+            edgeIndex: 0,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgPila);
+      expect(res.storyPolygons[0].polygon.length).toBe(5); // ground modified
+      expect(res.storyPolygons[1].polygon.length).toBe(4); // upper unmodified
+    });
+
+    it('reproduces reference mod-test6.json: Budynek1A matches Budynek1B', () => {
+      const bldg1A: BuildingLoop = {
+        id: 'bldg-1789415044958-wyxm',
+        name: 'Budynek1A',
+        layer: 'BUD_NOWY',
+        isTested: false,
+        category: 'building',
+        elevation: 0,
+        firstFloorHeight: 3,
+        typicalFloorHeight: 3,
+        storeysCount: 5,
+        isIncluded: true,
+        isCityCentre: false,
+        buildingType: 'residential',
+        defaultHeight: 15,
+        heightSource: 'default',
+        hWindowBottom: 0.85,
+        isClockwise: true,
+        transform: { tx: 0, ty: 0, rotationDeg: 0 },
+        vertices: [
+          { x: -70.02942662591025, y: -6.796457014023964 },
+          { x: -27.783087987846997, y: 8.823708291050089 },
+          { x: 14.029883576300215, y: -6.796457014023964 },
+          { x: -5.325878641314048, y: -67.99753374019468 },
+          { x: -70.02942662591025, y: -67.99753374019468 },
+        ],
+        segments: [],
+        modifiers: [
+          {
+            id: 'mod-pila-1789415022011-yttu',
+            type: 'pila',
+            enabled: true,
+            teethCount: 3,
+            toothAngle: 90,
+            alignment: 'next_edge',
+            storiesCount: 0,
+            edgeIndex: 2,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldg1A);
+      expect(res.storyPolygons.length).toBe(5);
+
+      const poly1A = res.storyPolygons[0].polygon;
+      expect(poly1A.length).toBe(10); // 10 vertices including 3 steps (6 subsegments)
+
+      // Expected reference offset (Budynek1B y offset = 40.571129828893234)
+      const dY = 40.571129828893234;
+
+      // Budynek1B target vertices
+      const bldg1BVertices: Point2D[] = [
+        { x: -70.02942662591025, y: 33.77467281486927 },
+        { x: -5.325878641314079, y: 33.77467281486927 },
+        { x: 1.1260420978906538, y: 33.77467281486927 },
+        { x: 1.123554784240536, y: 54.167167074718165 },
+        { x: 7.577962837095402, y: 54.175031723592824 },
+        { x: 7.572988209795152, y: 74.55966133456707 },
+        { x: 14.029883576300156, y: 74.57539063231641 },
+        { x: 14.02988357630017, y: 94.97574954104002 },
+        { x: -27.78308798784703, y: 110.59591484611408 },
+        { x: -70.02942662591025, y: 94.97574954104002 },
+      ];
+
+      // Translated 1A should match 1B vertices
+      for (const ptB of bldg1BVertices) {
+        const match = poly1A.some((ptA) => Math.hypot(ptA.x - ptB.x, (ptA.y + dY) - ptB.y) < 0.1);
+        expect(match).toBe(true);
+      }
+    });
+  });
+
+  describe('Modifier: Zone Function (BuildingType per storey and per edge offset)', () => {
+    it('sets buildingType: service on ground floor (scope: storeys)', () => {
+      const bldgZoneFunc: BuildingLoop = {
+        ...baseBuilding,
+        buildingType: 'residential',
+        modifiers: [
+          {
+            id: 'mod-zfunc-1',
+            type: 'zone_function',
+            enabled: true,
+            buildingType: 'service',
+            scope: 'storeys',
+            storiesCount: 1, // parter (+1)
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgZoneFunc);
+      expect(res.storyPolygons[0].buildingType).toBe('service');
+      expect(res.storyPolygons[1].buildingType).toBe('residential');
+
+      // Check facade segments
+      const groundSegs = res.segments.filter((s) => s.hBase === 0 && s.hTop === 3.5);
+      expect(groundSegs.length).toBe(4);
+      for (const seg of groundSegs) {
+        expect(seg.buildingType).toBe('service');
+      }
+
+      const upperSegs = res.segments.filter((s) => s.hBase === 3.5 && s.hTop === 15.0);
+      expect(upperSegs.length).toBe(4);
+      for (const seg of upperSegs) {
+        expect(seg.buildingType).toBe('residential');
+      }
+    });
+
+    it('splits footprint into 2 discrete StoryFootprint zones along edge offset', () => {
+      const bldgZoneOffset: BuildingLoop = {
+        ...baseBuilding,
+        buildingType: 'residential',
+        modifiers: [
+          {
+            id: 'mod-zfunc-2',
+            type: 'zone_function',
+            enabled: true,
+            buildingType: 'garage',
+            scope: 'edge_offset',
+            storiesCount: 0, // cała bryła
+            edgeIndex: 0,
+            depth: 4.0, // 4m pasmo od krawędzi 0 (y: 0..4)
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgZoneOffset);
+      // Each of the 5 storeys is split into 2 footprints (1 garage + 1 residential)
+      expect(res.storyPolygons.length).toBe(10);
+
+      const garageFootprints = res.storyPolygons.filter((s) => s.buildingType === 'garage');
+      const resFootprints = res.storyPolygons.filter((s) => s.buildingType === 'residential');
+      expect(garageFootprints.length).toBe(5);
+      expect(resFootprints.length).toBe(5);
+
+      // Verify 3D solids produce distinct elements with their respective buildingType
+      const solids = getBuildingSolids({ ...bldgZoneOffset, storyPolygons: res.storyPolygons });
+      expect(solids.length).toBe(10);
+      expect(solids.filter((s) => s.buildingType === 'garage').length).toBe(5);
+      expect(solids.filter((s) => s.buildingType === 'residential').length).toBe(5);
+    });
   });
 });
 
