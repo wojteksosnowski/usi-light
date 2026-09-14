@@ -1,6 +1,16 @@
-import { AreaType, Point2D } from './geometry';
+import { AreaType, BuildingType, Point2D } from './geometry';
 
-export type ModifierType = 'story_offset' | 'zone_offset' | 'bay_window' | 'terrace' | 'donut' | 'corner_cut' | 'gate';
+export type ModifierType =
+  | 'story_offset'
+  | 'zone_offset'
+  | 'bay_window'
+  | 'terrace'
+  | 'donut'
+  | 'corner_cut'
+  | 'gate'
+  | 'sztyca'
+  | 'pila'
+  | 'zone_function';
 
 export interface BaseModifier {
   id: string;
@@ -76,7 +86,48 @@ export interface GateModifier extends BaseModifier {
   autoWidth?: boolean;     // Czy tryb automatycznej maksymalnej szerokości jest aktywny
 }
 
-export type Modifier = StoryOffsetModifier | ZoneOffsetModifier | BayWindowModifier | TerraceModifier | DonutModifier | CornerCutModifier | GateModifier;
+export interface SztycaModifier extends BaseModifier {
+  type: 'sztyca';
+  storiesCount: number;    // Liczba dodatkowych kondygnacji na szczycie (>=1, domyślnie 1)
+  storeyHeight: number;    // Wysokość dodawanej kondygnacji (m, domyślnie 3.0)
+  offset?: number;         // Opcjonalne odsunięcie/cofnięcie krawędzi sztycy (m, domyślnie 0.0)
+}
+
+export type PilaAngle = 90 | 120 | 135 | 150;
+export type PilaAlignment = 'perpendicular' | 'prev_edge' | 'next_edge';
+
+export interface PilaModifier extends BaseModifier {
+  type: 'pila';
+  teethCount: number;      // Liczba zębów / uskoków (>=1, domyślnie 1)
+  depth?: number;          // Opcjonalna głębokość (wyliczana automatycznie z geometrii)
+  toothAngle?: PilaAngle;  // Kąt schodkowania: 90, 120, 135, 150 stopni (domyślnie 90)
+  alignment?: PilaAlignment; // Kierunek skoku: 'perpendicular' (domyślnie), 'prev_edge', 'next_edge'
+  storiesCount: number;    // Kondygnacja: <0 od góry, >0 od dołu, 0 cała bryła
+  edgeIndex?: number;      // Indeks modyfikowanej krawędzi (domyślnie najdłuższa lub 0)
+}
+
+export type ZoneFunctionScope = 'storeys' | 'edge_offset';
+
+export interface ZoneFunctionModifier extends BaseModifier {
+  type: 'zone_function';
+  buildingType: BuildingType; // Docelowy typ budynku: 'residential' | 'service' | 'garage'
+  scope: ZoneFunctionScope;   // 'storeys' (cały obrys) | 'edge_offset' (pas od krawędzi)
+  storiesCount: number;       // Kondygnacja: <0 od góry, >0 od dołu, 0 cała bryła
+  edgeIndex?: number;         // Indeks krawędzi (dla scope === 'edge_offset')
+  depth?: number;             // Głębokość strefy w głąb budynku (metry, domyślnie 10.0m)
+}
+
+export type Modifier =
+  | StoryOffsetModifier
+  | ZoneOffsetModifier
+  | BayWindowModifier
+  | TerraceModifier
+  | DonutModifier
+  | CornerCutModifier
+  | GateModifier
+  | SztycaModifier
+  | PilaModifier
+  | ZoneFunctionModifier;
 
 function newModifierId(prefix: string): string {
   return `mod-${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
@@ -170,6 +221,49 @@ export function createDefaultGateModifier(): GateModifier {
   };
 }
 
+/**
+ * Tworzy domyślny modyfikator "Sztyca (nadbudowa / dodatkowe piętra)"
+ */
+export function createDefaultSztycaModifier(): SztycaModifier {
+  return {
+    id: newModifierId('sztyca'),
+    type: 'sztyca',
+    enabled: true,
+    storiesCount: 1,      // 1 dodatkowa kondygnacja
+    storeyHeight: 3.0,    // 3.0m wysokości
+    offset: 0.0,          // ten sam obrys co najwyższa kondygnacja
+  };
+}
+
+/**
+ * Tworzy domyślny modyfikator "Piła (schodkowanie krawędzi)"
+ */
+export function createDefaultPilaModifier(): PilaModifier {
+  return {
+    id: newModifierId('pila'),
+    type: 'pila',
+    enabled: true,
+    teethCount: 1,        // 1 uskok (2 podsegmenty: b-a)
+    toothAngle: 90,
+    alignment: 'prev_edge',
+    storiesCount: 0,      // cała bryła
+  };
+}
+
+/**
+ * Tworzy domyślny modyfikator "Strefa funkcji (typ budynku)"
+ */
+export function createDefaultZoneFunctionModifier(): ZoneFunctionModifier {
+  return {
+    id: newModifierId('zfunc'),
+    type: 'zone_function',
+    enabled: true,
+    buildingType: 'service', // domyślnie usługi
+    scope: 'storeys',        // domyślnie kondygnacje
+    storiesCount: 1,         // domyślnie parter (+1)
+    depth: 10.0,             // 10m pasmo od krawędzi
+  };
+}
 
 export interface StoryFootprint {
   storyIndex: number;    // Indeks kondygnacji 0 .. K-1
@@ -177,6 +271,7 @@ export interface StoryFootprint {
   hTop: number;          // Rzędna wierzchu kondygnacji (m)
   polygon: Point2D[];    // Zewnętrzny obrys 2D danej kondygnacji
   holes?: Point2D[][];   // Wewnętrzne otwory (np. dziedzińce / patio z modyfikatora Donat)
+  buildingType?: BuildingType; // Indywidualne przeznaczenie kondygnacji/obrysu (np. po modyfikatorze strefy funkcji)
 }
 
 export interface ZoneFootprint {

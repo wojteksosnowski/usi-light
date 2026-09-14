@@ -1,10 +1,11 @@
-import type { BuildingLoop, Point2D } from '@/types/geometry';
+import type { BuildingLoop, BuildingType, Point2D } from '@/types/geometry';
 
 export interface IsoSolid {
   polygon: Point2D[];
   holes: Point2D[][];
   hBottom: number;
   hTop: number;
+  buildingType?: BuildingType;
 }
 
 /**
@@ -28,6 +29,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
         holes: (story.holes ?? []).map((hole) => hole.map(normalize)),
         hBottom: story.hBottom,
         hTop: story.hTop,
+        buildingType: story.buildingType ?? building.buildingType ?? 'residential',
       }));
   }
 
@@ -42,6 +44,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
       holes: [],
       hBottom,
       hTop: hBottom + building.defaultHeight,
+      buildingType: building.buildingType ?? 'residential',
     },
   ];
 }

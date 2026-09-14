@@ -1,8 +1,10 @@
 import polygonClipping from 'polygon-clipping';
-import { BuildingLoop, FacadeSegment, Point2D } from '../../types/geometry';
+import { BuildingLoop, BuildingType, FacadeSegment, Point2D } from '../../types/geometry';
 import {
   CornerCutMode,
   CornerCutScope,
+  PilaAlignment,
+  PilaAngle,
   StoryFootprint,
   ZoneCornerType,
   ZoneFootprint,
@@ -733,7 +735,470 @@ export function cutGateFromFootprint(
         hTop: footprint.hTop,
         polygon: outerPts,
         holes: holesPts,
+        buildingType: footprint.buildingType,
       });
+    }
+
+    return results.length > 0 ? results : [footprint];
+  } catch {
+    return [footprint];
+  }
+}
+
+/** Zwraca indeks najdłuższej krawędzi wielokąta - domyślna krawędź docelowa dla modyfikatorów Piła/Strefa funkcji. */
+function findLongestEdgeIndex(vertices: Point2D[]): number {
+  const n = vertices.length;
+  let bestEdgeIdx = 0;
+  let maxEdgeLen = 0;
+  for (let i = 0; i < n; i++) {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % n];
+    const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (len > maxEdgeLen) {
+      maxEdgeLen = len;
+      bestEdgeIdx = i;
+    }
+  }
+  return bestEdgeIdx;
+}
+
+export interface PilaMetrics {
+  lenA: number;
+  lenB: number;
+  angle: number;
+  edgeLen: number;
+  totalSubsegments: number;
+  depth: number;
+}
+
+/**
+ * Wyznacza wektory pojedynczego uskoku vecB i vecA dla modyfikatora Piła (układ b-a-b-a).
+ * Wektor vecB jest przedłużeniem krawędzi dochodzącej (prev_edge) lub odchodzącej (next_edge).
+ */
+export function computeStepVectors(
+  pPrev: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  pNext: Point2D,
+  kSteps: number,
+  toothAngle: number,
+  alignment: PilaAlignment,
+  isCCW: boolean
+): {
+  uB: Point2D;
+  uA: Point2D;
+  lenB: number;
+  lenA: number;
+  effAngle: number;
+  mode: PilaAlignment;
+} {
+  const edgeDx = p2.x - p1.x;
+  const edgeDy = p2.y - p1.y;
+  const edgeLen = Math.hypot(edgeDx, edgeDy);
+  const tan = { x: edgeDx / edgeLen, y: edgeDy / edgeLen };
+  const normOut = calculateOutwardNormal(p1, p2, isCCW);
+  const normIn = { x: -normOut.x, y: -normOut.y };
+
+  const validAngle = toothAngle === 120 || toothAngle === 135 || toothAngle === 150 ? toothAngle : 90;
+  const thetaRad = (validAngle * Math.PI) / 180;
+
+  let uB: Point2D;
+  let uA: Point2D;
+  let lenB: number;
+  let lenA: number;
+
+  if (alignment === 'prev_edge') {
+    const vPrev = { x: p1.x - pPrev.x, y: p1.y - pPrev.y };
+    const lenPrev = Math.hypot(vPrev.x, vPrev.y);
+    const baseUB = lenPrev > 1e-4 ? { x: vPrev.x / lenPrev, y: vPrev.y / lenPrev } : { x: normIn.x, y: normIn.y };
+
+    const turnAngle = Math.PI - thetaRad;
+    const cosT = Math.cos(turnAngle);
+    const sinT = Math.sin(turnAngle);
+
+    const targetX = edgeDx / kSteps;
+    const targetY = edgeDy / kSteps;
+
+    // Przetestuj warianty uB (+baseUB, -baseUB) i obrotu (rotCW, rotCCW)
+    const candidates: { uB: Point2D; uA: Point2D; lenB: number; lenA: number; score: number }[] = [];
+
+    for (const candUB of [baseUB, { x: -baseUB.x, y: -baseUB.y }]) {
+      const rotCW = { x: candUB.x * cosT + candUB.y * sinT, y: -candUB.x * sinT + candUB.y * cosT };
+      const rotCCW = { x: candUB.x * cosT - candUB.y * sinT, y: candUB.x * sinT + candUB.y * cosT };
+
+      for (const candUA of [rotCW, rotCCW]) {
+        const det = candUB.x * candUA.y - candUB.y * candUA.x;
+        if (Math.abs(det) > 1e-4) {
+          const lB = (targetX * candUA.y - targetY * candUA.x) / det;
+          const lA = (candUB.x * targetY - candUB.y * targetX) / det;
+          if (lB >= -1e-4 && lA >= -1e-4) {
+            // Wierzchołek zęba P_mid = P1 + lB * uB
+            // Ząb powinien iść w stronę normIn (do wnętrza): candUB.dot(normIn) + candUA.dot(normIn) >= 0
+            const inScore = (candUB.x + candUA.x) * normIn.x + (candUB.y + candUA.y) * normIn.y;
+            const tanScore = candUA.x * tan.x + candUA.y * tan.y;
+            candidates.push({
+              uB: candUB,
+              uA: candUA,
+              lenB: Math.max(0, lB),
+              lenA: Math.max(0, lA),
+              score: inScore * 2 + tanScore,
+            });
+          }
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.score - a.score);
+      uB = candidates[0].uB;
+      uA = candidates[0].uA;
+      lenB = candidates[0].lenB;
+      lenA = candidates[0].lenA;
+    } else {
+      // Fallback
+      uB = baseUB;
+      const rCW = { x: uB.x * cosT + uB.y * sinT, y: -uB.x * sinT + uB.y * cosT };
+      const rCCW = { x: uB.x * cosT - uB.y * sinT, y: uB.x * sinT + uB.y * cosT };
+      uA = (rCW.x * tan.x + rCW.y * tan.y) >= (rCCW.x * tan.x + rCCW.y * tan.y) ? rCW : rCCW;
+      lenA = edgeLen / kSteps;
+      lenB = lenA / 2;
+    }
+  } else if (alignment === 'next_edge') {
+    const vNext = { x: pNext.x - p2.x, y: pNext.y - p2.y };
+    const lenNext = Math.hypot(vNext.x, vNext.y);
+    const baseUB = lenNext > 1e-4 ? { x: -vNext.x / lenNext, y: -vNext.y / lenNext } : { x: normIn.x, y: normIn.y };
+
+    const turnAngle = Math.PI - thetaRad;
+    const cosT = Math.cos(turnAngle);
+    const sinT = Math.sin(turnAngle);
+
+    const targetX = edgeDx / kSteps;
+    const targetY = edgeDy / kSteps;
+
+    const candidates: { uB: Point2D; uA: Point2D; lenB: number; lenA: number; score: number }[] = [];
+
+    for (const candUB of [baseUB, { x: -baseUB.x, y: -baseUB.y }]) {
+      const rotCW = { x: candUB.x * cosT + candUB.y * sinT, y: -candUB.x * sinT + candUB.y * cosT };
+      const rotCCW = { x: candUB.x * cosT - candUB.y * sinT, y: candUB.x * sinT + candUB.y * cosT };
+
+      for (const candUA of [rotCW, rotCCW]) {
+        // kSteps * (lenA * candUA + lenB * candUB) = (p2 - p1)
+        const det = candUA.x * candUB.y - candUA.y * candUB.x;
+        if (Math.abs(det) > 1e-4) {
+          const lA = (targetX * candUB.y - targetY * candUB.x) / det;
+          const lB = (candUA.x * targetY - candUA.y * targetX) / det;
+          if (lA >= -1e-4 && lB >= -1e-4) {
+            const inScore = (candUB.x + candUA.x) * normIn.x + (candUB.y + candUA.y) * normIn.y;
+            const tanScore = candUA.x * tan.x + candUA.y * tan.y;
+            candidates.push({
+              uB: candUB,
+              uA: candUA,
+              lenB: Math.max(0, lB),
+              lenA: Math.max(0, lA),
+              score: inScore * 2 + tanScore,
+            });
+          }
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.score - a.score);
+      uB = candidates[0].uB;
+      uA = candidates[0].uA;
+      lenB = candidates[0].lenB;
+      lenA = candidates[0].lenA;
+    } else {
+      uB = baseUB;
+      const rCW = { x: uB.x * cosT + uB.y * sinT, y: -uB.x * sinT + uB.y * cosT };
+      const rCCW = { x: uB.x * cosT - uB.y * sinT, y: uB.x * sinT + uB.y * cosT };
+      uA = (rCW.x * tan.x + rCW.y * tan.y) >= (rCCW.x * tan.x + rCCW.y * tan.y) ? rCW : rCCW;
+      lenA = edgeLen / kSteps;
+      lenB = lenA / 2;
+    }
+  } else {
+    // perpendicular (symetrycznie)
+    const alpha = (Math.PI - thetaRad) / 2;
+    uB = {
+      x: Math.cos(alpha) * tan.x - Math.sin(alpha) * normIn.x,
+      y: Math.cos(alpha) * tan.y - Math.sin(alpha) * normIn.y,
+    };
+    uA = {
+      x: Math.cos(alpha) * tan.x + Math.sin(alpha) * normIn.x,
+      y: Math.cos(alpha) * tan.y + Math.sin(alpha) * normIn.y,
+    };
+    lenA = edgeLen / (2 * kSteps * Math.cos(alpha));
+    lenB = lenA;
+  }
+
+  return {
+    uB,
+    uA,
+    lenB,
+    lenA,
+    effAngle: validAngle,
+    mode: alignment,
+  };
+}
+
+/**
+ * Analityczne wyznaczanie długości odcinków a i b dla modyfikatora Piła (parzysty układ b-a-b-a).
+ */
+export function calculatePilaMetrics(
+  vertices: Point2D[],
+  teethCount: number = 1,
+  targetEdgeIndex?: number,
+  toothAngle: number = 90,
+  alignment: PilaAlignment = 'prev_edge'
+): PilaMetrics | null {
+  if (!vertices || vertices.length < 3) return null;
+
+  const n = vertices.length;
+  const edgeIdx =
+    targetEdgeIndex !== undefined && targetEdgeIndex >= 0 && targetEdgeIndex < n
+      ? targetEdgeIndex
+      : findLongestEdgeIndex(vertices);
+
+  const isCCW = isPolygonCCW(vertices);
+  const prevIdx = (edgeIdx - 1 + n) % n;
+  const nextIdx = (edgeIdx + 1) % n;
+  const nextNextIdx = (edgeIdx + 2) % n;
+
+  const pPrev = vertices[prevIdx];
+  const p1 = vertices[edgeIdx];
+  const p2 = vertices[nextIdx];
+  const pNext = vertices[nextNextIdx];
+
+  const edgeDx = p2.x - p1.x;
+  const edgeDy = p2.y - p1.y;
+  const edgeLen = Math.hypot(edgeDx, edgeDy);
+  if (edgeLen < 1e-4) return null;
+
+  const kSteps = Math.max(1, Math.round(teethCount));
+  const totalSubsegments = 2 * kSteps;
+
+  const step = computeStepVectors(
+    pPrev,
+    p1,
+    p2,
+    pNext,
+    kSteps,
+    toothAngle,
+    alignment,
+    isCCW
+  );
+
+  return {
+    lenA: Number(step.lenA.toFixed(2)),
+    lenB: Number(step.lenB.toFixed(2)),
+    angle: step.effAngle,
+    edgeLen: Number(edgeLen.toFixed(2)),
+    totalSubsegments,
+    depth: Number(step.lenB.toFixed(2)),
+  };
+}
+
+/**
+ * Generuje wielokąt ze schodkowaniem w kształcie zębów piły o parzystej liczbie podsegmentów b-a-b-a na pojedynczej krawędzi (Piła).
+ * Pierwszy odcinek 'b' jest przedłużeniem odcinka dochodzącego (lub odchodzącego) w wierzchołku krawędzi.
+ */
+export function generatePilaPolygon(
+  vertices: Point2D[],
+  teethCount: number = 1,
+  targetEdgeIndex?: number,
+  toothAngle: number = 90,
+  alignment: PilaAlignment = 'prev_edge'
+): Point2D[] {
+  if (!vertices || vertices.length < 3) {
+    return vertices ? vertices.map((p) => ({ ...p })) : [];
+  }
+
+  const n = vertices.length;
+  const isCCW = isPolygonCCW(vertices);
+
+  const edgeIdx =
+    targetEdgeIndex !== undefined && targetEdgeIndex >= 0 && targetEdgeIndex < n
+      ? targetEdgeIndex
+      : findLongestEdgeIndex(vertices);
+
+  const prevIdx = (edgeIdx - 1 + n) % n;
+  const nextIdx = (edgeIdx + 1) % n;
+  const nextNextIdx = (edgeIdx + 2) % n;
+
+  const pPrev = vertices[prevIdx];
+  const p1 = vertices[edgeIdx];
+  const p2 = vertices[nextIdx];
+  const pNext = vertices[nextNextIdx];
+
+  const edgeDx = p2.x - p1.x;
+  const edgeDy = p2.y - p1.y;
+  const edgeLen = Math.hypot(edgeDx, edgeDy);
+  if (edgeLen < 1e-4) return vertices.map((p) => ({ ...p }));
+
+  const kSteps = Math.max(1, Math.round(teethCount));
+
+  const step = computeStepVectors(
+    pPrev,
+    p1,
+    p2,
+    pNext,
+    kSteps,
+    toothAngle,
+    alignment,
+    isCCW
+  );
+
+  const toothPoints: Point2D[] = [];
+  let curr = { x: p1.x, y: p1.y };
+  toothPoints.push({ ...curr });
+
+  if (step.mode === 'next_edge') {
+    // W trybie next_edge: zaczynamy od a, a ostatni odcinek b wchodzi w P2 wzdłuż ściany w P2
+    for (let s = 0; s < kSteps; s++) {
+      // Odcinek a_{s+1}
+      curr = { x: curr.x + step.lenA * step.uA.x, y: curr.y + step.lenA * step.uA.y };
+      toothPoints.push({ ...curr });
+
+      // Odcinek b_{s+1}
+      curr = { x: curr.x + step.lenB * step.uB.x, y: curr.y + step.lenB * step.uB.y };
+      toothPoints.push({ ...curr });
+    }
+  } else {
+    // W trybie prev_edge lub perpendicular: zaczynamy od b1 wzdłuż ściany P1, potem a1
+    for (let s = 0; s < kSteps; s++) {
+      // Odcinek b_{s+1}
+      curr = { x: curr.x + step.lenB * step.uB.x, y: curr.y + step.lenB * step.uB.y };
+      toothPoints.push({ ...curr });
+
+      // Odcinek a_{s+1}
+      curr = { x: curr.x + step.lenA * step.uA.x, y: curr.y + step.lenA * step.uA.y };
+      toothPoints.push({ ...curr });
+    }
+  }
+
+  // Ostatni punkt zbiega się z P2
+  toothPoints[toothPoints.length - 1] = { x: p2.x, y: p2.y };
+
+  // Wstawienie punktów w miejsce krawędzi P1 -> P2
+  // Zastępujemy odcinek vertices[edgeIdx] -> vertices[(edgeIdx+1)%n]
+  // całym ciągiem toothPoints (który zaczyna się w P1 i kończy w P2 bez duplikowania P2 w kolejnym kroku)
+  const result: Point2D[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i === edgeIdx) {
+      // Wstawiamy P1 oraz wszystkie punkty pośrednie (oprócz ostatniego P2, który wejdzie jako kolejny wierzchołek lub zostanie zamknięty)
+      for (let j = 0; j < toothPoints.length - 1; j++) {
+        result.push(toothPoints[j]);
+      }
+    } else {
+      result.push({ ...vertices[i] });
+    }
+  }
+
+  return cleanPolygonRing(result, isCCW);
+}
+
+/**
+ * Rozcina obrys kondygnacji na dwa niezależne obrysy wzdłuż pasa o zadanym offsecie od krawędzi (Strefa funkcji).
+ */
+export function splitFootprintByEdgeOffset(
+  footprint: StoryFootprint,
+  edgeIndex: number | undefined,
+  depth: number,
+  newType: BuildingType
+): StoryFootprint[] {
+  if (!footprint.polygon || footprint.polygon.length < 3 || depth <= 1e-4) {
+    return [footprint];
+  }
+
+  const vertices = footprint.polygon;
+  const n = vertices.length;
+  const isCCW = isPolygonCCW(vertices);
+
+  const edgeIdx =
+    edgeIndex !== undefined && edgeIndex >= 0 && edgeIndex < n ? edgeIndex : findLongestEdgeIndex(vertices);
+
+  const p1 = vertices[edgeIdx];
+  const p2 = vertices[(edgeIdx + 1) % n];
+
+  // Wektor normalny skierowany do wnętrza bryły
+  const normOut = calculateOutwardNormal(p1, p2, isCCW);
+  const normIn = { x: -normOut.x, y: -normOut.y };
+
+  const edgeDx = p2.x - p1.x;
+  const edgeDy = p2.y - p1.y;
+  const edgeLen = Math.hypot(edgeDx, edgeDy);
+  if (edgeLen < 1e-4) return [footprint];
+  const tan = { x: edgeDx / edgeLen, y: edgeDy / edgeLen };
+
+  const margin = Math.max(20.0, depth * 2);
+  const extP1 = { x: p1.x - tan.x * margin, y: p1.y - tan.y * margin };
+  const extP2 = { x: p2.x + tan.x * margin, y: p2.y + tan.y * margin };
+
+  const cutterPolygon: Point2D[] = [
+    extP1,
+    extP2,
+    { x: extP2.x + normIn.x * depth, y: extP2.y + normIn.y * depth },
+    { x: extP1.x + normIn.x * depth, y: extP1.y + normIn.y * depth },
+  ];
+
+  try {
+    const outerRing = toClosedRing(footprint.polygon);
+    const validHoles = (footprint.holes || []).filter((h) => h && h.length >= 3);
+    const subjectRings: [number, number][][] = [outerRing, ...validHoles.map(toClosedRing)];
+    const cutterRing = toClosedRing(cutterPolygon);
+
+    // 1. Strefa offsetu = intersection(subject, cutter)
+    const zoneDiff = polygonClipping.intersection([subjectRings], [[cutterRing]]);
+    // 2. Pozostała część = difference(subject, cutter)
+    const remainderDiff = polygonClipping.difference([subjectRings], [[cutterRing]]);
+
+    const results: StoryFootprint[] = [];
+
+    // `poly[0]` to zewnętrzny obrys, `poly[1..]` to dziury - odfiltrowujemy zdegenerowane pierścienie
+    // (< 3 punktów lub znikoma powierzchnia) powstałe jako artefakty operacji boolean.
+    const collectValidHoles = (poly: ReturnType<typeof toClosedRing>[]): Point2D[][] => {
+      const holesPts: Point2D[][] = [];
+      for (let h = 1; h < poly.length; h++) {
+        const hPts = fromClosedRing(poly[h], true);
+        if (hPts.length >= 3 && Math.abs(calculateSignedArea(hPts)) >= 0.1) {
+          holesPts.push(hPts);
+        }
+      }
+      return holesPts;
+    };
+
+    // Dodaj obrysy strefy offsetu z newType
+    if (zoneDiff && zoneDiff.length > 0) {
+      for (const poly of zoneDiff) {
+        if (!poly || poly.length === 0) continue;
+        const outerPts = fromClosedRing(poly[0], true);
+        if (outerPts.length < 3 || Math.abs(calculateSignedArea(outerPts)) < 0.1) continue;
+        results.push({
+          storyIndex: footprint.storyIndex,
+          hBottom: footprint.hBottom,
+          hTop: footprint.hTop,
+          polygon: outerPts,
+          holes: collectValidHoles(poly),
+          buildingType: newType,
+        });
+      }
+    }
+
+    // Dodaj pozostałe obrysy z pierwotnym typem
+    if (remainderDiff && remainderDiff.length > 0) {
+      for (const poly of remainderDiff) {
+        if (!poly || poly.length === 0) continue;
+        const outerPts = fromClosedRing(poly[0], true);
+        if (outerPts.length < 3 || Math.abs(calculateSignedArea(outerPts)) < 0.1) continue;
+        results.push({
+          storyIndex: footprint.storyIndex,
+          hBottom: footprint.hBottom,
+          hTop: footprint.hTop,
+          polygon: outerPts,
+          holes: collectValidHoles(poly),
+          buildingType: footprint.buildingType,
+        });
+      }
     }
 
     return results.length > 0 ? results : [footprint];
@@ -745,7 +1210,7 @@ export function cutGateFromFootprint(
 /**
  * Główny potok przetwarzania modyfikatorów na budynku:
  * 1. Inicjalizuje obrysy kondygnacji (story footprints 0..K-1) z geometrii bazowej
- * 2. Nakłada po kolei aktywne modyfikatory ze stosu (Uskok, Strefa, Wykusz, Taras, Donat, Brama)
+ * 2. Nakłada po kolei aktywne modyfikatory ze stosu (Uskok, Strefa, Wykusz, Taras, Donat, Brama, Sztyca, Piła, Strefa funkcji)
  * 3. Ekstrahuje pionowe krawędzie ścian (zewnętrznych i wewnętrznych dziedzińca) i scala współliniowe odcinki w segmenty [Hbase, Htotal]
  */
 export function applyBuildingModifiers(building: BuildingLoop): ModifierPipelineResult {
@@ -795,6 +1260,7 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     hTop: interval.hTop,
     polygon: baseVertices.map((p) => ({ ...p })),
     holes: [],
+    buildingType: building.buildingType ?? 'residential',
   }));
 
   const zoneFootprints: ZoneFootprint[] = [];
@@ -816,11 +1282,13 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     hTop: number;
     storyIndex: number;
     isHole?: boolean;
+    buildingType?: BuildingType;
   }
 
   const rawEdges: RawEdge[] = [];
 
   sanitizedStoryFootprints.forEach((sf) => {
+    const currentBuildingType = sf.buildingType || building.buildingType || 'residential';
     // Krawędzie zewnętrzne
     const poly = sf.polygon;
     const m = poly.length;
@@ -832,6 +1300,7 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
         hTop: sf.hTop,
         storyIndex: sf.storyIndex,
         isHole: false,
+        buildingType: currentBuildingType,
       });
     }
 
@@ -847,19 +1316,21 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
             hTop: sf.hTop,
             storyIndex: sf.storyIndex,
             isHole: true,
+            buildingType: currentBuildingType,
           });
         }
       });
     }
   });
 
-  // Scalanie identycznych krawędzi (te same p1 i p2 w granicach tolerancji)
+  // Scalanie identycznych krawędzi (te same p1 i p2 w granicach tolerancji i ten sam buildingType)
   interface MergedSegment {
     p1: Point2D;
     p2: Point2D;
     hBase: number;
     hTop: number;
     isHole?: boolean;
+    buildingType?: BuildingType;
   }
 
   const merged: MergedSegment[] = [];
@@ -869,6 +1340,7 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     const existing = merged.find(
       (m) =>
         m.isHole === edge.isHole &&
+        m.buildingType === edge.buildingType &&
         Math.hypot(m.p1.x - edge.p1.x, m.p1.y - edge.p1.y) < TOL &&
         Math.hypot(m.p2.x - edge.p2.x, m.p2.y - edge.p2.y) < TOL
     );
@@ -883,6 +1355,7 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
         hBase: edge.hBottom,
         hTop: edge.hTop,
         isHole: edge.isHole,
+        buildingType: edge.buildingType,
       });
     }
   }
@@ -907,7 +1380,7 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
       hBase: m.hBase,
       hWindowBottom: building.hWindowBottom ?? 0.85,
       isCityCentre: building.isCityCentre ?? false,
-      buildingType: building.buildingType ?? 'residential',
+      buildingType: m.buildingType ?? building.buildingType ?? 'residential',
       lineEquation: computeLineEquation(m.p1, m.p2, normal),
     };
   });
