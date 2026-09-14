@@ -171,8 +171,8 @@ function buildGeometryGroup(
         });
         createdMaterials.push(solidInnerMaterial);
 
-        const innerPolygon = miterOffsetPolygon(solid.polygon, -0.4);
-        const innerHoles = (solid.holes ?? []).map((h) => miterOffsetPolygon(h, 0.4));
+        const innerPolygon = miterOffsetPolygon(solid.polygon, -0.4)[0] ?? solid.polygon;
+        const innerHoles = (solid.holes ?? []).flatMap((h) => miterOffsetPolygon(h, 0.4));
         const innerShape = pointsToPath(innerPolygon, new THREE.Shape());
         for (const hole of innerHoles) {
           innerShape.holes.push(pointsToPath(hole, new THREE.Path()));

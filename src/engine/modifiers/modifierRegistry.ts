@@ -148,9 +148,9 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     for (const { storyIndex } of steps) {
       for (const footprint of getStoryFragments(ctx, storyIndex)) {
-        footprint.polygon = miterOffsetPolygon(footprint.polygon, distance);
+        footprint.polygon = miterOffsetPolygon(footprint.polygon, distance)[0] ?? footprint.polygon;
         if (footprint.holes && footprint.holes.length > 0) {
-          footprint.holes = footprint.holes.map((hole) => miterOffsetPolygon(hole, -distance));
+          footprint.holes = footprint.holes.flatMap((hole) => miterOffsetPolygon(hole, -distance));
         }
       }
     }
@@ -364,15 +364,15 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
       for (const topSf of topFootprints) {
         let poly = topSf.polygon.map((p) => ({ ...p }));
         if (offset && Math.abs(offset) > 1e-4) {
-          poly = miterOffsetPolygon(poly, offset);
+          poly = miterOffsetPolygon(poly, offset)[0] ?? poly;
         }
         let holes: Point2D[][] | undefined = undefined;
         if (topSf.holes && topSf.holes.length > 0) {
-          holes = topSf.holes.map((h) => {
+          holes = topSf.holes.flatMap((h) => {
             if (offset && Math.abs(offset) > 1e-4) {
               return miterOffsetPolygon(h, -offset);
             }
-            return h.map((p) => ({ ...p }));
+            return [h.map((p) => ({ ...p }))];
           });
         }
 

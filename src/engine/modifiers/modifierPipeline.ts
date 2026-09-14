@@ -30,7 +30,7 @@ export function generateZonePolygon(vertices: Point2D[], distance: number): Poin
   if (!vertices || vertices.length < 3 || Math.abs(distance) < 1e-4) {
     return vertices ? vertices.map((p) => ({ ...p })) : [];
   }
-  return miterOffsetPolygon(vertices, distance);
+  return miterOffsetPolygon(vertices, distance)[0] ?? vertices.map((p) => ({ ...p }));
 }
 
 function zoneJoinTypeFor(cornerType: ZoneCornerType | undefined): PolygonJoinType {
@@ -52,7 +52,7 @@ export function generateZoneBand(
   if (!vertices || vertices.length < 3 || Math.abs(distance) < 1e-4) {
     return { outer: base, inner: base };
   }
-  const offset = offsetPolygonWithJoin(vertices, distance, zoneJoinTypeFor(cornerType));
+  const offset = offsetPolygonWithJoin(vertices, distance, zoneJoinTypeFor(cornerType))[0] ?? base;
   return distance >= 0 ? { outer: offset, inner: base } : { outer: base, inner: offset };
 }
 
@@ -184,21 +184,27 @@ export function generateDonutHoles(vertices: Point2D[], offset: number): Point2D
 
   // Odsunięcie do wewnątrz ma wartość ujemną
   const inwardOffset = offset > 0 ? -offset : offset;
-  const holePoly = miterOffsetPolygon(vertices, inwardOffset);
+  // Silnik offsetu naprawia samoprzecięcia (bowtie) powstałe z naiwnego offsetu
+  // wierzchołkowego na wklęsłych kształtach, zwracając ewentualnie kilka rozłącznych
+  // wysp — każdą traktujemy jako osobny otwór.
+  const holePolys = miterOffsetPolygon(vertices, inwardOffset);
 
-  if (!holePoly || holePoly.length < 3) {
+  if (!holePolys || holePolys.length === 0) {
     return [];
   }
 
   const origArea = Math.abs(calculateSignedArea(vertices));
-  const holeArea = Math.abs(calculateSignedArea(holePoly));
+  const holes: Point2D[][] = [];
 
-  // Otwór musi być mniejszy niż obrys bazowy i posiadać co najmniej 1 m² powierzchni
-  if (holeArea < 1.0 || holeArea >= origArea * 0.95) {
-    return [];
+  for (const holePoly of holePolys) {
+    if (!holePoly || holePoly.length < 3) continue;
+    const holeArea = Math.abs(calculateSignedArea(holePoly));
+    // Otwór musi być mniejszy niż obrys bazowy i posiadać co najmniej 1 m² powierzchni
+    if (holeArea < 1.0 || holeArea >= origArea * 0.95) continue;
+    holes.push(holePoly);
   }
 
-  return [holePoly];
+  return holes;
 }
 
 /**

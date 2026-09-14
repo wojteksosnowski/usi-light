@@ -1,5 +1,5 @@
 import { Point2D } from '../../types/geometry';
-import { calculateSignedArea, isPolygonCCW } from './polygons';
+import { calculateSignedArea, isPolygonCCW, isSimplePolygonRing, resolveSelfIntersectingRing } from './polygons';
 
 export interface MiterOffsetOptions {
   miterLimit?: number; // Maksymalny współczynnik wydłużenia narożnika (domyślnie 3.0)
@@ -42,8 +42,11 @@ function computeEdgeNormals(vertices: Point2D[], isCCW: boolean): EdgeNormal[] {
 }
 
 /**
- * Sprawdza czy wynik offsetu nie zapadł się (zachowana orientacja, pole powyżej minimum).
- * Zwraca `result`, lub oryginalne wierzchołki (kopię) jeśli walidacja nie przejdzie.
+ * Sprawdza czy wynik offsetu nie zapadł się (zachowana orientacja, pole powyżej minimum),
+ * a następnie naprawia ewentualne samoprzecięcia (bowtie) powstałe z naiwnego offsetu
+ * wierzchołkowego na wklęsłych kształtach — patrz resolveSelfIntersectingRing().
+ * Zwraca listę prostych, nieprzecinających się konturów (posortowaną wg pola malejąco;
+ * zwykle 1 element, więcej gdy offset do wewnątrz rozdzielił kształt na wyspy).
  */
 function validateOffsetResult(
   vertices: Point2D[],
@@ -51,7 +54,7 @@ function validateOffsetResult(
   isCCW: boolean,
   distance: number,
   minArea: number
-): Point2D[] {
+): Point2D[][] {
   const origArea = Math.abs(calculateSignedArea(vertices));
   const newArea = calculateSignedArea(result);
   const newAbsArea = Math.abs(newArea);
@@ -59,10 +62,16 @@ function validateOffsetResult(
   const orientationKept = isCCW ? newArea > 0 : newArea < 0;
   if (!orientationKept || newAbsArea < minArea || (distance < 0 && newAbsArea > origArea)) {
     // Wielokąt zapadł się w sobie (np. zbyt duże cofnięcie) – zwracamy oryginalne wierzchołki
-    return vertices.map((p) => ({ ...p }));
+    return [vertices.map((p) => ({ ...p }))];
   }
 
-  return result;
+  // Naprawa topologii (bowtie → wyspy) tylko gdy faktycznie potrzebna — dla prostych
+  // wyników zachowujemy dokładny układ wierzchołków bez przepuszczania przez polygon-clipping.
+  if (isSimplePolygonRing(result)) {
+    return [result];
+  }
+
+  return resolveSelfIntersectingRing(result);
 }
 
 /**
@@ -70,15 +79,16 @@ function validateOffsetResult(
  * @param vertices Wierzchołki wielokąta bazowego
  * @param distance Odległość offsetu w metrach (>0 powiększenie na zewnątrz, <0 pomniejszenie do wewnątrz)
  * @param options Opcje (miterLimit, minArea)
- * @returns Nowe wierzchołki przesuniętego wielokąta lub oryginalne wierzchołki, jeśli offset zapada wielokąt
+ * @returns Lista prostych konturów po offsetcie (posortowana wg pola malejąco; pierwszy =
+ *   główny/największy), lub oryginalne wierzchołki jako jedyny element, jeśli offset zapada wielokąt
  */
 export function miterOffsetPolygon(
   vertices: Point2D[],
   distance: number,
   options: MiterOffsetOptions = {}
-): Point2D[] {
+): Point2D[][] {
   if (!vertices || vertices.length < 3 || Math.abs(distance) < 1e-5) {
-    return vertices ? vertices.map((p) => ({ ...p })) : [];
+    return vertices && vertices.length > 0 ? [vertices.map((p) => ({ ...p }))] : [];
   }
 
   const { miterLimit = 3.0, minArea = 0.5 } = options;
@@ -170,9 +180,9 @@ export function offsetPolygonWithJoin(
   distance: number,
   joinType: PolygonJoinType,
   options: MiterOffsetOptions = {}
-): Point2D[] {
+): Point2D[][] {
   if (!vertices || vertices.length < 3 || Math.abs(distance) < 1e-5) {
-    return vertices ? vertices.map((p) => ({ ...p })) : [];
+    return vertices && vertices.length > 0 ? [vertices.map((p) => ({ ...p }))] : [];
   }
 
   if (joinType === 'miter') {

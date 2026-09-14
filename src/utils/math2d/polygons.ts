@@ -260,6 +260,71 @@ function clippingResultToLoops(unionResult: polygonClipping.MultiPolygon | polyg
   return resultLoops;
 }
 
+function crossSign(o: Point2D, a: Point2D, b: Point2D): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+/**
+ * Sprawdza czy dwa odcinki właściwie się przecinają (skrzyżowanie wewnątrz obu odcinków,
+ * z pominięciem stykania się w punktach końcowych/współliniowości — interesują nas tylko
+ * "twarde" przecięcia typu bowtie powstałe z naiwnego offsetu wierzchołkowego).
+ */
+function segmentsProperlyIntersect(p1: Point2D, p2: Point2D, p3: Point2D, p4: Point2D): boolean {
+  const d1 = crossSign(p3, p4, p1);
+  const d2 = crossSign(p3, p4, p2);
+  const d3 = crossSign(p1, p2, p3);
+  const d4 = crossSign(p1, p2, p4);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/**
+ * Sprawdza czy pierścień jest prosty (bez samoprzecięć krawędzi niesąsiadujących).
+ * Używane by uruchomić kosztowną i topologię-zmieniającą naprawę (resolveSelfIntersectingRing)
+ * tylko wtedy, gdy jest to faktycznie konieczne — dla poprawnych wielokątów zachowuje dokładny
+ * układ wierzchołków bez przepuszczania przez polygon-clipping.
+ */
+export function isSimplePolygonRing(ring: Point2D[]): boolean {
+  const n = ring.length;
+  if (n < 4) return true;
+  for (let i = 0; i < n; i++) {
+    const a1 = ring[i];
+    const a2 = ring[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      if (j === i || (j + 1) % n === i || (i + 1) % n === j) continue;
+      const b1 = ring[j];
+      const b2 = ring[(j + 1) % n];
+      if (segmentsProperlyIntersect(a1, a2, b1, b2)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Naprawia pojedynczy, potencjalnie samoprzecinający się pierścień (np. wynik naiwnego
+ * offsetu wierzchołkowego na wklęsłym wielokącie) rozbijając go na proste, nieprzecinające
+ * się kontury. Wykorzystuje polygonClipping.union na jednym pierścieniu — w przeciwieństwie
+ * do unionPolygonLoops() nie ma skrótu dla pojedynczego wejścia, więc faktycznie uruchamia
+ * silnik sweep-line i normalizuje topologię (bowtie → 1+ prostych wielokątów).
+ * Zwraca listę posortowaną malejąco wg pola (największy kontur jako pierwszy).
+ */
+export function resolveSelfIntersectingRing(ring: Point2D[]): Point2D[][] {
+  if (!ring || ring.length < 3) return ring ? [ring] : [];
+
+  try {
+    const normalized = toNormalizedClippingRing(ring);
+    if (!normalized) return [ring];
+
+    const unionResult = polygonClipping.union([normalized]);
+    const loops = clippingResultToLoops(unionResult);
+    if (loops.length === 0) return [ring];
+
+    loops.sort((a, b) => Math.abs(calculateSignedArea(b)) - Math.abs(calculateSignedArea(a)));
+    return loops;
+  } catch {
+    return [ring];
+  }
+}
+
 export interface PolygonWithHoles {
   outer: Point2D[];
   holes: Point2D[][];
