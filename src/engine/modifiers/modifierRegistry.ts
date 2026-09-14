@@ -24,7 +24,7 @@ import {
   resolveStoryModifierSteps,
   sanitizeStoryFootprint,
 } from './modifierPipeline';
-import { resolveIndexTarget } from './modifierIndexTarget';
+import { resolveFragmentEdgeIndex, resolveFragmentVertexIndex, resolveIndexTarget } from './modifierIndexTarget';
 
 export interface ModifierApplyContext {
   storyFootprints: StoryFootprint[];
@@ -35,6 +35,69 @@ export interface ModifierApplyContext {
 }
 
 export type ModifierApplyFn<M extends Modifier> = (modifier: M, ctx: ModifierApplyContext) => void;
+
+/**
+ * Zwraca wszystkie fragmenty obrysu danej kondygnacji. Zwykle jest to jeden element, ale po
+ * przecięciu bramą (`gate`) kondygnacja może rozpaść się na kilka rozłącznych fragmentów (skrzydeł)
+ * dzielących to samo `storyIndex` — pozycja w tablicy `storyFootprints` przestaje wtedy odpowiadać
+ * indeksowi kondygnacji, więc modyfikatory muszą dopasowywać się po polu `storyIndex`, a nie po
+ * indeksie tablicy.
+ */
+function getStoryFragments(ctx: ModifierApplyContext, storyIndex: number): StoryFootprint[] {
+  return ctx.storyFootprints.filter((fp) => fp.storyIndex === storyIndex);
+}
+
+/**
+ * Sprawdza, czy globalny indeks (krawędzi/wierzchołka) mieści się w danym fragmencie obrysu
+ * (zewnętrzny obrys + otwory). Po rozcięciu bramą (`gate`) ten sam globalny indeks może być
+ * poprawny dla jednego skrzydła kondygnacji, a nieistniejący dla drugiego.
+ */
+function isIndexWithinFootprint(footprint: StoryFootprint, globalIndex: number): boolean {
+  const holesLen = footprint.holes?.reduce((sum, hole) => sum + hole.length, 0) ?? 0;
+  return globalIndex < footprint.polygon.length + holesLen;
+}
+
+/**
+ * Rozwiązuje globalny indeks krawędzi obrysu zewnętrznego dla konkretnego fragmentu kondygnacji,
+ * ZAWSZE dopasowując go geometrycznie do `baseVertices` (pierwotny, nigdy niemodyfikowany obrys
+ * budynku), zamiast traktować go jako surowy indeks pozycyjny w aktualnym `footprint.polygon`.
+ * To konieczne nie tylko po rozcięciu bramą (`gate`) — gdzie ten sam fragment kondygnacji
+ * rozpada się na kilka rozłącznych fragmentów o niepowiązanej lokalnej numeracji krawędzi — ale
+ * także dla POJEDYNCZEGO, niedzielonego fragmentu: uniwersalna sanityzacja uruchamiana po KAŻDYM
+ * kroku potoku (`applyModifier` → `sanitizeStoryFootprint`, wywoływana na wszystkich kondygnacjach,
+ * nawet tych, których dany modyfikator nie dotyczy) przepuszcza obrys przez boolean union
+ * (`polygon-clipping`), który może po cichu przestawić punkt startowy / kolejność wierzchołków.
+ * Surowy `edgeIndex` wskazywałby wtedy zupełnie inną ścianę niż ta, dla której użytkownik go wybrał
+ * (np. wcześniejszy `gate`, uruchomiony przed `terrace` na tym samym budynku, wystarczy by
+ * przenumerować wierzchołki kondygnacji, której `gate` w ogóle nie dotyka).
+ * Zwraca `null`, jeśli dany fragment w ogóle nie zawiera fragmentu tej ściany.
+ * Indeksy otworów (>= baseVertices.length, czyli już poza pierwotnym obrysem zewnętrznym) nie są
+ * tu obsługiwane — otwory nie mają odpowiednika w `baseVertices`, więc zostają przy kontroli zakresu.
+ */
+function resolveOuterEdgeIndexForFragment(
+  footprint: StoryFootprint,
+  globalIndex: number | undefined,
+  baseVertices: Point2D[]
+): number | undefined | null {
+  if (globalIndex === undefined) return undefined;
+  if (globalIndex >= baseVertices.length) {
+    return isIndexWithinFootprint(footprint, globalIndex) ? globalIndex : null;
+  }
+  return resolveFragmentEdgeIndex(footprint, globalIndex, baseVertices);
+}
+
+/** Analogiczne dopasowanie dla indeksu wierzchołka (używane przez corner_cut scope='vertex'). */
+function resolveVertexIndexForFragment(
+  footprint: StoryFootprint,
+  globalIndex: number | undefined,
+  baseVertices: Point2D[]
+): number | undefined | null {
+  if (globalIndex === undefined) return undefined;
+  if (globalIndex >= baseVertices.length) {
+    return isIndexWithinFootprint(footprint, globalIndex) ? globalIndex : null;
+  }
+  return resolveFragmentVertexIndex(footprint, globalIndex, baseVertices);
+}
 
 /**
  * Rejestr aplikatorów modyfikatorów. Jedyne miejsce (obok modifierDescriptors.tsx w warstwie UI),
@@ -48,10 +111,11 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
 
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     for (const { storyIndex } of steps) {
-      const footprint = ctx.storyFootprints[storyIndex];
-      footprint.polygon = miterOffsetPolygon(footprint.polygon, distance);
-      if (footprint.holes && footprint.holes.length > 0) {
-        footprint.holes = footprint.holes.map((hole) => miterOffsetPolygon(hole, -distance));
+      for (const footprint of getStoryFragments(ctx, storyIndex)) {
+        footprint.polygon = miterOffsetPolygon(footprint.polygon, distance);
+        if (footprint.holes && footprint.holes.length > 0) {
+          footprint.holes = footprint.holes.map((hole) => miterOffsetPolygon(hole, -distance));
+        }
       }
     }
   },
@@ -75,26 +139,30 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
 
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     for (const { storyIndex } of steps) {
-      const footprint = ctx.storyFootprints[storyIndex];
-      const target = resolveIndexTarget(footprint, edgeIndex);
-      if (target.isHole) {
-        footprint.holes![target.holeIndex!] = generateBayWindowPolygon(
-          footprint.holes![target.holeIndex!],
-          width,
-          projection,
-          target.localIndex,
-          sideAngle ?? 45,
-          positionRatio ?? 0.5
-        );
-      } else {
-        footprint.polygon = generateBayWindowPolygon(
-          footprint.polygon,
-          width,
-          projection,
-          edgeIndex,
-          sideAngle ?? 45,
-          positionRatio ?? 0.5
-        );
+      const fragments = getStoryFragments(ctx, storyIndex);
+      for (const footprint of fragments) {
+        const resolvedEdgeIndex = resolveOuterEdgeIndexForFragment(footprint, edgeIndex, ctx.baseVertices);
+        if (resolvedEdgeIndex === null) continue;
+        const target = resolveIndexTarget(footprint, resolvedEdgeIndex);
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generateBayWindowPolygon(
+            footprint.holes![target.holeIndex!],
+            width,
+            projection,
+            target.localIndex,
+            sideAngle ?? 45,
+            positionRatio ?? 0.5
+          );
+        } else {
+          footprint.polygon = generateBayWindowPolygon(
+            footprint.polygon,
+            width,
+            projection,
+            resolvedEdgeIndex,
+            sideAngle ?? 45,
+            positionRatio ?? 0.5
+          );
+        }
       }
     }
   },
@@ -110,17 +178,21 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
 
     for (const { storyIndex, stepMultiplier } of steps) {
       const storyDepth = isCascade ? baseStepDepth * stepMultiplier : depth;
-      const footprint = ctx.storyFootprints[storyIndex];
-      const target = resolveIndexTarget(footprint, edgeIndex);
+      const fragments = getStoryFragments(ctx, storyIndex);
+      for (const footprint of fragments) {
+        const resolvedEdgeIndex = resolveOuterEdgeIndexForFragment(footprint, edgeIndex, ctx.baseVertices);
+        if (resolvedEdgeIndex === null) continue;
+        const target = resolveIndexTarget(footprint, resolvedEdgeIndex);
 
-      if (target.isHole) {
-        footprint.holes![target.holeIndex!] = generateTerracePolygon(
-          footprint.holes![target.holeIndex!],
-          storyDepth,
-          target.localIndex
-        );
-      } else {
-        footprint.polygon = generateTerracePolygon(footprint.polygon, storyDepth, edgeIndex);
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generateTerracePolygon(
+            footprint.holes![target.holeIndex!],
+            storyDepth,
+            target.localIndex
+          );
+        } else {
+          footprint.polygon = generateTerracePolygon(footprint.polygon, storyDepth, resolvedEdgeIndex);
+        }
       }
     }
   },
@@ -131,10 +203,11 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
 
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     for (const { storyIndex } of steps) {
-      const footprint = ctx.storyFootprints[storyIndex];
-      const holes = generateDonutHoles(footprint.polygon, offset);
-      if (holes && holes.length > 0) {
-        footprint.holes = [...(footprint.holes || []), ...holes];
+      for (const footprint of getStoryFragments(ctx, storyIndex)) {
+        const holes = generateDonutHoles(footprint.polygon, offset);
+        if (holes && holes.length > 0) {
+          footprint.holes = [...(footprint.holes || []), ...holes];
+        }
       }
     }
   },
@@ -143,23 +216,30 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
     const { depth, storiesCount, mode, scope, edgeIndex, vertexIndex } = modifier;
     if (depth <= 1e-4) return;
 
-    const targetIdx = scope === 'vertex' ? vertexIndex : scope === 'edge' ? edgeIndex : undefined;
+    const rawTargetIdx = scope === 'vertex' ? vertexIndex : scope === 'edge' ? edgeIndex : undefined;
 
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     for (const { storyIndex } of steps) {
-      const footprint = ctx.storyFootprints[storyIndex];
-      const target = resolveIndexTarget(footprint, targetIdx);
+      const fragments = getStoryFragments(ctx, storyIndex);
+      for (const footprint of fragments) {
+        const targetIdx =
+          scope === 'vertex'
+            ? resolveVertexIndexForFragment(footprint, rawTargetIdx, ctx.baseVertices)
+            : resolveOuterEdgeIndexForFragment(footprint, rawTargetIdx, ctx.baseVertices);
+        if (targetIdx === null) continue;
+        const target = resolveIndexTarget(footprint, targetIdx);
 
-      if (target.isHole) {
-        footprint.holes![target.holeIndex!] = generateCornerCutPolygon(
-          footprint.holes![target.holeIndex!],
-          depth,
-          mode,
-          scope,
-          target.localIndex
-        );
-      } else {
-        footprint.polygon = generateCornerCutPolygon(footprint.polygon, depth, mode, scope, targetIdx);
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generateCornerCutPolygon(
+            footprint.holes![target.holeIndex!],
+            depth,
+            mode,
+            scope,
+            target.localIndex
+          );
+        } else {
+          footprint.polygon = generateCornerCutPolygon(footprint.polygon, depth, mode, scope, targetIdx);
+        }
       }
     }
   },

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   applyBuildingModifiers,
   computeStoryHeightIntervals,
@@ -1176,6 +1178,140 @@ describe('modifierPipeline', () => {
         expect(upperStory!.holes!.length).toBe(1);
       }
     });
+  });
+
+describe('Real-world reference files: geometry stability', () => {
+    // `reference/` is gitignored (local scratch/debug fixtures), so these files may not exist in
+    // every checkout or in CI. These tests are a bonus stability check when the fixtures happen to
+    // be present locally; they skip cleanly (rather than failing) when they're not.
+    const referenceFileExists = (fileName: string) =>
+      fs.existsSync(path.resolve(__dirname, '../../../reference', fileName));
+
+    const loadReferenceBuilding = (fileName: string, buildingName?: string): BuildingLoop => {
+      const filePath = path.resolve(__dirname, '../../../reference', fileName);
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      const building = buildingName
+        ? raw.buildings.find((b: BuildingLoop) => b.name === buildingName)
+        : raw.buildings[0];
+      return building as BuildingLoop;
+    };
+
+    const area = (poly: Point2D[]) => Math.abs(calculateSignedArea(poly));
+
+    it.skipIf(!referenceFileExists('mod-test2.json'))(
+      'mod-test2.json: gate splits stories 2-4 into wings, story_offset only insets story 4 (both wings)',
+      () => {
+      const building = loadReferenceBuilding('mod-test2.json');
+      const res = applyBuildingModifiers(building);
+
+      const story2Wings = res.storyPolygons.filter((s) => s.storyIndex === 2);
+      const story3Wings = res.storyPolygons.filter((s) => s.storyIndex === 3);
+      const story4Wings = res.storyPolygons.filter((s) => s.storyIndex === 4);
+      expect(story2Wings.length).toBe(2);
+      expect(story3Wings.length).toBe(2);
+      expect(story4Wings.length).toBe(2);
+
+      // Story 2 and 3 are both untouched by story_offset (only story 4 = storiesCount:-1 is targeted),
+      // so their wing areas (purely a function of the gate cut, same footprint shape) must match.
+      const story2Areas = story2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const story3Areas = story3Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      expect(story3Areas[0]).toBeCloseTo(story2Areas[0], 3);
+      expect(story3Areas[1]).toBeCloseTo(story2Areas[1], 3);
+
+      // Story 4 must be inset (smaller area than story 3's matching wing) by the -2m offset.
+      const story4Areas = story4Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      expect(story4Areas[0]).toBeLessThan(story3Areas[0]);
+      expect(story4Areas[1]).toBeLessThan(story3Areas[1]);
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test3.json'))(
+      'mod-test3.json: gate splits story 2 into wings, terrace edgeIndex:0 affects only one wing (no leakage)',
+      () => {
+      const building = loadReferenceBuilding('mod-test3.json');
+      const res = applyBuildingModifiers(building);
+
+      const story2Wings = res.storyPolygons.filter((s) => s.storyIndex === 2);
+      expect(story2Wings.length).toBe(2);
+
+      // Compute what gate alone (no terrace) would have produced for story 2, to diff against.
+      const gateOnlyBuilding: BuildingLoop = {
+        ...building,
+        modifiers: building.modifiers!.filter((m) => m.type === 'gate'),
+      };
+      const gateOnlyRes = applyBuildingModifiers(gateOnlyBuilding);
+      const gateOnlyStory2Wings = gateOnlyRes.storyPolygons.filter((s) => s.storyIndex === 2);
+      expect(gateOnlyStory2Wings.length).toBe(2);
+
+      const gateOnlyAreas = gateOnlyStory2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const afterTerraceAreas = story2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+
+      // Exactly one wing must differ from its gate-only shape (the terrace target);
+      // the other must be unchanged (no leakage into the second loop).
+      const diffs = [0, 1].map((i) => Math.abs(afterTerraceAreas[i] - gateOnlyAreas[i]));
+      const changedCount = diffs.filter((d) => d > 1e-3).length;
+      expect(changedCount).toBe(1);
+
+      // Stories 3 and 4 (not split by gate) still get the terrace setback normally.
+      for (const s of [3, 4]) {
+        const gateOnlyStory = gateOnlyRes.storyPolygons.find((p) => p.storyIndex === s);
+        const afterTerraceStory = res.storyPolygons.find((p) => p.storyIndex === s);
+        expect(gateOnlyStory).toBeDefined();
+        expect(afterTerraceStory).toBeDefined();
+        expect(area(afterTerraceStory!.polygon)).toBeLessThan(area(gateOnlyStory!.polygon));
+      }
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test4.json'))(
+      'mod-test4.json: an earlier gate step must not corrupt a later edge-targeted terrace on UNRELATED, unsplit stories',
+      () => {
+      // Regression test: sanitizeStoryFootprint's boolean-union cleanup (run after every modifier
+      // step, on every story) can silently reorder/renumber a footprint's vertex array. Even a
+      // story `gate` never touches (here: stories 3-4, since gate's storiesCount:3 only covers
+      // stories 0-2) can have its terrace edgeIndex mis-resolved if that index is treated as a raw
+      // position rather than being re-matched geometrically against the original base vertices.
+      const raw = loadReferenceBuilding('mod-test4.json', 'Budynek1');
+      const gateDisabled: BuildingLoop = raw;
+      const gateEnabled: BuildingLoop = {
+        ...raw,
+        modifiers: raw.modifiers!.map((m) => (m.type === 'gate' ? { ...m, enabled: true } : m)),
+      };
+
+      const resOff = applyBuildingModifiers(gateDisabled);
+      const resOn = applyBuildingModifiers(gateEnabled);
+
+      // Stories 3 and 4 are never targeted by gate (storiesCount:3 -> stories 0,1,2 only), so
+      // enabling/disabling gate must have ZERO effect on their terrace-modified shape.
+      for (const s of [3, 4]) {
+        const off = resOff.storyPolygons.find((p) => p.storyIndex === s);
+        const on = resOn.storyPolygons.find((p) => p.storyIndex === s);
+        expect(off).toBeDefined();
+        expect(on).toBeDefined();
+        expect(on!.polygon.length).toBe(off!.polygon.length);
+        expect(area(on!.polygon)).toBeCloseTo(area(off!.polygon), 3);
+      }
+
+      // Story 2 (split by gate into 2 wings): exactly one wing must carry the terrace reduction
+      // relative to the gate-only shape; the other wing (owning a different wall than edgeIndex:7)
+      // must stay exactly as gate alone would produce it.
+      const story2Wings = resOn.storyPolygons.filter((p) => p.storyIndex === 2);
+      expect(story2Wings.length).toBe(2);
+
+      const gateOnlyBuilding: BuildingLoop = {
+        ...gateEnabled,
+        modifiers: gateEnabled.modifiers!.filter((m) => m.type === 'gate'),
+      };
+      const gateOnlyRes = applyBuildingModifiers(gateOnlyBuilding);
+      const gateOnlyStory2Wings = gateOnlyRes.storyPolygons.filter((p) => p.storyIndex === 2);
+      expect(gateOnlyStory2Wings.length).toBe(2);
+
+      const gateOnlyAreas = gateOnlyStory2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const afterTerraceAreas = story2Wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+      const diffs = [0, 1].map((i) => Math.abs(afterTerraceAreas[i] - gateOnlyAreas[i]));
+      expect(diffs.filter((d) => d > 1e-3).length).toBe(1);
+      }
+    );
   });
 });
 
