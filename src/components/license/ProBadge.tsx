@@ -17,10 +17,10 @@ export const ProBadge: React.FC = () => {
           alignItems: 'center',
           gap: '5px',
           padding: '4px 8px',
-          borderRadius: '999px',
-          background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(234, 88, 12, 0.25))',
-          border: '1px solid rgba(245, 158, 11, 0.5)',
-          color: '#fbbf24',
+          borderRadius: '8px',
+          background: 'linear-gradient(135deg, var(--status-amber-bg), rgba(234, 88, 12, 0.25))',
+          border: '1px solid var(--status-amber-border)',
+          color: 'var(--status-amber-text)',
           fontSize: '11px',
           fontWeight: 700,
           cursor: 'pointer',
@@ -29,7 +29,7 @@ export const ProBadge: React.FC = () => {
         }}
         title={`Aktywna licencja PRO (${daysLeft !== null ? `${daysLeft} dni pozostało` : 'Aktywna'}). Kliknij, aby zarządzać.`}
       >
-        <Crown size={12} color="#fbbf24" />
+        <Crown size={12} color="var(--accent-amber)" />
         <span>PRO{daysLeft !== null ? ` (${daysLeft}d)` : ''}</span>
       </button>
     );

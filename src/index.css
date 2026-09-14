@@ -22,6 +22,43 @@
   --accent-yellow: #fef08a;
   --accent-orange: #fed7aa;
   --accent-emerald-light: #a7f3d0;
+
+  /* Glassmorphism & Surface Tokens */
+  --bg-glass: rgba(11, 19, 41, 0.92);
+  --bg-glass-modal: rgba(11, 19, 41, 0.95);
+  --bg-overlay: rgba(2, 6, 23, 0.82);
+  --bg-badge: rgba(15, 23, 42, 0.85);
+
+  /* Status Tokens Soft Backgrounds & Borders */
+  --status-emerald-bg: rgba(16, 185, 129, 0.15);
+  --status-emerald-border: rgba(16, 185, 129, 0.4);
+  --status-emerald-text: #6ee7b7;
+
+  --status-amber-bg: rgba(245, 158, 11, 0.15);
+  --status-amber-border: rgba(245, 158, 11, 0.4);
+  --status-amber-text: #fcd34d;
+
+  --status-rose-bg: rgba(244, 63, 94, 0.15);
+  --status-rose-border: rgba(244, 63, 94, 0.4);
+  --status-rose-text: #fca5a5;
+
+  --status-cyan-bg: rgba(56, 189, 248, 0.15);
+  --status-cyan-border: rgba(56, 189, 248, 0.4);
+  --status-cyan-text: #7dd3fc;
+
+  --status-indigo-bg: rgba(99, 102, 241, 0.15);
+  --status-indigo-border: rgba(99, 102, 241, 0.4);
+  --status-indigo-text: #c7d2fe;
+
+  --status-purple-bg: rgba(192, 132, 252, 0.15);
+  --status-purple-border: rgba(192, 132, 252, 0.35);
+  --status-purple-text: #c084fc;
+
+  --status-blue-bg: rgba(59, 130, 246, 0.25);
+  --status-blue-border: rgba(59, 130, 246, 0.5);
+  --status-blue-text: #bfdbfe;
+
+  --status-rose-bg-hover: rgba(244, 63, 94, 0.35);
 }
 
 *, *::before, *::after {

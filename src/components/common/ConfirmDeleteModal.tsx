@@ -36,7 +36,7 @@ export const ConfirmDeleteModal: React.FC = () => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(2, 6, 23, 0.78)',
+        backgroundColor: 'var(--bg-overlay)',
         backdropFilter: 'blur(8px)',
         zIndex: 9999,
         display: 'flex',
@@ -52,9 +52,9 @@ export const ConfirmDeleteModal: React.FC = () => {
         style={{
           width: '100%',
           maxWidth: '420px',
-          backgroundColor: 'rgba(11, 19, 41, 0.98)',
+          backgroundColor: 'var(--bg-glass-modal)',
           backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(244, 63, 94, 0.35)',
+          border: '1px solid var(--status-rose-border)',
           borderRadius: '16px',
           padding: '20px',
           boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7)',
@@ -72,8 +72,8 @@ export const ConfirmDeleteModal: React.FC = () => {
                 width: '36px',
                 height: '36px',
                 borderRadius: '10px',
-                backgroundColor: 'rgba(244, 63, 94, 0.15)',
-                border: '1px solid rgba(244, 63, 94, 0.35)',
+                backgroundColor: 'var(--status-rose-bg)',
+                border: '1px solid var(--status-rose-border)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -155,21 +155,21 @@ export const ConfirmDeleteModal: React.FC = () => {
               gap: '6px',
               padding: '9px 14px',
               borderRadius: '12px',
-              border: '1px solid rgba(244, 63, 94, 0.5)',
-              backgroundColor: 'rgba(244, 63, 94, 0.2)',
-              color: '#fca5a5',
+              border: '1px solid var(--status-rose-border)',
+              backgroundColor: 'var(--status-rose-bg)',
+              color: 'var(--status-rose-text)',
               fontSize: '12px',
               fontWeight: 700,
               cursor: 'pointer',
               transition: 'all 0.15s ease',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.35)';
-              e.currentTarget.style.color = '#ffffff';
+              e.currentTarget.style.backgroundColor = 'var(--status-rose-bg-hover)';
+              e.currentTarget.style.color = 'var(--text-primary)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.2)';
-              e.currentTarget.style.color = '#fca5a5';
+              e.currentTarget.style.backgroundColor = 'var(--status-rose-bg)';
+              e.currentTarget.style.color = 'var(--status-rose-text)';
             }}
           >
             <Trash2 size={13} />

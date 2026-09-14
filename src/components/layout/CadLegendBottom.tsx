@@ -4,6 +4,12 @@ import { useSolarAnalysisStore, useSceneStore, useUiStore } from '../../store';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { Point2D } from '../../types/geometry';
 
+const ACCURACY_STAGE_STYLES: Record<string, { bg: string; border: string; text: string }> = {
+  final: { bg: 'var(--status-emerald-bg)', border: 'var(--status-emerald-border)', text: 'var(--status-emerald-text)' },
+  live: { bg: 'var(--status-amber-bg)', border: 'var(--status-amber-border)', text: 'var(--status-amber-text)' },
+};
+const ACCURACY_STAGE_DEFAULT = { bg: 'var(--status-indigo-bg)', border: 'var(--status-indigo-border)', text: 'var(--status-indigo-text)' };
+
 export const CadLegendBottom: React.FC = () => {
   const showShadowingLines = useSolarAnalysisStore((s) => s.showShadowingLines);
   const showSunlightLines = useSolarAnalysisStore((s) => s.showSunlightLines);
@@ -45,24 +51,24 @@ export const CadLegendBottom: React.FC = () => {
 
   return (
     <div className="cad-legend-bottom" style={{ gap: '12px', alignItems: 'center' }}>
-      <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '11px' }}>LEGENDA:</span>
+      <span style={{ fontWeight: 'bold', color: 'var(--text-primary)', fontSize: '11px' }}>LEGENDA:</span>
 
       {/* § 12 — tylko gdy włączone */}
       {showShadowingLines && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>§ 12:</span>
-            <span style={{ color: '#10b981', fontWeight: 800, fontSize: '12px' }} title="§ 12 Zgodne">✓</span>
-            <span style={{ color: '#f43f5e', fontWeight: 800, fontSize: '12px' }} title="§ 12 Niezgodne">✗</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>§ 12:</span>
+            <span style={{ color: 'var(--accent-emerald)', fontWeight: 800, fontSize: '12px' }} title="§ 12 Zgodne">✓</span>
+            <span style={{ color: 'var(--accent-rose)', fontWeight: 800, fontSize: '12px' }} title="§ 12 Niezgodne">✗</span>
           </div>
-          {showSunlightLines && <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />}
+          {showSunlightLines && <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />}
         </>
       )}
 
       {/* § 56 — tylko gdy włączone */}
       {showSunlightLines && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>§ 56:</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>§ 56:</span>
           <div style={{ display: 'flex', height: '6px', width: '70px', borderRadius: '3px', overflow: 'hidden' }}>
             <span style={{ flex: 1, backgroundColor: '#3b0764' }} title="0h" />
             <span style={{ flex: 1, backgroundColor: '#7e22ce' }} title="1.0h" />
@@ -70,16 +76,16 @@ export const CadLegendBottom: React.FC = () => {
             <span style={{ flex: 1, backgroundColor: '#ea580c' }} title="3.0h (Zgodne)" />
             <span style={{ flex: 1, backgroundColor: '#fb923c' }} title="4.0h+" />
           </div>
-          <span style={{ fontSize: '10px', color: '#cbd5e1' }}>0h &rarr; 4h+</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>0h &rarr; 4h+</span>
         </div>
       )}
 
       {/* Gdy żadna analiza nie jest włączona */}
       {!showShadowingLines && !showSunlightLines && (
-        <span style={{ fontSize: '10px', color: '#475569', fontStyle: 'italic' }}>Brak aktywnych analiz</span>
+        <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Brak aktywnych analiz</span>
       )}
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
 
       {/* Geodetic Coordinate System Badge (ETRF2000-PL / CS2000) */}
       <div
@@ -88,21 +94,21 @@ export const CadLegendBottom: React.FC = () => {
           alignItems: 'center',
           gap: '5px',
           padding: '2px 7px',
-          borderRadius: '5px',
-          backgroundColor: 'rgba(56, 189, 248, 0.12)',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          color: '#38bdf8',
+          borderRadius: '6px',
+          backgroundColor: 'var(--status-cyan-bg)',
+          border: '1px solid var(--status-cyan-border)',
+          color: 'var(--status-cyan-text)',
           fontSize: '10px',
           fontWeight: 600,
           fontFamily: 'monospace',
         }}
         title={`Państwowy układ współrzędnych sceny CAD: ${crsInfo.description}`}
       >
-        <Globe size={11} color="var(--accent-cyan, #38bdf8)" />
+        <Globe size={11} color="var(--accent-cyan)" />
         <span>{crsInfo.geodeticLabel}</span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light, #334155)' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
 
       {/* Zoom / Scale Debug Badge */}
       <div
@@ -111,23 +117,23 @@ export const CadLegendBottom: React.FC = () => {
           alignItems: 'center',
           gap: '5px',
           padding: '2px 7px',
-          borderRadius: '5px',
-          backgroundColor: 'rgba(192, 132, 252, 0.12)',
-          border: '1px solid rgba(192, 132, 252, 0.3)',
-          color: 'var(--accent-purple, #c084fc)',
+          borderRadius: '6px',
+          backgroundColor: 'var(--status-purple-bg)',
+          border: '1px solid var(--status-purple-border)',
+          color: 'var(--status-purple-text)',
           fontSize: '10px',
           fontWeight: 600,
           fontFamily: 'monospace',
         }}
         title={`Poziom zoomu Web Mercator dla kafli WMS/Satelitarnych:\n• Dokładny zoom (exact): ${zoomInfo.exactZoom.toFixed(3)}\n• Kafelki (target): Z${zoomInfo.targetZoom}\n• Rozdzielczość: ${zoomInfo.metersPerPixel.toFixed(3)} m/px\n• Skala widoku: ${zoomInfo.scale.toFixed(2)} px/m`}
       >
-        <ZoomIn size={11} color="var(--accent-purple, #c084fc)" />
+        <ZoomIn size={11} color="var(--accent-purple)" />
         <span>Z{zoomInfo.targetZoom} ({zoomInfo.exactZoom.toFixed(2)})</span>
-        <span style={{ color: 'var(--text-muted, #64748b)' }}>·</span>
-        <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>{zoomInfo.scale.toFixed(1)}px/m</span>
+        <span style={{ color: 'var(--text-muted)' }}>·</span>
+        <span style={{ color: 'var(--text-secondary)' }}>{zoomInfo.scale.toFixed(1)}px/m</span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light, #334155)' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
 
       {/* Dynamic Accuracy Refinement Badge */}
       <div
@@ -136,26 +142,10 @@ export const CadLegendBottom: React.FC = () => {
           alignItems: 'center',
           gap: '5px',
           padding: '2px 7px',
-          borderRadius: '5px',
-          backgroundColor:
-            accuracyStage === 'final'
-              ? 'rgba(16, 185, 129, 0.15)'
-              : accuracyStage === 'live'
-              ? 'rgba(245, 158, 11, 0.15)'
-              : 'rgba(99, 102, 241, 0.15)',
-          border: `1px solid ${
-            accuracyStage === 'final'
-              ? 'rgba(16, 185, 129, 0.3)'
-              : accuracyStage === 'live'
-              ? 'rgba(245, 158, 11, 0.3)'
-              : 'rgba(99, 102, 241, 0.3)'
-          }`,
-          color:
-            accuracyStage === 'final'
-              ? '#6ee7b7'
-              : accuracyStage === 'live'
-              ? '#fcd34d'
-              : '#a5b4fc',
+          borderRadius: '6px',
+          backgroundColor: (ACCURACY_STAGE_STYLES[accuracyStage] ?? ACCURACY_STAGE_DEFAULT).bg,
+          border: `1px solid ${(ACCURACY_STAGE_STYLES[accuracyStage] ?? ACCURACY_STAGE_DEFAULT).border}`,
+          color: (ACCURACY_STAGE_STYLES[accuracyStage] ?? ACCURACY_STAGE_DEFAULT).text,
           fontSize: '10px',
           fontWeight: 600,
         }}
@@ -184,35 +174,35 @@ export const CadLegendBottom: React.FC = () => {
           alignItems: 'center',
           gap: '6px',
           padding: '2px 8px',
-          borderRadius: '5px',
-          backgroundColor: 'rgba(15, 23, 42, 0.85)',
-          border: '1px solid #334155',
+          borderRadius: '6px',
+          backgroundColor: 'var(--bg-badge)',
+          border: '1px solid var(--border-light)',
           fontSize: '10px',
           fontFamily: 'monospace',
         }}
         title={`Czas pełnego przeliczenia metod analitycznych w bieżącym cyklu:\n• Liczba zbadanych punktów: ${totalPoints.toLocaleString()} (${(totalPoints / 1000).toFixed(2)}k pkt)\n• § 12 (Przesłanianie) łącznie: ${totalShadowingMs.toFixed(2)} ms (śr. ${avgShadowingMs.toFixed(3)} ms/pkt)\n• § 56 (Nasłonecznienie) łącznie: ${totalSunlightMs.toFixed(2)} ms (śr. ${avgSunlightMs.toFixed(3)} ms/pkt)\n• Obrys i koperta cienia (§ 56): ${shadowEnvelopeMs.toFixed(2)} ms\n• Całkowity czas cyklu: ${totalAnalysisMs.toFixed(2)} ms`}
       >
-        <Timer size={11} color="#94a3b8" />
-        <span style={{ color: '#93c5fd', fontWeight: 600 }}>
+        <Timer size={11} color="var(--text-secondary)" />
+        <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>
           {totalPoints >= 1000
             ? `${(totalPoints / 1000).toFixed(1)}k pkt`
             : `${totalPoints} pkt`}
         </span>
-        <span style={{ color: '#475569' }}>|</span>
-        <span style={{ color: '#34d399', fontWeight: 600 }}>
+        <span style={{ color: 'var(--border-light)' }}>|</span>
+        <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>
           §12: {totalShadowingMs < 0.1 && totalShadowingMs > 0 ? '<0.1' : totalShadowingMs.toFixed(1)}ms
         </span>
-        <span style={{ color: '#475569' }}>|</span>
-        <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+        <span style={{ color: 'var(--border-light)' }}>|</span>
+        <span style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
           §56: {totalSunlightMs < 0.1 && totalSunlightMs > 0 ? '<0.1' : totalSunlightMs.toFixed(1)}ms
         </span>
-        <span style={{ color: '#475569' }}>|</span>
-        <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
+        <span style={{ color: 'var(--border-light)' }}>|</span>
+        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
           Cykl: {totalAnalysisMs < 0.1 && totalAnalysisMs > 0 ? '<0.1' : totalAnalysisMs.toFixed(1)}ms
         </span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155' }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
 
       {/* Warstadt Website Link */}
       <a
@@ -224,14 +214,14 @@ export const CadLegendBottom: React.FC = () => {
           alignItems: 'center',
           fontSize: '10.5px',
           fontWeight: 600,
-          color: '#94a3b8',
+          color: 'var(--text-secondary)',
           textDecoration: 'none',
           padding: '2px 4px',
           borderRadius: '4px',
           transition: 'color 0.15s ease',
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = '#38bdf8')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-cyan)')}
+        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
         title="www.warstadt.com"
       >
         <span>www.warstadt.com</span>

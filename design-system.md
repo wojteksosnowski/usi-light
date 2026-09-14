@@ -32,13 +32,32 @@ Zdefiniowane w [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.c
 | `--accent-yellow` | `#fef08a` (Yellow 200) | Akcent modyfikatora Wykusz (Bay Window) |
 | `--accent-orange` | `#fed7aa` (Orange 200) | Akcent modyfikatora Taras |
 | `--accent-emerald-light` | `#a7f3d0` (Emerald 200) | Akcent modyfikatora Donat |
+| `--bg-glass` | `rgba(11, 19, 41, 0.92)` | Tło szklanych paneli i paska narzędziowego |
+| `--bg-glass-modal` | `rgba(11, 19, 41, 0.95)` | Tło pływających modali i inspektorów |
+| `--bg-overlay` | `rgba(2, 6, 23, 0.82)` | Przyciemnienie tła pod modalami |
+| `--bg-badge` | `rgba(15, 23, 42, 0.85)` | Tło kapsułek informacyjnych i statystyk |
+| `--status-emerald-bg` | `rgba(16, 185, 129, 0.15)` | Miękkie tło statusu sukces / § 12 |
+| `--status-emerald-border` | `rgba(16, 185, 129, 0.4)` | Obramowanie statusu sukces / § 12 |
+| `--status-emerald-text` | `#6ee7b7` | Kolor tekstu sukces / § 12 |
+| `--status-amber-bg` | `rgba(245, 158, 11, 0.15)` | Miękkie tło statusu ostrzeżenie / § 56 |
+| `--status-amber-border` | `rgba(245, 158, 11, 0.4)` | Obramowanie statusu ostrzeżenie / § 56 |
+| `--status-amber-text` | `#fcd34d` | Kolor tekstu ostrzeżenie / § 56 |
+| `--status-rose-bg` | `rgba(244, 63, 94, 0.15)` | Miękkie tło błędu / niezgodności |
+| `--status-rose-border` | `rgba(244, 63, 94, 0.4)` | Obramowanie błędu / niezgodności |
+| `--status-rose-text` | `#fca5a5` | Kolor tekstu błędu / niezgodności |
+| `--status-cyan-bg` | `rgba(56, 189, 248, 0.15)` | Miękkie tło akcentu cyan / eksportu |
+| `--status-cyan-border` | `rgba(56, 189, 248, 0.4)` | Obramowanie akcentu cyan |
+| `--status-cyan-text` | `#7dd3fc` | Kolor tekstu akcentu cyan |
+| `--status-indigo-bg` | `rgba(99, 102, 241, 0.15)` | Miękkie tło akcentu indigo |
+| `--status-indigo-border` | `rgba(99, 102, 241, 0.4)` | Obramowanie akcentu indigo |
+| `--status-indigo-text` | `#c7d2fe` | Kolor tekstu akcentu indigo |
 
-Powyższe 5 tokenów zasila deskryptory modyfikatorów 2.5D (`src/components/modifiers/modifierDescriptors.tsx`) — zone_offset korzysta z `--accent-cyan`, corner_cut z `--accent-cyan-light`. Zob. [[modifier-architecture-guide]].
+Powyższe tokeny zasilają deskryptory modyfikatorów 2.5D (`src/components/modifiers/modifierDescriptors.tsx`) oraz wskaźniki statusu HUD i modali.
 
 ### 1.2. Pływające Powierzchnie Szklane (Glassmorphism Surfaces)
 Pływające panele nad rzutem CAD wykorzystują efekt rozmycia tła:
-- **Tło nakładek HUD / Toolbar**: `rgba(11, 19, 41, 0.92)` z `backdrop-filter: blur(12px)`
-- **Tło modalu inspektora punktu**: `rgba(11, 19, 41, 0.95)` z `backdrop-filter: blur(16px)`
+- **Tło nakładek HUD / Toolbar**: `var(--bg-glass)` (`rgba(11, 19, 41, 0.92)`) z `backdrop-filter: blur(12px)`
+- **Tło modalu inspektora punktu / modali**: `var(--bg-glass-modal)` (`rgba(11, 19, 41, 0.95)`) z `backdrop-filter: blur(16px)`
 - **Obramowanie**: `1px solid var(--border-light)` (`#334155`)
 - **Cienie**: `box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5)`
 
@@ -148,7 +167,7 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
 1. **Hardcodowane `#fff` lub `#ffffff` w stylach inline JSX** zamiast `var(--text-primary)` lub dedykowanej klasy.
 2. **Ręczne wartości paddingów/marginesów** w niektórych podkomponentach zamiast standardowych odstępów (4px, 8px, 12px, 16px).
 3. **Mieszanie styli inline ze stylami klasowymi** w nagłówkach i przyciskach HUD.
-4. **Wariant PRO w `ProBadge.tsx`** (stan `isPro`) nadal używa kształtu pigułki (`border-radius: 999px`) i stylu inline — niespójne z decyzją o braku kształtu pill dla przycisków (patrz 4.1 pkt 4, `.btn-gold`). Do ujednolicenia przy najbliższej pracy nad tym komponentem.
+4. **Wariant PRO w `ProBadge.tsx`** [ROZWIĄZANE]: Ujednolicono do skali kafli (`border-radius: 8px`) i tokenów CSS (`var(--status-amber-bg)`, `var(--status-amber-border)`).
 
 ### 5.2. Procedura Dopytywania przy Wątpliwościach
 > [!IMPORTANT]

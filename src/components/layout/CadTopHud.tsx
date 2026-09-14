@@ -52,7 +52,7 @@ const GeoOverlayToggleButton: React.FC<GeoOverlayToggleButtonProps> = ({
       cursor: 'pointer',
       border: 'none',
       backgroundColor: active ? activeBg : 'transparent',
-      color: active ? activeColor : '#94a3b8',
+      color: active ? activeColor : 'var(--text-secondary)',
       transition: 'all 0.15s ease',
       flexShrink: 0,
     }}
@@ -110,7 +110,6 @@ export const CadTopHud: React.FC = () => {
     }
   }, []);
 
-
   return (
     <div className="cad-hud-top">
       {!isSidebarOpen && (
@@ -124,7 +123,7 @@ export const CadTopHud: React.FC = () => {
             padding: '6px 8px',
             borderRadius: '8px',
             background: 'var(--accent-indigo)',
-            color: '#fff',
+            color: 'var(--text-primary)',
             border: 'none',
             cursor: 'pointer',
           }}
@@ -141,20 +140,20 @@ export const CadTopHud: React.FC = () => {
           gap: '5px',
           padding: '4px 8px',
           borderRadius: '6px',
-          backgroundColor: 'rgba(15, 23, 42, 0.85)',
-          border: '1px solid #334155',
+          backgroundColor: 'var(--bg-badge)',
+          border: '1px solid var(--border-light)',
           fontSize: '11px',
-          color: '#f8fafc',
+          color: 'var(--text-primary)',
           whiteSpace: 'nowrap',
           flexShrink: 0,
         }}
         title={`Lokalizacja projektu: ${selectedCity} (${settings.latitude.toFixed(2)}°N, ${settings.longitude.toFixed(2)}°E)`}
       >
-        <MapPin size={13} color="#f59e0b" />
-        <span style={{ fontWeight: 600, color: '#f8fafc' }}>{selectedCity}</span>
+        <MapPin size={13} color="var(--accent-amber)" />
+        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedCity}</span>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
 
       <button
         onClick={() => setShowShadowingLines((prev) => !prev)}
@@ -169,8 +168,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: showShadowingLines ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-          color: showShadowingLines ? '#6ee7b7' : '#94a3b8',
+          backgroundColor: showShadowingLines ? 'var(--status-emerald-bg)' : 'transparent',
+          color: showShadowingLines ? 'var(--status-emerald-text)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
@@ -190,8 +189,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: showSunlightLines ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-          color: showSunlightLines ? '#fcd34d' : '#94a3b8',
+          backgroundColor: showSunlightLines ? 'var(--status-amber-bg)' : 'transparent',
+          color: showSunlightLines ? 'var(--status-amber-text)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
@@ -211,8 +210,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: showAnalysisPoints ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-          color: showAnalysisPoints ? '#38bdf8' : '#94a3b8',
+          backgroundColor: showAnalysisPoints ? 'var(--status-cyan-bg)' : 'transparent',
+          color: showAnalysisPoints ? 'var(--accent-cyan)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
@@ -233,8 +232,8 @@ export const CadTopHud: React.FC = () => {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: showShadowRange ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-          color: showShadowRange ? '#c7d2fe' : '#94a3b8',
+          backgroundColor: showShadowRange ? 'var(--status-indigo-bg)' : 'transparent',
+          color: showShadowRange ? 'var(--status-indigo-text)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
@@ -256,8 +255,8 @@ export const CadTopHud: React.FC = () => {
           fontWeight: 600,
           cursor: 'pointer',
           border: 'none',
-          backgroundColor: showSatelliteLayer ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-          color: showSatelliteLayer ? '#38bdf8' : '#94a3b8',
+          backgroundColor: showSatelliteLayer ? 'var(--status-cyan-bg)' : 'transparent',
+          color: showSatelliteLayer ? 'var(--accent-cyan)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
@@ -280,8 +279,8 @@ export const CadTopHud: React.FC = () => {
           fontWeight: 600,
           cursor: 'pointer',
           border: 'none',
-          backgroundColor: showProjectParameters ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-          color: showProjectParameters ? 'var(--accent-emerald, #34d399)' : '#94a3b8',
+          backgroundColor: showProjectParameters ? 'var(--status-emerald-bg)' : 'transparent',
+          color: showProjectParameters ? 'var(--status-emerald-text)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
@@ -291,8 +290,7 @@ export const CadTopHud: React.FC = () => {
         <span className="hud-btn-label">Parametry</span>
       </button>
 
-      {/* Podkłady GEO (PRO) i Plany buttons — ukryte do czasu publikacji i dla darmowych użytkowników, patrz APP_CONFIG.geoOverlays oraz isPro.
-          Sterują warstwami GEO (GESUT/BDOT) i Planistycznymi (MPZP/NMT/itp.). */}
+      {/* Podkłady GEO (PRO) i Plany buttons */}
       {APP_CONFIG.geoOverlays.showTogglesPanel && isPro && (
         <>
           <GeoOverlayToggleButton
@@ -301,8 +299,8 @@ export const CadTopHud: React.FC = () => {
               const s = useWfsStore.getState();
               s.setShowGeoOverlayGroup(!s.showGeoOverlayGroup);
             }}
-            activeBg="rgba(99, 102, 241, 0.2)"
-            activeColor="#a5b4fc"
+            activeBg="var(--status-indigo-bg)"
+            activeColor="var(--status-indigo-text)"
             title="Włącz / wyłącz podkłady geodezyjne (Uzbrojenie GESUT / BDOT10k) [Wersja PRO]"
             icon={<Layers size={13} />}
             label="Podkład"
@@ -314,8 +312,8 @@ export const CadTopHud: React.FC = () => {
               const s = useWfsStore.getState();
               s.setShowPlansOverlayGroup(!s.showPlansOverlayGroup);
             }}
-            activeBg="rgba(56, 189, 248, 0.2)"
-            activeColor="#7dd3fc"
+            activeBg="var(--status-cyan-bg)"
+            activeColor="var(--status-cyan-text)"
             title="Włącz / wyłącz warstwy planistyczne i ukształtowania terenu (MPZP / NMT / Overture / Pokrycie terenu) [Wersja PRO]"
             icon={<Map size={13} />}
             label="Plany"
@@ -323,7 +321,7 @@ export const CadTopHud: React.FC = () => {
         </>
       )}
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
 
       {/* Grupa Widok: centruj, obrót, przełącz */}
       <div
@@ -348,9 +346,9 @@ export const CadTopHud: React.FC = () => {
             fontSize: '11px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: '1px solid #334155',
-            backgroundColor: 'rgba(30, 41, 59, 0.8)',
-            color: '#f8fafc',
+            border: '1px solid var(--border-light)',
+            backgroundColor: 'var(--bg-card)',
+            color: 'var(--text-primary)',
             transition: 'all 0.15s ease',
           }}
         >
@@ -372,9 +370,9 @@ export const CadTopHud: React.FC = () => {
             fontSize: '11px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: viewRotationMode ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid #334155',
-            backgroundColor: viewRotationMode ? 'rgba(59, 130, 246, 0.25)' : 'rgba(30, 41, 59, 0.8)',
-            color: viewRotationMode ? '#bfdbfe' : '#f8fafc',
+            border: viewRotationMode ? '1px solid var(--status-blue-border)' : '1px solid var(--border-light)',
+            backgroundColor: viewRotationMode ? 'var(--status-blue-bg)' : 'var(--bg-card)',
+            color: viewRotationMode ? 'var(--status-blue-text)' : 'var(--text-primary)',
             transition: 'all 0.15s ease',
           }}
         >
@@ -400,9 +398,9 @@ export const CadTopHud: React.FC = () => {
             fontSize: '11px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: Math.abs(viewRotationDeg) > 0.001 ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid #334155',
-            backgroundColor: Math.abs(viewRotationDeg) > 0.001 ? 'rgba(56, 189, 248, 0.2)' : 'rgba(30, 41, 59, 0.8)',
-            color: Math.abs(viewRotationDeg) > 0.001 ? '#38bdf8' : '#f8fafc',
+            border: Math.abs(viewRotationDeg) > 0.001 ? '1px solid var(--status-cyan-border)' : '1px solid var(--border-light)',
+            backgroundColor: Math.abs(viewRotationDeg) > 0.001 ? 'var(--status-cyan-bg)' : 'var(--bg-card)',
+            color: Math.abs(viewRotationDeg) > 0.001 ? 'var(--accent-cyan)' : 'var(--text-primary)',
             transition: 'all 0.15s ease',
           }}
         >
@@ -417,7 +415,7 @@ export const CadTopHud: React.FC = () => {
         </button>
       </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
 
       <button
         onClick={toggleOsnap}
@@ -433,18 +431,18 @@ export const CadTopHud: React.FC = () => {
           fontSize: '11px',
           fontWeight: 600,
           cursor: 'pointer',
-          border: isOsnapActive ? '1px solid #10b981' : '1px solid #334155',
-          backgroundColor: isOsnapActive ? 'rgba(16, 185, 129, 0.22)' : 'rgba(30, 41, 59, 0.8)',
-          color: isOsnapActive ? '#6ee7b7' : '#94a3b8',
+          border: isOsnapActive ? '1px solid var(--accent-emerald)' : '1px solid var(--border-light)',
+          backgroundColor: isOsnapActive ? 'var(--status-emerald-bg)' : 'var(--bg-card)',
+          color: isOsnapActive ? 'var(--status-emerald-text)' : 'var(--text-secondary)',
           transition: 'all 0.15s ease',
           flexShrink: 0,
         }}
       >
-        <Magnet size={13} color={isOsnapActive ? '#10b981' : '#94a3b8'} />
+        <Magnet size={13} color={isOsnapActive ? 'var(--accent-emerald)' : 'var(--text-secondary)'} />
         <span className="hud-btn-label">Przyciąganie</span>
       </button>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: '#334155', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
 
       <button
         onClick={() => setShareModalOpen(true)}
