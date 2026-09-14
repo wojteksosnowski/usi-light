@@ -11,6 +11,8 @@ export interface LabeledNumberFieldProps {
   max?: number;
   hint?: string;
   hintColor?: string;
+  /** Gdy true, pole prezentuje wartość wyliczoną automatycznie (np. tryb "auto") — tekst wyszarzony, pole tylko do odczytu. */
+  grayed?: boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ export const LabeledNumberField: React.FC<LabeledNumberFieldProps> = ({
   max,
   hint,
   hintColor = 'var(--text-muted)',
+  grayed = false,
 }) => {
   return (
     <div style={FIELD_WRAPPER_STYLE}>
@@ -36,8 +39,15 @@ export const LabeledNumberField: React.FC<LabeledNumberFieldProps> = ({
         min={min}
         max={max}
         value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        style={{ ...FIELD_INPUT_STYLE, fontFamily: 'monospace', fontWeight: 600 }}
+        readOnly={grayed}
+        onChange={(e) => !grayed && onChange(parseFloat(e.target.value) || 0)}
+        style={{
+          ...FIELD_INPUT_STYLE,
+          fontFamily: 'monospace',
+          fontWeight: 600,
+          color: grayed ? 'var(--text-muted)' : FIELD_INPUT_STYLE.color,
+          cursor: grayed ? 'default' : undefined,
+        }}
       />
       {hint && <span style={{ fontSize: '9px', color: hintColor }}>{hint}</span>}
     </div>

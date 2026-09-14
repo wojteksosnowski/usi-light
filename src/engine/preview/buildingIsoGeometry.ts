@@ -5,6 +5,10 @@ export interface IsoSolid {
   holes: Point2D[][];
   hBottom: number;
   hTop: number;
+  // Dziedziczone ID krawędzi obrysu (patrz StoryFootprint.edgeOrigins) — pozwala podglądowi 3D
+  // podświetlić DOKŁADNIE tę samą ścianę na każdej kondygnacji zamiast surowego indeksu pozycyjnego,
+  // który może wskazywać różne, niepowiązane krawędzie na różnych kondygnacjach (patrz BuildingIsoPreview.tsx).
+  edgeOrigins?: (number | null)[];
 }
 
 /**
@@ -28,6 +32,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
         holes: (story.holes ?? []).map((hole) => hole.map(normalize)),
         hBottom: story.hBottom,
         hTop: story.hTop,
+        edgeOrigins: story.edgeOrigins,
       }));
   }
 

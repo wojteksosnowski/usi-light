@@ -1,9 +1,9 @@
 import React from 'react';
-import { Ruler } from 'lucide-react';
 import { TerraceModifier } from '../../../types/modifiers';
 import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
+import { MiniToggle } from '../controls/MiniToggle';
 import { SegmentedControl } from '../controls/SegmentedControl';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 import { TerraceDropIcon, TerraceStepsIcon } from '../../common/CustomCadIcons';
@@ -56,6 +56,14 @@ export const TerraceFields: React.FC<ModifierFieldsProps<TerraceModifier>> = ({ 
     onChange({ depth, autoDistance: false });
   };
 
+  // Krawędź: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
+  React.useEffect(() => {
+    if ((modifier.edgeIndex === undefined || modifier.edgeIndex === -1) && context.availableEdges.length > 0) {
+      onChange({ edgeIndex: context.availableEdges[0].value });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context.availableEdges]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
       <SegmentedControl
@@ -73,34 +81,20 @@ export const TerraceFields: React.FC<ModifierFieldsProps<TerraceModifier>> = ({ 
               {currentVariant === 'steps' ? 'Uskok łączny a (m):' : 'Głębokość uskoku a (m):'}
             </span>
             {calculatedDist !== null && (
-              <button
-                type="button"
-                onClick={handleToggleAuto}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '3px',
-                  background: isAuto ? 'rgba(254, 215, 170, 0.25)' : 'rgba(254, 215, 170, 0.08)',
-                  border: isAuto ? '1px solid var(--accent-orange)' : '1px solid rgba(254, 215, 170, 0.25)',
-                  borderRadius: '4px',
-                  color: isAuto ? 'var(--text-primary)' : 'var(--accent-orange)',
-                  fontSize: '9px',
-                  fontWeight: isAuto ? 700 : 500,
-                  padding: '1px 5px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
+              <MiniToggle
+                label="Auto"
+                checked={isAuto}
+                onChange={handleToggleAuto}
+                accentVar="var(--accent-orange)"
                 title={isAuto ? 'Tryb Auto aktywny (wyliczany na żywo). Kliknij aby przejść w tryb ręczny.' : `Włącz tryb Auto (${calculatedDist}m)`}
-              >
-                <Ruler size={10} />
-                <span>Auto: {calculatedDist}m {isAuto ? '●' : ''}</span>
-              </button>
+              />
             )}
           </div>
           <LabeledNumberField
             label=""
             value={modifier.depth}
             onChange={handleManualDepthChange}
+            grayed={isAuto}
             hint={isAuto ? `Tryb Auto: ${depthHint.text}` : depthHint.text}
             hintColor={depthHint.color}
           />
@@ -122,6 +116,7 @@ export const TerraceFields: React.FC<ModifierFieldsProps<TerraceModifier>> = ({ 
           options={context.availableEdges}
           onChange={(edgeIndex) => onChange({ edgeIndex })}
           accentVar="var(--accent-orange)"
+          showAutoOption={false}
         />
       )}
     </div>

@@ -50,7 +50,8 @@ interface SegmentRef {
 export function computeGateSpan(
   vertices: Point2D[],
   holes?: Point2D[][],
-  edgeIndex?: number
+  edgeIndex?: number,
+  edgeEligible?: boolean[]
 ): GateSpanResult | null {
   if (!vertices || vertices.length < 3) return null;
   const n = vertices.length;
@@ -125,6 +126,11 @@ export function computeGateSpan(
   for (let i = 0; i < n; i++) {
     if (!isInputHole && i === eIdx) continue;
     if (!isInputHole && n > 3 && (i === (eIdx - 1 + n) % n || i === (eIdx + 1) % n)) continue;
+    // Ściany bez dziedziczonego pochodzenia (np. tunel innej bramy wyciętej wcześniej w tym samym
+    // przebiegu potoku) nie są prawdziwymi przegrodami budynku — promień "first hit" nie może w nie
+    // trafiać jako "ściana przeciwległa", bo prowadzi to do korytarza obciętego przez cudzą bramę
+    // zamiast przez rzeczywistą, dalszą ścianę (patrz modifierRegistry.ts: aplikator `gate`).
+    if (!isInputHole && edgeEligible && edgeEligible[i] === false) continue;
 
     allSegments.push({
       q1: vertices[i],
@@ -244,9 +250,10 @@ export function generateGateCorridor(
   holes?: Point2D[][],
   width: number = 4.0,
   positionRatio: number = 0.5,
-  edgeIndex?: number
+  edgeIndex?: number,
+  edgeEligible?: boolean[]
 ): GateCorridorPoints | null {
-  const span = computeGateSpan(vertices, holes, edgeIndex);
+  const span = computeGateSpan(vertices, holes, edgeIndex, edgeEligible);
   if (!span || span.maxWidth <= 1e-3 || width <= 1e-3) return null;
 
   const effWidth = Math.min(width, span.maxWidth);

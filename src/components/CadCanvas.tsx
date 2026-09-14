@@ -721,6 +721,16 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     };
   }, [handleInteractionChange]);
 
+  // `interaction.effectiveIsInteracting` już poprawnie odzwierciedla przeciąganie budynku,
+  // obracanie, edycję wierzchołka/krawędzi itd. (patrz `useCanvasInteraction.ts`), ale dotąd
+  // globalny `useCadToolStore.isInteracting` (czytany m.in. przez podgląd 3D do zamrożenia
+  // auto-kadrowania) był aktualizowany WYŁĄCZNIE z handlera scrolla powyżej - żaden z pozostałych
+  // typów interakcji nigdy go nie ustawiał. Ten efekt uzupełnia pokrycie o wszystkie pozostałe
+  // typy interakcji (mają naturalne mouse-down/mouse-up, więc nie potrzebują debounce'u jak scroll).
+  useEffect(() => {
+    handleInteractionChange?.(interaction.effectiveIsInteracting);
+  }, [interaction.effectiveIsInteracting, handleInteractionChange]);
+
   const expandedLabelBuilding = expandedLabelBuildingId
     ? buildings.find((b) => b.id === expandedLabelBuildingId) || null
     : null;

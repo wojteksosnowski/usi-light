@@ -1308,6 +1308,130 @@ describe('modifierPipeline', () => {
       expect(diffs.filter((d) => d > 1e-3).length).toBe(1);
       }
     );
+
+    // mod-test5.json: Budynek1A and Budynek1B each carry ONE gate modifier on their own
+    // building (used here purely as stabilization anchors: their own single-gate geometry
+    // must stay identical across this fix). Budynek1 is the same octagon with BOTH gate
+    // modifiers (from A and B) composed onto one building — reproduces the reported bug
+    // where a second `gate`, run after the first has already split the story into wings,
+    // was applied to EVERY wing (raw local edgeIndex, no ownership check) instead of only
+    // the wing that geometrically owns the wall it targets, producing an extra/erroneous cutout.
+    const onlyModifierById = (building: BuildingLoop, id: string): BuildingLoop => ({
+      ...building,
+      modifiers: building.modifiers!.filter((m) => m.id === id),
+    });
+
+    // Detects the degenerate "sliver" artifact reported live: a boolean-op result containing two
+    // consecutive vertices closer than a real geometric feature ever would be (observed: ~5mm).
+    const hasNearDuplicateConsecutiveVertex = (polygon: Point2D[], tol = 1e-2): boolean => {
+      const n = polygon.length;
+      for (let i = 0; i < n; i++) {
+        const p = polygon[i];
+        const q = polygon[(i + 1) % n];
+        if (Math.hypot(q.x - p.x, q.y - p.y) < tol) return true;
+      }
+      return false;
+    };
+
+    const assertNoDegenerateGeometry = (res: ReturnType<typeof applyBuildingModifiers>) => {
+      for (const sf of res.storyPolygons) {
+        expect(hasNearDuplicateConsecutiveVertex(sf.polygon)).toBe(false);
+      }
+      for (const seg of res.segments) {
+        expect(seg.length).toBeGreaterThan(1e-2);
+      }
+    };
+
+    it.skipIf(!referenceFileExists('mod-test5.json'))(
+      'mod-test5.json: Budynek1A gate geometry is stable (stabilization anchor)',
+      () => {
+        const building = loadReferenceBuilding('mod-test5.json', 'Budynek1A');
+        const res = applyBuildingModifiers(building);
+
+        const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
+        const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
+        expect(story0Wings.length).toBe(2);
+        expect(story1Wings.length).toBe(2);
+        assertNoDegenerateGeometry(res);
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test5.json'))(
+      'mod-test5.json: Budynek1B gate geometry is stable (stabilization anchor)',
+      () => {
+        const building = loadReferenceBuilding('mod-test5.json', 'Budynek1B');
+        const res = applyBuildingModifiers(building);
+
+        const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
+        const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
+        expect(story0Wings.length).toBe(2);
+        expect(story1Wings.length).toBe(2);
+        assertNoDegenerateGeometry(res);
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test5.json'))(
+      'mod-test5.json: Budynek1 (both gates composed) must not produce an extra/erroneous cutout or a degenerate sliver fragment',
+      () => {
+        const building = loadReferenceBuilding('mod-test5.json', 'Budynek1');
+        expect(building.modifiers!.length).toBe(2);
+        const [gate1, gate2] = building.modifiers!;
+
+        const res1Only = applyBuildingModifiers(onlyModifierById(building, gate1.id));
+        const res2Only = applyBuildingModifiers(onlyModifierById(building, gate2.id));
+        const resBoth = applyBuildingModifiers(building);
+
+        // No near-zero-length wall segments and no near-duplicate consecutive vertices anywhere in
+        // the combined result. This is what actually catches the live-reported sliver bug: before the
+        // fix, `cutGateFromFootprint`'s boolean difference near the reflex corner shared by both gates'
+        // target walls produced a 4-vertex fragment with two vertices ~5mm apart (well above
+        // `cleanPolygonRing`'s 0.1mm de-dup tolerance, well below anything a real cut should produce),
+        // which then propagated into a ~5mm zero-length `FacadeSegment`. Wing COUNT alone (below)
+        // passed even with that artifact present, since its area (~13 m²) was above the pipeline's
+        // `area < 0.1` discard threshold — hence the false-positive the user flagged.
+        assertNoDegenerateGeometry(resBoth);
+
+        const baseArea = Math.abs(calculateSignedArea(building.vertices));
+
+        for (const storyIndex of [0, 1]) {
+          const wings1Only = res1Only.storyPolygons.filter((s) => s.storyIndex === storyIndex);
+          const wings2Only = res2Only.storyPolygons.filter((s) => s.storyIndex === storyIndex);
+          const wingsBoth = resBoth.storyPolygons.filter((s) => s.storyIndex === storyIndex);
+          expect(wings1Only.length).toBe(2);
+          expect(wings2Only.length).toBe(2);
+
+          // Gate #2 must split exactly the ONE wing that geometrically owns its target wall
+          // into 2, leaving the other wing untouched -> 3 total, never 2 (no-op) or 4+ (both
+          // wings wrongly cut).
+          expect(wingsBoth.length).toBe(3);
+
+          // Exactly one of the gate-1-only wings must survive with an unchanged area in the
+          // combined result (the wing gate #2 does not own); the other must have been consumed
+          // into gate #2's own split.
+          const areas1Only = sortedAreas(wings1Only);
+          const areasBoth = sortedAreas(wingsBoth);
+          const unchangedCount = areas1Only.filter((a1) =>
+            areasBoth.some((ab) => Math.abs(ab - a1) < 1e-3)
+          ).length;
+          expect(unchangedCount).toBe(1);
+
+          // The two gates were deliberately configured (by width/position) not to interact — so the
+          // combined result's total footprint area must equal the base story area minus BOTH corridor
+          // cuts, each measured independently from the single-gate results. This is precisely the
+          // property the user reported as broken ("Budynek1's vertices don't correspond to Budynek1A's
+          // and Budynek1B's, even though the gates shouldn't intersect") — root-caused to
+          // `computeGateSpan`'s first-hit ray-cast landing on gate #1's own tunnel wall as gate #2's
+          // "opposite wall" instead of the real far wall, shrinking gate #2's corridor. Fixed by
+          // excluding edges with no inherited `edgeOrigins` (synthetic/tunnel walls) from the ray-cast
+          // candidates (see gateGeometry.ts's `edgeEligible` parameter).
+          const corridor1Area = baseArea - areas1Only.reduce((s, a) => s + a, 0);
+          const corridor2Area = baseArea - sortedAreas(wings2Only).reduce((s, a) => s + a, 0);
+          const expectedCombinedArea = baseArea - corridor1Area - corridor2Area;
+          const actualCombinedArea = areasBoth.reduce((s, a) => s + a, 0);
+          expect(actualCombinedArea).toBeCloseTo(expectedCombinedArea, 0);
+        }
+      }
+    );
   });
 });
 

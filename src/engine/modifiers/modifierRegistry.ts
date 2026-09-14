@@ -24,7 +24,14 @@ import {
   resolveStoryModifierSteps,
   sanitizeStoryFootprint,
 } from './modifierPipeline';
-import { resolveFragmentEdgeIndex, resolveFragmentVertexIndex, resolveIndexTarget } from './modifierIndexTarget';
+import {
+  deriveEdgeOrigins,
+  deriveHoleOrigins,
+  findEdgeByOrigin,
+  resolveFragmentEdgeIndex,
+  resolveFragmentVertexIndex,
+  resolveIndexTarget,
+} from './modifierIndexTarget';
 
 export interface ModifierApplyContext {
   storyFootprints: StoryFootprint[];
@@ -87,12 +94,31 @@ function resolveGlobalIndexForFragment(
   return resolveGeometric(footprint, globalIndex, baseVertices);
 }
 
+/**
+ * Rozwiązuje indeks krawędzi obrysu zewnętrznego, preferując DZIEDZICZONE ID (`footprint.edgeOrigins`)
+ * nad zgadywaniem geometrycznym od zera względem `baseVertices`. Krawędzie każdego fragmentu niosą
+ * swoje pochodzenie krok po kroku przez cały potok (patrz `deriveEdgeOrigins` w `modifierPipeline.ts`
+ * i inicjalizacja tożsamości w `applyBuildingModifiers`), więc selektor `edgeIndex` odnajduje
+ * bezpośrednich potomków oryginalnej ściany zamiast dopasowywać współrzędne na nowo przy każdym kroku.
+ * Dopasowanie geometryczne (`resolveFragmentEdgeIndex`) zostaje wyłącznie jako fallback dla
+ * fragmentów bez ustawionego `edgeOrigins` (np. skonstruowanych ręcznie, bez przejścia przez potok).
+ */
 function resolveOuterEdgeIndexForFragment(
   footprint: StoryFootprint,
   globalIndex: number | undefined,
   baseVertices: Point2D[]
 ): number | undefined | null {
-  return resolveGlobalIndexForFragment(footprint, globalIndex, baseVertices, resolveFragmentEdgeIndex);
+  if (globalIndex === undefined) return undefined;
+  if (globalIndex >= baseVertices.length) {
+    return isIndexWithinFootprint(footprint, globalIndex) ? globalIndex : null;
+  }
+  // `edgeOrigins` obecne, ale całkowicie puste (same `null`) oznacza fragment, którego linia
+  // dziedziczenia została już wcześniej utracona (np. przez corner_cut) — nie ma sensu ufać "brakowi
+  // właściciela" w takim przypadku, spadamy na dopasowanie geometryczne jak dotychczas.
+  if (footprint.edgeOrigins && footprint.edgeOrigins.some((tag) => tag !== null)) {
+    return findEdgeByOrigin(footprint.edgeOrigins, globalIndex);
+  }
+  return resolveFragmentEdgeIndex(footprint, globalIndex, baseVertices);
 }
 
 /** Analogiczne dopasowanie dla indeksu wierzchołka (używane przez corner_cut scope='vertex'). */
@@ -167,6 +193,9 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
             sideAngle ?? 45,
             positionRatio ?? 0.5
           );
+          // Dziedziczenie ID krawędzi po tej mutacji jest utrzymywane UNIWERSALNIE, dla każdego typu
+          // modyfikatora jednakowo, w applyModifier() poniżej (re-derivacja geometryczna względem
+          // stanu sprzed kroku) — nie trzeba tu ręcznie śledzić wstawek.
         }
       }
     }
@@ -243,6 +272,9 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
             target.localIndex
           );
         } else {
+          // corner_cut zmienia liczbę wierzchołków w sposób zależny od trybu (chamfer/fillet/notch),
+          // ale dziedziczenie ID krawędzi jest i tak utrzymywane UNIWERSALNIE w applyModifier()
+          // poniżej — re-derivacja geometryczna nie zależy od tego, JAK footprint.polygon się zmienił.
           footprint.polygon = generateCornerCutPolygon(footprint.polygon, depth, mode, scope, targetIdx);
         }
       }
@@ -258,20 +290,37 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
 
     const newFootprints: StoryFootprint[] = [];
     for (const sf of ctx.storyFootprints) {
-      if (targetStoryIndices.has(sf.storyIndex)) {
-        const corridor = generateGateCorridor(
-          sf.polygon,
-          sf.holes,
-          width,
-          positionRatio ?? 0.5,
-          edgeIndex
-        );
-        if (corridor) {
-          const cutResults = cutGateFromFootprint(sf, corridor.cuttingPolygon);
-          newFootprints.push(...cutResults);
-        } else {
-          newFootprints.push(sf);
-        }
+      if (!targetStoryIndices.has(sf.storyIndex)) {
+        newFootprints.push(sf);
+        continue;
+      }
+
+      const resolvedEdgeIndex = resolveOuterEdgeIndexForFragment(sf, edgeIndex, ctx.baseVertices);
+      if (resolvedEdgeIndex === null) {
+        // Ten fragment (skrzydło po wcześniejszym gate) nie zawiera ściany wskazanej
+        // przez edgeIndex — nie jest jej właścicielem, więc nie tniemy tutaj.
+        newFootprints.push(sf);
+        continue;
+      }
+
+      // Ściany bez dziedziczonego pochodzenia (edgeOrigins[i] === null) to artefakty cięcia innej
+      // bramy w tym samym przebiegu (tunel) — promień "first hit" nie może traktować ich jako
+      // prawdziwej ściany przeciwległej (patrz gateGeometry.ts). Gdy `edgeOrigins` jest całkowicie
+      // puste (linia dziedziczenia już wcześniej utracona, np. przez corner_cut), filtr wykluczyłby
+      // WSZYSTKIE ściany — zamiast tego nie filtrujemy wcale (zachowanie jak dotychczas).
+      const hasLineage = sf.edgeOrigins && sf.edgeOrigins.some((tag) => tag !== null);
+      const edgeEligible = hasLineage ? sf.edgeOrigins!.map((tag) => tag !== null) : undefined;
+      const corridor = generateGateCorridor(
+        sf.polygon,
+        sf.holes,
+        width,
+        positionRatio ?? 0.5,
+        resolvedEdgeIndex,
+        edgeEligible
+      );
+      if (corridor) {
+        const cutResults = cutGateFromFootprint(sf, corridor.cuttingPolygon);
+        newFootprints.push(...cutResults);
       } else {
         newFootprints.push(sf);
       }
@@ -281,9 +330,40 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
   },
 };
 
+/**
+ * Uniwersalne dziedziczenie ID krawędzi/otworów: JEDEN mechanizm dla WSZYSTKICH typów modyfikatorów,
+ * a nie osobna logika księgowania wstawek per typ. Przed uruchomieniem aplikatora zapisuje referencje
+ * do bieżących `polygon`/`holes`/tagów każdego fragmentu; po jego uruchomieniu, dla każdego fragmentu,
+ * którego `polygon` (lub `holes`) zostały PODMIENIONE (nowa referencja — każdy generator zwraca nową
+ * tablicę, nigdy nie mutuje w miejscu), odtwarza tagi geometrycznie względem stanu SPRZED kroku
+ * (`deriveEdgeOrigins`/`deriveHoleOrigins`). Fragmenty nowo utworzone w tym kroku (np. skrzydła
+ * `gate`) nie mają wpisu "sprzed" — już niosą własne tagi, nadane przez funkcję, która je stworzyła
+ * (`cutGateFromFootprint`), więc nie są tu dotykane.
+ */
+function inheritEdgeLineage(ctx: ModifierApplyContext, before: Map<StoryFootprint, StoryFootprint>): void {
+  for (const fp of ctx.storyFootprints) {
+    const prev = before.get(fp);
+    if (!prev) continue; // nowo utworzony fragment (np. przez gate) — już otagowany przez twórcę
+
+    if (fp.polygon !== prev.polygon) {
+      fp.edgeOrigins = deriveEdgeOrigins(fp.polygon, prev.polygon, prev.edgeOrigins);
+    }
+    if (fp.holes !== prev.holes) {
+      fp.holeOrigins = deriveHoleOrigins(fp.holes || [], prev.holes, prev.holeOrigins);
+    }
+  }
+}
+
 export function applyModifier(modifier: Modifier, ctx: ModifierApplyContext): void {
+  const before = new Map<StoryFootprint, StoryFootprint>();
+  for (const fp of ctx.storyFootprints) {
+    before.set(fp, { ...fp });
+  }
+
   const applier = MODIFIER_APPLIERS[modifier.type] as ModifierApplyFn<Modifier>;
   applier(modifier, ctx);
+
+  inheritEdgeLineage(ctx, before);
 
   // Systemowa sanityzacja obrysów kondygnacji po każdym kroku modyfikatora
   for (let s = 0; s < ctx.storyFootprints.length; s++) {

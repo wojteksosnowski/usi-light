@@ -177,6 +177,20 @@ export interface StoryFootprint {
   hTop: number;          // Rzędna wierzchu kondygnacji (m)
   polygon: Point2D[];    // Zewnętrzny obrys 2D danej kondygnacji
   holes?: Point2D[][];   // Wewnętrzne otwory (np. dziedzińce / patio z modyfikatora Donat)
+  // Dziedziczone ID krawędzi obrysu zewnętrznego: edgeOrigins[i] to indeks krawędzi z baseVertices,
+  // po której "dziedziczy" krawędź polygon[i] -> polygon[i+1] (albo null dla krawędzi nowo powstałej,
+  // np. ściany tunelu bramy, bez odpowiednika w oryginalnym obrysie). Pozwala selektorowi edgeIndex
+  // odnaleźć potomków oryginalnej ściany bez zgadywania geometrycznego od zera przy każdym kroku.
+  // Brak tego pola (undefined) oznacza "nieznane pochodzenie" — wywołuje fallback na dopasowanie
+  // geometryczne względem baseVertices (patrz modifierIndexTarget.ts).
+  edgeOrigins?: (number | null)[];
+  // Analogiczne dziedziczenie ID dla krawędzi otworów (dziedzińce/patio z Donata): holeOrigins[h][i]
+  // to LOKALNY indeks (w obrębie otworu h w momencie jego powstania) krawędzi, po której dziedziczy
+  // krawędź holes[h][i] -> holes[h][i+1] (albo null dla nowej krawędzi, np. cięcia bramą w otwór).
+  // Otwory nie mają odpowiednika w baseVertices — numeracja jest własna, per otwór, nadawana przy
+  // jego utworzeniu (np. przez `donut`). Utrzymywane tym samym uniwersalnym mechanizmem co
+  // edgeOrigins, dla każdego typu modyfikatora jednakowo (patrz modifierRegistry.ts: applyModifier).
+  holeOrigins?: (number | null)[][];
 }
 
 export interface ZoneFootprint {

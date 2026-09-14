@@ -10,6 +10,8 @@ export interface IndexPillSelectorProps<T extends string | number> {
   onChange: (value: T | undefined) => void;
   accentVar?: string;
   disabled?: boolean;
+  /** Gdy false, pigułka "Auto" nie jest renderowana — do użycia tam, gdzie "auto" koliduje pojęciowo z innym przełącznikiem auto na tej samej karcie (np. wybór krawędzi). Domyślnie true. */
+  showAutoOption?: boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ export function IndexPillSelector<T extends string | number>({
   onChange,
   accentVar = 'var(--accent-purple)',
   disabled = false,
+  showAutoOption = true,
 }: IndexPillSelectorProps<T>) {
   const isPlaceholderSelected = value === placeholderValue;
 
@@ -45,29 +48,31 @@ export function IndexPillSelector<T extends string | number>({
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(undefined)}
-          title={placeholderLabel}
-          style={{
-            flex: '1 1 auto',
-            padding: '3px 6px',
-            borderRadius: '5px',
-            fontSize: '10px',
-            fontWeight: isPlaceholderSelected ? 700 : 500,
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            border: 'none',
-            backgroundColor: isPlaceholderSelected ? `color-mix(in srgb, ${accentVar} 25%, transparent)` : 'transparent',
-            color: isPlaceholderSelected ? accentVar : 'var(--text-muted)',
-            letterSpacing: '0.02em',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          Auto
-        </button>
+        {showAutoOption && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(undefined)}
+            title={placeholderLabel}
+            style={{
+              flex: '1 1 auto',
+              padding: '3px 6px',
+              borderRadius: '5px',
+              fontSize: '10px',
+              fontWeight: isPlaceholderSelected ? 700 : 500,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              border: 'none',
+              backgroundColor: isPlaceholderSelected ? `color-mix(in srgb, ${accentVar} 25%, transparent)` : 'transparent',
+              color: isPlaceholderSelected ? accentVar : 'var(--text-muted)',
+              letterSpacing: '0.02em',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            Auto
+          </button>
+        )}
         {options.map((opt, i) => {
-          const isSelected = value === opt.value;
+          const isSelected = value === opt.value || (!showAutoOption && isPlaceholderSelected && i === 0);
           return (
             <button
               key={opt.value}

@@ -17,6 +17,9 @@ interface UiState {
   isConfirmDeleteModalOpen: boolean;
   paymentSuccessSessionId: string | null;
   viewportScale: number;
+  /** Id modyfikatora aktualnie rozwiniętego (akordeon) w panelu Modyfikatorów - podgląd 3D
+   * podświetla krawędź odpowiadającą temu modyfikatorowi, nie pierwszemu z listy. */
+  expandedModifierId: string | null;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -31,6 +34,7 @@ interface UiState {
   setPaymentSuccessModalOpen: (open: boolean) => void;
   setPaymentSuccessSessionId: (sessionId: string | null) => void;
   setViewportScale: (scale: number) => void;
+  setExpandedModifierId: (id: string | null) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -46,6 +50,9 @@ export const useUiStore = create<UiState>((set) => ({
   isConfirmDeleteModalOpen: false,
   paymentSuccessSessionId: null,
   viewportScale: 14,
+  expandedModifierId: null,
+
+  setExpandedModifierId: (id) => set({ expandedModifierId: id }),
 
   setViewportScale: (scale) => set((state) => (Math.abs(state.viewportScale - scale) > 1e-4 ? { viewportScale: scale } : state)),
 

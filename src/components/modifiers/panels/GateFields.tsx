@@ -1,10 +1,10 @@
 import React from 'react';
-import { Ruler } from 'lucide-react';
 import { GateModifier } from '../../../types/modifiers';
 import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { LabeledSlider } from '../controls/LabeledSlider';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
+import { MiniToggle } from '../controls/MiniToggle';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 import { computeGateSpan } from '../../../utils/math2d/gateGeometry';
 
@@ -56,6 +56,14 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
 
   const isFullWidth = maxAllowedWidth !== null && modifier.width >= maxAllowedWidth - 1e-3;
 
+  // Krawędź wejściowa: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
+  React.useEffect(() => {
+    if ((modifier.edgeIndex === undefined || modifier.edgeIndex === -1) && availableEdges.length > 0) {
+      onChange({ edgeIndex: availableEdges[0].value });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableEdges]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', alignItems: 'flex-start' }}>
@@ -65,32 +73,17 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
               Szerokość bramy a (m):
             </span>
             {maxAllowedWidth !== null && (
-              <button
-                type="button"
-                onClick={handleToggleAuto}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '3px',
-                  background: isAuto ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.08)',
-                  border: isAuto ? '1px solid var(--accent-emerald)' : '1px solid rgba(16, 185, 129, 0.25)',
-                  borderRadius: '4px',
-                  color: isAuto ? 'var(--text-primary)' : 'var(--accent-emerald)',
-                  fontSize: '9px',
-                  fontWeight: isAuto ? 700 : 500,
-                  padding: '1px 5px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
+              <MiniToggle
+                label="Auto"
+                checked={isAuto}
+                onChange={handleToggleAuto}
+                accentVar="var(--accent-emerald)"
                 title={
                   isAuto
                     ? 'Tryb Auto aktywny (dopasowany do wierzchołków). Kliknij aby przejść w tryb ręczny.'
                     : `Włącz pełną dozwoloną szerokość (${maxAllowedWidth}m)`
                 }
-              >
-                <Ruler size={10} />
-                <span>Auto: {maxAllowedWidth}m {isAuto ? '●' : ''}</span>
-              </button>
+              />
             )}
           </div>
           <LabeledNumberField
@@ -100,6 +93,7 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
             max={maxAllowedWidth !== null ? maxAllowedWidth : 100}
             step={0.5}
             onChange={handleManualWidthChange}
+            grayed={isAuto}
             hint={
               isAuto
                 ? `Pełna szerokość korytarza: ${modifier.width}m`
@@ -141,6 +135,7 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
           options={availableEdges}
           onChange={(edgeIndex) => onChange({ edgeIndex })}
           accentVar="var(--accent-emerald)"
+          showAutoOption={false}
         />
       )}
 

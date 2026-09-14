@@ -19,7 +19,20 @@ const CORNER_CUT_SCOPE_OPTIONS: { value: CornerCutModifier['scope']; label: stri
   { value: 'vertex', label: 'Jeden narożnik' },
 ];
 
-export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> = ({ modifier, onChange, context }) => (
+export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> = ({ modifier, onChange, context }) => {
+  // Krawędź: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
+  React.useEffect(() => {
+    if (
+      modifier.scope === 'edge' &&
+      (modifier.edgeIndex === undefined || modifier.edgeIndex === -1) &&
+      context.availableEdges.length > 0
+    ) {
+      onChange({ edgeIndex: context.availableEdges[0].value });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modifier.scope, context.availableEdges]);
+
+  return (
   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
       <LabeledNumberField
@@ -61,6 +74,7 @@ export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> =
         options={context.availableEdges}
         onChange={(edgeIndex) => onChange({ edgeIndex })}
         accentVar="var(--accent-cyan-light)"
+        showAutoOption={false}
       />
     )}
 
@@ -76,4 +90,5 @@ export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> =
       />
     )}
   </div>
-);
+  );
+};

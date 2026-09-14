@@ -19,6 +19,14 @@ export const BayWindowFields: React.FC<ModifierFieldsProps<BayWindowModifier>> =
   const currentPos = modifier.positionRatio ?? 0.5;
   const { availableEdges } = context;
 
+  // Krawędź: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
+  React.useEffect(() => {
+    if ((modifier.edgeIndex === undefined || modifier.edgeIndex === -1) && availableEdges.length > 0) {
+      onChange({ edgeIndex: availableEdges[0].value });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableEdges]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
@@ -51,30 +59,29 @@ export const BayWindowFields: React.FC<ModifierFieldsProps<BayWindowModifier>> =
         accentVar="var(--accent-yellow)"
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: availableEdges.length > 1 ? '1.2fr 0.8fr' : '1fr', gap: '8px', alignItems: 'center' }}>
-        <LabeledSlider
-          label="Pozycja wzdłuż krawędzi:"
-          value={currentPos}
-          min={0}
-          max={1}
-          step={0.05}
-          onChange={(positionRatio) => onChange({ positionRatio })}
-          formatValue={(v) => (v === 0.5 ? 'Środek (50%)' : `${Math.round(v * 100)}%`)}
-          accentVar="var(--accent-yellow)"
-        />
+      <LabeledSlider
+        label="Pozycja wzdłuż krawędzi:"
+        value={currentPos}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(positionRatio) => onChange({ positionRatio })}
+        formatValue={(v) => (v === 0.5 ? 'Środek (50%)' : `${Math.round(v * 100)}%`)}
+        accentVar="var(--accent-yellow)"
+      />
 
-        {availableEdges.length > 1 && (
-          <IndexPillSelector
-            label="Krawędź:"
-            value={modifier.edgeIndex ?? -1}
-            placeholderValue={-1}
-            placeholderLabel="Domyślna (najdłuższa)"
-            options={availableEdges}
-            onChange={(edgeIndex) => onChange({ edgeIndex })}
-            accentVar="var(--accent-yellow)"
-          />
-        )}
-      </div>
+      {availableEdges.length > 1 && (
+        <IndexPillSelector
+          label="Krawędź:"
+          value={modifier.edgeIndex ?? -1}
+          placeholderValue={-1}
+          placeholderLabel="Domyślna (najdłuższa)"
+          options={availableEdges}
+          onChange={(edgeIndex) => onChange({ edgeIndex })}
+          accentVar="var(--accent-yellow)"
+          showAutoOption={false}
+        />
+      )}
 
       <span style={{ fontSize: '9px', color: modifier.projection >= 0 ? 'var(--accent-yellow)' : 'var(--accent-rose)' }}>
         {modifier.projection >= 0

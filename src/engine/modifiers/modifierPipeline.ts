@@ -13,6 +13,7 @@ import { calculateOutwardNormal, distance } from '../../utils/math2d/vec2';
 import { computeLineEquation, rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors } from '../../utils/buildingFloorCalculator';
 import { applyModifier, ModifierApplyContext } from './modifierRegistry';
+import { deriveEdgeOrigins, deriveHoleOrigins } from './modifierIndexTarget';
 
 export interface ModifierPipelineResult {
   storyPolygons: StoryFootprint[];
@@ -305,7 +306,7 @@ export function generateBayWindowPolygon(
   return result;
 }
 
-export function cleanPolygonRing(pts: Point2D[], enforceCCW = true): Point2D[] {
+export function cleanPolygonRing(pts: Point2D[], enforceCCW = true, dupTol = 1e-4): Point2D[] {
   if (!pts || pts.length < 3) return [];
 
   // 1. Usuń duplikaty bezpośrednich sąsiadów
@@ -313,7 +314,7 @@ export function cleanPolygonRing(pts: Point2D[], enforceCCW = true): Point2D[] {
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i];
     const prev = noDups[noDups.length - 1];
-    if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 1e-4) {
+    if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > dupTol) {
       noDups.push({
         x: Math.abs(p.x) < 1e-9 ? 0 : p.x,
         y: Math.abs(p.y) < 1e-9 ? 0 : p.y,
@@ -323,7 +324,7 @@ export function cleanPolygonRing(pts: Point2D[], enforceCCW = true): Point2D[] {
   // Sprawdź czy ostatni nie jest zbieżny z pierwszym
   if (
     noDups.length >= 2 &&
-    Math.hypot(noDups[0].x - noDups[noDups.length - 1].x, noDups[0].y - noDups[noDups.length - 1].y) < 1e-4
+    Math.hypot(noDups[0].x - noDups[noDups.length - 1].x, noDups[0].y - noDups[noDups.length - 1].y) < dupTol
   ) {
     noDups.pop();
   }
@@ -568,13 +569,13 @@ function toClosedRing(pts: Point2D[]): [number, number][] {
   return ring;
 }
 
-function fromClosedRing(ring: [number, number][], enforceCCW = true): Point2D[] {
+function fromClosedRing(ring: [number, number][], enforceCCW = true, dupTol = 1e-4): Point2D[] {
   if (!ring || ring.length < 3) return [];
   const isClosed =
     Math.hypot(ring[0][0] - ring[ring.length - 1][0], ring[0][1] - ring[ring.length - 1][1]) < 1e-6;
   const raw = isClosed ? ring.slice(0, -1) : ring;
   const pts: Point2D[] = raw.map(([x, y]) => ({ x, y }));
-  return cleanPolygonRing(pts, enforceCCW);
+  return cleanPolygonRing(pts, enforceCCW, dupTol);
 }
 
 /**
@@ -610,10 +611,13 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
             }
           }
         }
+        const sanitizedOuter = fromClosedRing(bestPoly, true);
         return {
           ...footprint,
-          polygon: fromClosedRing(bestPoly, true),
+          polygon: sanitizedOuter,
           holes: [],
+          edgeOrigins: deriveEdgeOrigins(sanitizedOuter, footprint.polygon, footprint.edgeOrigins),
+          holeOrigins: [],
         };
       }
       return footprint;
@@ -622,10 +626,13 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
     // 2. Jeśli są otwory: wykonujemy boolean difference (outer - holes)
     const validHoles = footprint.holes.filter((h) => h && h.length >= 3);
     if (validHoles.length === 0) {
+      const sanitizedOuter = fromClosedRing(outerRing, true);
       return {
         ...footprint,
-        polygon: fromClosedRing(outerRing, true),
+        polygon: sanitizedOuter,
         holes: [],
+        edgeOrigins: deriveEdgeOrigins(sanitizedOuter, footprint.polygon, footprint.edgeOrigins),
+        holeOrigins: [],
       };
     }
 
@@ -678,11 +685,20 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
       ...footprint,
       polygon: sanitizedOuter,
       holes: sanitizedHoles,
+      edgeOrigins: deriveEdgeOrigins(sanitizedOuter, footprint.polygon, footprint.edgeOrigins),
+      holeOrigins: deriveHoleOrigins(sanitizedHoles, footprint.holes, footprint.holeOrigins),
     };
   } catch {
     return footprint;
   }
 }
+
+// Tolerancja scalania "sklejonych" wierzchołków w wyniku boolean-op cięcia bramą. Przy cięciu
+// w pobliżu wklęsłego naroża `polygon-clipping` może wygenerować dodatkowy, zdegenerowany
+// fragment z dwoma niemal identycznymi wierzchołkami (obserwowane: ~5 mm rozstawu) — znacznie
+// powyżej ogólnego progu duplikatów `cleanPolygonRing` (0.1 mm), więc trzeba go tu jawnie
+// scalić, zanim taki "wiór" przejdzie próg pola `area < 0.1` jako rzekomo prawdziwe skrzydło.
+const GATE_CUT_DUP_TOL = 1e-2;
 
 /**
  * Wycina korytarz bramy z pojedynczego obrysu kondygnacji (footprint).
@@ -714,14 +730,14 @@ export function cutGateFromFootprint(
     const results: StoryFootprint[] = [];
     for (const poly of diff) {
       if (!poly || poly.length === 0) continue;
-      const outerPts = fromClosedRing(poly[0], true);
+      const outerPts = fromClosedRing(poly[0], true, GATE_CUT_DUP_TOL);
       if (outerPts.length < 3) continue;
       const area = Math.abs(calculateSignedArea(outerPts));
       if (area < 0.1) continue;
 
       const holesPts: Point2D[][] = [];
       for (let h = 1; h < poly.length; h++) {
-        const holePts = fromClosedRing(poly[h], true);
+        const holePts = fromClosedRing(poly[h], true, GATE_CUT_DUP_TOL);
         if (holePts.length >= 3 && Math.abs(calculateSignedArea(holePts)) >= 0.1) {
           holesPts.push(holePts);
         }
@@ -733,6 +749,8 @@ export function cutGateFromFootprint(
         hTop: footprint.hTop,
         polygon: outerPts,
         holes: holesPts,
+        edgeOrigins: deriveEdgeOrigins(outerPts, footprint.polygon, footprint.edgeOrigins),
+        holeOrigins: deriveHoleOrigins(holesPts, footprint.holes, footprint.holeOrigins),
       });
     }
 
@@ -795,6 +813,9 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     hTop: interval.hTop,
     polygon: baseVertices.map((p) => ({ ...p })),
     holes: [],
+    // Dziedziczenie ID krawędzi startuje z tożsamości: krawędź i dziedziczy po baseVertices[i].
+    edgeOrigins: baseVertices.map((_, i) => i),
+    holeOrigins: [],
   }));
 
   const zoneFootprints: ZoneFootprint[] = [];
@@ -866,6 +887,11 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
   const TOL = 0.005; // 5mm tolerancja geometrii
 
   for (const edge of rawEdges) {
+    // Pomijamy zdegenerowane (praktycznie zerowej długości) krawędzie — mogą powstać jako
+    // artefakt boolean-op w footprintach (np. wiór po cięciu bramą); analogiczny guard jak
+    // w `buildRingSegments` (ringSegments.ts) dla ścieżki bez modyfikatorów.
+    if (Math.hypot(edge.p2.x - edge.p1.x, edge.p2.y - edge.p1.y) < 1e-4) continue;
+
     const existing = merged.find(
       (m) =>
         m.isHole === edge.isHole &&

@@ -3,7 +3,7 @@
 // Wierne odwzorowanie 1:1 oryginalnego podglądu (bez sztucznej górnej belki)
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { useSceneStore } from '../../store';
+import { useSceneStore, useUiStore } from '../../store';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
@@ -19,6 +19,7 @@ export const Recording3DPipWindow: React.FC = () => {
 
   const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
+  const expandedModifierId = useUiStore((s) => s.expandedModifierId);
 
   const isDemoRecordingActive = (isRecording || isCountingDown) && show3DPreview;
 
@@ -33,27 +34,26 @@ export const Recording3DPipWindow: React.FC = () => {
     return buildings.find((b) => b.category !== 'boundary') || null;
   }, [buildings, selectedBuildingId]);
 
-  // Podświetlenie aktywnej krawędzi modyfikatora (taras/wykusz/uskok)
+  // Podświetlenie krawędzi ma odpowiadać modyfikatorowi aktualnie rozwiniętemu (akordeon) w panelu
+  // Modyfikatorów, jeśli jest otwarty; w przeciwnym razie pierwszy włączony modyfikator z edgeIndex
+  // (panel może nie być otwarty podczas nagrywania demo).
   const activeHighlight = useMemo(() => {
     if (!activeBuilding) return undefined;
     const modifiers = activeBuilding.modifiers || [];
-    const modWithEdge = modifiers.find((m) => m.enabled && 'edgeIndex' in m && (m as any).edgeIndex !== undefined);
+    const hasEdge = (m: (typeof modifiers)[number]) => m.enabled && 'edgeIndex' in m && (m as any).edgeIndex !== undefined;
+
+    if (expandedModifierId) {
+      const expandedMod = modifiers.find((m) => m.id === expandedModifierId);
+      if (!expandedMod || !hasEdge(expandedMod)) return undefined;
+      const edgeIdx = (expandedMod as any).edgeIndex;
+      return edgeIdx === undefined || edgeIdx === -1 ? 0 : edgeIdx;
+    }
+
+    const modWithEdge = modifiers.find(hasEdge);
     if (!modWithEdge) return undefined;
     const edgeIdx = (modWithEdge as any).edgeIndex;
-    if (edgeIdx === undefined || edgeIdx === -1) return 0;
-    return edgeIdx;
-  }, [activeBuilding]);
-
-  const activeHighlightColor = useMemo(() => {
-    if (!activeBuilding) return '#fed7aa';
-    const modifiers = activeBuilding.modifiers || [];
-    const modWithEdge = modifiers.find((m) => m.enabled && 'edgeIndex' in m && (m as any).edgeIndex !== undefined);
-    if (!modWithEdge) return '#fed7aa';
-    if (modWithEdge.type === 'terrace') return '#fed7aa';
-    if (modWithEdge.type === 'bay_window') return '#fef08a';
-    if (modWithEdge.type === 'corner_cut') return '#7dd3fc';
-    return '#fed7aa';
-  }, [activeBuilding]);
+    return edgeIdx === undefined || edgeIdx === -1 ? 0 : edgeIdx;
+  }, [activeBuilding, expandedModifierId]);
 
   const groupBuildings = useMemo(() => {
     if (!activeBuilding || !activeBuilding.groupId) return undefined;
@@ -114,7 +114,6 @@ export const Recording3DPipWindow: React.FC = () => {
         building={activeBuilding}
         groupBuildings={groupBuildings}
         highlightEdgeIndex={activeHighlight}
-        highlightColor={activeHighlightColor}
         hideToolbar={false}
       />
     </div>
