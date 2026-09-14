@@ -6,6 +6,7 @@ import { LabeledSlider } from '../controls/LabeledSlider';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { MiniToggle } from '../controls/MiniToggle';
 import { StoryRangeSelector } from '../StoryRangeSelector';
+import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
 import { computeGateSpan } from '../../../utils/math2d/gateGeometry';
 
 export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
@@ -56,13 +57,7 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
 
   const isFullWidth = maxAllowedWidth !== null && modifier.width >= maxAllowedWidth - 1e-3;
 
-  // Krawędź wejściowa: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
-  React.useEffect(() => {
-    if ((modifier.edgeIndex === undefined || modifier.edgeIndex === -1) && availableEdges.length > 0) {
-      onChange({ edgeIndex: availableEdges[0].value });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableEdges]);
+  useDefaultEdgeIndex(modifier.edgeIndex, availableEdges, (edgeIndex) => onChange({ edgeIndex }));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>

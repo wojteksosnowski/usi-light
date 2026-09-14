@@ -28,11 +28,11 @@ export const StoryRangeSelector: React.FC<StoryRangeSelectorProps> = ({
   disabled = false,
 }) => {
   // Przesuwające się okno pigułek: wybór skrajnej wartości odsłania kolejną w tym kierunku,
-  // aż do granicy MAX_ABS - patrz [[musimy-naprawic-to-zolte-breezy-wind]].
+  // aż do granicy MAX_ABS.
   const [shift, setShift] = React.useState(() => computeDefaultShift(value));
   // Śledzi ostatnią wartość wyemitowaną przez ten komponent przez onChange, żeby odróżnić
   // "ja właśnie zmieniłem value" (nie nadpisuj shiftu ustawionego w handleSelect) od zmiany
-  // faktycznie zewnętrznej (np. przełączenie na inny modyfikator) - patrz [[musimy-naprawic-to-zolte-breezy-wind]].
+  // faktycznie zewnętrznej (np. przełączenie na inny modyfikator).
   const lastEmittedRef = React.useRef(value);
 
   const windowMin = -WINDOW_HALF + shift;

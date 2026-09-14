@@ -6,11 +6,11 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { Scan } from 'lucide-react';
-import type { BuildingLoop } from '@/types/geometry';
+import type { BuildingLoop, Point2D } from '@/types/geometry';
 import { getBuildingSolids } from '@/engine/preview/buildingIsoGeometry';
 import { miterOffsetPolygon } from '@/utils/math2d/miterOffset';
 import { getIsoCameraOffset, type IsoOrientation } from './isoCameraPresets';
-import { getPolygonCentroid, getPolygonInteriorPoint } from '@/utils/math2d/polygons';
+import { getPolygonCentroid, getPolygonInteriorPoint, computePointsBoundingBox } from '@/utils/math2d/polygons';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
 
 /** Clockwise cycle used for the left/right compass arrows, 45° per step. */
@@ -21,14 +21,14 @@ const COLOR_PROPOSED = '#ffffff';
 const COLOR_EXISTING = '#f8fafc';
 const STORY_LINE_COLOR = 0x1e293b;
 const EDGE_ANGLE_THRESHOLD_DEG = 2;
-/** Liczba przedziałów grubości linii wg głębokości względem kamery (depth cueing) - patrz [[musimy-naprawic-to-zolte-breezy-wind]]. */
+/** Liczba przedziałów grubości linii wg głębokości względem kamery (depth cueing). */
 const DEPTH_LINE_BUCKETS = 6;
 const DEPTH_LINE_BASE_WIDTH = 2.8;
 /** Najdalsza linia ma mieć 50% grubości najbliższej. */
 const DEPTH_LINE_MIN_FACTOR = 0.5;
 /** Linie dzielące fasadę na kondygnacje mają 50% grubości linii konturowych bryły. */
 const STORY_DIVIDER_FACTOR = 0.5;
-/** Mnożnik marginesu kadru auto-fit - ustalony testowo (0.95 bazowe * 1.1 dobrane empirycznie). */
+/** Mnożnik marginesu kadru auto-fit - dobrany testowo. */
 const ZOOM_MARGIN_FACTOR = 1.4;
 /** Wstęga podświetlenia wybranej krawędzi modyfikatora - zawsze fioletowa (token --accent-purple). */
 const HIGHLIGHT_RIBBON_COLOR = '#c084fc';
@@ -77,12 +77,12 @@ function buildGeometryGroup(
   const createdMaterials: THREE.Material[] = [];
 
   // Kierunek "w stronę kamery" w przestrzeni świata (Y-up), używany do policzenia głębokości
-  // krawędzi względem kamery (depth cueing grubości linii) - patrz [[musimy-naprawic-to-zolte-breezy-wind]].
+  // krawędzi względem kamery (depth cueing grubości linii).
   const camDirOffset = getIsoCameraOffset(orientation, 1);
   const viewDirWorld = new THREE.Vector3(camDirOffset.x, camDirOffset.y, camDirOffset.z).normalize();
 
   // Zbierane w pierwszym przebiegu (per solidGroup) do globalnej normalizacji głębokości oraz
-  // klasyfikacji kontur/podział kondygnacji (patrz [[musimy-naprawic-to-zolte-breezy-wind]]).
+  // klasyfikacji kontur/podział kondygnacji.
   type PendingEdgeBucket = {
     solidGroup: THREE.Group;
     positions: Float32Array;
@@ -203,7 +203,7 @@ function buildGeometryGroup(
         const midLocalY = (edgePositions[base + 1] + edgePositions[base + 4]) / 2;
         const midLocalZ = (edgePositions[base + 2] + edgePositions[base + 5]) / 2;
         // Lokalne (x,y,z) ekstruzji -> świat (Y-up): world = (x, z + hBottom, -y) - patrz
-        // wyprowadzenie w [[musimy-naprawic-to-zolte-breezy-wind]] (solidGroup.rotation.x = -PI/2).
+        // wyprowadzenie (solidGroup.rotation.x = -PI/2).
         const worldX = midLocalX;
         const worldY = midLocalZ + solid.hBottom;
         const worldZ = -midLocalY;
@@ -232,7 +232,7 @@ function buildGeometryGroup(
       solidGroup.add(hiddenLines);
 
       // Wstęga podświetlenia wybranej krawędzi (tylko dla aktywnego budynku, i tylko na jego
-      // najniższej kondygnacji - patrz [[musimy-naprawic-to-zolte-breezy-wind]]). Odnajdywana przez
+      // najniższej kondygnacji). Odnajdywana przez
       // DZIEDZICZONE ID (`solid.edgeOrigins`, patrz StoryFootprint.edgeOrigins) — ten sam mechanizm,
       // którego używa silnik modyfikatorów do rozwiązywania `edgeIndex` — a nie surowy indeks
       // pozycyjny (`% n`), który na różnych kondygnacjach (o różnych, niezależnie zmodyfikowanych
@@ -317,7 +317,7 @@ function buildGeometryGroup(
   // najdalsze = DEPTH_LINE_MIN_FACTOR grubości najbliższych), niezależnie dla dwóch warstw:
   // kontur bryły (narożniki pionowe + linia dachu/gruntu) - grubszy, i podziały kondygnacji
   // (poziome linie międzypiętrowe) - STORY_DIVIDER_FACTOR grubości konturu - przybliżenie zamiast
-  // pełnego cieniowania per-wierzchołek, patrz [[musimy-naprawic-to-zolte-breezy-wind]].
+  // pełnego cieniowania per-wierzchołek.
   const depthRange = globalMaxDepth - globalMinDepth;
   const Y_RANGE_EPS = Math.max(Y_EPS, (globalMaxY - globalMinY) * 1e-4);
   for (const bucket of pendingEdgeBuckets) {
@@ -407,37 +407,43 @@ interface WorldExtent {
   maxZ: number;
 }
 
+interface BuildingWorldInfo {
+  extent: WorldExtent;
+  /** Centroid rzutu (najniższej kondygnacji) budynku w świecie - X/Z. */
+  centroid: { x: number; z: number };
+}
+
 /**
- * Zasięg świata budynku liczony WYŁĄCZNIE z danych geometrycznych (getBuildingSolids), bez
+ * Zasięg i centroid budynku liczone WYŁĄCZNIE z danych geometrycznych (getBuildingSolids), bez
  * dotykania drzewa obiektów Three.js/matrixWorld - środek/zasięg są właściwością samego obiektu,
- * nie czymś odwrotnie wyliczanym z wyrenderowanej sceny - patrz [[musimy-naprawic-to-zolte-breezy-wind]].
+ * nie czymś odwrotnie wyliczanym z wyrenderowanej sceny. Jedno wywołanie getBuildingSolids/jeden
+ * przebieg po wierzchołkach obsługuje oba wyniki naraz, żeby uniknąć powtarzania tej samej pracy.
  */
-function getBuildingWorldExtent(bldg: BuildingLoop): WorldExtent | null {
+function getBuildingWorldInfo(bldg: BuildingLoop): BuildingWorldInfo | null {
   const solids = getBuildingSolids(bldg);
   if (solids.length === 0) return null;
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+
+  const allPoints: Point2D[] = [];
+  let minY = Infinity, maxY = -Infinity;
   for (const solid of solids) {
-    for (const p of solid.polygon) {
-      // Lokalne (x,y) rzutu -> świat (Y-up): worldX = x, worldZ = -y.
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (-p.y < minZ) minZ = -p.y;
-      if (-p.y > maxZ) maxZ = -p.y;
-    }
+    allPoints.push(...solid.polygon);
     if (solid.hBottom < minY) minY = solid.hBottom;
     if (solid.hTop > maxY) maxY = solid.hTop;
   }
-  return isFinite(minX) ? { minX, maxX, minY, maxY, minZ, maxZ } : null;
-}
+  // Lokalne (x,y) rzutu -> świat (Y-up): worldX = x, worldZ = -y.
+  const bbox = computePointsBoundingBox(allPoints);
+  if (!isFinite(bbox.minX)) return null;
 
-/** Centroid rzutu (najniższej kondygnacji) budynku w świecie - X/Z. */
-function getBuildingWorldCentroid(bldg: BuildingLoop): { x: number; z: number } | null {
-  const solids = getBuildingSolids(bldg);
-  if (solids.length === 0) return null;
   const baseSolid = solids.reduce((min, s) => (s.hBottom < min.hBottom ? s : min), solids[0]);
-  if (baseSolid.polygon.length < 3) return null;
-  const c = getPolygonCentroid(baseSolid.polygon);
-  return { x: c.x, z: -c.y };
+  const centroidLocal = baseSolid.polygon.length >= 3 ? getPolygonCentroid(baseSolid.polygon) : null;
+  const centroid = centroidLocal
+    ? { x: centroidLocal.x, z: -centroidLocal.y }
+    : { x: (bbox.minX + bbox.maxX) / 2, z: -(bbox.minY + bbox.maxY) / 2 };
+
+  return {
+    extent: { minX: bbox.minX, maxX: bbox.maxX, minY, maxY, minZ: -bbox.maxY, maxZ: -bbox.minY },
+    centroid,
+  };
 }
 
 const IsoScene: React.FC<{
@@ -453,246 +459,245 @@ const IsoScene: React.FC<{
   orientation,
   highlightEdgeIndex,
 }) => {
-    const { camera, size, invalidate } = useThree();
-    const groupRef = useRef<THREE.Group | null>(null);
-    const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
-    const centerRef = useRef(new THREE.Vector3());
-    const distanceRef = useRef(10);
-    const tweenRafRef = useRef<number | null>(null);
-    const [frameData, setFrameData] = useState<FrameData | null>(null);
+  const { camera, size, invalidate } = useThree();
+  const groupRef = useRef<THREE.Group | null>(null);
+  const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const centerRef = useRef(new THREE.Vector3());
+  const distanceRef = useRef(10);
+  const tweenRafRef = useRef<number | null>(null);
+  const [frameData, setFrameData] = useState<FrameData | null>(null);
 
-    // Full geometry signature ensuring real-time live preview updates on any vertex/parameter change.
-    // `orientation` jest częścią sygnatury, bo grubość linii (depth cueing) zależy od kierunku patrzenia.
-    const geometrySignature = useMemo(() => {
-      return (
-        buildings.map(getBuildingGeometrySignature).join('||') +
-        `_xray:${isXRay}_hl:${highlightEdgeIndex}_act:${activeBuildingId}_or:${orientation}`
-      );
-    }, [buildings, activeBuildingId, isXRay, highlightEdgeIndex, orientation]);
-
-    const group = useMemo(() => {
-      return buildGeometryGroup(
-        buildings,
-        activeBuildingId,
-        isXRay,
-        highlightEdgeIndex,
-        orientation
-      );
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [geometrySignature]);
-
-    useEffect(() => {
-      return () => {
-        group.traverse((child) => {
-          if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
-            child.geometry.dispose();
-          }
-        });
-        const materials = group.userData.materials as THREE.Material[] | undefined;
-        materials?.forEach((m) => m.dispose());
-      };
-    }, [group]);
-
-    // LineMaterial (fat lines) wymaga rozmiaru viewportu w pikselach do poprawnego przeliczenia
-    // grubości linii - dopinamy realny rozmiar tutaj (przy tworzeniu geometrii ustawiana jest
-    // tylko wartość startowa).
-    useEffect(() => {
-      if (!size || size.width <= 0 || size.height <= 0) return;
-      group.traverse((child: any) => {
-        if (child.material?.isLineMaterial) {
-          child.material.resolution.set(size.width, size.height);
-        }
-      });
-      invalidate();
-    }, [group, size, invalidate]);
-
-    // Auto-frame whenever geometry changes or viewport size updates. Środek/zasięg budynku są
-    // liczone analitycznie z danych (getBuildingWorldExtent/getBuildingWorldCentroid) - NIE z
-    // drzewa obiektów Three.js/matrixWorld - patrz [[musimy-naprawic-to-zolte-breezy-wind]].
-    useEffect(() => {
-      if (!size || size.width <= 0 || size.height <= 0) {
-        return;
-      }
-
-      // Zasięg całej sceny (do dopasowania zoomu, obejmuje sąsiednie budynki grupy).
-      let sceneMinX = Infinity, sceneMaxX = -Infinity, sceneMinY = Infinity, sceneMaxY = -Infinity;
-      let sceneMinZ = Infinity, sceneMaxZ = -Infinity;
-      for (const bldg of buildings) {
-        const ext = getBuildingWorldExtent(bldg);
-        if (!ext) continue;
-        if (ext.minX < sceneMinX) sceneMinX = ext.minX;
-        if (ext.maxX > sceneMaxX) sceneMaxX = ext.maxX;
-        if (ext.minY < sceneMinY) sceneMinY = ext.minY;
-        if (ext.maxY > sceneMaxY) sceneMaxY = ext.maxY;
-        if (ext.minZ < sceneMinZ) sceneMinZ = ext.minZ;
-        if (ext.maxZ > sceneMaxZ) sceneMaxZ = ext.maxZ;
-      }
-      if (!isFinite(sceneMinX)) {
-        setFrameData(null);
-        invalidate();
-        return;
-      }
-
-      // Środek patrzenia/obrotu kamery liczymy z centroidu RZUTU (footprintu) aktywnego budynku,
-      // a nie ze środka bounding-boxa całej wyekstrudowanej bryły 3D - dla budynków z asymetrycznymi
-      // elementami (wykusz, uskok, ścięty narożnik...) środek bboxa jest systematycznie przesunięty
-      // względem intuicyjnego środka budynku, co dawało "dziwny" pivot obrotu i dryfowanie budynku
-      // w kadrze przy przesuwaniu go w CAD - patrz [[musimy-naprawic-to-zolte-breezy-wind]].
-      const activeBuilding = buildings.find((b) => b.id === activeBuildingId);
-      const activeCentroid = activeBuilding ? getBuildingWorldCentroid(activeBuilding) : null;
-      const activeExtent = activeBuilding ? getBuildingWorldExtent(activeBuilding) : null;
-
-      const center = activeCentroid && activeExtent
-        ? new THREE.Vector3(activeCentroid.x, (activeExtent.minY + activeExtent.maxY) / 2, activeCentroid.z)
-        : new THREE.Vector3((sceneMinX + sceneMaxX) / 2, (sceneMinY + sceneMaxY) / 2, (sceneMinZ + sceneMaxZ) / 2);
-
-      // Promień musi obejmować całą scenę (np. sąsiednie budynki grupy), ale liczony względem
-      // NOWEGO środka (centroid rzutu aktywnego budynku), nie środka pełnego zasięgu sceny.
-      const sceneHalfSize = new THREE.Vector3(
-        (sceneMaxX - sceneMinX) / 2,
-        (sceneMaxY - sceneMinY) / 2,
-        (sceneMaxZ - sceneMinZ) / 2
-      );
-      const sceneCenter = new THREE.Vector3((sceneMinX + sceneMaxX) / 2, (sceneMinY + sceneMaxY) / 2, (sceneMinZ + sceneMaxZ) / 2);
-      const centerOffset = sceneCenter.distanceTo(center);
-      const rawRadius = sceneHalfSize.length() + centerOffset;
-      const safeRadius = Math.max(1, isNaN(rawRadius) ? 10 : rawRadius);
-
-      centerRef.current.copy(center);
-      distanceRef.current = Math.max(safeRadius * 2.6, 5);
-      const hasUnderground = sceneMinY < -0.01;
-
-      setFrameData({
-        center: center.clone(),
-        radius: safeRadius,
-        groundY: isFinite(sceneMinY) ? sceneMinY : 0,
-        hasUnderground,
-      });
-
-      const orthoCam = camera as THREE.OrthographicCamera;
-      const worldExtent = safeRadius * 2;
-      const viewportPx = Math.max(10, Math.min(size.width, size.height));
-      const zoom = worldExtent > 0 ? (viewportPx * ZOOM_MARGIN_FACTOR) / worldExtent : 1;
-      orthoCam.zoom = isFinite(zoom) && zoom > 0 ? zoom : 1;
-
-      try {
-        orthoCam.setViewOffset(
-          size.width,
-          size.height,
-          0,
-          Math.round(0.08 * size.height),
-          size.width,
-          size.height
-        );
-      } catch {
-        orthoCam.clearViewOffset();
-      }
-
-      const offset = getIsoCameraOffset(orientation, distanceRef.current);
-      camera.position.set(center.x + offset.x, center.y + offset.y, center.z + offset.z);
-      camera.lookAt(center);
-      orthoCam.near = 0.1;
-      orthoCam.far = Math.max(distanceRef.current * 4, 30);
-      orthoCam.updateProjectionMatrix();
-
-      // Size the shadow camera's ortho frustum to fit this building
-      const light = dirLightRef.current;
-      if (light) {
-        const dir = new THREE.Vector3(0.55, 1, 0.4).normalize();
-        light.position.copy(center).addScaledVector(dir, Math.max(safeRadius * 3.5, 8));
-        light.target.position.copy(center);
-        light.target.updateMatrixWorld();
-        const extent = Math.max(safeRadius * 1.6, 2);
-        const shadowCam = light.shadow.camera as THREE.OrthographicCamera;
-        shadowCam.left = -extent;
-        shadowCam.right = extent;
-        shadowCam.top = extent;
-        shadowCam.bottom = -extent;
-        shadowCam.near = 0.1;
-        shadowCam.far = Math.max(safeRadius * 8, 20);
-        shadowCam.updateProjectionMatrix();
-        light.shadow.bias = -0.0005;
-        light.shadow.normalBias = Math.max(safeRadius * 0.01, 0.02);
-        light.shadow.needsUpdate = true;
-      }
-
-      invalidate();
-    }, [group, size.width, size.height, camera, orientation, invalidate, buildings, activeBuildingId]);
-
-    // Smoothly tween the camera to the newly selected orientation.
-    const prevOrientationRef = useRef(orientation);
-    useEffect(() => {
-      if (prevOrientationRef.current === orientation) return;
-      prevOrientationRef.current = orientation;
-
-      if (tweenRafRef.current !== null) cancelAnimationFrame(tweenRafRef.current);
-
-      const start = camera.position.clone();
-      const offset = getIsoCameraOffset(orientation, distanceRef.current);
-      const end = new THREE.Vector3(
-        centerRef.current.x + offset.x,
-        centerRef.current.y + offset.y,
-        centerRef.current.z + offset.z
-      );
-      const durationMs = 250;
-      const startTime = performance.now();
-
-      const tick = (now: number) => {
-        const t = Math.min(1, (now - startTime) / durationMs);
-        const eased = easeInOutCubic(t);
-        camera.position.lerpVectors(start, end, eased);
-        camera.lookAt(centerRef.current);
-        invalidate();
-        if (t < 1) {
-          tweenRafRef.current = requestAnimationFrame(tick);
-        } else {
-          tweenRafRef.current = null;
-        }
-      };
-      tweenRafRef.current = requestAnimationFrame(tick);
-
-      return () => {
-        if (tweenRafRef.current !== null) cancelAnimationFrame(tweenRafRef.current);
-      };
-    }, [orientation, camera, invalidate]);
-
+  // Full geometry signature ensuring real-time live preview updates on any vertex/parameter change.
+  // `orientation` jest częścią sygnatury, bo grubość linii (depth cueing) zależy od kierunku patrzenia.
+  const geometrySignature = useMemo(() => {
     return (
-      <>
-        <hemisphereLight color="#ffffff" groundColor="#cbd5e1" intensity={1.4} />
-        <ambientLight intensity={0.65} />
-        <directionalLight
-          ref={dirLightRef}
-          position={[8, 12, 5]}
-          intensity={1.2}
-          castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
-        />
-        <primitive ref={groupRef} object={group} />
-
-        {frameData && (
-          <mesh
-            position={[frameData.center.x, 0, frameData.center.z]}
-            rotation={[-Math.PI / 2, 0, 0]}
-            receiveShadow
-          >
-            <planeGeometry args={[Math.max(frameData.radius * 12, 30), Math.max(frameData.radius * 12, 30)]} />
-            <meshStandardMaterial
-              color="#eeeeee"
-              roughness={1}
-              metalness={0}
-              depthWrite={true}
-              polygonOffset={true}
-              polygonOffsetFactor={1}
-              polygonOffsetUnits={1}
-              transparent={isXRay}
-              opacity={isXRay ? 0.35 : 1.0}
-            />
-          </mesh>
-        )}
-      </>
+      buildings.map(getBuildingGeometrySignature).join('||') +
+      `_xray:${isXRay}_hl:${highlightEdgeIndex}_act:${activeBuildingId}_or:${orientation}`
     );
-  };
+  }, [buildings, activeBuildingId, isXRay, highlightEdgeIndex, orientation]);
+
+  const group = useMemo(() => {
+    return buildGeometryGroup(
+      buildings,
+      activeBuildingId,
+      isXRay,
+      highlightEdgeIndex,
+      orientation
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geometrySignature]);
+
+  useEffect(() => {
+    return () => {
+      group.traverse((child) => {
+        if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
+          child.geometry.dispose();
+        }
+      });
+      const materials = group.userData.materials as THREE.Material[] | undefined;
+      materials?.forEach((m) => m.dispose());
+    };
+  }, [group]);
+
+  // LineMaterial (fat lines) wymaga rozmiaru viewportu w pikselach do poprawnego przeliczenia
+  // grubości linii - dopinamy realny rozmiar tutaj (przy tworzeniu geometrii ustawiana jest
+  // tylko wartość startowa).
+  useEffect(() => {
+    if (!size || size.width <= 0 || size.height <= 0) return;
+    group.traverse((child: any) => {
+      if (child.material?.isLineMaterial) {
+        child.material.resolution.set(size.width, size.height);
+      }
+    });
+    invalidate();
+  }, [group, size, invalidate]);
+
+  // Auto-frame whenever geometry changes or viewport size updates. Środek/zasięg budynku są
+  // liczone analitycznie z danych (getBuildingWorldInfo) - NIE z drzewa obiektów Three.js/matrixWorld.
+  useEffect(() => {
+    if (!size || size.width <= 0 || size.height <= 0) {
+      return;
+    }
+
+    // Zasięg całej sceny (do dopasowania zoomu, obejmuje sąsiednie budynki grupy) - jedno
+    // wywołanie na budynek, reużywane też dla aktywnego budynku poniżej zamiast liczyć go ponownie.
+    let sceneMinX = Infinity, sceneMaxX = -Infinity, sceneMinY = Infinity, sceneMaxY = -Infinity;
+    let sceneMinZ = Infinity, sceneMaxZ = -Infinity;
+    let activeInfo: BuildingWorldInfo | null = null;
+    for (const bldg of buildings) {
+      const info = getBuildingWorldInfo(bldg);
+      if (!info) continue;
+      if (bldg.id === activeBuildingId) activeInfo = info;
+      const ext = info.extent;
+      if (ext.minX < sceneMinX) sceneMinX = ext.minX;
+      if (ext.maxX > sceneMaxX) sceneMaxX = ext.maxX;
+      if (ext.minY < sceneMinY) sceneMinY = ext.minY;
+      if (ext.maxY > sceneMaxY) sceneMaxY = ext.maxY;
+      if (ext.minZ < sceneMinZ) sceneMinZ = ext.minZ;
+      if (ext.maxZ > sceneMaxZ) sceneMaxZ = ext.maxZ;
+    }
+    if (!isFinite(sceneMinX)) {
+      setFrameData(null);
+      invalidate();
+      return;
+    }
+
+    // Środek patrzenia/obrotu kamery liczymy z centroidu RZUTU (footprintu) aktywnego budynku,
+    // a nie ze środka bounding-boxa całej wyekstrudowanej bryły 3D - dla budynków z asymetrycznymi
+    // elementami (wykusz, uskok, ścięty narożnik...) środek bboxa jest systematycznie przesunięty
+    // względem intuicyjnego środka budynku, co dawało "dziwny" pivot obrotu i dryfowanie budynku
+    // w kadrze przy przesuwaniu go w CAD.
+    const center = activeInfo
+      ? new THREE.Vector3(activeInfo.centroid.x, (activeInfo.extent.minY + activeInfo.extent.maxY) / 2, activeInfo.centroid.z)
+      : new THREE.Vector3((sceneMinX + sceneMaxX) / 2, (sceneMinY + sceneMaxY) / 2, (sceneMinZ + sceneMaxZ) / 2);
+
+    // Promień musi obejmować całą scenę (np. sąsiednie budynki grupy), ale liczony względem
+    // NOWEGO środka (centroid rzutu aktywnego budynku), nie środka pełnego zasięgu sceny.
+    const sceneHalfSize = new THREE.Vector3(
+      (sceneMaxX - sceneMinX) / 2,
+      (sceneMaxY - sceneMinY) / 2,
+      (sceneMaxZ - sceneMinZ) / 2
+    );
+    const sceneCenter = new THREE.Vector3((sceneMinX + sceneMaxX) / 2, (sceneMinY + sceneMaxY) / 2, (sceneMinZ + sceneMaxZ) / 2);
+    const centerOffset = sceneCenter.distanceTo(center);
+    const rawRadius = sceneHalfSize.length() + centerOffset;
+    const safeRadius = Math.max(1, isNaN(rawRadius) ? 10 : rawRadius);
+
+    centerRef.current.copy(center);
+    distanceRef.current = Math.max(safeRadius * 2.6, 5);
+    const hasUnderground = sceneMinY < -0.01;
+
+    setFrameData({
+      center: center.clone(),
+      radius: safeRadius,
+      groundY: isFinite(sceneMinY) ? sceneMinY : 0,
+      hasUnderground,
+    });
+
+    const orthoCam = camera as THREE.OrthographicCamera;
+    const worldExtent = safeRadius * 2;
+    const viewportPx = Math.max(10, Math.min(size.width, size.height));
+    const zoom = worldExtent > 0 ? (viewportPx * ZOOM_MARGIN_FACTOR) / worldExtent : 1;
+    orthoCam.zoom = isFinite(zoom) && zoom > 0 ? zoom : 1;
+
+    try {
+      orthoCam.setViewOffset(
+        size.width,
+        size.height,
+        0,
+        Math.round(0.08 * size.height),
+        size.width,
+        size.height
+      );
+    } catch {
+      orthoCam.clearViewOffset();
+    }
+
+    const offset = getIsoCameraOffset(orientation, distanceRef.current);
+    camera.position.set(center.x + offset.x, center.y + offset.y, center.z + offset.z);
+    camera.lookAt(center);
+    orthoCam.near = 0.1;
+    orthoCam.far = Math.max(distanceRef.current * 4, 30);
+    orthoCam.updateProjectionMatrix();
+
+    // Size the shadow camera's ortho frustum to fit this building
+    const light = dirLightRef.current;
+    if (light) {
+      const dir = new THREE.Vector3(0.55, 1, 0.4).normalize();
+      light.position.copy(center).addScaledVector(dir, Math.max(safeRadius * 3.5, 8));
+      light.target.position.copy(center);
+      light.target.updateMatrixWorld();
+      const extent = Math.max(safeRadius * 1.6, 2);
+      const shadowCam = light.shadow.camera as THREE.OrthographicCamera;
+      shadowCam.left = -extent;
+      shadowCam.right = extent;
+      shadowCam.top = extent;
+      shadowCam.bottom = -extent;
+      shadowCam.near = 0.1;
+      shadowCam.far = Math.max(safeRadius * 8, 20);
+      shadowCam.updateProjectionMatrix();
+      light.shadow.bias = -0.0005;
+      light.shadow.normalBias = Math.max(safeRadius * 0.01, 0.02);
+      light.shadow.needsUpdate = true;
+    }
+
+    invalidate();
+  }, [group, size.width, size.height, camera, orientation, invalidate, buildings, activeBuildingId]);
+
+  // Smoothly tween the camera to the newly selected orientation.
+  const prevOrientationRef = useRef(orientation);
+  useEffect(() => {
+    if (prevOrientationRef.current === orientation) return;
+    prevOrientationRef.current = orientation;
+
+    if (tweenRafRef.current !== null) cancelAnimationFrame(tweenRafRef.current);
+
+    const start = camera.position.clone();
+    const offset = getIsoCameraOffset(orientation, distanceRef.current);
+    const end = new THREE.Vector3(
+      centerRef.current.x + offset.x,
+      centerRef.current.y + offset.y,
+      centerRef.current.z + offset.z
+    );
+    const durationMs = 250;
+    const startTime = performance.now();
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - startTime) / durationMs);
+      const eased = easeInOutCubic(t);
+      camera.position.lerpVectors(start, end, eased);
+      camera.lookAt(centerRef.current);
+      invalidate();
+      if (t < 1) {
+        tweenRafRef.current = requestAnimationFrame(tick);
+      } else {
+        tweenRafRef.current = null;
+      }
+    };
+    tweenRafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (tweenRafRef.current !== null) cancelAnimationFrame(tweenRafRef.current);
+    };
+  }, [orientation, camera, invalidate]);
+
+  return (
+    <>
+      <hemisphereLight color="#ffffff" groundColor="#cbd5e1" intensity={1.4} />
+      <ambientLight intensity={0.65} />
+      <directionalLight
+        ref={dirLightRef}
+        position={[8, 12, 5]}
+        intensity={1.2}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+      />
+      <primitive ref={groupRef} object={group} />
+
+      {frameData && (
+        <mesh
+          position={[frameData.center.x, 0, frameData.center.z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          receiveShadow
+        >
+          <planeGeometry args={[Math.max(frameData.radius * 12, 30), Math.max(frameData.radius * 12, 30)]} />
+          <meshStandardMaterial
+            color="#eeeeee"
+            roughness={1}
+            metalness={0}
+            depthWrite={true}
+            polygonOffset={true}
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+            transparent={isXRay}
+            opacity={isXRay ? 0.35 : 1.0}
+          />
+        </mesh>
+      )}
+    </>
+  );
+};
 
 const CompassStrip: React.FC<{ orientation: IsoOrientation }> = ({ orientation }) => {
   const currentIndex = ORIENTATION_CYCLE.indexOf(orientation);

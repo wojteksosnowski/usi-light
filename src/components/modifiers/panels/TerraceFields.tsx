@@ -6,6 +6,7 @@ import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { MiniToggle } from '../controls/MiniToggle';
 import { SegmentedControl } from '../controls/SegmentedControl';
 import { StoryRangeSelector } from '../StoryRangeSelector';
+import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
 import { TerraceDropIcon, TerraceStepsIcon } from '../../common/CustomCadIcons';
 import { computeEdgeAdjacentPerpendicularDistance } from '../../../utils/math2d/dimensions';
 import { signHint } from './signHint';
@@ -56,13 +57,7 @@ export const TerraceFields: React.FC<ModifierFieldsProps<TerraceModifier>> = ({ 
     onChange({ depth, autoDistance: false });
   };
 
-  // Krawędź: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
-  React.useEffect(() => {
-    if ((modifier.edgeIndex === undefined || modifier.edgeIndex === -1) && context.availableEdges.length > 0) {
-      onChange({ edgeIndex: context.availableEdges[0].value });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context.availableEdges]);
+  useDefaultEdgeIndex(modifier.edgeIndex, context.availableEdges, (edgeIndex) => onChange({ edgeIndex }));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>

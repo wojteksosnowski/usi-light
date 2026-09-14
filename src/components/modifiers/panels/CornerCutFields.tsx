@@ -5,6 +5,7 @@ import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { SegmentedControl } from '../controls/SegmentedControl';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { StoryRangeSelector } from '../StoryRangeSelector';
+import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
 import { ChamferIcon, FilletIcon, NotchIcon } from '../../common/CustomCadIcons';
 
 const CORNER_CUT_MODE_OPTIONS: { value: CornerCutModifier['mode']; label: string; Icon: React.FC<{ size?: number; color?: string }> }[] = [
@@ -20,17 +21,7 @@ const CORNER_CUT_SCOPE_OPTIONS: { value: CornerCutModifier['scope']; label: stri
 ];
 
 export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> = ({ modifier, onChange, context }) => {
-  // Krawędź: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
-  React.useEffect(() => {
-    if (
-      modifier.scope === 'edge' &&
-      (modifier.edgeIndex === undefined || modifier.edgeIndex === -1) &&
-      context.availableEdges.length > 0
-    ) {
-      onChange({ edgeIndex: context.availableEdges[0].value });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modifier.scope, context.availableEdges]);
+  useDefaultEdgeIndex(modifier.edgeIndex, context.availableEdges, (edgeIndex) => onChange({ edgeIndex }), modifier.scope === 'edge');
 
   return (
   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>

@@ -6,6 +6,7 @@ import { SegmentedControl } from '../controls/SegmentedControl';
 import { LabeledSlider } from '../controls/LabeledSlider';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { StoryRangeSelector } from '../StoryRangeSelector';
+import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
 
 const BAY_WINDOW_ANGLE_OPTIONS: { value: BayWindowAngle; label: string }[] = [
   { value: 90, label: '90°' },
@@ -19,13 +20,7 @@ export const BayWindowFields: React.FC<ModifierFieldsProps<BayWindowModifier>> =
   const currentPos = modifier.positionRatio ?? 0.5;
   const { availableEdges } = context;
 
-  // Krawędź: eliminujemy niejawne "auto" — jeśli nie wybrano jawnie, przyjmujemy pierwszą dostępną.
-  React.useEffect(() => {
-    if ((modifier.edgeIndex === undefined || modifier.edgeIndex === -1) && availableEdges.length > 0) {
-      onChange({ edgeIndex: availableEdges[0].value });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableEdges]);
+  useDefaultEdgeIndex(modifier.edgeIndex, availableEdges, (edgeIndex) => onChange({ edgeIndex }));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
