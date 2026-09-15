@@ -7,7 +7,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { BuildingLoop } from '@/types/geometry';
-import { getBuildingSolids } from '@/engine/preview/buildingIsoGeometry';
+import { getBuildingSolids, computeBuildingFrameBounds } from '@/engine/preview/buildingIsoGeometry';
 import { getIsoCameraOffset, type IsoOrientation } from './isoCameraPresets';
 
 /** Clockwise cycle used for the left/right compass arrows, 45° per step. */
@@ -196,21 +196,22 @@ const IsoScene: React.FC<{
 
   // Auto-frame whenever geometry changes.
   useEffect(() => {
-    const box = new THREE.Box3().setFromObject(group);
-    if (box.isEmpty()) {
+    const solids = getBuildingSolids(building);
+    const bounds = computeBuildingFrameBounds(solids);
+    if (!bounds) {
       onFrame(null);
       invalidate();
       return;
     }
-    const center = box.getCenter(new THREE.Vector3());
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const center = new THREE.Vector3(bounds.center.x, bounds.center.y, bounds.center.z);
+    const radius = bounds.radius;
     centerRef.current.copy(center);
-    distanceRef.current = Math.max(sphere.radius * 2.6, 1);
-    onFrame({ center: center.clone(), radius: sphere.radius, groundY: box.min.y });
-    setRadius(sphere.radius);
+    distanceRef.current = Math.max(radius * 2.6, 1);
+    onFrame({ center: center.clone(), radius, groundY: bounds.groundY });
+    setRadius(radius);
 
     const orthoCam = camera as THREE.OrthographicCamera;
-    const worldExtent = sphere.radius * 2;
+    const worldExtent = radius * 2;
     const viewportPx = Math.min(size.width, size.height);
     const zoom = worldExtent > 0 ? (viewportPx * 0.999) / worldExtent : 1;
     orthoCam.zoom = zoom;
@@ -233,20 +234,20 @@ const IsoScene: React.FC<{
     const light = dirLightRef.current;
     if (light) {
       const dir = new THREE.Vector3(0.55, 1, 0.4).normalize();
-      light.position.copy(center).addScaledVector(dir, Math.max(sphere.radius * 4, 4));
+      light.position.copy(center).addScaledVector(dir, Math.max(radius * 4, 4));
       light.target.position.copy(center);
       light.target.updateMatrixWorld();
-      const extent = Math.max(sphere.radius * 1.5, 1);
+      const extent = Math.max(radius * 1.5, 1);
       const shadowCam = light.shadow.camera as THREE.OrthographicCamera;
       shadowCam.left = -extent;
       shadowCam.right = extent;
       shadowCam.top = extent;
       shadowCam.bottom = -extent;
       shadowCam.near = 0.1;
-      shadowCam.far = Math.max(sphere.radius * 8, 8);
+      shadowCam.far = Math.max(radius * 8, 8);
       shadowCam.updateProjectionMatrix();
       light.shadow.bias = -0.0005;
-      light.shadow.normalBias = Math.max(sphere.radius * 0.01, 0.02);
+      light.shadow.normalBias = Math.max(radius * 0.01, 0.02);
       light.shadow.needsUpdate = true;
     }
 

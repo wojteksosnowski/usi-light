@@ -45,3 +45,80 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
     },
   ];
 }
+
+export interface FrameBounds {
+  center: { x: number; y: number; z: number };
+  radius: number;
+  groundY: number;
+}
+
+/**
+ * Computes rotation-invariant bounding parameters (center, radius, groundY)
+ * directly from the 3D vertices of the solids.
+ *
+ * The radius is computed as the maximum 3D Euclidean distance from the center,
+ * which is mathematically invariant under rigid 2D/3D rotations of the building.
+ */
+export function computeBuildingFrameBounds(solids: IsoSolid[]): FrameBounds | null {
+  if (solids.length === 0) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  let groundY = Infinity;
+  let topY = -Infinity;
+
+  const points3D: { x: number; y: number; z: number }[] = [];
+
+  for (const solid of solids) {
+    if (solid.hBottom < groundY) groundY = solid.hBottom;
+    if (solid.hTop > topY) topY = solid.hTop;
+
+    const addPolygonPoints = (pts: Point2D[]) => {
+      for (const p of pts) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minZ) minZ = p.y;
+        if (p.y > maxZ) maxZ = p.y;
+
+        points3D.push({ x: p.x, y: solid.hBottom, z: p.y });
+        points3D.push({ x: p.x, y: solid.hTop, z: p.y });
+      }
+    };
+
+    addPolygonPoints(solid.polygon);
+    for (const hole of solid.holes) {
+      addPolygonPoints(hole);
+    }
+  }
+
+  if (points3D.length === 0 || !Number.isFinite(groundY) || !Number.isFinite(topY)) {
+    return null;
+  }
+
+  // Centroid / center of the solid vertices in 3D:
+  // (In CAD 2D coordinates: X -> 3D X, Y -> 3D Z; height -> 3D Y)
+  const centerX = (minX + maxX) / 2;
+  const centerY = (groundY + topY) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+
+  let maxDistSq = 0;
+  for (const pt of points3D) {
+    const dx = pt.x - centerX;
+    const dy = pt.y - centerY;
+    const dz = pt.z - centerZ;
+    const distSq = dx * dx + dy * dy + dz * dz;
+    if (distSq > maxDistSq) {
+      maxDistSq = distSq;
+    }
+  }
+
+  const radius = Math.max(Math.sqrt(maxDistSq), 0.1);
+
+  return {
+    center: { x: centerX, y: centerY, z: centerZ },
+    radius,
+    groundY,
+  };
+}
