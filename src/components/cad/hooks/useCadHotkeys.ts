@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Point2D } from '../../../types/geometry';
-import { useCadToolStore, useSceneStore } from '../../../store';
+import { useCadToolStore, useSceneStore, useUiStore } from '../../../store';
 import type { DrawingMode } from '../../../store/useCadToolStore';
 import { isTypingTarget } from '../../../utils/keyboardUtils';
 
@@ -138,6 +138,11 @@ export function useCadHotkeys({
         return;
       }
 
+      if ((e.key === 'v' || e.key === 'V') && !isModifier && drawingMode === 'none') {
+        e.preventDefault();
+        useUiStore.getState().toggleViewMode2D();
+        return;
+      }
 
       if (e.key === 'Escape') {
         useCadToolStore.getState().setShowModifiersPanel(false);

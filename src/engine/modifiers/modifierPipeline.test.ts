@@ -1357,23 +1357,23 @@ describe('modifierPipeline', () => {
 
         const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
         const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
+        // Gate modifier has storiesCount: 2 (ground and 1st floor)
         expect(story0Wings.length).toBe(2);
-        expect(story1Wings.length).toBe(1);
+        expect(story1Wings.length).toBe(2);
         assertNoDegenerateGeometry(res);
       }
     );
 
     it.skipIf(!referenceFileExists('mod-test5.json'))(
-      'mod-test5.json: Budynek1B donut geometry is stable (stabilization anchor)',
+      'mod-test5.json: Budynek1B gate geometry is stable (stabilization anchor)',
       () => {
         const building = loadReferenceBuilding('mod-test5.json', 'Budynek1B');
         const res = applyBuildingModifiers(building);
 
         const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
         const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
-        expect(story0Wings.length).toBe(1);
-        expect(story1Wings.length).toBe(1);
-        expect(story0Wings[0].holes!.length).toBe(1);
+        expect(story0Wings.length).toBe(2);
+        expect(story1Wings.length).toBe(2);
         assertNoDegenerateGeometry(res);
       }
     );
@@ -1940,12 +1940,18 @@ describe('modifierPipeline', () => {
     it('maintains donut + courtyard hole terrace modifier across all rotation angles', () => {
       const bldg: BuildingLoop = {
         ...baseBuilding,
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 40, y: 0 },
+          { x: 40, y: 40 },
+          { x: 0, y: 40 },
+        ],
         modifiers: [
           {
             id: 'mod-donut-rot',
             type: 'donut',
             enabled: true,
-            offset: -4,
+            offset: -10,
             storiesCount: 0,
           },
           {
@@ -1992,10 +1998,87 @@ describe('modifierPipeline', () => {
         }
       }
     });
+
+    it('maintains identical relative geometry across all translation offsets in the scene', () => {
+      const modifiersToTest: Modifier[] = [
+        { id: 'm1', type: 'story_offset', enabled: true, distance: -2, storiesCount: -1 },
+        { id: 'm2', type: 'bay_window', enabled: true, width: 4, projection: 1.5, storiesCount: 0, edgeIndex: 1 },
+        { id: 'm3', type: 'terrace', enabled: true, depth: -4, storiesCount: -1, edgeIndex: 1 },
+        { id: 'm4', type: 'donut', enabled: true, offset: -10, storiesCount: 0 },
+        { id: 'm5', type: 'corner_cut', enabled: true, depth: 2, storiesCount: 0, mode: 'chamfer', scope: 'vertex', vertexIndex: 1 },
+        { id: 'm6', type: 'gate', enabled: true, width: 4, storiesCount: 1, positionRatio: 0.5, edgeIndex: 0 },
+        { id: 'm7', type: 'sztyca', enabled: true, storiesCount: 1, storeyHeight: 3, offset: -1 },
+        { id: 'm8', type: 'pila', enabled: true, teethCount: 2, storiesCount: 0, edgeIndex: 1, toothAngle: 90, alignment: 'prev_edge' },
+      ];
+
+      const testOffsets = [
+        { dx: 10, dy: 20 },
+        { dx: -50, dy: 75 },
+        { dx: 123.456, dy: 789.012 },
+        { dx: 5000, dy: -3000 },
+      ];
+
+      for (const mod of modifiersToTest) {
+        const base: BuildingLoop = {
+          ...baseBuilding,
+          vertices: [
+            { x: 0, y: 0 },
+            { x: 40, y: 0 },
+            { x: 40, y: 30 },
+            { x: 0, y: 30 },
+          ],
+          modifiers: [mod],
+        };
+
+        const resOrigin = applyBuildingModifiers(base);
+
+        for (const { dx, dy } of testOffsets) {
+          const movedBldg: BuildingLoop = {
+            ...base,
+            vertices: base.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy })),
+          };
+
+          const resMoved = applyBuildingModifiers(movedBldg);
+
+          expect(resMoved.storyPolygons.length).toBe(resOrigin.storyPolygons.length);
+
+          for (let s = 0; s < resOrigin.storyPolygons.length; s++) {
+            const origSp = resOrigin.storyPolygons[s];
+            const movedSp = resMoved.storyPolygons[s];
+
+            expect(movedSp.polygon.length).toBe(origSp.polygon.length);
+
+            // Sprawdź czy każdy wierzchołek po odjęciu (dx, dy) zgadza się z origSp
+            // (z uwzględnieniem ewentualnego cyklicznego przesunięcia indeksu)
+            const n = origSp.polygon.length;
+            let bestOffset = -1;
+            for (let shift = 0; shift < n; shift++) {
+              let allMatch = true;
+              for (let i = 0; i < n; i++) {
+                const pMoved = movedSp.polygon[(i + shift) % n];
+                const pOrig = origSp.polygon[i];
+                if (
+                  Math.abs(pMoved.x - dx - pOrig.x) > 0.05 ||
+                  Math.abs(pMoved.y - dy - pOrig.y) > 0.05
+                ) {
+                  allMatch = false;
+                  break;
+                }
+              }
+              if (allMatch) {
+                bestOffset = shift;
+                break;
+              }
+            }
+
+            expect(
+              bestOffset !== -1,
+              `Modifier ${mod.type} failed translation test at offset (${dx}, ${dy}) on story ${s}`
+            ).toBe(true);
+          }
+        }
+      }
+    });
   });
 });
-
-
-
-
 

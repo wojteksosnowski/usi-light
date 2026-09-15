@@ -308,6 +308,57 @@ describe('useSceneStore', () => {
       useSceneStore.temporal.getState().undo();
       expect(useSceneStore.getState().buildings[0].vertices).toEqual(initialVertices);
     });
+
+    it('moveBuilding and rotateBuilding directly transform modifier geometry buffer', () => {
+      const bldgId = 'bldg-mod-buffer';
+      const initialBuilding = {
+        ...createBuildingFromVertices(
+          [
+            { x: 0, y: 0 },
+            { x: 20, y: 0 },
+            { x: 20, y: 20 },
+            { x: 0, y: 20 },
+          ],
+          'Bldg Mod Buffer',
+          15
+        ),
+        id: bldgId,
+        modifiers: [
+          {
+            id: 'm-terrace',
+            type: 'terrace' as const,
+            enabled: true,
+            depth: -4,
+            storiesCount: -1,
+            edgeIndex: 1,
+          },
+        ],
+      };
+
+      useSceneStore.getState().setBuildings([initialBuilding]);
+      useSceneStore.getState().selectBuilding(bldgId);
+      useSceneStore.getState().updateSelectedBuilding({}); // triggers applyBuildingModifiers
+      const withMods = useSceneStore.getState().buildings.find((b) => b.id === bldgId)!;
+      expect(withMods.storyPolygons).toBeDefined();
+      expect(withMods.storyPolygons!.length).toBe(5);
+
+      const topStoryBefore = withMods.storyPolygons![4].polygon.map((p) => ({ ...p }));
+
+      // 1. Move building by (50, 100)
+      useSceneStore.getState().moveBuilding(bldgId, 50, 100);
+      const moved = useSceneStore.getState().buildings.find((b) => b.id === bldgId)!;
+      expect(moved.storyPolygons![4].polygon[0].x).toBeCloseTo(topStoryBefore[0].x + 50, 2);
+      expect(moved.storyPolygons![4].polygon[0].y).toBeCloseTo(topStoryBefore[0].y + 100, 2);
+
+      // 2. Rotate building by 90 degrees around (0,0)
+      useSceneStore.getState().rotateBuilding(bldgId, { x: 0, y: 0 }, Math.PI / 2);
+      const rotated = useSceneStore.getState().buildings.find((b) => b.id === bldgId)!;
+      const movedPt = moved.storyPolygons![4].polygon[0];
+      const expectedX = -movedPt.y;
+      const expectedY = movedPt.x;
+      expect(rotated.storyPolygons![4].polygon[0].x).toBeCloseTo(expectedX, 2);
+      expect(rotated.storyPolygons![4].polygon[0].y).toBeCloseTo(expectedY, 2);
+    });
   });
 });
 

@@ -4,6 +4,8 @@ export type ActiveModalType = 'share' | 'pricing' | 'license' | 'paymentSuccess'
 
 export type SidebarGroupType = 'project' | 'analyses' | 'layers' | 'tools';
 
+export type ViewportMode2D = 'cad' | 'masterplan_white';
+
 interface UiState {
   isSidebarOpen: boolean;
   openSidebarGroup: SidebarGroupType | null;
@@ -17,6 +19,7 @@ interface UiState {
   isConfirmDeleteModalOpen: boolean;
   paymentSuccessSessionId: string | null;
   viewportScale: number;
+  viewMode2D: ViewportMode2D;
   /** Id modyfikatora aktualnie rozwiniętego (akordeon) w panelu Modyfikatorów - podgląd 3D
    * podświetla krawędź odpowiadającą temu modyfikatorowi, nie pierwszemu z listy. */
   expandedModifierId: string | null;
@@ -34,6 +37,8 @@ interface UiState {
   setPaymentSuccessModalOpen: (open: boolean) => void;
   setPaymentSuccessSessionId: (sessionId: string | null) => void;
   setViewportScale: (scale: number) => void;
+  setViewMode2D: (mode: ViewportMode2D) => void;
+  toggleViewMode2D: () => void;
   setExpandedModifierId: (id: string | null) => void;
 }
 
@@ -50,7 +55,14 @@ export const useUiStore = create<UiState>((set) => ({
   isConfirmDeleteModalOpen: false,
   paymentSuccessSessionId: null,
   viewportScale: 14,
+  viewMode2D: 'cad',
   expandedModifierId: null,
+
+  setViewMode2D: (mode) => set({ viewMode2D: mode }),
+  toggleViewMode2D: () =>
+    set((state) => ({
+      viewMode2D: state.viewMode2D === 'cad' ? 'masterplan_white' : 'cad',
+    })),
 
   setExpandedModifierId: (id) => set({ expandedModifierId: id }),
 

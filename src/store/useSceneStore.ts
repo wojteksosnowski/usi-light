@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { temporal } from 'zundo';
 import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference, DEFAULT_SWEEP_WIDTH } from '../types/geometry';
 import { createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
-import { rebuildBuildingSegments } from '../utils/segmentStatistics';
+import { computeLineEquation, rebuildBuildingSegments } from '../utils/segmentStatistics';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 
@@ -119,6 +119,110 @@ function deriveStoreysCount(height: number, firstFloorHeight: number, typicalFlo
   return height > firstFloorHeight
     ? 1 + Math.max(1, Math.round((height - firstFloorHeight) / typicalFloorHeight))
     : 1;
+}
+
+/** Translates a building's vertices, sweep path, story/zone polygons, and facade segments by (dx, dy). */
+function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: number): BuildingLoop {
+  const translate = (p: Point2D) => ({ x: p.x + dx, y: p.y + dy });
+
+  const newVertices = bldg.vertices.map(translate);
+  const newSweepPath = bldg.sweepPath ? bldg.sweepPath.map(translate) : undefined;
+
+  const newStoryPolygons = bldg.storyPolygons
+    ? bldg.storyPolygons.map((sf) => ({
+        ...sf,
+        polygon: sf.polygon.map(translate),
+        holes: sf.holes?.map((hole) => hole.map(translate)),
+      }))
+    : undefined;
+
+  const newZonePolygons = bldg.zonePolygons
+    ? bldg.zonePolygons.map((zf) => ({
+        ...zf,
+        polygon: zf.polygon.map(translate),
+        holes: zf.holes?.map((hole) => hole.map(translate)),
+      }))
+    : undefined;
+
+  const newSegments = bldg.segments.map((s) => {
+    const p1 = translate(s.p1);
+    const p2 = translate(s.p2);
+    return { ...s, p1, p2, lineEquation: computeLineEquation(p1, p2, s.normal) };
+  });
+
+  const currentTransform = bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 };
+
+  return {
+    ...bldg,
+    vertices: newVertices,
+    sweepPath: newSweepPath,
+    storyPolygons: newStoryPolygons,
+    zonePolygons: newZonePolygons,
+    segments: newSegments,
+    transform: {
+      ...currentTransform,
+      tx: (currentTransform.tx || 0) + dx,
+      ty: (currentTransform.ty || 0) + dy,
+    },
+  };
+}
+
+/** Rotates a building's vertices, sweep path, story/zone polygons, and facade segments around a pivot. */
+function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRad: number): BuildingLoop {
+  const deltaDeg = (deltaAngleRad * 180) / Math.PI;
+  const rotate = (v: Point2D) => {
+    const r = rotatePointAroundPivot(v, pivot, deltaAngleRad);
+    return { x: pivot.x + r.x, y: pivot.y + r.y };
+  };
+  const rotateNormal = (n: Point2D) => rotatePointAroundPivot(n, { x: 0, y: 0 }, deltaAngleRad);
+
+  const newVertices = bldg.vertices.map(rotate);
+  const newSweepPath = bldg.sweepPath ? bldg.sweepPath.map(rotate) : undefined;
+
+  const newStoryPolygons = bldg.storyPolygons
+    ? bldg.storyPolygons.map((sf) => ({
+        ...sf,
+        polygon: sf.polygon.map(rotate),
+        holes: sf.holes?.map((hole) => hole.map(rotate)),
+      }))
+    : undefined;
+
+  const newZonePolygons = bldg.zonePolygons
+    ? bldg.zonePolygons.map((zf) => ({
+        ...zf,
+        polygon: zf.polygon.map(rotate),
+        holes: zf.holes?.map((hole) => hole.map(rotate)),
+      }))
+    : undefined;
+
+  const newSegments = bldg.segments.map((s) => {
+    const p1 = rotate(s.p1);
+    const p2 = rotate(s.p2);
+    const normal = rotateNormal(s.normal);
+    return {
+      ...s,
+      p1,
+      p2,
+      normal,
+      angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
+      lineEquation: computeLineEquation(p1, p2, normal),
+    };
+  });
+
+  const updatedTransform = {
+    ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
+    rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
+  };
+
+  return {
+    ...bldg,
+    vertices: newVertices,
+    sweepPath: newSweepPath,
+    transform: updatedTransform,
+    storyPolygons: newStoryPolygons,
+    zonePolygons: newZonePolygons,
+    segments: newSegments,
+  };
 }
 
 export const useSceneStore = create<SceneState>()(
@@ -439,43 +543,7 @@ export const useSceneStore = create<SceneState>()(
         buildings: state.buildings.map((bldg) => {
           const shouldMove = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
           if (!shouldMove) return bldg;
-
-          const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
-          const newSweepPath = bldg.sweepPath
-            ? bldg.sweepPath.map((p) => ({ x: p.x + dx, y: p.y + dy }))
-            : undefined;
-          const newStoryPolygons = bldg.storyPolygons
-            ? bldg.storyPolygons.map((sf) => ({
-                ...sf,
-                polygon: sf.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })),
-              }))
-            : undefined;
-
-          const withMoved = {
-            ...bldg,
-            vertices: newVertices,
-            sweepPath: newSweepPath,
-            storyPolygons: newStoryPolygons,
-          };
-
-          if (withMoved.modifiers && withMoved.modifiers.length > 0) {
-            const modRes = applyBuildingModifiers(withMoved);
-            withMoved.storyPolygons = modRes.storyPolygons;
-            withMoved.zonePolygons = modRes.zonePolygons;
-            withMoved.segments = modRes.segments;
-            return withMoved;
-          }
-
-          const newSegments = bldg.segments.map((s) => ({
-            ...s,
-            p1: { x: s.p1.x + dx, y: s.p1.y + dy },
-            p2: { x: s.p2.x + dx, y: s.p2.y + dy },
-          }));
-
-          return {
-            ...withMoved,
-            segments: newSegments,
-          };
+          return translateBuildingGeometry(bldg, dx, dy);
         }),
       };
     });
@@ -496,43 +564,7 @@ export const useSceneStore = create<SceneState>()(
         buildings: state.buildings.map((bldg) => {
           const shouldMove = idsSet.has(bldg.id) || (!!bldg.groupId && targetGroupIds.has(bldg.groupId));
           if (!shouldMove) return bldg;
-
-          const newVertices = bldg.vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
-          const newSweepPath = bldg.sweepPath
-            ? bldg.sweepPath.map((p) => ({ x: p.x + dx, y: p.y + dy }))
-            : undefined;
-          const newStoryPolygons = bldg.storyPolygons
-            ? bldg.storyPolygons.map((sf) => ({
-                ...sf,
-                polygon: sf.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })),
-              }))
-            : undefined;
-
-          const withMoved = {
-            ...bldg,
-            vertices: newVertices,
-            sweepPath: newSweepPath,
-            storyPolygons: newStoryPolygons,
-          };
-
-          if (withMoved.modifiers && withMoved.modifiers.length > 0) {
-            const modRes = applyBuildingModifiers(withMoved);
-            withMoved.storyPolygons = modRes.storyPolygons;
-            withMoved.zonePolygons = modRes.zonePolygons;
-            withMoved.segments = modRes.segments;
-            return withMoved;
-          }
-
-          const newSegments = bldg.segments.map((s) => ({
-            ...s,
-            p1: { x: s.p1.x + dx, y: s.p1.y + dy },
-            p2: { x: s.p2.x + dx, y: s.p2.y + dy },
-          }));
-
-          return {
-            ...withMoved,
-            segments: newSegments,
-          };
+          return translateBuildingGeometry(bldg, dx, dy);
         }),
       };
     });
@@ -582,12 +614,6 @@ export const useSceneStore = create<SceneState>()(
   },
 
   rotateBuilding: (id, pivot, deltaAngleRad) => {
-    const deltaDeg = (deltaAngleRad * 180) / Math.PI;
-    const rotate = (v: Point2D) => {
-      const r = rotatePointAroundPivot(v, pivot, deltaAngleRad);
-      return { x: pivot.x + r.x, y: pivot.y + r.y };
-    };
-
     set((state) => {
       const targetBldg = state.buildings.find((b) => b.id === id);
       const targetGroupId = targetBldg?.groupId;
@@ -596,26 +622,7 @@ export const useSceneStore = create<SceneState>()(
         buildings: state.buildings.map((bldg) => {
           const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
           if (!shouldRotate) return bldg;
-
-          const newVertices = bldg.vertices.map(rotate);
-
-          const newSweepPath = bldg.sweepPath ? bldg.sweepPath.map(rotate) : undefined;
-
-          const updatedTransform = {
-            ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),
-            rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
-          };
-
-          const rebuilt = rebuildBuildingSegments(bldg, newVertices);
-          rebuilt.transform = updatedTransform;
-          rebuilt.sweepPath = newSweepPath;
-          if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
-            const modRes = applyBuildingModifiers(rebuilt);
-            rebuilt.storyPolygons = modRes.storyPolygons;
-            rebuilt.zonePolygons = modRes.zonePolygons;
-            rebuilt.segments = modRes.segments;
-          }
-          return rebuilt;
+          return rotateBuildingGeometry(bldg, pivot, deltaAngleRad);
         }),
       };
     });

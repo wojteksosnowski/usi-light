@@ -220,7 +220,12 @@ export function computeGateSpan(
   if (candidates.length === 0) return null;
 
   // 4. FIRST HIT: Wybierz krawędź o NAJMNIEJSZEJ odległości (najbliższą wzdłuż promienia)
-  candidates.sort((a, b) => a.distance - b.distance);
+  // Przy zbliżonych odległościach (np. symetryczne lub przeciwległe ściany) stosujemy deterministyczny tie-breaker (globalIndex)
+  candidates.sort((a, b) => {
+    const diff = a.distance - b.distance;
+    if (Math.abs(diff) > 1e-4) return diff;
+    return a.segment.globalIndex - b.segment.globalIndex;
+  });
   const firstHit = candidates[0];
 
   return {
@@ -228,17 +233,17 @@ export function computeGateSpan(
     oppEdgeIndex: firstHit.segment.globalIndex,
     isHitOnHole: firstHit.segment.isHole,
     holeIndex: firstHit.segment.holeIndex,
-    edgeLength: Math.round(edgeLen * 100) / 100,
-    tMin: Math.round(firstHit.tMin * 100) / 100,
-    tMax: Math.round(firstHit.tMax * 100) / 100,
-    maxWidth: Math.round(firstHit.maxWidth * 100) / 100,
+    edgeLength: edgeLen,
+    tMin: firstHit.tMin,
+    tMax: firstHit.tMax,
+    maxWidth: firstHit.maxWidth,
     p1,
     p2,
     oppP1: firstHit.segment.q1,
     oppP2: firstHit.segment.q2,
     inwardNormal: inNorm,
     unitTangent,
-    distanceToHit: Math.round(firstHit.distance * 100) / 100,
+    distanceToHit: firstHit.distance,
   };
 }
 
@@ -254,7 +259,8 @@ export function generateGateCorridor(
   edgeEligible?: boolean[]
 ): GateCorridorPoints | null {
   const span = computeGateSpan(vertices, holes, edgeIndex, edgeEligible);
-  if (!span || span.maxWidth <= 1e-3 || width <= 1e-3) return null;
+  if (!span) return null;
+  if (span.maxWidth <= 1e-3 || width <= 1e-3) return null;
 
   const effWidth = Math.min(width, span.maxWidth);
   const availableMargin = Math.max(0, span.maxWidth - effWidth);

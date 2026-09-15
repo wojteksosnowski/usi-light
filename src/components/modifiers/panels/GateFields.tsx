@@ -29,6 +29,7 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
   }, [context.building, modifier.edgeIndex]);
 
   const maxAllowedWidth = spanResult ? spanResult.maxWidth : null;
+  const maxAllowedWidthDisplay = maxAllowedWidth !== null ? Math.round(maxAllowedWidth * 100) / 100 : null;
 
   // Synchronizacja na żywo gdy włączony jest tryb auto
   React.useEffect(() => {
@@ -78,7 +79,7 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
                   accentVar: 'var(--accent-emerald)',
                   title: isAuto
                     ? 'Tryb Auto aktywny (dopasowany do wierzchołków). Kliknij aby przejść w tryb ręczny.'
-                    : `Włącz pełną dozwoloną szerokość (${maxAllowedWidth}m)`,
+                    : `Włącz pełną dozwoloną szerokość (${maxAllowedWidthDisplay}m)`,
                 }
               : null
           }
@@ -86,7 +87,7 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
             isAuto
               ? `Pełna szerokość: ${modifier.width}m`
               : maxAllowedWidth !== null
-              ? `Maks. dopuszczalna: ${maxAllowedWidth}m`
+              ? `Maks. dopuszczalna: ${maxAllowedWidthDisplay}m`
               : undefined
           }
           hintColor="var(--accent-emerald)"

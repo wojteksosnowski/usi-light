@@ -21,6 +21,8 @@ import { APP_CONFIG } from '../config/appConfig';
 import { useWfsStore, MpzpZoneFeature } from '../modules/wfs-import/store/useWfsStore';
 import { prefetchActiveGeoLayersInRadius } from '../modules/wfs-import/registerGeoLayers';
 import { useSolarAnalysisStore } from '../store/useSolarAnalysisStore';
+import { useUiStore } from '../store/useUiStore';
+import { MasterplanRenderPipeline } from './cad/masterplan/MasterplanRenderPipeline';
 
 export { isBuildingLocked, getBuildingTopElevation };
 
@@ -90,12 +92,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const satelliteProvider = useSolarAnalysisStore((s) => s.satelliteProvider);
   const tileRafIdRef = useRef<number | null>(null);
 
+  const viewMode2D = useUiStore((s) => s.viewMode2D);
+
   const scheduleTileRedraw = useCallback(() => {
     if (tileRafIdRef.current !== null) return;
     tileRafIdRef.current = requestAnimationFrame(() => {
       tileRafIdRef.current = null;
       if (latestRenderFrameContextRef.current) {
-        CadRenderPipeline.renderMain(latestRenderFrameContextRef.current);
+        if (useUiStore.getState().viewMode2D === 'masterplan_white') {
+          MasterplanRenderPipeline.render(latestRenderFrameContextRef.current);
+        } else {
+          CadRenderPipeline.renderMain(latestRenderFrameContextRef.current);
+        }
       }
     });
   }, []);
@@ -497,8 +505,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     };
 
     latestRenderFrameContextRef.current = frameContext;
-    CadRenderPipeline.renderMain(frameContext);
+    if (viewMode2D === 'masterplan_white') {
+      MasterplanRenderPipeline.render(frameContext);
+    } else {
+      CadRenderPipeline.renderMain(frameContext);
+    }
   }, [
+    viewMode2D,
     buildings,
     selectedBuildingId,
     selectedBuildingIds,

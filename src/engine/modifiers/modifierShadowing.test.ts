@@ -4,10 +4,12 @@ import path from 'path';
 import { defaultSolarAnalysisEngine } from '../solar';
 import { analyzeShadowingAtPoint, prefilterShadowingObstacles } from '../analysisEngine';
 
+const referencePath = path.resolve(__dirname, '../../../reference/test-modyfikatorow-3.json');
+const referenceExists = fs.existsSync(referencePath);
+
 describe('Modifier Scene Facade Point Consistency', () => {
-  it('ensures points on stepped/terraced buildings evaluate shadowing § 12 correctly', () => {
-    const jsonPath = path.resolve(__dirname, '../../../reference/test-modyfikatorow-3.json');
-    const scene = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  it.skipIf(!referenceExists)('ensures points on stepped/terraced buildings evaluate shadowing § 12 correctly', () => {
+    const scene = JSON.parse(fs.readFileSync(referencePath, 'utf8'));
     const { buildings, pinnedPoints, settings, sunlightMethod } = scene;
 
     const batchOutput = defaultSolarAnalysisEngine.runFullAnalysis(

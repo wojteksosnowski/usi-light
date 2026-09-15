@@ -68,6 +68,8 @@ export const CadTopHud: React.FC = () => {
   const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
+  const viewMode2D = useUiStore((s) => s.viewMode2D);
+  const setViewMode2D = useUiStore((s) => s.setViewMode2D);
 
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
   const settings = useSolarAnalysisStore((s) => s.settings);
@@ -151,6 +153,65 @@ export const CadTopHud: React.FC = () => {
       >
         <MapPin size={13} color="var(--accent-amber)" />
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedCity}</span>
+      </div>
+
+      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
+
+      {/* Segmented Control 2D Viewport Mode: CAD / Plan [V] */}
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '2px',
+          borderRadius: '7px',
+          backgroundColor: 'var(--bg-card)',
+          border: '1px solid var(--border-light)',
+          flexShrink: 0,
+          gap: '2px',
+        }}
+      >
+        <button
+          onClick={() => setViewMode2D('cad')}
+          title="Widok roboczy CAD [V]"
+          style={{
+            height: '24px',
+            padding: '0 8px',
+            borderRadius: '5px',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            backgroundColor: viewMode2D === 'cad' ? 'var(--status-blue-bg)' : 'transparent',
+            color: viewMode2D === 'cad' ? 'var(--status-blue-text)' : 'var(--text-secondary)',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <span>📐 CAD</span>
+        </button>
+        <button
+          onClick={() => setViewMode2D('masterplan_white')}
+          title="Widok prezentacyjny 2D: Masterplan White (tusz na białym arkuszu, cienie ΔH, AO) [V]"
+          style={{
+            height: '24px',
+            padding: '0 8px',
+            borderRadius: '5px',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            backgroundColor: viewMode2D === 'masterplan_white' ? 'var(--status-indigo-bg)' : 'transparent',
+            color: viewMode2D === 'masterplan_white' ? 'var(--status-indigo-text)' : 'var(--text-secondary)',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <span>📄 Plan</span>
+        </button>
       </div>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
