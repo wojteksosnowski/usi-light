@@ -520,6 +520,43 @@ export function differencePolygonLoops(
   }
 }
 
+/**
+ * Przecięcie dwóch zestawów poligonów (A ∩ B) za pomocą polygonClipping.intersection.
+ * Używana m.in. do budowy umbry cienia z dwóch wariantów kątowych (masterplanGeometry.ts).
+ */
+export function intersectionPolygonLoops(loopsA: Point2D[][], loopsB: Point2D[][]): Point2D[][] {
+  if (loopsA.length === 0 || loopsB.length === 0) return [];
+
+  const toClippingRings = (loops: Point2D[][]): polygonClipping.Polygon[] => {
+    const list: polygonClipping.Polygon[] = [];
+    for (const poly of loops) {
+      const ring = toNormalizedClippingRing(poly, 1000);
+      if (ring) {
+        list.push([ring]);
+      }
+    }
+    return list;
+  };
+
+  const cA = toClippingRings(loopsA);
+  const cB = toClippingRings(loopsB);
+  if (cA.length === 0 || cB.length === 0) return [];
+
+  try {
+    const result = polygonClipping.intersection(cA as any, cB as any);
+    return clippingResultToLoops(result);
+  } catch {
+    try {
+      const uA = batchUnionRings(cA, 24);
+      const uB = batchUnionRings(cB, 24);
+      const result = polygonClipping.intersection(uA, uB);
+      return clippingResultToLoops(result);
+    } catch {
+      return [];
+    }
+  }
+}
+
 export interface BooleanUnionResult {
   success: boolean;
   building?: BuildingLoop;

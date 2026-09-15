@@ -1,7 +1,13 @@
 import { Point2D, BuildingLoop } from '../../../types/geometry';
 import { calculateSolarPosition } from '../../../utils/solar';
 import polygonClipping from 'polygon-clipping';
-import { isPolygonCCW, isPolygonConvex, computeConvexHull } from '../../../utils/math2d/polygons';
+import {
+  isPolygonCCW,
+  isPolygonConvex,
+  computeConvexHull,
+  unionPolygonLoops,
+  intersectionPolygonLoops,
+} from '../../../utils/math2d/polygons';
 
 export interface SolarAngles {
   azimuthDeg: number;
@@ -259,6 +265,54 @@ export function buildShadowSweepPolygon(
   }
 
   return computeConvexHull(allPts);
+}
+
+export interface SoftShadowResult {
+  umbra: Point2D[][];
+  penumbraOuter: Point2D[][];
+}
+
+/**
+ * Wariant "soft" cienia kondygnacji: umbra = przecięcie dwóch hard-shadowów liczonych pod
+ * azymutem odchylonym o ±promień kątowy tarczy słonecznej, penumbraOuter = ich unia.
+ * Fizycznie poprawne: przy hBottom≈0 (styk ściany z gruntem) offset dla obu azymutów wynosi {0,0}
+ * niezależnie od kąta, więc penumbra ma tam szerokość zero z definicji geometrii — bez potrzeby
+ * śledzenia, który wierzchołek scalonego poligonu pochodzi z podstawy a który z dachu.
+ * Koszt: 2× computeStoryShadowPolygon (liniowe, bez pierwiastków) + 1 intersection + 1 union.
+ */
+export function computeSoftStoryShadowPolygon(
+  polygon: Point2D[],
+  solarAngles: SolarAngles,
+  hTop: number,
+  hBottom: number = 0,
+  sunAngularRadiusDeg: number = 0.267
+): SoftShadowResult {
+  const anglesMin = perturbAzimuth(solarAngles, -sunAngularRadiusDeg);
+  const anglesMax = perturbAzimuth(solarAngles, sunAngularRadiusDeg);
+
+  const polyMin = computeStoryShadowPolygon(polygon, anglesMin, hTop, hBottom);
+  const polyMax = computeStoryShadowPolygon(polygon, anglesMax, hTop, hBottom);
+
+  if (polyMin.length < 3 && polyMax.length < 3) return { umbra: [], penumbraOuter: [] };
+  if (polyMin.length < 3 || polyMax.length < 3) {
+    const single = polyMin.length >= 3 ? [polyMin] : [polyMax];
+    return { umbra: single, penumbraOuter: single };
+  }
+
+  const umbra = intersectionPolygonLoops([polyMin], [polyMax]);
+  const penumbraOuter = unionPolygonLoops([polyMin, polyMax]);
+  return { umbra, penumbraOuter };
+}
+
+/** Odchyla azymut słońca o `deltaDeg`, przeliczając `sunVector` (elewacja zostaje bez zmian). */
+function perturbAzimuth(solarAngles: SolarAngles, deltaDeg: number): SolarAngles {
+  const azimuthDeg = solarAngles.azimuthDeg + deltaDeg;
+  const azRad = (azimuthDeg * Math.PI) / 180;
+  return {
+    azimuthDeg,
+    elevationDeg: solarAngles.elevationDeg,
+    sunVector: { x: -Math.sin(azRad), y: -Math.cos(azRad) },
+  };
 }
 
 export { computeConvexHull };

@@ -2,6 +2,7 @@ export { ProjectNameCard } from './ProjectNameCard';
 export { ProjectLocationCard } from './ProjectLocationCard';
 export { ProjectCadCard } from './ProjectCadCard';
 export { ProjectAnalysisTogglesCard } from './ProjectAnalysisTogglesCard';
+export { MasterplanShadowAlgorithmCard } from './MasterplanShadowAlgorithmCard';
 export { ProjectOverlaysCard } from './ProjectOverlaysCard';
 export { ProjectDevToolsCard } from './ProjectDevToolsCard';
 export { SimpleLayerToggle } from './SimpleLayerToggle';

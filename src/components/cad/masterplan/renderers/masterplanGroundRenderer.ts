@@ -2,13 +2,11 @@ import { CadRenderFrameContext } from '@/components/cad/pipeline/types';
 import { useWfsStore } from '@/modules/wfs-import/store/useWfsStore';
 import { Point2D, BuildingLoop } from '@/types/geometry';
 import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
-import { unionPolygonLoops } from '@/utils/math2d/polygons';
 import {
-  getMasterplanSolarAngles,
-  computeStoryShadowPolygon,
   extractBuildingStoryTiers,
   MasterplanStoryTier,
 } from '../masterplanGeometry';
+import { getCachedGroundShadowSamples, drawMasterplanShadowResult } from '../masterplanShadowCache';
 
 /**
  * Paleta barwna dla podkładu „Masterplan White”
@@ -48,7 +46,8 @@ export const MASTERPLAN_COLORS = {
  */
 export function renderMasterplanGround(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds } = context;
-  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate } = renderContext;
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, isInteracting } = renderContext;
+  const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
 
   const bldgs = visibleBuildings || buildings;
 
@@ -268,35 +267,20 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     allTiers.push(...extractBuildingStoryTiers(bldg));
   }
 
-  for (const sample of MASTERPLAN_COLORS.shadowSamples) {
-    const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin);
-    const samplePolys: Point2D[][] = [];
+  const shadowResult = getCachedGroundShadowSamples(
+    shadowAlgorithm,
+    allTiers,
+    MASTERPLAN_COLORS.shadowSamples,
+    latitude,
+    longitude,
+    equinoxDate,
+    hourFraction,
+    isInteracting
+  );
 
-    for (const tier of allTiers) {
-      if (!tier.polygon || tier.polygon.length < 3 || tier.hTop <= 0) continue;
-      const poly = computeStoryShadowPolygon(tier.polygon, angles, tier.hTop, tier.hBottom);
-      if (poly.length >= 3) {
-        samplePolys.push(poly);
-      }
-    }
-
-    if (samplePolys.length > 0) {
-      const mergedPolys = unionPolygonLoops(samplePolys);
-      ctx.save();
-      ctx.fillStyle = sample.color;
-      for (const poly of mergedPolys) {
-        if (poly.length < 3) continue;
-        ctx.beginPath();
-        poly.forEach((p: Point2D, idx: number) => {
-          if (idx === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
-        });
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-  }
+  ctx.save();
+  drawMasterplanShadowResult(ctx, shadowResult);
+  ctx.restore();
 
   ctx.restore();
 }

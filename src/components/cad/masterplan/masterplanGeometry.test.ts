@@ -6,8 +6,10 @@ import {
   computeConvexHull,
   extractBuildingStoryTiers,
   computeStoryShadowPolygon,
+  computeSoftStoryShadowPolygon,
 } from './masterplanGeometry';
 import { BuildingLoop } from '../../../types/geometry';
+import { isPointInPolygon } from '../../../utils/math2d/polygons';
 
 describe('masterplanGeometry', () => {
   it('calculates valid solar angles for equinox at noon', () => {
@@ -130,6 +132,67 @@ describe('masterplanGeometry', () => {
     // Self-shading deltaH calculation (e.g. higher floor 6m above lower floor)
     const upperStoryShadow = computeStoryShadowPolygon(rect, angles, 6, 0);
     expect(upperStoryShadow.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('computes soft shadow with a penumbra envelope larger than the umbra', () => {
+    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
+    const rect = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    const { umbra, penumbraOuter } = computeSoftStoryShadowPolygon(rect, angles, 10, 0);
+    expect(umbra.length).toBeGreaterThanOrEqual(1);
+    expect(penumbraOuter.length).toBeGreaterThanOrEqual(1);
+
+    const area = (poly: { x: number; y: number }[]) => {
+      let a = 0;
+      for (let i = 0; i < poly.length; i++) {
+        const p1 = poly[i];
+        const p2 = poly[(i + 1) % poly.length];
+        a += p1.x * p2.y - p2.x * p1.y;
+      }
+      return Math.abs(a) / 2;
+    };
+    const totalArea = (polys: { x: number; y: number }[][]) => polys.reduce((sum, p) => sum + area(p), 0);
+
+    expect(totalArea(penumbraOuter)).toBeGreaterThan(totalArea(umbra));
+  });
+
+  it('returns empty result for degenerate soft shadow input', () => {
+    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
+    const result = computeSoftStoryShadowPolygon([], angles, 10, 0);
+    expect(result.umbra).toEqual([]);
+    expect(result.penumbraOuter).toEqual([]);
+  });
+
+  it('has zero penumbra spread at the contact footprint with the ground plane (hBottom=0)', () => {
+    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
+    const rect = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    // Przy hBottom=0 offset podstawy wynosi {0,0} niezależnie od azymutu (perturbacji ±kąta
+    // tarczy słonecznej), więc wierzchołki footprintu budynku muszą leżeć w obu (umbra i
+    // penumbraOuter) — zerowa szerokość penumbry w punkcie styku ze ziemią, bez dziury między nimi.
+    const { umbra, penumbraOuter } = computeSoftStoryShadowPolygon(rect, angles, 10, 0);
+    // Punkty tuż przy narożnikach footprintu (nie dokładnie na granicy, by uniknąć niejednoznaczności
+    // testu punkt-na-krawędzi) muszą leżeć w umbrze — brak przerwy/rozjazdu przy styku z gruntem.
+    const insetCorners = [
+      { x: 0.1, y: 0.1 },
+      { x: 9.9, y: 0.1 },
+      { x: 9.9, y: 9.9 },
+      { x: 0.1, y: 9.9 },
+    ];
+    for (const v of insetCorners) {
+      const inUmbra = umbra.some((poly) => isPointInPolygon(v, poly));
+      expect(inUmbra).toBe(true);
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ProjectAnalysisTogglesCard } from './project';
+import { ProjectAnalysisTogglesCard, MasterplanShadowAlgorithmCard } from './project';
 
 /**
  * Kontener widoku grupy Analizy w panelu bocznym.
@@ -10,6 +10,7 @@ export const AnalysesGroup: React.FC = () => {
   return (
     <div className="sidebar-group-content">
       <ProjectAnalysisTogglesCard />
+      <MasterplanShadowAlgorithmCard />
     </div>
   );
 };

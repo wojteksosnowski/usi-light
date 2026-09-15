@@ -1,13 +1,14 @@
 import { CadRenderFrameContext } from '@/components/cad/pipeline/types';
 import { BuildingLoop, Point2D } from '@/types/geometry';
-import { unionPolygonLoops } from '@/utils/math2d/polygons';
 import { MASTERPLAN_COLORS } from './masterplanGroundRenderer';
 import {
-  getMasterplanSolarAngles,
-  computeStoryShadowPolygon,
   extractBuildingStoryTiers,
+  getMasterplanSolarAngles,
+  computeShadowOffsetVector,
   MasterplanStoryTier,
 } from '../masterplanGeometry';
+import { tierFootprintBounds, extendBoundsByOffset, boundsOverlap, Bounds } from '../masterplanSpatial';
+import { getCachedRoofShadowSamples, drawMasterplanShadowResult } from '../masterplanShadowCache';
 
 /**
  * Renderuje dachy budynków, rzutowanie cieni ΔH od wyższych kondygnacji/budynków (zacienianie wzajemne i własne)
@@ -15,7 +16,8 @@ import {
  */
 export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds, hoveredBuildingId } = context;
-  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate } = renderContext;
+  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, isInteracting } = renderContext;
+  const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
 
   const bldgs = (visibleBuildings || buildings).filter(
     (b: BuildingLoop) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
@@ -33,6 +35,8 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
 
   // 2. Sortowanie poziomów dachowych po wysokości Htop rosnąco (najniższe dachy najpierw, najwyższe na końcu)
   const sortedTiers = [...allTiers].sort((a, b) => a.hTop - b.hTop);
+  const sortedTierBounds = sortedTiers.map(tierFootprintBounds);
+  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
 
   ctx.save();
   ctx.translate(viewState.panX, viewState.panY);
@@ -82,41 +86,35 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     ctx.fill('evenodd');
 
     // 2. Pobierz wszystkie kondygnacje/bryły wyższe (z tego samego budynku - self-shading, oraz z innych budynków - mutual shading)
+    // Filtr przestrzenny (AABB zasięgu cienia higherTier vs. footprint tier) eliminuje tiery, których
+    // cień nigdy nie dotknie tego dachu, niezależnie od ich wysokości — patrz masterplanSpatial.ts.
     const currentH = tier.hTop;
-    const higherTiers = sortedTiers.slice(i + 1).filter((ht) => ht.hTop > currentH + 0.05);
+    const tierBounds: Bounds = sortedTierBounds[i];
+    const higherTiers = sortedTiers.slice(i + 1).filter((ht, offset) => {
+      if (ht.hTop <= currentH + 0.05) return false;
+      const deltaHTop = ht.hTop - currentH;
+      const htOffset = computeShadowOffsetVector(deltaHTop, angles);
+      const htReachBounds = extendBoundsByOffset(sortedTierBounds[i + 1 + offset], htOffset.dx * 1.05, htOffset.dy * 1.05);
+      return boundsOverlap(tierBounds, htReachBounds);
+    });
 
     if (higherTiers.length > 0) {
       // Rysujemy 3 próbki cienia dachowego (t-1, t, t+1) z sumą boolowską (brak podwójnego nakładania się cieni)
-      for (const sample of MASTERPLAN_COLORS.shadowSamples) {
-        const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin);
-        const samplePolys: Point2D[][] = [];
+      const currentTierKey = `${tier.buildingId}:${tier.storyIndex}`;
+      const shadowResult = getCachedRoofShadowSamples(
+        shadowAlgorithm,
+        currentTierKey,
+        currentH,
+        higherTiers,
+        MASTERPLAN_COLORS.shadowSamples,
+        latitude,
+        longitude,
+        equinoxDate,
+        hourFraction,
+        isInteracting
+      );
 
-        for (const higherTier of higherTiers) {
-          const deltaHTop = higherTier.hTop - currentH;
-          const deltaHBase = Math.max(0, higherTier.hBottom - currentH);
-          if (deltaHTop <= 0.05) continue;
-
-          const shadowRoofPoly = computeStoryShadowPolygon(higherTier.polygon, angles, deltaHTop, deltaHBase);
-          if (shadowRoofPoly.length >= 3) {
-            samplePolys.push(shadowRoofPoly);
-          }
-        }
-
-        if (samplePolys.length > 0) {
-          const mergedPolys = unionPolygonLoops(samplePolys);
-          ctx.fillStyle = sample.color;
-          for (const poly of mergedPolys) {
-            if (poly.length < 3) continue;
-            ctx.beginPath();
-            poly.forEach((p: Point2D, idx: number) => {
-              if (idx === 0) ctx.moveTo(p.x, p.y);
-              else ctx.lineTo(p.x, p.y);
-            });
-            ctx.closePath();
-            ctx.fill();
-          }
-        }
-      }
+      drawMasterplanShadowResult(ctx, shadowResult);
     }
 
     // Zwolnij maskę (clip)

@@ -102,6 +102,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const showSatelliteLayer = useSolarAnalysisStore((s) => s.showSatelliteLayer);
   const satelliteOpacity = useSolarAnalysisStore((s) => s.satelliteOpacity);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
+  const masterplanShadowAlgorithm = useSolarAnalysisStore((s) => s.masterplanShadowAlgorithm);
   const pinnedPoints = useSolarAnalysisStore((s) => s.pinnedPoints);
   const activePinnedPointId = useSolarAnalysisStore((s) => s.activePinnedPointId);
   const setActivePinnedPointId = useSolarAnalysisStore((s) => s.setActivePinnedPointId);
@@ -370,6 +371,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             latitude={settings.latitude}
             longitude={settings.longitude}
             equinoxDate={settings.equinoxDate}
+            masterplanShadowAlgorithm={masterplanShadowAlgorithm}
             fitRequest={fitRequest}
             onInteractionChange={setIsInteracting}
             isLinkingMode={isLinkingMode}
