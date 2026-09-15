@@ -981,3 +981,198 @@ html, body, #root {
   background-color: rgba(244, 63, 94, 0.15);
 }
 
+/* Building Isometric Preview (design-system.md / BuildingIsoPreview) */
+.iso-preview-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: #eeeeee;
+}
+
+.iso-preview-xray-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  background-color: rgba(11, 19, 41, 0.85);
+  color: var(--text-primary);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.iso-preview-xray-btn:hover {
+  background-color: rgba(19, 29, 56, 0.95);
+  border-color: var(--accent-indigo);
+}
+
+.iso-preview-xray-btn.active {
+  border-color: var(--accent-indigo);
+  background-color: var(--accent-indigo);
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.45);
+}
+
+.iso-preview-legend {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background-color: rgba(11, 19, 41, 0.88);
+  border: 1px solid var(--border-light);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 9.5px;
+  pointer-events: none;
+}
+
+.iso-preview-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-primary);
+}
+
+.iso-preview-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.iso-preview-legend-dot.residential {
+  background-color: var(--accent-indigo, #6366f1);
+}
+
+.iso-preview-legend-dot.service {
+  background-color: var(--accent-amber, #f59e0b);
+}
+
+.iso-preview-legend-dot.garage {
+  background-color: var(--text-muted, #64748b);
+}
+
+.iso-preview-canvas-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.iso-preview-rotate-btn {
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.iso-preview-rotate-btn.left {
+  left: 0;
+}
+
+.iso-preview-rotate-btn.right {
+  right: 0;
+}
+
+.iso-compass-strip {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  pointer-events: none;
+}
+
+.iso-compass-track-window {
+  position: relative;
+  width: 150px;
+  height: 20px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.iso-compass-track {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: flex;
+  align-items: flex-start;
+  transform: translateX(-50%);
+  transition: transform 220ms ease-out;
+}
+
+.iso-compass-item {
+  width: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.iso-compass-label {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.iso-compass-label.active {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.iso-compass-tick {
+  margin-top: 3px;
+  width: 1px;
+  height: 4px;
+  background-color: var(--border-light);
+}
+
+.iso-compass-tick.active {
+  height: 6px;
+  background-color: var(--text-primary);
+}
+
+.building-preview-card {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-light, #334155);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  background-color: #eeeeee;
+}
+
+.recording-pip-card {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-light, #334155);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  background-color: #eeeeee;
+  user-select: none;
+  pointer-events: auto;
+}
+

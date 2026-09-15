@@ -65,6 +65,36 @@ export const APP_CONFIG = {
     obstacleBuildingSelectedFill: 'rgba(148, 163, 184, 0.28)',
   },
 
+  // Konfiguracja podglądu izometrycznego 3D budynku
+  isoPreview: {
+    colors: {
+      proposed: '#ffffff',
+      existing: '#f8fafc',
+      groundPlane: '#eeeeee',
+      storyLine: 0x1e293b,
+      storyLineXRay: 0x0f172a,
+      dashedLine: 0x94a3b8,
+      dashedLineXRay: 0x334155,
+      highlightRibbon: '#c084fc',
+      hemisphereSky: '#ffffff',
+      hemisphereGround: '#cbd5e1',
+      xray: {
+        residential: '#6366f1',
+        service: '#f59e0b',
+        garage: '#64748b',
+      },
+    },
+    geometry: {
+      edgeAngleThresholdDeg: 2,
+      depthLineBuckets: 6,
+      depthLineBaseWidth: 2.8,
+      depthLineMinFactor: 0.5,
+      storyDividerFactor: 0.5,
+      zoomMarginFactor: 1.1,
+      ribbonWidth: 3.0,
+    },
+  },
+
   // System śledzenia kierunków i snapowania (Polar / Ortho Tracking & Snapping)
   directionSnapping: {
     enabledDefault: true,

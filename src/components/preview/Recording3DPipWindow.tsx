@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useSceneStore, useUiStore } from '../../store';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
+import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
 export const Recording3DPipWindow: React.FC = () => {
@@ -34,26 +35,10 @@ export const Recording3DPipWindow: React.FC = () => {
     return buildings.find((b) => b.category !== 'boundary') || null;
   }, [buildings, selectedBuildingId]);
 
-  // Podświetlenie krawędzi ma odpowiadać modyfikatorowi aktualnie rozwiniętemu (akordeon) w panelu
-  // Modyfikatorów, jeśli jest otwarty; w przeciwnym razie pierwszy włączony modyfikator z edgeIndex
-  // (panel może nie być otwarty podczas nagrywania demo).
-  const activeHighlight = useMemo(() => {
-    if (!activeBuilding) return undefined;
-    const modifiers = activeBuilding.modifiers || [];
-    const hasEdge = (m: (typeof modifiers)[number]) => m.enabled && 'edgeIndex' in m && (m as any).edgeIndex !== undefined;
-
-    if (expandedModifierId) {
-      const expandedMod = modifiers.find((m) => m.id === expandedModifierId);
-      if (!expandedMod || !hasEdge(expandedMod)) return undefined;
-      const edgeIdx = (expandedMod as any).edgeIndex;
-      return edgeIdx === undefined || edgeIdx === -1 ? 0 : edgeIdx;
-    }
-
-    const modWithEdge = modifiers.find(hasEdge);
-    if (!modWithEdge) return undefined;
-    const edgeIdx = (modWithEdge as any).edgeIndex;
-    return edgeIdx === undefined || edgeIdx === -1 ? 0 : edgeIdx;
-  }, [activeBuilding, expandedModifierId]);
+  const activeHighlight = getActiveHighlightEdgeIndex(
+    activeBuilding?.modifiers,
+    expandedModifierId
+  );
 
   const groupBuildings = useMemo(() => {
     if (!activeBuilding || !activeBuilding.groupId) return undefined;
@@ -95,19 +80,13 @@ export const Recording3DPipWindow: React.FC = () => {
   return (
     <div
       ref={containerRef}
+      className="recording-pip-card"
       style={{
         position: 'absolute',
         ...positionStyles,
         width: `${dimensions.width}px`,
         height: `${dimensions.height}px`,
-        borderRadius: '12px',
-        overflow: 'hidden',
-        border: '1px solid var(--border-light, #334155)',
-        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
-        backgroundColor: '#eeeeee',
         zIndex: 50,
-        userSelect: 'none',
-        pointerEvents: 'auto',
       }}
     >
       <BuildingIsoPreview

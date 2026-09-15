@@ -169,16 +169,14 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   }, [activeTileManager]);
 
 
-  // Project circle pulse animation (shows when Centruj is pressed)
+  // Project circle pulse animation (shows when Centruj is pressed or project radius changes)
   const [projectCirclePulse, setProjectCirclePulse] = useState<{ radius: number; opacity: number } | null>(null);
   const circleAnimRef = useRef<number | null>(null);
   const projectRadius = useWfsStore((s) => s.projectRadius);
 
   const triggerProjectCirclePulse = useCallback((radius: number) => {
-    // Cancel any running animation
     if (circleAnimRef.current !== null) {
       cancelAnimationFrame(circleAnimRef.current);
-      circleAnimRef.current = null;
     }
 
     const DURATION_MS = 2500;
@@ -186,8 +184,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     const animate = (now: number) => {
       const elapsed = now - startTime;
-      const t = Math.min(elapsed / DURATION_MS, 1);
-      const opacity = 1 - t;
+      const opacity = 1 - Math.min(elapsed / DURATION_MS, 1);
       if (opacity > 0.01) {
         setProjectCirclePulse({ radius, opacity });
         circleAnimRef.current = requestAnimationFrame(animate);
@@ -202,11 +199,11 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   }, []);
 
   useEffect(() => {
-    if (fitRequest === undefined || fitRequest.nonce === 0) return;
-    triggerProjectCirclePulse(projectRadius);
+    if (fitRequest?.nonce) {
+      triggerProjectCirclePulse(projectRadius);
+    }
   }, [fitRequest, projectRadius, triggerProjectCirclePulse]);
 
-  // Show the pulse whenever the project radius itself changes (e.g. via the parameters panel)
   const prevProjectRadiusRef = useRef(projectRadius);
   useEffect(() => {
     if (prevProjectRadiusRef.current !== projectRadius) {
@@ -226,12 +223,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   // Detekcja układu współrzędnych sceny CAD
   const crsInfo = useMemo<CrsDetectionResult>(() => {
-    const allPts: Point2D[] = [];
-    for (const b of buildings) {
-      if (Array.isArray(b.vertices)) {
-        for (const v of b.vertices) allPts.push(v);
-      }
-    }
+    const allPts = buildings.flatMap((b) => (Array.isArray(b.vertices) ? b.vertices : []));
     return detectCoordinateSystem(allPts, { lat: latitude, lon: longitude });
   }, [buildings, latitude, longitude]);
 
@@ -328,35 +320,25 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     const container = containerRef.current;
     if (!container) return;
 
+    const updateFromSize = (width: number, height: number) => {
+      if (width > 0 && height > 0) {
+        const w = Math.floor(width);
+        const h = Math.floor(height);
+        setCanvasDimensions((prev) => (prev.width !== w || prev.height !== h ? { width: w, height: h } : prev));
+      }
+    };
+
     const updateDimensions = () => {
       const rect = container.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        const w = Math.floor(rect.width);
-        const h = Math.floor(rect.height);
-        setCanvasDimensions((prev) => {
-          if (prev.width !== w || prev.height !== h) {
-            return { width: w, height: h };
-          }
-          return prev;
-        });
-      }
+      updateFromSize(rect.width, rect.height);
     };
 
     updateDimensions();
 
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          const w = Math.floor(width);
-          const h = Math.floor(height);
-          setCanvasDimensions((prev) => {
-            if (prev.width !== w || prev.height !== h) {
-              return { width: w, height: h };
-            }
-            return prev;
-          });
-        }
+      const entry = entries[0];
+      if (entry) {
+        updateFromSize(entry.contentRect.width, entry.contentRect.height);
       }
     });
 
@@ -412,28 +394,28 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     if (!pinnedPoints || pinnedPoints.length === 0) {
       return selectedPointResult ? [selectedPointResult] : [];
     }
-    return pinnedPoints.map((pt, idx) => {
+    return pinnedPoints.flatMap((pt, idx) => {
       const bldg = buildings.find((b) => b.id === pt.buildingId);
-      if (!bldg) return null;
-      const lyr = bldg.layer || 'Domyślna (0)';
-      if (layerSettings[lyr]?.isVisible === false) return null;
-      const seg = bldg.segments.find((s) => s.id === pt.segmentId);
-      if (seg) {
-        const px = seg.p1.x + pt.offsetRatio * (seg.p2.x - seg.p1.x);
-        const py = seg.p1.y + pt.offsetRatio * (seg.p2.y - seg.p1.y);
-        return {
-          id: pt.id,
-          point: { x: px, y: py },
-          normal: seg.normal || { x: 0, y: 1 },
-          buildingId: pt.buildingId,
-          segmentId: pt.segmentId,
-          label: pt.label || `P${idx + 1}`,
-          shadowing: { point: { x: px, y: py }, segmentId: pt.segmentId, offsetRatio: pt.offsetRatio, isCompliant: true, maxContinuousFreeSpanDeg: 156, totalFreeSpanDeg: 156, sectors: [], rays: [] },
-          sunlight: { point: { x: px, y: py }, segmentId: pt.segmentId, offsetRatio: pt.offsetRatio, totalMinutes: 0, totalHours: 0, isCompliant: true, timeSlots: [], sectors: [] },
-        };
-      }
-      return null;
-    }).filter(Boolean) as AnalysisPointResult[];
+      const lyr = bldg?.layer || 'Domyślna (0)';
+      if (!bldg || layerSettings[lyr]?.isVisible === false) return [];
+      const seg = bldg.segments?.find((s) => s.id === pt.segmentId);
+      if (!seg) return [];
+
+      const px = seg.p1.x + pt.offsetRatio * (seg.p2.x - seg.p1.x);
+      const py = seg.p1.y + pt.offsetRatio * (seg.p2.y - seg.p1.y);
+      const point = { x: px, y: py };
+
+      return [{
+        id: pt.id,
+        point,
+        normal: seg.normal || { x: 0, y: 1 },
+        buildingId: pt.buildingId,
+        segmentId: pt.segmentId,
+        label: pt.label || `P${idx + 1}`,
+        shadowing: { point, segmentId: pt.segmentId, offsetRatio: pt.offsetRatio, isCompliant: true, maxContinuousFreeSpanDeg: 156, totalFreeSpanDeg: 156, sectors: [], rays: [] },
+        sunlight: { point, segmentId: pt.segmentId, offsetRatio: pt.offsetRatio, totalMinutes: 0, totalHours: 0, isCompliant: true, timeSlots: [], sectors: [] },
+      } as AnalysisPointResult];
+    });
   }, [propPinnedPointResults, pinnedPoints, buildings, selectedPointResult, layerSettings]);
 
   // 1. Base Render Loop

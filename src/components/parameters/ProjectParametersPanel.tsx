@@ -27,6 +27,89 @@ interface ProjectParametersPanelProps {
   onToggleCollapse?: (collapsed: boolean) => void;
 }
 
+const formatPct = (val: number, total: number) => `${((val / total) * 100).toFixed(1)}%`;
+
+const StatRow: React.FC<{
+  label: React.ReactNode;
+  value: React.ReactNode;
+  color?: string;
+  isHeader?: boolean;
+  isDashedTop?: boolean;
+}> = ({ label, value, color = 'var(--text-secondary)', isHeader, isDashedTop }) => (
+  <div
+    style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      ...(isDashedTop ? { paddingTop: '2px', borderTop: '1px dashed rgba(255, 255, 255, 0.12)' } : {}),
+    }}
+  >
+    <span style={{ color: isHeader ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: isHeader ? 600 : 400 }}>
+      {label}
+    </span>
+    <b style={{ color, fontFamily: 'monospace' }}>{value}</b>
+  </div>
+);
+
+const MetricsGroup: React.FC<{
+  pz: number;
+  pc: number;
+  pcNadz?: number;
+  pcPodz?: number;
+  volume: number;
+  pum: number;
+  pu: number;
+  pumiu: number;
+  parkingPlaces?: number;
+  type?: 'residential' | 'service' | 'garage' | 'all';
+}> = ({ pz, pc, pcNadz, pcPodz, volume, pum, pu, pumiu, parkingPlaces = 0, type = 'all' }) => (
+  <>
+    <StatRow label="Powierzchnia zabudowy (Pz):" value={`${Math.round(pz)} m²`} color="var(--accent-emerald)" />
+    <StatRow
+      label="Powierzchnia całkowita (Pc):"
+      value={
+        <>
+          {Math.round(pc)} m²
+          {pcPodz !== undefined && pcNadz !== undefined && pcPodz > 0 && (
+            <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginLeft: '4px' }}>
+              (nadz: {Math.round(pcNadz)}, podz: {Math.round(pcPodz)})
+            </span>
+          )}
+        </>
+      }
+      color="var(--accent-sky)"
+    />
+    <StatRow label="Kubatura brutto (V):" value={`${Math.round(volume)} m³`} color="var(--accent-purple, #c084fc)" />
+
+    {(type === 'all' || type === 'residential') && pum > 0 && (
+      <StatRow label="PUM (~70% mieszk.):" value={`${Math.round(pum)} m²`} color="var(--accent-amber)" />
+    )}
+    {(type === 'all' || type === 'service') && pu > 0 && (
+      <StatRow label="PU (~70% usług.):" value={`${Math.round(pu)} m²`} color="var(--accent-amber)" />
+    )}
+    {type !== 'garage' && (pum > 0 || pu > 0 || type === 'all') && (
+      <StatRow label="Łącznie PUMiU:" value={`${Math.round(pumiu)} m²`} color="var(--accent-emerald)" isHeader isDashedTop />
+    )}
+
+    {(type === 'all' || type === 'garage') && parkingPlaces > 0 && (
+      <StatRow
+        label={
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Car size={11} /> Miejsca postojowe{type === 'all' ? ' w garażach' : ''}:
+          </span>
+        }
+        value={
+          <>
+            {Math.floor(parkingPlaces)} mp
+            {type === 'garage' && <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginLeft: '3px' }}>(1 mp / 32,5 m²)</span>}
+          </>
+        }
+        color="var(--accent-sky)"
+      />
+    )}
+  </>
+);
+
 export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = React.memo(({
   onClose,
   isEmbedded = false,
@@ -45,8 +128,7 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     const b = buildings.find((item) => item.id === selectedBuildingId);
     if (!b) return null;
     const lyr = b.layer || 'Domyślna (0)';
-    if (layerSettings[lyr]?.isVisible === false) return null;
-    return b;
+    return layerSettings[lyr]?.isVisible === false ? null : b;
   }, [buildings, selectedBuildingId, layerSettings]);
 
   // Działki ewidencyjne (boundary z areaType === 'plot' lub domyślnym, bez playground i paved)
@@ -96,40 +178,33 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
   // Group summary calculations
   const groupSummary = useMemo(() => {
     if (!isGroupSelected) return null;
-    let totalPz = 0;
-    let totalPcNadz = 0;
-    let totalPcPodz = 0;
-    let totalPc = 0;
-    let totalVolume = 0;
-    let totalPUM = 0;
-    let totalPU = 0;
-    let totalParkingPlaces = 0;
+    const acc = {
+      totalPz: 0,
+      totalPcNadz: 0,
+      totalPcPodz: 0,
+      totalPc: 0,
+      totalVolume: 0,
+      totalPUM: 0,
+      totalPU: 0,
+      totalParkingPlaces: 0,
+    };
 
     for (const b of selectedGroupBuildings) {
       const m = calculateSingleBuildingMetrics(b, activePlotBoundaries);
-      totalPz += m.pz;
-      totalPcNadz += m.pcNadz;
-      totalPcPodz += m.pcPodz;
-      totalPc += m.pc;
-      totalVolume += m.volume;
-      totalPUM += m.pum;
-      totalPU += m.pu;
-      totalParkingPlaces += m.parkingPlaces;
+      acc.totalPz += m.pz;
+      acc.totalPcNadz += m.pcNadz;
+      acc.totalPcPodz += m.pcPodz;
+      acc.totalPc += m.pc;
+      acc.totalVolume += m.volume;
+      acc.totalPUM += m.pum;
+      acc.totalPU += m.pu;
+      acc.totalParkingPlaces += m.parkingPlaces;
     }
-
-    const totalPUMiU = totalPUM + totalPU;
 
     return {
       count: selectedGroupBuildings.length,
-      totalPz,
-      totalPcNadz,
-      totalPcPodz,
-      totalPc,
-      totalVolume,
-      totalPUM,
-      totalPU,
-      totalPUMiU,
-      totalParkingPlaces,
+      ...acc,
+      totalPUMiU: acc.totalPUM + acc.totalPU,
       buildings: selectedGroupBuildings,
     };
   }, [selectedGroupBuildings, isGroupSelected, activePlotBoundaries]);
@@ -168,10 +243,10 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
         `Wskaźnik intensywności całkowitej: ${testedBuildingsSummary.intensityTotal.toFixed(2)}`
       );
       if (testedBuildingsSummary.pavedPlotFootprintArea > 0) {
-        lines.push(`Powierzchnie utwardzone na działce: ${Math.round(testedBuildingsSummary.pavedPlotFootprintArea)} m² (${((testedBuildingsSummary.pavedPlotFootprintArea / totalBoundaryArea) * 100).toFixed(1)}%)`);
+        lines.push(`Powierzchnie utwardzone na działce: ${Math.round(testedBuildingsSummary.pavedPlotFootprintArea)} m² (${formatPct(testedBuildingsSummary.pavedPlotFootprintArea, totalBoundaryArea)})`);
       }
       if (testedBuildingsSummary.garagePlotFootprintArea > 0) {
-        lines.push(`Rzut garaży na działce: ${Math.round(testedBuildingsSummary.garagePlotFootprintArea)} m² (${((testedBuildingsSummary.garagePlotFootprintArea / totalBoundaryArea) * 100).toFixed(1)}%)`);
+        lines.push(`Rzut garaży na działce: ${Math.round(testedBuildingsSummary.garagePlotFootprintArea)} m² (${formatPct(testedBuildingsSummary.garagePlotFootprintArea, totalBoundaryArea)})`);
       }
       lines.push(
         `Grunt rodzimy (poza Pz, garażem i utwardzeniem): ${Math.round(testedBuildingsSummary.nativeGroundArea)} m² (${testedBuildingsSummary.nativeGroundRatio.toFixed(1)}% działki)`
@@ -193,10 +268,11 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     }
 
     if (selectedBuildingMetrics) {
+      const typeLabel = selectedBuildingMetrics.buildingType === 'residential' ? 'Mieszkalny' : selectedBuildingMetrics.buildingType === 'service' ? 'Usługowy' : 'Garaż';
       lines.push(
         '',
         `--- ZAZNACZONY OBIEKT: ${selectedBuildingMetrics.name} ---`,
-        `Typ: ${selectedBuildingMetrics.buildingType === 'residential' ? 'Mieszkalny' : selectedBuildingMetrics.buildingType === 'service' ? 'Usługowy' : 'Garaż'}`,
+        `Typ: ${typeLabel}`,
         `Liczba kondygnacji: ${selectedBuildingMetrics.storeysCount}`,
         `Wysokość H: ${selectedBuildingMetrics.height.toFixed(2)} m (posadowienie: ${selectedBuildingMetrics.elevation.toFixed(2)} m)`,
         `Powierzchnia zabudowy (Pz): ${Math.round(selectedBuildingMetrics.pz)} m²`,
@@ -256,63 +332,38 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
               </span>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>grupa</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Łączna pow. zabudowy (Pz):</span>
-              <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(groupSummary.totalPz)} m²</b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Łączna pow. całkowita (Pc):</span>
-              <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>{Math.round(groupSummary.totalPc)} m²</b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Łączna kubatura brutto (V):</span>
-              <b style={{ color: 'var(--accent-purple, #c084fc)', fontFamily: 'monospace' }}>{Math.round(groupSummary.totalVolume)} m³</b>
-            </div>
 
-            {groupSummary.totalPUM > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>PUM (~70% mieszk.):</span>
-                <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(groupSummary.totalPUM)} m²</b>
-              </div>
-            )}
-            {groupSummary.totalPU > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>PU (~70% usług.):</span>
-                <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(groupSummary.totalPU)} m²</b>
-              </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '2px', borderTop: '1px dashed rgba(56, 189, 248, 0.2)' }}>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Łącznie PUMiU:</span>
-              <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(groupSummary.totalPUMiU)} m²</b>
-            </div>
-
-            {groupSummary.totalParkingPlaces > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Car size={11} /> Miejsca postojowe:
-                </span>
-                <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>{Math.floor(groupSummary.totalParkingPlaces)} mp</b>
-              </div>
-            )}
+            <MetricsGroup
+              pz={groupSummary.totalPz}
+              pc={groupSummary.totalPc}
+              volume={groupSummary.totalVolume}
+              pum={groupSummary.totalPUM}
+              pu={groupSummary.totalPU}
+              pumiu={groupSummary.totalPUMiU}
+              parkingPlaces={groupSummary.totalParkingPlaces}
+            />
 
             {/* Lista obiektów składowych */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', paddingTop: '4px', borderTop: '1px dashed rgba(56, 189, 248, 0.25)' }}>
-              {groupSummary.buildings.map((b) => (
-                <span
-                  key={b.id}
-                  style={{
-                    fontSize: '9.5px',
-                    padding: '2px 5px',
-                    borderRadius: '4px',
-                    backgroundColor: b.id === selectedBuilding?.id ? 'rgba(56, 189, 248, 0.3)' : 'rgba(0,0,0,0.25)',
-                    border: b.id === selectedBuilding?.id ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.08)',
-                    color: b.id === selectedBuilding?.id ? '#ffffff' : 'var(--text-secondary)',
-                    fontWeight: b.id === selectedBuilding?.id ? 700 : 400,
-                  }}
-                >
-                  {b.name} ({Math.round(computePolygonArea(b.vertices || []))} m²)
-                </span>
-              ))}
+              {groupSummary.buildings.map((b) => {
+                const isCurrent = b.id === selectedBuilding?.id;
+                return (
+                  <span
+                    key={b.id}
+                    style={{
+                      fontSize: '9.5px',
+                      padding: '2px 5px',
+                      borderRadius: '4px',
+                      backgroundColor: isCurrent ? 'rgba(56, 189, 248, 0.3)' : 'rgba(0,0,0,0.25)',
+                      border: isCurrent ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.08)',
+                      color: isCurrent ? '#ffffff' : 'var(--text-secondary)',
+                      fontWeight: isCurrent ? 700 : 400,
+                    }}
+                  >
+                    {b.name} ({Math.round(computePolygonArea(b.vertices || []))} m²)
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}
@@ -339,63 +390,19 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
                 {selectedBuildingMetrics.storeysCount} kond. (H={selectedBuildingMetrics.height.toFixed(1)}m)
               </span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Powierzchnia zabudowy (Pz):</span>
-              <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(selectedBuildingMetrics.pz)} m²</b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Powierzchnia całkowita (Pc):</span>
-              <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>
-                {Math.round(selectedBuildingMetrics.pc)} m²
-                {selectedBuildingMetrics.pcPodz > 0 && selectedBuildingMetrics.pcNadz > 0 && (
-                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginLeft: '4px' }}>
-                    (nadz: {Math.round(selectedBuildingMetrics.pcNadz)}, podz: {Math.round(selectedBuildingMetrics.pcPodz)})
-                  </span>
-                )}
-              </b>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Kubatura brutto (V):</span>
-              <b style={{ color: 'var(--accent-purple, #c084fc)', fontFamily: 'monospace' }}>{Math.round(selectedBuildingMetrics.volume)} m³</b>
-            </div>
 
-            {selectedBuildingMetrics.buildingType === 'residential' && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>PUM (~70%):</span>
-                  <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(selectedBuildingMetrics.pum)} m²</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>PUMiU:</span>
-                  <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(selectedBuildingMetrics.pumiu)} m²</b>
-                </div>
-              </>
-            )}
-
-            {selectedBuildingMetrics.buildingType === 'service' && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>PU (~70%):</span>
-                  <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(selectedBuildingMetrics.pu)} m²</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>PUMiU:</span>
-                  <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(selectedBuildingMetrics.pumiu)} m²</b>
-                </div>
-              </>
-            )}
-
-            {selectedBuildingMetrics.buildingType === 'garage' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <Car size={11} /> Miejsca postojowe:
-                </span>
-                <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>
-                  {Math.floor(selectedBuildingMetrics.parkingPlaces)} mp
-                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginLeft: '3px' }}>(1 mp / 32,5 m²)</span>
-                </b>
-              </div>
-            )}
+            <MetricsGroup
+              pz={selectedBuildingMetrics.pz}
+              pc={selectedBuildingMetrics.pc}
+              pcNadz={selectedBuildingMetrics.pcNadz}
+              pcPodz={selectedBuildingMetrics.pcPodz}
+              volume={selectedBuildingMetrics.volume}
+              pum={selectedBuildingMetrics.pum}
+              pu={selectedBuildingMetrics.pu}
+              pumiu={selectedBuildingMetrics.pumiu}
+              parkingPlaces={selectedBuildingMetrics.parkingPlaces}
+              type={selectedBuildingMetrics.buildingType}
+            />
           </div>
         )}
 
@@ -415,50 +422,18 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
             <Layers size={12} />
             <span>Łącznie obiekty badane ({testedBuildingsSummary.testedCount} szt.)</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Łączna pow. zabudowy (Pz):</span>
-            <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPz)} m²</b>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Łączna pow. całkowita (Pc):</span>
-            <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>
-              {Math.round(testedBuildingsSummary.totalPc)} m²
-              {testedBuildingsSummary.totalPcPodz > 0 && (
-                <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginLeft: '4px' }}>
-                  (nadz: {Math.round(testedBuildingsSummary.totalPcNadz)}, podz: {Math.round(testedBuildingsSummary.totalPcPodz)})
-                </span>
-              )}
-            </b>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Łączna kubatura (V):</span>
-            <b style={{ color: 'var(--accent-purple, #c084fc)', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalVolume)} m³</b>
-          </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Szacowany PUM (~70% mieszk.):</span>
-            <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPUM)} m²</b>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Szacowana PU (~70% usług.):</span>
-            <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPU)} m²</b>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '2px', borderTop: '1px dashed rgba(99, 102, 241, 0.25)' }}>
-            <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Łącznie PUMiU:</span>
-            <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>{Math.round(testedBuildingsSummary.totalPUMiU)} m²</b>
-          </div>
-
-          {testedBuildingsSummary.totalParkingPlaces > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Car size={11} /> Miejsca postojowe w garażach:
-              </span>
-              <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>
-                {Math.floor(testedBuildingsSummary.totalParkingPlaces)} mp
-                <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginLeft: '3px' }}>(1 mp / 32,5 m²)</span>
-              </b>
-            </div>
-          )}
+          <MetricsGroup
+            pz={testedBuildingsSummary.totalPz}
+            pc={testedBuildingsSummary.totalPc}
+            pcNadz={testedBuildingsSummary.totalPcNadz}
+            pcPodz={testedBuildingsSummary.totalPcPodz}
+            volume={testedBuildingsSummary.totalVolume}
+            pum={testedBuildingsSummary.totalPUM}
+            pu={testedBuildingsSummary.totalPU}
+            pumiu={testedBuildingsSummary.totalPUMiU}
+            parkingPlaces={testedBuildingsSummary.totalParkingPlaces}
+          />
         </div>
 
         {/* 4. Sekcja: Działki i wskaźniki urbanistyczne (Bilans Terenu) */}
@@ -480,50 +455,50 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
               {testedBoundaryObjects.length > 0 ? `, w tym ${testedBoundaryObjects.length} bad.` : ''})
             </span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Pow. działki badanej (Pdz):</span>
-            <b style={{ color: 'var(--accent-rose)', fontFamily: 'monospace' }}>
-              {totalBoundaryArea > 0 ? `${Math.round(totalBoundaryArea)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak działek'}
-            </b>
-          </div>
+          <StatRow
+            label="Pow. działki badanej (Pdz):"
+            value={totalBoundaryArea > 0 ? `${Math.round(totalBoundaryArea)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak działek'}
+            color="var(--accent-rose)"
+          />
+
           {totalBoundaryArea > 0 && (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Powierzchnia zabudowy (Pz):</span>
-                <b style={{ color: 'var(--accent-emerald)', fontFamily: 'monospace' }}>
-                  {Math.round(testedBuildingsSummary.totalPz)} m² ({testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%)
-                </b>
-              </div>
+              <StatRow
+                label="Powierzchnia zabudowy (Pz):"
+                value={`${Math.round(testedBuildingsSummary.totalPz)} m² (${testedBuildingsSummary.plotCoverageRatio.toFixed(1)}%)`}
+                color="var(--accent-emerald)"
+              />
               {testedBuildingsSummary.pavedPlotFootprintArea > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Pow. utwardzone na działce:</span>
-                  <b style={{ color: 'var(--accent-amber)', fontFamily: 'monospace' }}>
-                    {Math.round(testedBuildingsSummary.pavedPlotFootprintArea)} m² ({((testedBuildingsSummary.pavedPlotFootprintArea / totalBoundaryArea) * 100).toFixed(1)}%)
-                  </b>
-                </div>
+                <StatRow
+                  label="Pow. utwardzone na działce:"
+                  value={`${Math.round(testedBuildingsSummary.pavedPlotFootprintArea)} m² (${formatPct(testedBuildingsSummary.pavedPlotFootprintArea, totalBoundaryArea)})`}
+                  color="var(--accent-amber)"
+                />
               )}
               {testedBuildingsSummary.garagePlotFootprintArea > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Rzut garaży na działce:</span>
-                  <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>
-                    {Math.round(testedBuildingsSummary.garagePlotFootprintArea)} m² ({((testedBuildingsSummary.garagePlotFootprintArea / totalBoundaryArea) * 100).toFixed(1)}%)
-                  </b>
-                </div>
+                <StatRow
+                  label="Rzut garaży na działce:"
+                  value={`${Math.round(testedBuildingsSummary.garagePlotFootprintArea)} m² (${formatPct(testedBuildingsSummary.garagePlotFootprintArea, totalBoundaryArea)})`}
+                  color="var(--accent-sky)"
+                />
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Intensywność nadziemna (I_nadz):</span>
-                <b style={{ color: 'var(--accent-sky)', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityAboveground.toFixed(2)}</b>
-              </div>
+              <StatRow
+                label="Intensywność nadziemna (I_nadz):"
+                value={testedBuildingsSummary.intensityAboveground.toFixed(2)}
+                color="var(--accent-sky)"
+              />
               {testedBuildingsSummary.totalPcPodz > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Intensywność podziemna (I_podz):</span>
-                  <b style={{ color: 'var(--accent-purple, #c084fc)', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityUnderground.toFixed(2)}</b>
-                </div>
+                <StatRow
+                  label="Intensywność podziemna (I_podz):"
+                  value={testedBuildingsSummary.intensityUnderground.toFixed(2)}
+                  color="var(--accent-purple, #c084fc)"
+                />
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Intensywność całkowita (I_całk):</span>
-                <b style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{testedBuildingsSummary.intensityTotal.toFixed(2)}</b>
-              </div>
+              <StatRow
+                label="Intensywność całkowita (I_całk):"
+                value={testedBuildingsSummary.intensityTotal.toFixed(2)}
+                color="var(--text-primary)"
+              />
 
               {/* Grunt rodzimy poza Pz, garażem i utwardzeniem */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '2px', borderTop: '1px dashed rgba(239, 68, 68, 0.25)' }}>

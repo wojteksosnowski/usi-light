@@ -7,7 +7,8 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { Scan } from 'lucide-react';
 import type { BuildingLoop, Point2D } from '@/types/geometry';
-import { getBuildingSolids, computeBuildingFrameBounds } from '@/engine/preview/buildingIsoGeometry';
+import { APP_CONFIG } from '@/config/appConfig';
+import { getBuildingSolids } from '@/engine/preview/buildingIsoGeometry';
 import { miterOffsetPolygon } from '@/utils/math2d/miterOffset';
 import { getIsoCameraOffset, type IsoOrientation } from './isoCameraPresets';
 import { getPolygonCentroid, getPolygonInteriorPoint, computePointsBoundingBox, computePolygonArea } from '@/utils/math2d/polygons';
@@ -16,29 +17,9 @@ import { useActionRecorderStore } from '../../modules/action-recorder/useActionR
 /** Clockwise cycle used for the left/right compass arrows, 45° per step. */
 const ORIENTATION_CYCLE: IsoOrientation[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-/** White architectural-model tones — near-white with a faint tint by isTested. */
-const COLOR_PROPOSED = '#ffffff';
-const COLOR_EXISTING = '#f8fafc';
-const STORY_LINE_COLOR = 0x1e293b;
-const EDGE_ANGLE_THRESHOLD_DEG = 2;
-/** Liczba przedziałów grubości linii wg głębokości względem kamery (depth cueing). */
-const DEPTH_LINE_BUCKETS = 6;
-const DEPTH_LINE_BASE_WIDTH = 2.8;
-/** Najdalsza linia ma mieć 50% grubości najbliższej. */
-const DEPTH_LINE_MIN_FACTOR = 0.5;
-/** Linie dzielące fasadę na kondygnacje mają 50% grubości linii konturowych bryły. */
-const STORY_DIVIDER_FACTOR = 0.5;
-/** Mnożnik marginesu kadru auto-fit - dobrany testowo. */
-const ZOOM_MARGIN_FACTOR = 1.1;
-/** Wstęga podświetlenia wybranej krawędzi modyfikatora - zawsze fioletowa (token --accent-purple). */
-const HIGHLIGHT_RIBBON_COLOR = '#c084fc';
-const RIBBON_WIDTH = 3.0;
+const { colors: ISO_COLORS, geometry: ISO_GEO } = APP_CONFIG.isoPreview;
+export const XRAY_COLORS = ISO_COLORS.xray;
 
-export const XRAY_COLORS = {
-  residential: '#6366f1', // Indygo / niebieski
-  service: '#f59e0b',     // Bursztynowy / pomarańczowy
-  garage: '#64748b',      // Szary / łupek
-};
 
 interface BuildingIsoPreviewProps {
   building: BuildingLoop;
@@ -97,7 +78,7 @@ function buildGeometryGroup(
   let globalMaxY = -Infinity;
   const Y_EPS = 1e-3;
   // Kolor/przezroczystość widocznych krawędzi - stałe dla całego wywołania, bo `isXRay` jest wspólne.
-  const storyLineColor = isXRay ? 0x0f172a : STORY_LINE_COLOR;
+  const storyLineColor = isXRay ? ISO_COLORS.storyLineXRay : ISO_COLORS.storyLine;
   const storyLineOpacity = isXRay ? 0.8 : 0.5;
 
   buildings.forEach((bldg) => {
@@ -109,7 +90,7 @@ function buildGeometryGroup(
 
     // Materiał powłoki zewnętrznej
     const outerMaterial = new THREE.MeshStandardMaterial({
-      color: isXRay ? '#ffffff' : (bldg.isTested ? COLOR_PROPOSED : COLOR_EXISTING),
+      color: isXRay ? '#ffffff' : (bldg.isTested ? ISO_COLORS.proposed : ISO_COLORS.existing),
       roughness: isXRay ? 0.3 : 0.85,
       metalness: isXRay ? 0.05 : 0.05,
       transparent: isXRay,
@@ -119,25 +100,9 @@ function buildGeometryGroup(
     });
     createdMaterials.push(outerMaterial);
 
-    // Materiał wewnętrznych kondygnacji w trybie X-Ray (kolor zgodny z typem, kryjący)
-    const innerMaterial = isXRay
-      ? new THREE.MeshStandardMaterial({
-        color: typeColor,
-        roughness: 0.35,
-        metalness: 0.05,
-        transparent: false,
-        opacity: 1.0,
-        depthWrite: true,
-        side: THREE.DoubleSide,
-      })
-      : null;
-    if (innerMaterial) {
-      createdMaterials.push(innerMaterial);
-    }
-
     // Ukryte / podziemne linie przerywane (GreaterDepth)
     const dashedLineMaterial = new THREE.LineDashedMaterial({
-      color: isXRay ? 0x334155 : 0x94a3b8,
+      color: isXRay ? ISO_COLORS.dashedLineXRay : ISO_COLORS.dashedLine,
       transparent: true,
       opacity: isXRay ? 0.65 : 0.4,
       dashSize: 0.8,
@@ -201,7 +166,7 @@ function buildGeometryGroup(
       solidGroup.add(outerMesh);
 
       // Krawędzie z obliczonymi odległościami dla linii przerywanych
-      const edges = new THREE.EdgesGeometry(outerGeometry, EDGE_ANGLE_THRESHOLD_DEG);
+      const edges = new THREE.EdgesGeometry(outerGeometry, ISO_GEO.edgeAngleThresholdDeg);
 
       // Widoczne krawędzie: grubość linii będzie zależna od głębokości względem kamery
       // (depth cueing) - zbieramy dane teraz, a same linie (fat lines) budujemy w drugim
@@ -245,13 +210,7 @@ function buildGeometryGroup(
       solidGroup.add(hiddenLines);
 
       // Wstęga podświetlenia wybranej krawędzi (tylko dla aktywnego budynku, i tylko na jego
-      // najniższej kondygnacji). Odnajdywana przez
-      // DZIEDZICZONE ID (`solid.edgeOrigins`, patrz StoryFootprint.edgeOrigins) — ten sam mechanizm,
-      // którego używa silnik modyfikatorów do rozwiązywania `edgeIndex` — a nie surowy indeks
-      // pozycyjny (`% n`), który na różnych kondygnacjach (o różnych, niezależnie zmodyfikowanych
-      // kształtach) może wskazywać zupełnie inne, niepowiązane krawędzie. Gdy dana kondygnacja nie
-      // zawiera już tej ściany (np. wycięta bramą) albo `edgeOrigins` nie jest dostępne, podświetlenie
-      // jest pomijane zamiast zawijać się na przypadkową krawędź.
+      // najniższej kondygnacji).
       if (
         bldg.id === activeBuildingId &&
         highlightEdgeIndex !== undefined &&
@@ -259,10 +218,6 @@ function buildGeometryGroup(
         solid.hBottom === minHBottomForBuilding
       ) {
         const n = solid.polygon.length;
-        // Brak `edgeOrigins` (np. budynek bez modyfikatorów, albo scena zapisana przed wprowadzeniem
-        // tego pola) -> brak informacji o dziedziczeniu, spadamy na dawne zachowanie pozycyjne zamiast
-        // milcząco gubić podświetlenie. Gdy `edgeOrigins` JEST dostępne, ufamy mu w pełni: brak wpisu
-        // oznacza, że ta kondygnacja naprawdę nie zawiera już tej ściany.
         const targetIdx = solid.edgeOrigins
           ? solid.edgeOrigins.indexOf(highlightEdgeIndex)
           : highlightEdgeIndex % Math.max(n, 1);
@@ -271,8 +226,6 @@ function buildGeometryGroup(
           const p2 = solid.polygon[(targetIdx + 1) % n];
 
           if (p1 && p2) {
-            // Wektor prostopadły do krawędzi, skierowany na zewnątrz obrysu (porównanie ze
-            // znanym punktem wewnętrznym wielokąta - jeśli normalna wskazuje w jego stronę, odwracamy ją).
             const edgeDx = p2.x - p1.x;
             const edgeDy = p2.y - p1.y;
             const edgeLen = Math.hypot(edgeDx, edgeDy) || 1;
@@ -291,8 +244,8 @@ function buildGeometryGroup(
             const RIBBON_Z = 0.03;
             const inX = p1.x, inY = p1.y;
             const in2X = p2.x, in2Y = p2.y;
-            const outX = p1.x + nx * RIBBON_WIDTH, outY = p1.y + ny * RIBBON_WIDTH;
-            const out2X = p2.x + nx * RIBBON_WIDTH, out2Y = p2.y + ny * RIBBON_WIDTH;
+            const outX = p1.x + nx * ISO_GEO.ribbonWidth, outY = p1.y + ny * ISO_GEO.ribbonWidth;
+            const out2X = p2.x + nx * ISO_GEO.ribbonWidth, out2Y = p2.y + ny * ISO_GEO.ribbonWidth;
 
             const ribbonGeo = new THREE.BufferGeometry();
             const ribbonPositions = new Float32Array([
@@ -307,7 +260,7 @@ function buildGeometryGroup(
             ribbonGeo.computeVertexNormals();
 
             const ribbonMat = new THREE.MeshBasicMaterial({
-              color: new THREE.Color(HIGHLIGHT_RIBBON_COLOR),
+              color: new THREE.Color(ISO_COLORS.highlightRibbon),
               transparent: true,
               opacity: 0.85,
               side: THREE.DoubleSide,
@@ -326,19 +279,14 @@ function buildGeometryGroup(
   });
 
   // Drugi przebieg: budujemy fat-lines (Line2/LineSegments2) pogrupowane w DEPTH_LINE_BUCKETS
-  // przedziałów grubości wg znormalizowanej głębokości względem kamery (najbliższe = grubsze,
-  // najdalsze = DEPTH_LINE_MIN_FACTOR grubości najbliższych), niezależnie dla dwóch warstw:
-  // kontur bryły (narożniki pionowe + linia dachu/gruntu) - grubszy, i podziały kondygnacji
-  // (poziome linie międzypiętrowe) - STORY_DIVIDER_FACTOR grubości konturu - przybliżenie zamiast
-  // pełnego cieniowania per-wierzchołek.
   const depthRange = globalMaxDepth - globalMinDepth;
   const Y_RANGE_EPS = Math.max(Y_EPS, (globalMaxY - globalMinY) * 1e-4);
   for (const bucket of pendingEdgeBuckets) {
     const segmentCount = bucket.depths.length;
     // [warstwa][bucket głębokości] -> tablica pozycji
     const bucketedPositions: number[][][] = [
-      Array.from({ length: DEPTH_LINE_BUCKETS }, () => []),
-      Array.from({ length: DEPTH_LINE_BUCKETS }, () => []),
+      Array.from({ length: ISO_GEO.depthLineBuckets }, () => []),
+      Array.from({ length: ISO_GEO.depthLineBuckets }, () => []),
     ];
     for (let s = 0; s < segmentCount; s++) {
       const hy = bucket.horizontalY[s];
@@ -349,20 +297,19 @@ function buildGeometryGroup(
       const layer = isContour ? 0 : 1;
 
       const t = depthRange > 1e-6 ? (bucket.depths[s] - globalMinDepth) / depthRange : 1;
-      const bucketIdx = Math.min(DEPTH_LINE_BUCKETS - 1, Math.max(0, Math.floor(t * DEPTH_LINE_BUCKETS)));
+      const bucketIdx = Math.min(ISO_GEO.depthLineBuckets - 1, Math.max(0, Math.floor(t * ISO_GEO.depthLineBuckets)));
       const base = s * 6;
       const arr = bucketedPositions[layer][bucketIdx];
       for (let k = 0; k < 6; k++) arr.push(bucket.positions[base + k]);
     }
 
     for (let layer = 0; layer < 2; layer++) {
-      const layerFactor = layer === 0 ? 1 : STORY_DIVIDER_FACTOR;
-      for (let b = 0; b < DEPTH_LINE_BUCKETS; b++) {
+      const layerFactor = layer === 0 ? 1 : ISO_GEO.storyDividerFactor;
+      for (let b = 0; b < ISO_GEO.depthLineBuckets; b++) {
         const posArr = bucketedPositions[layer][b];
         if (posArr.length === 0) continue;
-        // t reprezentuje środek przedziału (b=0 najdalszy, b=DEPTH_LINE_BUCKETS-1 najbliższy).
-        const bucketT = (b + 0.5) / DEPTH_LINE_BUCKETS;
-        const depthFactor = DEPTH_LINE_MIN_FACTOR + (1 - DEPTH_LINE_MIN_FACTOR) * bucketT;
+        const bucketT = (b + 0.5) / ISO_GEO.depthLineBuckets;
+        const depthFactor = ISO_GEO.depthLineMinFactor + (1 - ISO_GEO.depthLineMinFactor) * bucketT;
 
         const lineGeo = new LineSegmentsGeometry();
         lineGeo.setPositions(posArr);
@@ -370,12 +317,10 @@ function buildGeometryGroup(
           color: storyLineColor,
           transparent: true,
           opacity: storyLineOpacity,
-          linewidth: DEPTH_LINE_BASE_WIDTH * layerFactor * depthFactor,
+          linewidth: ISO_GEO.depthLineBaseWidth * layerFactor * depthFactor,
           depthFunc: THREE.LessEqualDepth,
           depthTest: true,
         });
-        // resolution jest wymagana przez LineMaterial - realny rozmiar viewportu jest dopinany
-        // w IsoScene (useEffect po `size` z useThree), tu tylko wartość startowa.
         lineMat.resolution.set(800, 600);
         createdMaterials.push(lineMat);
 
@@ -491,7 +436,6 @@ const IsoScene: React.FC<{
   highlightEdgeIndex,
 }) => {
     const { camera, size, invalidate } = useThree();
-    const groupRef = useRef<THREE.Group | null>(null);
     const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
     const centerRef = useRef(new THREE.Vector3());
     const distanceRef = useRef(10);
@@ -626,7 +570,7 @@ const IsoScene: React.FC<{
       const orthoCam = camera as THREE.OrthographicCamera;
       const worldExtent = safeRadius * 2;
       const viewportPx = Math.max(10, Math.min(size.width, size.height));
-      const zoom = worldExtent > 0 ? (viewportPx * ZOOM_MARGIN_FACTOR) / worldExtent : 1;
+      const zoom = worldExtent > 0 ? (viewportPx * ISO_GEO.zoomMarginFactor) / worldExtent : 1;
       orthoCam.zoom = isFinite(zoom) && zoom > 0 ? zoom : 1;
 
       try {
@@ -671,12 +615,6 @@ const IsoScene: React.FC<{
       }
 
       invalidate();
-      // `geometrySignature` (nie `buildings`/`activeBuildingId`) jest kluczem przeliczenia - jeśli
-      // rodzic przekazuje `buildings` jako nową referencję tablicy przy każdym renderze (np.
-      // niezmemoizowany selektor Zustand), samo to nie może wymuszać ponownego, kosztownego
-      // przeliczenia centroidu/bboxa (z pipeline'em modyfikatorów w środku) - to była przyczyna
-      // widocznego jittera kamery przy renderach niezwiązanych ze zmianą geometrii.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [group, size.width, size.height, camera, orientation, invalidate, geometrySignature]);
 
     // Smoothly tween the camera to the newly selected orientation.
@@ -718,7 +656,11 @@ const IsoScene: React.FC<{
 
     return (
       <>
-        <hemisphereLight color="#ffffff" groundColor="#cbd5e1" intensity={1.4} />
+        <hemisphereLight
+          color={ISO_COLORS.hemisphereSky}
+          groundColor={ISO_COLORS.hemisphereGround}
+          intensity={1.4}
+        />
         <ambientLight intensity={0.65} />
         <directionalLight
           ref={dirLightRef}
@@ -728,7 +670,7 @@ const IsoScene: React.FC<{
           shadow-mapSize-width={1024}
           shadow-mapSize-height={1024}
         />
-        <primitive ref={groupRef} object={group} />
+        <primitive object={group} />
 
         {frameData && (
           <mesh
@@ -738,7 +680,7 @@ const IsoScene: React.FC<{
           >
             <planeGeometry args={[Math.max(frameData.radius * 12, 30), Math.max(frameData.radius * 12, 30)]} />
             <meshStandardMaterial
-              color="#eeeeee"
+              color={ISO_COLORS.groundPlane}
               roughness={1}
               metalness={0}
               depthWrite={true}
@@ -760,72 +702,18 @@ const CompassStrip: React.FC<{ orientation: IsoOrientation }> = ({ orientation }
   const items = Array.from({ length: TRACK_STEPS }, (_, i) => i - Math.floor(TRACK_STEPS / 2));
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        left: '50%',
-        bottom: '8px',
-        transform: 'translateX(-50%)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
-        padding: '4px 6px',
-        pointerEvents: 'none',
-      }}
-    >
-      <div
-        style={{
-          position: 'relative',
-          width: '150px',
-          height: '20px',
-          overflow: 'hidden',
-          pointerEvents: 'none',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: '50%',
-            display: 'flex',
-            alignItems: 'flex-start',
-            transform: 'translateX(-50%)',
-            transition: 'transform 220ms ease-out',
-          }}
-        >
+    <div className="iso-compass-strip">
+      <div className="iso-compass-track-window">
+        <div className="iso-compass-track">
           {items.map((offset) => {
             const idx = (currentIndex + offset + ORIENTATION_CYCLE.length * 100) % ORIENTATION_CYCLE.length;
             const isActive = offset === 0;
             return (
-              <div
-                key={`${offset}-${idx}`}
-                style={{
-                  width: '30px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: isActive ? '10px' : '9px',
-                    fontWeight: isActive ? 700 : 500,
-                    letterSpacing: '0.06em',
-                    color: isActive ? '#1a1a1a' : 'rgba(0, 0, 0, 0.45)',
-                    lineHeight: 1,
-                  }}
-                >
+              <div key={`${offset}-${idx}`} className="iso-compass-item">
+                <span className={`iso-compass-label${isActive ? ' active' : ''}`}>
                   {ORIENTATION_CYCLE[idx]}
                 </span>
-                <span
-                  style={{
-                    marginTop: '3px',
-                    width: '1px',
-                    height: isActive ? '6px' : '4px',
-                    backgroundColor: isActive ? '#1a1a1a' : 'rgba(0, 0, 0, 0.25)',
-                  }}
-                />
+                <span className={`iso-compass-tick${isActive ? ' active' : ''}`} />
               </div>
             );
           })}
@@ -837,26 +725,6 @@ const CompassStrip: React.FC<{ orientation: IsoOrientation }> = ({ orientation }
 
 const ORIENTATION_STORAGE_KEY = 'usi-light.preview.orientation';
 const XRAY_STORAGE_KEY = 'usi-light.preview.xray';
-
-function loadStoredOrientation(): IsoOrientation {
-  try {
-    const stored = localStorage.getItem(ORIENTATION_STORAGE_KEY);
-    if (stored && (ORIENTATION_CYCLE as string[]).includes(stored)) {
-      return stored as IsoOrientation;
-    }
-  } catch {
-    // localStorage unavailable
-  }
-  return 'SW';
-}
-
-function loadStoredXRay(): boolean {
-  try {
-    return localStorage.getItem(XRAY_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
 
 export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
   building,
@@ -906,17 +774,8 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
   };
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        width: '100%',
-        aspectRatio: '4 / 3',
-        borderRadius: '12px',
-        overflow: 'hidden',
-        backgroundColor: '#eeeeee',
-      }}
-    >
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+    <div className="iso-preview-container">
+      <div className="iso-preview-canvas-wrap">
         <Canvas
           frameloop="demand"
           shadows
@@ -944,25 +803,7 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
           type="button"
           onClick={toggleXRay}
           title={effectiveIsXRay ? 'Wyłącz tryb X-Ray' : 'Włącz tryb X-Ray (kolory typów obiektów)'}
-          style={{
-            position: 'absolute',
-            top: '8px',
-            right: '8px',
-            zIndex: 10,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '5px 8px',
-            borderRadius: '6px',
-            border: effectiveIsXRay ? '1px solid #6366f1' : '1px solid rgba(0, 0, 0, 0.15)',
-            backgroundColor: effectiveIsXRay ? 'rgba(99, 102, 241, 0.9)' : 'rgba(255, 255, 255, 0.85)',
-            color: effectiveIsXRay ? '#ffffff' : '#334155',
-            backdropFilter: 'blur(4px)',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-            cursor: 'pointer',
-            fontSize: '10.5px',
-            fontWeight: 600,
-          }}
+          className={`iso-preview-xray-btn${effectiveIsXRay ? ' active' : ''}`}
         >
           <Scan size={13} />
           <span>X-Ray</span>
@@ -971,35 +812,17 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
 
       {/* Legenda trybu X-Ray */}
       {effectiveIsXRay && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '8px',
-            left: '8px',
-            zIndex: 10,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '3px',
-            padding: '5px 7px',
-            borderRadius: '6px',
-            backgroundColor: 'rgba(255, 255, 255, 0.88)',
-            border: '1px solid rgba(0, 0, 0, 0.1)',
-            backdropFilter: 'blur(4px)',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
-            fontSize: '9.5px',
-            pointerEvents: 'none',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#1e293b' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '2px', backgroundColor: '#6366f1' }} />
+        <div className="iso-preview-legend">
+          <div className="iso-preview-legend-item">
+            <span className="iso-preview-legend-dot residential" />
             <span>Mieszkalny</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#1e293b' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '2px', backgroundColor: '#f59e0b' }} />
+          <div className="iso-preview-legend-item">
+            <span className="iso-preview-legend-dot service" />
             <span>Usługowy</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#1e293b' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '2px', backgroundColor: '#64748b' }} />
+          <div className="iso-preview-legend-item">
+            <span className="iso-preview-legend-dot garage" />
             <span>Garaż</span>
           </div>
         </div>
@@ -1010,33 +833,13 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
         type="button"
         onClick={() => rotate(-1)}
         aria-label="Obróć w lewo"
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: '50%',
-          height: '100%',
-          border: 'none',
-          background: 'transparent',
-          cursor: 'pointer',
-          padding: 0,
-        }}
+        className="iso-preview-rotate-btn left"
       />
       <button
         type="button"
         onClick={() => rotate(1)}
         aria-label="Obróć w prawo"
-        style={{
-          position: 'absolute',
-          right: 0,
-          top: 0,
-          width: '50%',
-          height: '100%',
-          border: 'none',
-          background: 'transparent',
-          cursor: 'pointer',
-          padding: 0,
-        }}
+        className="iso-preview-rotate-btn right"
       />
 
       {/* Compass strip: purely visual, ticks slide to reflect the current direction. */}

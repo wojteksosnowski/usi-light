@@ -150,11 +150,16 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
    - Disabled: kolor `var(--border-light)`, `opacity: 0.6`
    - Używany w klastrze ikon sterujących karty modyfikatora (`ModifierCard.tsx`: toggle włącz/wyłącz, reorder góra/dół, usuń) — kolor/obramowanie nadpisywane inline per stan (np. `var(--accent-purple)` gdy aktywny toggle, `var(--accent-rose)` dla usuwania).
 
-### 4.2. Promienie Zaokrągleń (Border Radius Scale)
+### 4.2. Podgląd Izometryczny Bryły (`.iso-preview-container`)
+- **Kontener podglądu (`.iso-preview-container`)**: `border-radius: 12px`, `aspect-ratio: 4 / 3`, `overflow: hidden`, tło `#eeeeee` (jasny viewport modelarski).
+- **Przycisk X-Ray (`.iso-preview-xray-btn`)**: `border-radius: 6px`, `font-size: 10.5px`, `font-weight: 600`, tło `rgba(11, 19, 41, 0.85)` z `backdrop-filter: blur(8px)`, stan aktywny: `var(--accent-indigo)`.
+- **Legenda X-Ray (`.iso-preview-legend`)**: `border-radius: 6px`, `font-size: 9.5px`, tło `rgba(11, 19, 41, 0.88)` z `backdrop-filter: blur(8px)`, obramowanie `var(--border-light)`.
+
+### 4.3. Promienie Zaokrągleń (Border Radius Scale)
 - **Tagi / Małe badge**: `border-radius: 4px` - `6px`
 - **Kafle / Przyciski narzędziowe / Wejścia**: `border-radius: 8px`
 - **Paski narzędziowe (Toolbar)**: `border-radius: 10px`
-- **Karty UI (`.ui-card`) / Przyciski główne**: `border-radius: 12px`
+- **Karty UI (`.ui-card`) / Przyciski główne / Kontener ISO (`.iso-preview-container`)**: `border-radius: 12px`
 - **Pływające paski dolne (Legenda)**: `border-radius: 14px`
 - **Pływający HUD górny**: `border-radius: 16px`
 - **Modale / Inspektor punktu (`.inspector-card`)**: `border-radius: 18px`

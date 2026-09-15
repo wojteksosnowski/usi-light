@@ -303,3 +303,24 @@ export interface ZoneFootprint {
   holes?: Point2D[][];   // wewnętrzna granica pasa strefy (jak StoryFootprint.holes); brak = pełny wielokąt, fallback
 }
 
+/**
+ * Wyznacza indeks krawędzi do podświetlenia w podglądzie izometrycznym.
+ * Odpowiada rozwiniętemu modyfikatorowi (jeśli posiada krawędź), z fallbackiem na pierwszy aktywny modyfikator z krawędzią.
+ */
+export function getActiveHighlightEdgeIndex(
+  modifiers: Modifier[] | undefined,
+  expandedModifierId?: string | null
+): number | undefined {
+  if (!modifiers || modifiers.length === 0) return undefined;
+  const hasEdge = (m: Modifier): m is Modifier & { edgeIndex?: number } =>
+    m.enabled && 'edgeIndex' in m && (m as { edgeIndex?: number }).edgeIndex !== undefined;
+
+  const targetMod = expandedModifierId
+    ? modifiers.find((m) => m.id === expandedModifierId)
+    : modifiers.find(hasEdge);
+
+  if (!targetMod || !hasEdge(targetMod)) return undefined;
+  const edgeIdx = targetMod.edgeIndex;
+  return edgeIdx === undefined || edgeIdx === -1 ? 0 : edgeIdx;
+}
+
