@@ -1,10 +1,15 @@
-import type { BuildingLoop, Point2D } from '@/types/geometry';
+import type { BuildingLoop, BuildingType, Point2D } from '@/types/geometry';
 
 export interface IsoSolid {
   polygon: Point2D[];
   holes: Point2D[][];
   hBottom: number;
   hTop: number;
+  // Dziedziczone ID krawędzi obrysu (patrz StoryFootprint.edgeOrigins) — pozwala podglądowi 3D
+  // podświetlić DOKŁADNIE tę samą ścianę na każdej kondygnacji zamiast surowego indeksu pozycyjnego,
+  // który może wskazywać różne, niepowiązane krawędzie na różnych kondygnacjach (patrz BuildingIsoPreview.tsx).
+  edgeOrigins?: (number | null)[];
+  buildingType?: BuildingType;
 }
 
 /**
@@ -28,6 +33,8 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
         holes: (story.holes ?? []).map((hole) => hole.map(normalize)),
         hBottom: story.hBottom,
         hTop: story.hTop,
+        edgeOrigins: story.edgeOrigins,
+        buildingType: story.buildingType ?? building.buildingType ?? 'residential',
       }));
   }
 
@@ -42,6 +49,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
       holes: [],
       hBottom,
       hTop: hBottom + building.defaultHeight,
+      buildingType: building.buildingType ?? 'residential',
     },
   ];
 }

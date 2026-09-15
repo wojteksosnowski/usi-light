@@ -1,6 +1,6 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import polygonClipping from 'polygon-clipping';
-import { calculateOutwardNormal } from './vec2';
+import { buildRingSegments } from '../ringSegments';
 
 /**
  * Calculates the signed area of a 2D polygon using the Shoelace formula / Green's theorem.
@@ -260,6 +260,113 @@ function clippingResultToLoops(unionResult: polygonClipping.MultiPolygon | polyg
   return resultLoops;
 }
 
+function crossSign(o: Point2D, a: Point2D, b: Point2D): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+/**
+ * Sprawdza czy dwa odcinki właściwie się przecinają (skrzyżowanie wewnątrz obu odcinków,
+ * z pominięciem stykania się w punktach końcowych/współliniowości — interesują nas tylko
+ * "twarde" przecięcia typu bowtie powstałe z naiwnego offsetu wierzchołkowego).
+ */
+function segmentsProperlyIntersect(p1: Point2D, p2: Point2D, p3: Point2D, p4: Point2D): boolean {
+  const d1 = crossSign(p3, p4, p1);
+  const d2 = crossSign(p3, p4, p2);
+  const d3 = crossSign(p1, p2, p3);
+  const d4 = crossSign(p1, p2, p4);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/**
+ * Sprawdza czy pierścień jest prosty (bez samoprzecięć krawędzi niesąsiadujących).
+ * Używane by uruchomić kosztowną i topologię-zmieniającą naprawę (resolveSelfIntersectingRing)
+ * tylko wtedy, gdy jest to faktycznie konieczne — dla poprawnych wielokątów zachowuje dokładny
+ * układ wierzchołków bez przepuszczania przez polygon-clipping.
+ */
+export function isSimplePolygonRing(ring: Point2D[]): boolean {
+  const n = ring.length;
+  if (n < 4) return true;
+  for (let i = 0; i < n; i++) {
+    const a1 = ring[i];
+    const a2 = ring[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      if (j === i || (j + 1) % n === i || (i + 1) % n === j) continue;
+      const b1 = ring[j];
+      const b2 = ring[(j + 1) % n];
+      if (segmentsProperlyIntersect(a1, a2, b1, b2)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Naprawia pojedynczy, potencjalnie samoprzecinający się pierścień (np. wynik naiwnego
+ * offsetu wierzchołkowego na wklęsłym wielokącie) rozbijając go na proste, nieprzecinające
+ * się kontury. Wykorzystuje polygonClipping.union na jednym pierścieniu — w przeciwieństwie
+ * do unionPolygonLoops() nie ma skrótu dla pojedynczego wejścia, więc faktycznie uruchamia
+ * silnik sweep-line i normalizuje topologię (bowtie → 1+ prostych wielokątów).
+ * Zwraca listę posortowaną malejąco wg pola (największy kontur jako pierwszy).
+ */
+export function resolveSelfIntersectingRing(ring: Point2D[]): Point2D[][] {
+  if (!ring || ring.length < 3) return ring ? [ring] : [];
+
+  try {
+    const normalized = toNormalizedClippingRing(ring);
+    if (!normalized) return [ring];
+
+    const unionResult = polygonClipping.union([normalized]);
+    const loops = clippingResultToLoops(unionResult);
+    if (loops.length === 0) return [ring];
+
+    loops.sort((a, b) => Math.abs(calculateSignedArea(b)) - Math.abs(calculateSignedArea(a)));
+    return loops;
+  } catch {
+    return [ring];
+  }
+}
+
+export interface PolygonWithHoles {
+  outer: Point2D[];
+  holes: Point2D[][];
+}
+
+function clippingRingToPoints(ring: polygonClipping.Ring): Point2D[] | null {
+  if (!ring || ring.length < 3) return null;
+  const isClosed = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1];
+  const sliceEnd = isClosed && ring.length > 3 ? ring.length - 1 : ring.length;
+  const pts = ring.slice(0, sliceEnd).map(([x, y]) => ({ x, y }));
+  return pts.length >= 3 ? pts : null;
+}
+
+/**
+ * Konwertuje wynik polygonClipping (MultiPolygon lub Polygon) zachowując hierarchię
+ * obrys zewnętrzny / otwory wewnętrzne zamiast spłaszczać wszystkie pierścienie.
+ */
+function clippingResultToPolygonsWithHoles(
+  unionResult: polygonClipping.MultiPolygon | polygonClipping.Polygon
+): PolygonWithHoles[] {
+  const result: PolygonWithHoles[] = [];
+  for (const poly of unionResult) {
+    if (!Array.isArray(poly) || poly.length === 0) continue;
+    if (typeof poly[0][0] === 'number') {
+      // poly jest pojedynczym Ring (unionResult to Polygon)
+      const outer = clippingRingToPoints(poly as unknown as polygonClipping.Ring);
+      if (outer) result.push({ outer, holes: [] });
+    } else {
+      const rings = poly as polygonClipping.Polygon;
+      const outer = clippingRingToPoints(rings[0]);
+      if (!outer) continue;
+      const holes: Point2D[][] = [];
+      for (let i = 1; i < rings.length; i++) {
+        const hole = clippingRingToPoints(rings[i]);
+        if (hole) holes.push(hole);
+      }
+      result.push({ outer, holes });
+    }
+  }
+  return result;
+}
+
 /**
  * Odporna unia hierarchiczna (Batch Union) zabezpieczająca algorytm Sweep-Line
  * przed przepełnieniem kolejki zdarzeń i mikrodegeneracjami zmiennoprzecinkowymi.
@@ -457,46 +564,36 @@ export function booleanUnionBuildings(
       };
     }
 
-    const outerRing = unionRes[0][0];
-    if (!outerRing || outerRing.length < 4) {
+    const pwh = clippingResultToPolygonsWithHoles(unionRes)[0];
+    if (!pwh || pwh.outer.length < 4) {
       return { success: false, error: 'Wynik sumy nie tworzy poprawnego wielokąta.' };
     }
 
-    const isClosed =
-      outerRing[0][0] === outerRing[outerRing.length - 1][0] &&
-      outerRing[0][1] === outerRing[outerRing.length - 1][1];
-    const pointsRaw = isClosed ? outerRing.slice(0, -1) : outerRing;
-    const vertices: Point2D[] = pointsRaw.map(([x, y]) => ({ x, y }));
-
-    const isCCW = isPolygonCCW(vertices);
-    const finalVertices = isCCW ? vertices : [...vertices].reverse();
+    const isCCW = isPolygonCCW(pwh.outer);
+    const finalVertices = isCCW ? pwh.outer : [...pwh.outer].reverse();
+    const finalHoles = pwh.holes.length > 0 ? pwh.holes.map((h) => (isCCW ? h : [...h].reverse())) : undefined;
 
     const newId = `bldg-union-${Date.now().toString(36)}`;
     const maxHeight = Math.max(bldgA.defaultHeight || 15, bldgB.defaultHeight || 15);
     const mergedName = `${bldgA.name || 'Obiekt'} + ${bldgB.name || 'Obiekt'}`;
+    const mergedMeta = {
+      id: newId,
+      elevation: 0,
+      defaultHeight: maxHeight,
+      hWindowBottom: bldgA.hWindowBottom ?? 0.85,
+      isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
+      buildingType: bldgA.buildingType || 'residential',
+    } as const;
 
-    const segments: import('../../types/geometry').FacadeSegment[] = [];
-
-    const n = finalVertices.length;
-    for (let i = 0; i < n; i++) {
-      const p1 = finalVertices[i];
-      const p2 = finalVertices[(i + 1) % n];
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const len = Math.hypot(dx, dy);
-      const normal = calculateOutwardNormal(p1, p2, isCCW);
-      segments.push({
-        id: `${newId}-seg-${i + 1}`,
-        p1,
-        p2,
-        normal,
-        length: len,
-        angleRad: Math.atan2(dy, dx),
-        hTop: maxHeight,
-        hWindowBottom: bldgA.hWindowBottom ?? 0.85,
-        isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
-        buildingType: bldgA.buildingType || 'residential',
-      });
+    const segments = buildRingSegments(mergedMeta, finalVertices, isCCW, `${newId}-seg`, 0);
+    if (finalHoles) {
+      for (let h = 0; h < finalHoles.length; h++) {
+        // Hole rings wind opposite to the outer ring (evenodd fill). `buildRingSegments`'s normal
+        // formula returns the direction away from a ring's own interior when given its true
+        // winding — for a hole we want the opposite (pointing INTO the void), so we deliberately
+        // pass `isCCW` (the outer ring's winding, i.e. the complement of this hole ring's actual one).
+        segments.push(...buildRingSegments(mergedMeta, finalHoles[h], isCCW, `${newId}-hole${h}-seg`, h + 1));
+      }
     }
 
     const mergedBuilding: BuildingLoop = {
@@ -505,11 +602,12 @@ export function booleanUnionBuildings(
       layer: bldgA.layer || 'Domyślna (0)',
       isTested: bldgA.isTested || bldgB.isTested || false,
       isIncluded: true,
-      isCityCentre: bldgA.isCityCentre || bldgB.isCityCentre || false,
-      buildingType: bldgA.buildingType || 'residential',
+      isCityCentre: mergedMeta.isCityCentre,
+      buildingType: mergedMeta.buildingType,
       defaultHeight: maxHeight,
-      hWindowBottom: bldgA.hWindowBottom ?? 0.85,
+      hWindowBottom: mergedMeta.hWindowBottom,
       vertices: finalVertices,
+      holes: finalHoles,
       segments,
       isClockwise: !isCCW,
       transform: {
@@ -683,6 +781,18 @@ export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
  * @param radius    promień okręgu w metrach
  * @returns         liczba z zakresu [0, 1] — udział pola wielokąta wewnątrz okręgu
  */
+/** Obwiednia (bounding box) zbioru punktów. */
+export function computePointsBoundingBox(points: Point2D[]): { minX: number; maxX: number; minY: number; maxY: number } {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, maxX, minY, maxY };
+}
+
 export function polygonCircleIntersectionRatio(
   vertices: Point2D[],
   cx: number,
@@ -692,13 +802,7 @@ export function polygonCircleIntersectionRatio(
   if (!vertices || vertices.length < 3 || radius <= 0) return 0;
 
   // Oblicz obwiednię wielokąta
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const v of vertices) {
-    if (v.x < minX) minX = v.x;
-    if (v.x > maxX) maxX = v.x;
-    if (v.y < minY) minY = v.y;
-    if (v.y > maxY) maxY = v.y;
-  }
+  const { minX, maxX, minY, maxY } = computePointsBoundingBox(vertices);
 
   const STEPS = 20; // 20x20 = 400 punktów próbkowania
   const dx = (maxX - minX) / STEPS;

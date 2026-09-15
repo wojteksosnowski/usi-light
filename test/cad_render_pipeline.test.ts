@@ -84,7 +84,7 @@ describe('CadRenderPipeline & Layer Orchestration', () => {
     const pipeline = new CadRenderPipeline();
     const layers = pipeline.getMainLayers();
 
-    expect(layers.length).toBe(9);
+    expect(layers.length).toBe(10);
     for (let i = 0; i < layers.length - 1; i++) {
       expect(layers[i].zIndex).toBeLessThanOrEqual(layers[i + 1].zIndex);
     }

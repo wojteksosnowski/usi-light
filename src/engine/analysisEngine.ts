@@ -112,6 +112,7 @@ export function prefilterShadowingCandidatesForSegment(
   const candidates: PrefilteredObstacle[] = [];
 
   for (const bldg of allBuildings) {
+    // "Dodaj do analiz" (isIncluded): przeszkoda w §12/§56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
     // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż maxReach od odcinka
@@ -252,6 +253,7 @@ export function prefilterSunlightCandidatesForSegment(
   const candidates: PrefilteredObstacle[] = [];
 
   for (const bldg of allBuildings) {
+    // "Dodaj do analiz" (isIncluded): przeszkoda w §12/§56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
 
     const aabb = getBuildingAABB(bldg);
@@ -806,12 +808,11 @@ export function analyzeSunlightAtPoint(
   baseHeightOverride?: number
 ): SunlightResult {
   const normal = segment.normal;
-  const isChildcare = segment.buildingType === 'childcare';
   const sys = hourSystem ?? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
 
   const trajectory =
     precomputedTrajectory ??
-    computeDailySolarTrajectory(settings, stepMinutes, isChildcare, sys);
+    computeDailySolarTrajectory(settings, stepMinutes, false, sys);
 
   // 1. Orientation culling check:
   // Find which slots actually strike this facade at an angle >= 12 deg (relative to wall plane, <= 78 deg from normal)
@@ -853,7 +854,7 @@ export function analyzeSunlightAtPoint(
     prefilteredObstacles ?? prefilterSunlightObstacles(point, segment, allBuildings, targetBuildingId);
 
   const windowInfo =
-    precomputedWindow ?? precomputeSolarWindow(settings, isChildcare, sys);
+    precomputedWindow ?? precomputeSolarWindow(settings, false, sys);
   const { nStart, nEnd } = windowInfo;
 
   // Liniowy filtr okna 10h dla kandydatów
@@ -992,12 +993,11 @@ export function analyzeSunlightAtPointSegments(
 ): SunlightResult & { _segMethodMs?: number } {
   const t0 = performance.now();
   const normal = segment.normal;
-  const isChildcare = segment.buildingType === 'childcare';
   const sys = hourSystem ?? new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate);
 
   // 1. Solar equinox analysis window (niezmienne dla lokalizacji)
   const windowInfo =
-    precomputedWindow ?? precomputeSolarWindow(settings, isChildcare, sys);
+    precomputedWindow ?? precomputeSolarWindow(settings, false, sys);
 
   const azSolarMin = windowInfo.azSolarMin;
   const azSolarMax = windowInfo.azSolarMax;
@@ -1232,7 +1232,7 @@ export function analyzeSunlightAtPointSegments(
 
   // Dokładne zaokrąglenie do pełnych minut, z uwzględnieniem tolerancji numerycznej O(1) dla pełnego okna
   let totalMinutes = Math.round(totalHours * 60);
-  const maxAllowedHours = isChildcare ? 8.0 : 10.0;
+  const maxAllowedHours = 10.0;
   if (Math.abs(totalHours - maxAllowedHours) < 0.05) {
     totalHours = maxAllowedHours;
     totalMinutes = Math.round(maxAllowedHours * 60);
@@ -1319,12 +1319,13 @@ export function runFullAnalysis(
   }
 
   const results: AnalysisPointResult[] = [];
+  // "W projekcie" (isTested): fasady tych obiektów są próbkowane jako punkty analizy §12/§56.
   const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary');
   const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
   const angleStep = options?.angleStepDeg ?? 0.5;
   const sunlightStep = options?.sunlightStepMinutes ?? 5;
 
-  // Precompute solar trajectories and 10h window lines once for standard residential and childcare segments
+  // Precompute solar trajectories and 10h window lines once for all facade segments
   const astroSystem = isSunlightEnabled ? new AstroSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
   const linijkaSystem = isSunlightEnabled ? new LinijkaSolarSystem(settings.latitude, settings.longitude, settings.equinoxDate) : null;
   const activeHourSystem = isSunlightEnabled ? (sunlightMethod === 'segments' ? linijkaSystem! : astroSystem!) : null;
@@ -1332,14 +1333,8 @@ export function runFullAnalysis(
   const standardTrajectory = (isSunlightEnabled && activeHourSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, false, activeHourSystem)
     : [];
-  const childcareTrajectory = (isSunlightEnabled && activeHourSystem)
-    ? computeDailySolarTrajectory(settings, sunlightStep, true, activeHourSystem)
-    : [];
   const standardWindow = (isSunlightEnabled && activeHourSystem)
     ? precomputeSolarWindow(settings, false, activeHourSystem)
-    : null;
-  const childcareWindow = (isSunlightEnabled && activeHourSystem)
-    ? precomputeSolarWindow(settings, true, activeHourSystem)
     : null;
 
   // Trajektorie referencyjne (Astro) tylko gdy jawnie zażądano profilowania (options?.debugBenchmark)
@@ -1347,14 +1342,8 @@ export function runFullAnalysis(
   const refStandardTrajectory = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? computeDailySolarTrajectory(settings, sunlightStep, false, astroSystem)
     : null;
-  const refChildcareTrajectory = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
-    ? computeDailySolarTrajectory(settings, sunlightStep, true, astroSystem)
-    : null;
   const refStandardWindow = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
     ? precomputeSolarWindow(settings, false, astroSystem)
-    : null;
-  const refChildcareWindow = (isDebugBenchmark && isSunlightEnabled && sunlightMethod === 'segments' && astroSystem)
-    ? precomputeSolarWindow(settings, true, astroSystem)
     : null;
 
   let totalShadowingTimeMs = 0;
@@ -1372,14 +1361,22 @@ export function runFullAnalysis(
 
     const tLoop0 = performance.now();
     for (const bldg of testedBuildings) {
+      const bldgType = bldg.buildingType || 'residential';
+      // Obiekty typu garaż nie muszą spełniać § 12 ani § 56
+      if (bldgType === 'garage') {
+        continue;
+      }
+      // Obiekty typu usługi nie muszą spełniać § 56 (nasłonecznienie), ale podlegają § 12 (przesłanianie)
+      const bldgSunlightEnabled = isSunlightEnabled && bldgType === 'residential';
+      const bldgShadowingEnabled = isShadowingEnabled;
+
       const tBldg0 = performance.now();
       for (const seg of bldg.segments) {
-        const isChildcare = seg.buildingType === 'childcare';
         const sampled = sampleSegmentPoints(seg.p1, seg.p2, interval);
-        const trajectory = isChildcare ? childcareTrajectory : standardTrajectory;
-        const windowInfo = isChildcare ? childcareWindow : standardWindow;
-        const refTrajectory = isChildcare ? refChildcareTrajectory : refStandardTrajectory;
-        const refWindowInfo = isChildcare ? refChildcareWindow : refStandardWindow;
+        const trajectory = standardTrajectory;
+        const windowInfo = standardWindow;
+        const refTrajectory = refStandardTrajectory;
+        const refWindowInfo = refStandardWindow;
 
         // Wstępne wyliczenie wektorów stożka widzenia i kandydatów przeszkód dla CAŁEGO odcinka fasady
         const normalAngleRad = Math.atan2(seg.normal.y, seg.normal.x);
@@ -1389,10 +1386,10 @@ export function runFullAnalysis(
         const n2 = { x: -Math.sin(a2), y: Math.cos(a2) };
         const pointBaseH = seg.hBase ?? 0.0;
 
-        const shadowingCandidates = isShadowingEnabled
+        const shadowingCandidates = bldgShadowingEnabled
           ? prefilterShadowingCandidatesForSegment(seg, buildings, bldg.id)
           : null;
-        const sunlightCandidates = isSunlightEnabled
+        const sunlightCandidates = bldgSunlightEnabled
           ? prefilterSunlightCandidatesForSegment(seg, buildings, bldg.id)
           : null;
 
@@ -1401,7 +1398,7 @@ export function runFullAnalysis(
 
           let shadowing: ShadowingResult;
           let pointShadowMs = 0;
-          if (isShadowingEnabled) {
+          if (bldgShadowingEnabled) {
             const prefilteredShadowing = filterPointShadowingFromCandidates(sample.point, shadowingCandidates!, n1, n2);
             const tShadow0 = performance.now();
             shadowing = analyzeShadowingAtPoint(
@@ -1424,7 +1421,7 @@ export function runFullAnalysis(
 
           let sunlight: SunlightResult;
           let pointSunlightMs = 0;
-          if (isSunlightEnabled) {
+          if (bldgSunlightEnabled) {
             const prefilteredSunlight = filterPointSunlightFromCandidates(sample.point, sunlightCandidates!, pointBaseH, n1, n2);
             const tSun0 = performance.now();
             sunlight =
@@ -1579,6 +1576,7 @@ export function analyzePlaygroundSunlight(
   const requiredDurationHours = isCityCentre ? 1.0 : 2.0;
 
   // Wyznacz segmenty przeszkód (budynki o H > elevation)
+  // "Dodaj do analiz" (isIncluded): przeszkoda w §56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
   const obstacleSegments: FacadeSegment[] = [];
   for (const bldg of allBuildings) {
     if (bldg.id === playground.id || bldg.isIncluded === false || bldg.category === 'boundary') continue;

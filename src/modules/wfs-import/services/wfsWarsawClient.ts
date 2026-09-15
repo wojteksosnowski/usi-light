@@ -12,7 +12,7 @@ export type WfsBbox = [number, number, number, number];
 
 import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
 
-const EPSG_2178: CrsDetectionResult = {
+export const EPSG_2178: CrsDetectionResult = {
   crs: 'EPSG:2178',
   description: 'PL-2000 strefa 7',
   geodeticLabel: 'ETRF2000-PL / CS2000 / 21',
@@ -20,19 +20,74 @@ const EPSG_2178: CrsDetectionResult = {
   zone: 7,
 };
 
+export const EPSG_2177: CrsDetectionResult = {
+  crs: 'EPSG:2177',
+  description: 'PL-2000 strefa 6',
+  geodeticLabel: 'ETRF2000-PL / CS2000 / 18',
+  isGeodetic: true,
+  zone: 6,
+};
+
+/** Rogi bboxa WGS84 [west, south, east, north] przeliczone na dany CRS. */
+export function wgs84BboxToEpsgBounds(
+  bbox: WfsBbox,
+  targetCrs: CrsDetectionResult
+): { minE: number; minN: number; maxE: number; maxN: number } {
+  const [west, south, east, north] = bbox;
+  const sw = wgs84ToCadPoint({ lat: south, lon: west }, targetCrs);
+  const ne = wgs84ToCadPoint({ lat: north, lon: east }, targetCrs);
+  return {
+    minE: Math.min(sw.x, ne.x),
+    minN: Math.min(sw.y, ne.y),
+    maxE: Math.max(sw.x, ne.x),
+    maxN: Math.max(sw.y, ne.y),
+  };
+}
+
+/** Rogi bboxa WGS84 [west, south, east, north] przeliczone na EPSG:2178. */
+export function wgs84BboxToEpsg2178Bounds(bbox: WfsBbox): { minE: number; minN: number; maxE: number; maxN: number } {
+  return wgs84BboxToEpsgBounds(bbox, EPSG_2178);
+}
+
 /**
  * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2178
  * w kolejności northing, easting (wymaganej przez GeoServer).
  */
-function wgs84BboxToEpsg2178(bbox: WfsBbox): string {
-  const [west, south, east, north] = bbox;
-  const sw = wgs84ToCadPoint({ lat: south, lon: west }, EPSG_2178);
-  const ne = wgs84ToCadPoint({ lat: north, lon: east }, EPSG_2178);
-  const minN = Math.min(sw.y, ne.y);
-  const minE = Math.min(sw.x, ne.x);
-  const maxN = Math.max(sw.y, ne.y);
-  const maxE = Math.max(sw.x, ne.x);
+export function wgs84BboxToEpsg2178(bbox: WfsBbox): string {
+  const { minE, minN, maxE, maxN } = wgs84BboxToEpsg2178Bounds(bbox);
   return `${minN},${minE},${maxN},${maxE}`;
+}
+
+/**
+ * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2178
+ * w kolejności easting, northing (wymaganej przez niektóre serwery MapServer/GeoServer).
+ */
+export function wgs84BboxToEpsg2178EN(bbox: WfsBbox): string {
+  const { minE, minN, maxE, maxN } = wgs84BboxToEpsg2178Bounds(bbox);
+  return `${minE},${minN},${maxE},${maxN}`;
+}
+
+/** Rogi bboxa WGS84 [west, south, east, north] przeliczone na EPSG:2177. */
+export function wgs84BboxToEpsg2177Bounds(bbox: WfsBbox): { minE: number; minN: number; maxE: number; maxN: number } {
+  return wgs84BboxToEpsgBounds(bbox, EPSG_2177);
+}
+
+/**
+ * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2177
+ * w kolejności northing, easting.
+ */
+export function wgs84BboxToEpsg2177(bbox: WfsBbox): string {
+  const { minE, minN, maxE, maxN } = wgs84BboxToEpsg2177Bounds(bbox);
+  return `${minN},${minE},${maxN},${maxE}`;
+}
+
+/**
+ * Konwertuje bbox WGS84 [west, south, east, north] na bbox EPSG:2177
+ * w kolejności easting, northing.
+ */
+export function wgs84BboxToEpsg2177EN(bbox: WfsBbox): string {
+  const { minE, minN, maxE, maxN } = wgs84BboxToEpsg2177Bounds(bbox);
+  return `${minE},${minN},${maxE},${maxN}`;
 }
 
 export interface GeoJsonFeatureCollection {

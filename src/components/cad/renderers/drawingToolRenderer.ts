@@ -1,5 +1,5 @@
 import { CadRenderContext } from '../types';
-import { BuildingLoop, Point2D } from '../../../types/geometry';
+import { BuildingLoop, Point2D, DEFAULT_SWEEP_WIDTH } from '../../../types/geometry';
 import { generateSweepPolygon, SweepAlignment, getPolygonCentroid, getRotateHandleScreenPos } from '../../../utils/math2d';
 import { OsnapSnapResult, BuildingDragSnapResult, EdgeDragSnapResult, DirectionSnapResult } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
@@ -20,7 +20,7 @@ export function renderDrawingToolPreview(
   selectedVertexIndex?: number | null,
   osnapSnapResult?: OsnapSnapResult | null,
   buildingDragSnap?: BuildingDragSnapResult | EdgeDragSnapResult | null,
-  sweepWidth: number = 5.0,
+  sweepWidth: number = DEFAULT_SWEEP_WIDTH,
   sweepAlignment: SweepAlignment = 'center',
   allBuildings?: BuildingLoop[],
   alignPendingRef?: { buildingId: string; segmentId: string } | null,

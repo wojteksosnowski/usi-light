@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   applyBuildingModifiers,
   computeStoryHeightIntervals,
@@ -8,11 +10,16 @@ import {
   generateTerracePolygon,
   generateDonutHoles,
   generateCornerCutPolygon,
+  generatePilaPolygon,
+  calculatePilaMetrics,
+  splitFootprintByEdgeOffset,
   resolveStoryModifierSteps,
   sanitizeStoryFootprint,
 } from './modifierPipeline';
 import { BuildingLoop, Point2D } from '../../types/geometry';
+import { Modifier } from '../../types/modifiers';
 import { calculateSignedArea, isPolygonCCW } from '../../utils/math2d/polygons';
+import { getBuildingSolids } from '../preview/buildingIsoGeometry';
 
 describe('modifierPipeline', () => {
   const baseBuilding: BuildingLoop = {
@@ -548,8 +555,11 @@ describe('modifierPipeline', () => {
       const hole = res.storyPolygons[4].holes![0];
       expect(hole).toBeDefined();
       expect(hole.length).toBe(4);
-      // Base hole is [12, 12] to [28, 28]. Modifying bottom edge of hole with setback shifts it
-      expect(hole[0].y).not.toBe(res.storyPolygons[0].holes![0][0].y);
+      // Base hole is modified with setback (shifts edge by -2m)
+      expect(hole).not.toEqual(res.storyPolygons[0].holes![0]);
+      expect(Math.abs(calculateSignedArea(hole))).not.toBeCloseTo(
+        Math.abs(calculateSignedArea(res.storyPolygons[0].holes![0]))
+      );
     });
   });
 
@@ -612,7 +622,7 @@ describe('modifierPipeline', () => {
       { x: 0, y: 30 },
     ];
 
-    it('applies stepped setbacks for storiesCount = -3 and depth = -4m on a 5-story building', () => {
+    it('applies stepped setbacks for storiesCount = -3 and depth = -6m on a 5-story building with variant = steps so total setback is 6m', () => {
       const bldgCascading: BuildingLoop = {
         ...baseBuilding,
         vertices: square30m,
@@ -621,9 +631,10 @@ describe('modifierPipeline', () => {
             id: 'terrace-cascade',
             type: 'terrace',
             enabled: true,
-            depth: -4.0,
-            storiesCount: -3, // 3 top storeys: story 2 (-4m), story 3 (-8m), story 4 (-12m)
+            depth: -6.0,
+            storiesCount: -3, // 3 top storeys: story 2 (-2m), story 3 (-4m), story 4 (-6m = total 'a')
             edgeIndex: 0, // bottom wall (0,0)->(30,0)
+            variant: 'steps',
           },
         ],
       };
@@ -635,17 +646,47 @@ describe('modifierPipeline', () => {
       expect(res.storyPolygons[0].polygon[0].y).toBeCloseTo(0, 2);
       expect(res.storyPolygons[1].polygon[0].y).toBeCloseTo(0, 2);
 
-      // Story 2 (3rd floor) setback 1x: y = 4
+      // Story 2 (3rd floor) setback 1/3: y = 2
+      expect(res.storyPolygons[2].polygon[0].y).toBeCloseTo(2, 2);
+      expect(res.storyPolygons[2].polygon[1].y).toBeCloseTo(2, 2);
+
+      // Story 3 (4th floor) setback 2/3: y = 4
+      expect(res.storyPolygons[3].polygon[0].y).toBeCloseTo(4, 2);
+      expect(res.storyPolygons[3].polygon[1].y).toBeCloseTo(4, 2);
+
+      // Story 4 (5th floor) setback 3/3: y = 6 (total 'a')
+      expect(res.storyPolygons[4].polygon[0].y).toBeCloseTo(6, 2);
+      expect(res.storyPolygons[4].polygon[1].y).toBeCloseTo(6, 2);
+    });
+
+    it('applies uniform setback for storiesCount = -3 with variant = drop', () => {
+      const bldgDrop: BuildingLoop = {
+        ...baseBuilding,
+        vertices: square30m,
+        modifiers: [
+          {
+            id: 'terrace-drop',
+            type: 'terrace',
+            enabled: true,
+            depth: -4.0,
+            storiesCount: -3, // 3 top storeys: story 2, 3, 4 each -4m
+            edgeIndex: 0,
+            variant: 'drop',
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgDrop);
+      expect(res.storyPolygons.length).toBe(5);
+
+      // Stories 0 and 1 have un-modified y = 0
+      expect(res.storyPolygons[0].polygon[0].y).toBeCloseTo(0, 2);
+      expect(res.storyPolygons[1].polygon[0].y).toBeCloseTo(0, 2);
+
+      // Stories 2, 3, 4 have uniform setback 1x (-4m -> y = 4)
       expect(res.storyPolygons[2].polygon[0].y).toBeCloseTo(4, 2);
-      expect(res.storyPolygons[2].polygon[1].y).toBeCloseTo(4, 2);
-
-      // Story 3 (4th floor) setback 2x: y = 8
-      expect(res.storyPolygons[3].polygon[0].y).toBeCloseTo(8, 2);
-      expect(res.storyPolygons[3].polygon[1].y).toBeCloseTo(8, 2);
-
-      // Story 4 (5th floor) setback 3x: y = 12
-      expect(res.storyPolygons[4].polygon[0].y).toBeCloseTo(12, 2);
-      expect(res.storyPolygons[4].polygon[1].y).toBeCloseTo(12, 2);
+      expect(res.storyPolygons[3].polygon[0].y).toBeCloseTo(4, 2);
+      expect(res.storyPolygons[4].polygon[0].y).toBeCloseTo(4, 2);
     });
   });
 
@@ -912,6 +953,1043 @@ describe('modifierPipeline', () => {
       expect(res.storyPolygons.length).toBe(2);
       for (const sf of res.storyPolygons) {
         expect(sf.polygon.length).toBe(8);
+      }
+    });
+
+    it('handles U-shaped building with terrace and corner_cut (mod-test1 regression)', () => {
+      // 8-vertex U-shaped building from reference/mod-test1.json
+      const uShapeVertices: Point2D[] = [
+        { x: -55.958975062954416, y: 16.00415738086747 },
+        { x: -56.51995114594727, y: 48.14245565130253 },
+        { x: -19.88095105747405, y: 48.474259725508404 },
+        { x: -10.147090211546056, y: 25.798444853458044 },
+        { x: -21.174072415680058, y: 21.064982751601526 },
+        { x: -27.757854233919197, y: 36.40243415258554 },
+        { x: -44.31058382098414, y: 36.252532050919186 },
+        { x: -43.96080272107772, y: 16.213586258114866 },
+      ];
+
+      const uBuilding: BuildingLoop = {
+        id: 'bldg-u-test',
+        name: 'Budynek U',
+        layer: 'BUD_NOWY',
+        isTested: true,
+        isCityCentre: false,
+        buildingType: 'residential',
+        defaultHeight: 15.0,
+        firstFloorHeight: 3.0,
+        typicalFloorHeight: 3.0,
+        storeysCount: 5,
+        hWindowBottom: 0.85,
+        vertices: uShapeVertices,
+        segments: [],
+        isClockwise: false,
+        transform: { tx: 0, ty: 0, rotationDeg: 0 },
+        modifiers: [
+          {
+            id: 'mod-terrace-test',
+            type: 'terrace',
+            enabled: true,
+            depth: -12,
+            storiesCount: -1, // top story (index 4)
+            variant: 'drop',
+            edgeIndex: 0,
+            autoDistance: true,
+          },
+          {
+            id: 'mod-cut-test',
+            type: 'corner_cut',
+            enabled: true,
+            depth: 4,
+            storiesCount: 0, // all stories
+            mode: 'chamfer',
+            scope: 'all',
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(uBuilding);
+      expect(res.storyPolygons.length).toBe(5);
+
+      // Stories 0..3 have 8 corners chamfered -> 16 vertices
+      for (let s = 0; s < 4; s++) {
+        expect(res.storyPolygons[s].polygon.length).toBe(16);
+      }
+
+      // Story 4 (top story with 12m terrace setback on edge 0):
+      // The western wing collapses into a clean outer wall.
+      // Every corner should be chamfered cleanly without inverted/self-intersecting segments.
+      const topStory = res.storyPolygons[4];
+      expect(topStory.polygon.length).toBeGreaterThanOrEqual(8);
+      expect(isPolygonCCW(topStory.polygon)).toBe(true);
+
+      // Verify that all points have valid coordinates
+      for (const pt of topStory.polygon) {
+        expect(isNaN(pt.x)).toBe(false);
+        expect(isNaN(pt.y)).toBe(false);
+      }
+
+      // Verify area is positive and smaller than base footprint
+      const baseArea = Math.abs(calculateSignedArea(uShapeVertices));
+      const topArea = Math.abs(calculateSignedArea(topStory.polygon));
+      expect(topArea).toBeGreaterThan(100);
+      expect(topArea).toBeLessThan(baseArea);
+    });
+  });
+
+  // --- NOWE TESTY DLA MODYFIKATORA BRAMA (GATE) ---
+  describe('Gate modifier', () => {
+    const rect30x15: Point2D[] = [
+      { x: 0, y: 0 },    // krawędź 0: dolna ściana y=0 (0,0)->(30,0)
+      { x: 30, y: 0 },   // krawędź 1: prawa ściana x=30 (30,0)->(30,15)
+      { x: 30, y: 15 },  // krawędź 2: górna ściana y=15 (30,15)->(0,15)
+      { x: 0, y: 15 },   // krawędź 3: lewa ściana x=0 (0,15)->(0,0)
+    ];
+
+    it('cuts a ground floor gate passage (storiesCount = 1, width = 6m, position = 0.5) on a 5-story building', () => {
+      const bldgWithGate: BuildingLoop = {
+        ...baseBuilding,
+        vertices: rect30x15,
+        modifiers: [
+          {
+            id: 'gate-ground',
+            type: 'gate',
+            enabled: true,
+            width: 6.0,
+            storiesCount: 1, // parter (storyIndex 0)
+            edgeIndex: 0,
+            positionRatio: 0.5,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgWithGate);
+      // Story 0 is split into 2 footprints (left wing x=[0..12], right wing x=[18..30]),
+      // and stories 1..4 have 1 full footprint each -> total 6 story footprints
+      expect(res.storyPolygons.length).toBe(6);
+
+      const groundPolys = res.storyPolygons.filter((s) => s.storyIndex === 0);
+      expect(groundPolys.length).toBe(2);
+
+      // Lewe skrzydło parteru: x od 0 do 12
+      const leftPoly = groundPolys.find((p) => p.polygon.some((pt) => Math.abs(pt.x - 0) < 0.1 && Math.abs(pt.y - 0) < 0.1));
+      expect(leftPoly).toBeDefined();
+      const leftMaxX = Math.max(...leftPoly!.polygon.map((p) => p.x));
+      expect(leftMaxX).toBeCloseTo(12, 1);
+
+      // Prawe skrzydło parteru: x od 18 do 30
+      const rightPoly = groundPolys.find((p) => p.polygon.some((pt) => Math.abs(pt.x - 30) < 0.1 && Math.abs(pt.y - 0) < 0.1));
+      expect(rightPoly).toBeDefined();
+      const rightMinX = Math.min(...rightPoly!.polygon.map((p) => p.x));
+      expect(rightMinX).toBeCloseTo(18, 1);
+
+      // Wyższe kondygnacje (1..4) mają pełny obrys 30x15
+      for (let s = 1; s <= 4; s++) {
+        const story = res.storyPolygons.find((p) => p.storyIndex === s);
+        expect(story).toBeDefined();
+        expect(story!.polygon.length).toBe(4);
+      }
+
+      // Weryfikacja segmentów pionowych ścian bramy:
+      // Powinny powstać ściany tunelu przy x=12 i x=18 dla hBase=0, hTop=3.5
+      const tunnelLeft = res.segments.find(
+        (s) => Math.abs(s.p1.x - 12) < 0.1 && Math.abs(s.p2.x - 12) < 0.1 && s.hBase === 0 && s.hTop === 3.5
+      );
+      expect(tunnelLeft).toBeDefined();
+
+      const tunnelRight = res.segments.find(
+        (s) => Math.abs(s.p1.x - 18) < 0.1 && Math.abs(s.p2.x - 18) < 0.1 && s.hBase === 0 && s.hTop === 3.5
+      );
+      expect(tunnelRight).toBeDefined();
+    });
+
+    it('cuts gate across the whole building (storiesCount = 0) splitting it into 2 separate buildings', () => {
+      const bldgFullGate: BuildingLoop = {
+        ...baseBuilding,
+        vertices: rect30x15,
+        modifiers: [
+          {
+            id: 'gate-all',
+            type: 'gate',
+            enabled: true,
+            width: 4.0,
+            storiesCount: 0, // cała bryła
+            edgeIndex: 0,
+            positionRatio: 0.5,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgFullGate);
+      // All 5 stories are split into 2 footprints -> total 10 story footprints
+      expect(res.storyPolygons.length).toBe(10);
+
+      // Każda kondygnacja ma dokładnie 2 części
+      for (let s = 0; s < 5; s++) {
+        const storyParts = res.storyPolygons.filter((p) => p.storyIndex === s);
+        expect(storyParts.length).toBe(2);
+      }
+
+      // Wszystkie segmenty rozciągają się od 0 do 15m
+      for (const seg of res.segments) {
+        expect(seg.hBase).toBe(0);
+        expect(seg.hTop).toBe(15.0);
+      }
+    });
+
+    it('cuts entrance into courtyard hole on ground floor when combined with Donut modifier', () => {
+      const square40: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 40, y: 0 },
+        { x: 40, y: 40 },
+        { x: 0, y: 40 },
+      ];
+
+      const bldgDonutGate: BuildingLoop = {
+        ...baseBuilding,
+        vertices: square40,
+        modifiers: [
+          {
+            id: 'donut-1',
+            type: 'donut',
+            enabled: true,
+            offset: -12.0, // dziedziniec [12..28, 12..28]
+            storiesCount: 0, // cała bryła
+          },
+          {
+            id: 'gate-courtyard',
+            type: 'gate',
+            enabled: true,
+            width: 4.0, // brama 4m do dziedzińca
+            storiesCount: 1, // tylko w parterze
+            edgeIndex: 0,
+            positionRatio: 0.5,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgDonutGate);
+      expect(res.storyPolygons.length).toBe(5);
+
+      // Parter (storyIndex 0): dziedziniec połączony z zewnątrz (kształt litery U/C z 0 zamkniętymi otworami wewnętrznymi)
+      const groundStory = res.storyPolygons.find((s) => s.storyIndex === 0);
+      expect(groundStory).toBeDefined();
+      expect(groundStory!.holes?.length || 0).toBe(0); // Brak zamkniętego otworu - otwór scalony z obwodem zewnętrznym
+      expect(groundStory!.polygon.length).toBeGreaterThan(4); // Wielokąt U-kształtny
+
+      // Piętra 1..4: nadal mają nienaruszony, zamknięty wewnętrzny dziedziniec
+      for (let s = 1; s <= 4; s++) {
+        const upperStory = res.storyPolygons.find((p) => p.storyIndex === s);
+        expect(upperStory).toBeDefined();
+        expect(upperStory!.holes).toBeDefined();
+        expect(upperStory!.holes!.length).toBe(1);
+      }
+    });
+  });
+
+  describe('Real-world reference files: geometry stability', () => {
+    // `reference/` is gitignored (local scratch/debug fixtures), so these files may not exist in
+    // every checkout or in CI. These tests are a bonus stability check when the fixtures happen to
+    // be present locally; they skip cleanly (rather than failing) when they're not.
+    const referenceFileExists = (fileName: string) =>
+      fs.existsSync(path.resolve(__dirname, '../../../reference', fileName));
+
+    const loadReferenceBuilding = (fileName: string, buildingName?: string): BuildingLoop => {
+      const filePath = path.resolve(__dirname, '../../../reference', fileName);
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      const building = buildingName
+        ? raw.buildings.find((b: BuildingLoop) => b.name === buildingName)
+        : raw.buildings[0];
+      return building as BuildingLoop;
+    };
+
+    const area = (poly: Point2D[]) => Math.abs(calculateSignedArea(poly));
+    const sortedAreas = (wings: { polygon: Point2D[] }[]) =>
+      wings.map((w) => area(w.polygon)).sort((a, b) => a - b);
+    const gateOnly = (building: BuildingLoop) =>
+      applyBuildingModifiers({ ...building, modifiers: building.modifiers!.filter((m) => m.type === 'gate') });
+
+    it.skipIf(!referenceFileExists('mod-test2.json'))(
+      'mod-test2.json: gate splits stories 2-4 into wings, story_offset only insets story 4 (both wings)',
+      () => {
+      const building = loadReferenceBuilding('mod-test2.json');
+      const res = applyBuildingModifiers(building);
+
+      const story2Wings = res.storyPolygons.filter((s) => s.storyIndex === 2);
+      const story3Wings = res.storyPolygons.filter((s) => s.storyIndex === 3);
+      const story4Wings = res.storyPolygons.filter((s) => s.storyIndex === 4);
+      expect(story2Wings.length).toBe(2);
+      expect(story3Wings.length).toBe(2);
+      expect(story4Wings.length).toBe(2);
+
+      // Story 2 and 3 are both untouched by story_offset (only story 4 = storiesCount:-1 is targeted),
+      // so their wing areas (purely a function of the gate cut, same footprint shape) must match.
+      const story2Areas = sortedAreas(story2Wings);
+      const story3Areas = sortedAreas(story3Wings);
+      expect(story3Areas[0]).toBeCloseTo(story2Areas[0], 3);
+      expect(story3Areas[1]).toBeCloseTo(story2Areas[1], 3);
+
+      // Story 4 must be inset (smaller area than story 3's matching wing) by the -2m offset.
+      const story4Areas = sortedAreas(story4Wings);
+      expect(story4Areas[0]).toBeLessThan(story3Areas[0]);
+      expect(story4Areas[1]).toBeLessThan(story3Areas[1]);
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test3.json'))(
+      'mod-test3.json: gate splits story 2 into wings, terrace edgeIndex:0 affects only one wing (no leakage)',
+      () => {
+      const building = loadReferenceBuilding('mod-test3.json');
+      const res = applyBuildingModifiers(building);
+
+      const story2Wings = res.storyPolygons.filter((s) => s.storyIndex === 2);
+      expect(story2Wings.length).toBe(2);
+
+      // Compute what gate alone (no terrace) would have produced for story 2, to diff against.
+      const gateOnlyRes = gateOnly(building);
+      const gateOnlyStory2Wings = gateOnlyRes.storyPolygons.filter((s) => s.storyIndex === 2);
+      expect(gateOnlyStory2Wings.length).toBe(2);
+
+      const gateOnlyAreas = sortedAreas(gateOnlyStory2Wings);
+      const afterTerraceAreas = sortedAreas(story2Wings);
+
+      // Exactly one wing must differ from its gate-only shape (the terrace target);
+      // the other must be unchanged (no leakage into the second loop).
+      const diffs = [0, 1].map((i) => Math.abs(afterTerraceAreas[i] - gateOnlyAreas[i]));
+      const changedCount = diffs.filter((d) => d > 1e-3).length;
+      expect(changedCount).toBe(1);
+
+      // Stories 3 and 4 (not split by gate) still get the terrace setback normally.
+      for (const s of [3, 4]) {
+        const gateOnlyStory = gateOnlyRes.storyPolygons.find((p) => p.storyIndex === s);
+        const afterTerraceStory = res.storyPolygons.find((p) => p.storyIndex === s);
+        expect(gateOnlyStory).toBeDefined();
+        expect(afterTerraceStory).toBeDefined();
+        expect(area(afterTerraceStory!.polygon)).toBeLessThan(area(gateOnlyStory!.polygon));
+      }
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test4.json'))(
+      'mod-test4.json: an earlier gate step must not corrupt a later edge-targeted terrace on UNRELATED, unsplit stories',
+      () => {
+      // Regression test: sanitizeStoryFootprint's boolean-union cleanup (run after every modifier
+      // step, on every story) can silently reorder/renumber a footprint's vertex array. Even a
+      // story `gate` never touches (here: stories 3-4, since gate's storiesCount:3 only covers
+      // stories 0-2) can have its terrace edgeIndex mis-resolved if that index is treated as a raw
+      // position rather than being re-matched geometrically against the original base vertices.
+      const raw = loadReferenceBuilding('mod-test4.json', 'Budynek1');
+      const gateDisabled: BuildingLoop = raw;
+      const gateEnabled: BuildingLoop = {
+        ...raw,
+        modifiers: raw.modifiers!.map((m) => (m.type === 'gate' ? { ...m, enabled: true } : m)),
+      };
+
+      const resOff = applyBuildingModifiers(gateDisabled);
+      const resOn = applyBuildingModifiers(gateEnabled);
+
+      // Stories 3 and 4 are never targeted by gate (storiesCount:3 -> stories 0,1,2 only), so
+      // enabling/disabling gate must have ZERO effect on their terrace-modified shape.
+      for (const s of [3, 4]) {
+        const off = resOff.storyPolygons.find((p) => p.storyIndex === s);
+        const on = resOn.storyPolygons.find((p) => p.storyIndex === s);
+        expect(off).toBeDefined();
+        expect(on).toBeDefined();
+        expect(on!.polygon.length).toBe(off!.polygon.length);
+        expect(area(on!.polygon)).toBeCloseTo(area(off!.polygon), 3);
+      }
+
+      // Story 2 (split by gate into 2 wings): exactly one wing must carry the terrace reduction
+      // relative to the gate-only shape; the other wing (owning a different wall than edgeIndex:7)
+      // must stay exactly as gate alone would produce it.
+      const story2Wings = resOn.storyPolygons.filter((p) => p.storyIndex === 2);
+      expect(story2Wings.length).toBe(2);
+
+      const gateOnlyRes = gateOnly(gateEnabled);
+      const gateOnlyStory2Wings = gateOnlyRes.storyPolygons.filter((p) => p.storyIndex === 2);
+      expect(gateOnlyStory2Wings.length).toBe(2);
+
+      const gateOnlyAreas = sortedAreas(gateOnlyStory2Wings);
+      const afterTerraceAreas = sortedAreas(story2Wings);
+      const diffs = [0, 1].map((i) => Math.abs(afterTerraceAreas[i] - gateOnlyAreas[i]));
+      expect(diffs.filter((d) => d > 1e-3).length).toBe(1);
+      }
+    );
+
+    // mod-test5.json: Budynek1A and Budynek1B each carry ONE gate modifier on their own
+    // building (used here purely as stabilization anchors: their own single-gate geometry
+    // must stay identical across this fix). Budynek1 is the same octagon with BOTH gate
+    // modifiers (from A and B) composed onto one building — reproduces the reported bug
+    // where a second `gate`, run after the first has already split the story into wings,
+    // was applied to EVERY wing (raw local edgeIndex, no ownership check) instead of only
+    // the wing that geometrically owns the wall it targets, producing an extra/erroneous cutout.
+    const onlyModifierById = (building: BuildingLoop, id: string): BuildingLoop => ({
+      ...building,
+      modifiers: building.modifiers!.filter((m) => m.id === id),
+    });
+
+    // Detects the degenerate "sliver" artifact reported live: a boolean-op result containing two
+    // consecutive vertices closer than a real geometric feature ever would be (observed: ~5mm).
+    const hasNearDuplicateConsecutiveVertex = (polygon: Point2D[], tol = 1e-2): boolean => {
+      const n = polygon.length;
+      for (let i = 0; i < n; i++) {
+        const p = polygon[i];
+        const q = polygon[(i + 1) % n];
+        if (Math.hypot(q.x - p.x, q.y - p.y) < tol) return true;
+      }
+      return false;
+    };
+
+    const assertNoDegenerateGeometry = (res: ReturnType<typeof applyBuildingModifiers>) => {
+      for (const sf of res.storyPolygons) {
+        expect(hasNearDuplicateConsecutiveVertex(sf.polygon)).toBe(false);
+      }
+      for (const seg of res.segments) {
+        expect(seg.length).toBeGreaterThan(1e-2);
+      }
+    };
+
+    it.skipIf(!referenceFileExists('mod-test5.json'))(
+      'mod-test5.json: Budynek1A gate geometry is stable (stabilization anchor)',
+      () => {
+        const building = loadReferenceBuilding('mod-test5.json', 'Budynek1A');
+        const res = applyBuildingModifiers(building);
+
+        const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
+        const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
+        expect(story0Wings.length).toBe(2);
+        expect(story1Wings.length).toBe(1);
+        assertNoDegenerateGeometry(res);
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test5.json'))(
+      'mod-test5.json: Budynek1B donut geometry is stable (stabilization anchor)',
+      () => {
+        const building = loadReferenceBuilding('mod-test5.json', 'Budynek1B');
+        const res = applyBuildingModifiers(building);
+
+        const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
+        const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
+        expect(story0Wings.length).toBe(1);
+        expect(story1Wings.length).toBe(1);
+        expect(story0Wings[0].holes!.length).toBe(1);
+        assertNoDegenerateGeometry(res);
+      }
+    );
+
+    it.skipIf(!referenceFileExists('mod-test5.json'))(
+      'mod-test5.json: Budynek1A gate + second gate composed must not produce an extra/erroneous cutout or a degenerate sliver fragment',
+      () => {
+        const bldg1A = loadReferenceBuilding('mod-test5.json', 'Budynek1A');
+        const gate2: Modifier = {
+          id: 'mod-gate-second',
+          type: 'gate',
+          enabled: true,
+          width: 4,
+          storiesCount: 1,
+          positionRatio: 0.5,
+          edgeIndex: 1,
+        };
+        const building: BuildingLoop = {
+          ...bldg1A,
+          name: 'Budynek1',
+          modifiers: [bldg1A.modifiers![0], gate2],
+        };
+        expect(building.modifiers!.length).toBe(2);
+
+        const res1Only = applyBuildingModifiers(onlyModifierById(building, bldg1A.modifiers![0].id));
+        const res2Only = applyBuildingModifiers(onlyModifierById(building, gate2.id));
+        const resBoth = applyBuildingModifiers(building);
+
+        assertNoDegenerateGeometry(resBoth);
+
+        for (const storyIndex of [0]) {
+          const wings1Only = res1Only.storyPolygons.filter((s) => s.storyIndex === storyIndex);
+          const wings2Only = res2Only.storyPolygons.filter((s) => s.storyIndex === storyIndex);
+          const wingsBoth = resBoth.storyPolygons.filter((s) => s.storyIndex === storyIndex);
+          expect(wings1Only.length).toBe(2);
+          expect(wings2Only.length).toBe(2);
+          expect(wingsBoth.length).toBe(3);
+
+          const areas1Only = sortedAreas(wings1Only);
+          const areasBoth = sortedAreas(wingsBoth);
+          const unchangedCount = areas1Only.filter((a1) =>
+            areasBoth.some((ab) => Math.abs(ab - a1) < 1e-3)
+          ).length;
+          expect(unchangedCount).toBe(1);
+        }
+      }
+    );
+  });
+
+  describe('Modifier: Sztyca (Vertical extension / additional storeys on roof)', () => {
+    it('adds 2 extra storeys on top of base 5 storeys, updating elevation to 21m', () => {
+      const bldgSztyca: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-sztyca-1',
+            type: 'sztyca',
+            enabled: true,
+            storiesCount: 2,
+            storeyHeight: 3.0,
+            offset: 0.0,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgSztyca);
+      expect(res.storyPolygons.length).toBe(7); // 5 base + 2 extra
+      expect(res.storyPolygons[5].hBottom).toBe(15.0);
+      expect(res.storyPolygons[5].hTop).toBe(18.0);
+      expect(res.storyPolygons[6].hBottom).toBe(18.0);
+      expect(res.storyPolygons[6].hTop).toBe(21.0);
+
+      const topSegs = res.segments.filter((s) => s.hTop === 21.0);
+      expect(topSegs.length).toBeGreaterThan(0);
+    });
+
+    it('adds a set-back spire with offset -1.0m on top', () => {
+      const bldgSztycaSetback: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-sztyca-2',
+            type: 'sztyca',
+            enabled: true,
+            storiesCount: 1,
+            storeyHeight: 4.0,
+            offset: -1.0,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgSztycaSetback);
+      expect(res.storyPolygons.length).toBe(6);
+      const topStory = res.storyPolygons[5];
+      expect(topStory.hBottom).toBe(15.0);
+      expect(topStory.hTop).toBe(19.0);
+      expect(topStory.polygon).toEqual([
+        { x: 1, y: 1 },
+        { x: 9, y: 1 },
+        { x: 9, y: 9 },
+        { x: 1, y: 9 },
+      ]);
+    });
+  });
+
+  describe('Modifier: Pila (Analytical Sawtooth / Edge Step Notches b-a-b-a)', () => {
+    it('generates 1 step (2 subsegments b-a) along edge of length 10m connecting P1 and P2 exactly', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const poly = generatePilaPolygon(pts, 1, 0, 90, 'prev_edge');
+      expect(poly.length).toBe(5);
+      expect(poly.some((p) => Math.abs(p.x) < 0.01 && Math.abs(p.y - 10) < 0.01)).toBe(true);
+      expect(poly.some((p) => Math.abs(p.x - 10) < 0.01 && Math.abs(p.y - 10) < 0.01)).toBe(true);
+      expect(poly.some((p) => Math.abs(p.x - 10) < 0.01 && Math.abs(p.y) < 0.01)).toBe(true);
+    });
+
+    it('generates 2 steps (4 subsegments b-a-b-a) along edge of length 30m', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const poly = generatePilaPolygon(pts, 2, 0, 90, 'prev_edge');
+      expect(poly.length).toBe(7);
+      expect(poly.some((p) => Math.abs(p.x - 30) < 0.01 && Math.abs(p.y) < 0.01)).toBe(true);
+    });
+
+    it('calculates metrics for 90, 120, 135, and 150 degree angles', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const m90 = calculatePilaMetrics(pts, 1, 0, 90, 'prev_edge');
+      expect(m90).not.toBeNull();
+      expect(m90!.totalSubsegments).toBe(2);
+      expect(m90!.edgeLen).toBe(20);
+
+      const m120 = calculatePilaMetrics(pts, 1, 0, 120, 'prev_edge');
+      expect(m120).not.toBeNull();
+      expect(m120!.angle).toBe(120);
+
+      const m135 = calculatePilaMetrics(pts, 1, 0, 135, 'prev_edge');
+      expect(m135).not.toBeNull();
+      expect(m135!.angle).toBe(135);
+
+      const m150 = calculatePilaMetrics(pts, 1, 0, 150, 'prev_edge');
+      expect(m150).not.toBeNull();
+      expect(m150!.angle).toBe(150);
+    });
+
+    it('supports prev_edge and next_edge alignment modes', () => {
+      const pts: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 10 },
+        { x: 0, y: 10 },
+      ];
+
+      const poly135 = generatePilaPolygon(pts, 1, 0, 135, 'prev_edge');
+      expect(poly135.length).toBeGreaterThanOrEqual(4);
+      expect(poly135.some((p) => Math.abs(p.x - 20) < 0.01 && Math.abs(p.y) < 0.01)).toBe(true);
+
+      const m135 = calculatePilaMetrics(pts, 1, 0, 135, 'prev_edge');
+      expect(m135).not.toBeNull();
+      expect(m135!.lenA).toBeGreaterThan(0);
+      expect(m135!.lenB).toBeGreaterThan(0);
+
+      const polyNext = generatePilaPolygon(pts, 1, 0, 90, 'next_edge');
+      expect(polyNext.length).toBeGreaterThanOrEqual(4);
+      expect(polyNext.some((p) => Math.abs(p.x - 20) < 0.01)).toBe(true);
+    });
+
+    it('applies Pila modifier within applyBuildingModifiers to specific story', () => {
+      const bldgPila: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-pila-1',
+            type: 'pila',
+            enabled: true,
+            teethCount: 1, // b-a
+            toothAngle: 90,
+            alignment: 'prev_edge',
+            storiesCount: 1, // parter tylko
+            edgeIndex: 0,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgPila);
+      expect(res.storyPolygons[0].polygon.length).toBe(5); // ground modified
+      expect(res.storyPolygons[1].polygon.length).toBe(4); // upper unmodified
+    });
+
+    it('reproduces reference mod-test6.json: Budynek1A matches Budynek1B', () => {
+      const bldg1A: BuildingLoop = {
+        id: 'bldg-1789415044958-wyxm',
+        name: 'Budynek1A',
+        layer: 'BUD_NOWY',
+        isTested: false,
+        category: 'building',
+        elevation: 0,
+        firstFloorHeight: 3,
+        typicalFloorHeight: 3,
+        storeysCount: 5,
+        isIncluded: true,
+        isCityCentre: false,
+        buildingType: 'residential',
+        defaultHeight: 15,
+        heightSource: 'default',
+        hWindowBottom: 0.85,
+        isClockwise: true,
+        transform: { tx: 0, ty: 0, rotationDeg: 0 },
+        vertices: [
+          { x: -70.02942662591025, y: -6.796457014023964 },
+          { x: -27.783087987846997, y: 8.823708291050089 },
+          { x: 14.029883576300215, y: -6.796457014023964 },
+          { x: -5.325878641314048, y: -67.99753374019468 },
+          { x: -70.02942662591025, y: -67.99753374019468 },
+        ],
+        segments: [],
+        modifiers: [
+          {
+            id: 'mod-pila-1789415022011-yttu',
+            type: 'pila',
+            enabled: true,
+            teethCount: 3,
+            toothAngle: 90,
+            alignment: 'next_edge',
+            storiesCount: 0,
+            edgeIndex: 2,
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldg1A);
+      expect(res.storyPolygons.length).toBe(5);
+
+      const poly1A = res.storyPolygons[0].polygon;
+      expect(poly1A.length).toBeGreaterThanOrEqual(9);
+
+      // Expected reference offset between Budynek1A and Budynek1B
+      const dY = 101.772206555064;
+
+      // Budynek1B target vertices
+      const bldg1BVertices: Point2D[] = [
+        { x: -70.02942662591025, y: 33.77467281486927 },
+        { x: -5.325878641314079, y: 33.77467281486927 },
+        { x: 1.1260420978906538, y: 33.77467281486927 },
+        { x: 1.123554784240536, y: 54.167167074718165 },
+        { x: 7.577962837095402, y: 54.175031723592824 },
+        { x: 7.572988209795152, y: 74.55966133456707 },
+        { x: 14.029883576300156, y: 74.57539063231641 },
+        { x: 14.02988357630017, y: 94.97574954104002 },
+        { x: -27.78308798784703, y: 110.59591484611408 },
+        { x: -70.02942662591025, y: 94.97574954104002 },
+      ];
+
+      // Translated 1A should match 1B corners
+      const nonCollinear1B = bldg1BVertices.filter((pt) => Math.abs(pt.x - (-5.325878641314079)) > 0.01);
+      for (const ptB of nonCollinear1B) {
+        const match = poly1A.some((ptA) => Math.hypot(ptA.x - ptB.x, (ptA.y + dY) - ptB.y) < 0.1);
+        expect(match).toBe(true);
+      }
+    });
+  });
+
+  describe('Modifier: Zone Function (BuildingType per storey and per edge offset)', () => {
+    it('sets buildingType: service on ground floor (scope: storeys)', () => {
+      const bldgZoneFunc: BuildingLoop = {
+        ...baseBuilding,
+        buildingType: 'residential',
+        modifiers: [
+          {
+            id: 'mod-zfunc-1',
+            type: 'zone_function',
+            enabled: true,
+            buildingType: 'service',
+            scope: 'storeys',
+            storiesCount: 1, // parter (+1)
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgZoneFunc);
+      expect(res.storyPolygons[0].buildingType).toBe('service');
+      expect(res.storyPolygons[1].buildingType).toBe('residential');
+
+      // Check facade segments
+      const groundSegs = res.segments.filter((s) => s.hBase === 0 && s.hTop === 3.5);
+      expect(groundSegs.length).toBe(4);
+      for (const seg of groundSegs) {
+        expect(seg.buildingType).toBe('service');
+      }
+
+      const upperSegs = res.segments.filter((s) => s.hBase === 3.5 && s.hTop === 15.0);
+      expect(upperSegs.length).toBe(4);
+      for (const seg of upperSegs) {
+        expect(seg.buildingType).toBe('residential');
+      }
+    });
+
+    it('splits footprint into 2 discrete StoryFootprint zones along edge offset', () => {
+      const bldgZoneOffset: BuildingLoop = {
+        ...baseBuilding,
+        buildingType: 'residential',
+        modifiers: [
+          {
+            id: 'mod-zfunc-2',
+            type: 'zone_function',
+            enabled: true,
+            buildingType: 'garage',
+            scope: 'edge_offset',
+            storiesCount: 0, // cała bryła
+            edgeIndex: 0,
+            depth: 4.0, // 4m pasmo od krawędzi 0 (y: 0..4)
+          },
+        ],
+      };
+
+      const res = applyBuildingModifiers(bldgZoneOffset);
+      // Each of the 5 storeys is split into 2 footprints (1 garage + 1 residential)
+      expect(res.storyPolygons.length).toBe(10);
+
+      const garageFootprints = res.storyPolygons.filter((s) => s.buildingType === 'garage');
+      const resFootprints = res.storyPolygons.filter((s) => s.buildingType === 'residential');
+      expect(garageFootprints.length).toBe(5);
+      expect(resFootprints.length).toBe(5);
+
+      // Verify 3D solids produce distinct elements with their respective buildingType
+      const solids = getBuildingSolids({ ...bldgZoneOffset, storyPolygons: res.storyPolygons });
+      expect(solids.length).toBe(10);
+      expect(solids.filter((s) => s.buildingType === 'garage').length).toBe(5);
+      expect(solids.filter((s) => s.buildingType === 'residential').length).toBe(5);
+    });
+  });
+
+  describe('Rotation stability for building modifiers', () => {
+    function rotatePoint(pt: Point2D, angleRad: number, center: Point2D = { x: 10, y: 10 }): Point2D {
+      const cos = Math.cos(angleRad);
+      const sin = Math.sin(angleRad);
+      const dx = pt.x - center.x;
+      const dy = pt.y - center.y;
+      return {
+        x: center.x + dx * cos - dy * sin,
+        y: center.y + dx * sin + dy * cos,
+      };
+    }
+
+    function rotateBuilding(building: BuildingLoop, angleDeg: number): BuildingLoop {
+      const rad = (angleDeg * Math.PI) / 180;
+      return {
+        ...building,
+        vertices: building.vertices.map((v) => rotatePoint(v, rad)),
+      };
+    }
+
+    function polygonsMatchAfterUnrotate(
+      polyRotated: Point2D[],
+      polyOriginal: Point2D[],
+      angleDeg: number
+    ): boolean {
+      const rad = (-angleDeg * Math.PI) / 180;
+      const unrotated = polyRotated.map((v) => rotatePoint(v, rad));
+      if (unrotated.length !== polyOriginal.length) return false;
+      const area1 = Math.abs(calculateSignedArea(unrotated));
+      const area2 = Math.abs(calculateSignedArea(polyOriginal));
+      if (Math.abs(area1 - area2) > 0.05) return false;
+      for (const pt1 of unrotated) {
+        const found = polyOriginal.some(
+          (pt2) => Math.hypot(pt1.x - pt2.x, pt1.y - pt2.y) < 0.1
+        );
+        if (!found) return false;
+      }
+      return true;
+    }
+
+    const testAngles = [0, 45, 90, 135, 180, 270];
+
+    it('maintains terrace modifier on edge 1 across all rotation angles', () => {
+      const bldg: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-terrace-rot',
+            type: 'terrace',
+            enabled: true,
+            depth: -4,
+            edgeIndex: 1,
+            storiesCount: -1,
+            variant: 'drop',
+          },
+        ],
+      };
+      const origRes = applyBuildingModifiers(bldg);
+
+      for (const angle of testAngles) {
+        const rotBldg = rotateBuilding(bldg, angle);
+        const rotRes = applyBuildingModifiers(rotBldg);
+
+        expect(rotRes.storyPolygons.length).toBe(origRes.storyPolygons.length);
+        for (let i = 0; i < origRes.storyPolygons.length; i++) {
+          expect(
+            polygonsMatchAfterUnrotate(
+              rotRes.storyPolygons[i].polygon,
+              origRes.storyPolygons[i].polygon,
+              angle
+            )
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('maintains bay window modifier on edge 1 across all rotation angles', () => {
+      const bldg: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-bay-rot',
+            type: 'bay_window',
+            enabled: true,
+            edgeIndex: 1,
+            width: 6,
+            projection: 2,
+            positionRatio: 0.5,
+            storiesCount: 0,
+            sideAngle: 90,
+          },
+        ],
+      };
+      const origRes = applyBuildingModifiers(bldg);
+
+      for (const angle of testAngles) {
+        const rotBldg = rotateBuilding(bldg, angle);
+        const rotRes = applyBuildingModifiers(rotBldg);
+
+        expect(rotRes.storyPolygons.length).toBe(origRes.storyPolygons.length);
+        for (let i = 0; i < origRes.storyPolygons.length; i++) {
+          expect(
+            polygonsMatchAfterUnrotate(
+              rotRes.storyPolygons[i].polygon,
+              origRes.storyPolygons[i].polygon,
+              angle
+            )
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('maintains gate modifier on edge 0 across all rotation angles', () => {
+      const bldg: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-gate-rot',
+            type: 'gate',
+            enabled: true,
+            edgeIndex: 0,
+            width: 4,
+            positionRatio: 0.5,
+            storiesCount: 1,
+          },
+        ],
+      };
+      const origRes = applyBuildingModifiers(bldg);
+
+      for (const angle of testAngles) {
+        const rotBldg = rotateBuilding(bldg, angle);
+        const rotRes = applyBuildingModifiers(rotBldg);
+
+        const origStory0 = origRes.storyPolygons.filter((s) => s.storyIndex === 0);
+        const rotStory0 = rotRes.storyPolygons.filter((s) => s.storyIndex === 0);
+        expect(rotStory0.length).toBe(origStory0.length);
+
+        for (const origWing of origStory0) {
+          const match = rotStory0.some((rw) =>
+            polygonsMatchAfterUnrotate(rw.polygon, origWing.polygon, angle)
+          );
+          expect(match).toBe(true);
+        }
+      }
+    });
+
+    it('maintains pila modifier on edge 1 across all rotation angles', () => {
+      const bldg: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-pila-rot',
+            type: 'pila',
+            enabled: true,
+            edgeIndex: 1,
+            teethCount: 2,
+            toothAngle: 90,
+            alignment: 'perpendicular',
+            storiesCount: 0,
+          },
+        ],
+      };
+      const origRes = applyBuildingModifiers(bldg);
+
+      for (const angle of testAngles) {
+        const rotBldg = rotateBuilding(bldg, angle);
+        const rotRes = applyBuildingModifiers(rotBldg);
+
+        expect(rotRes.storyPolygons.length).toBe(origRes.storyPolygons.length);
+        for (let i = 0; i < origRes.storyPolygons.length; i++) {
+          expect(
+            polygonsMatchAfterUnrotate(
+              rotRes.storyPolygons[i].polygon,
+              origRes.storyPolygons[i].polygon,
+              angle
+            )
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('maintains corner cut modifier on vertex 1 across all rotation angles', () => {
+      const bldg: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-corner-rot',
+            type: 'corner_cut',
+            enabled: true,
+            vertexIndex: 1,
+            scope: 'vertex',
+            mode: 'chamfer',
+            depth: 3,
+            storiesCount: 0,
+          },
+        ],
+      };
+      const origRes = applyBuildingModifiers(bldg);
+
+      for (const angle of testAngles) {
+        const rotBldg = rotateBuilding(bldg, angle);
+        const rotRes = applyBuildingModifiers(rotBldg);
+
+        expect(rotRes.storyPolygons.length).toBe(origRes.storyPolygons.length);
+        for (let i = 0; i < origRes.storyPolygons.length; i++) {
+          expect(
+            polygonsMatchAfterUnrotate(
+              rotRes.storyPolygons[i].polygon,
+              origRes.storyPolygons[i].polygon,
+              angle
+            )
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('maintains donut + courtyard hole terrace modifier across all rotation angles', () => {
+      const bldg: BuildingLoop = {
+        ...baseBuilding,
+        modifiers: [
+          {
+            id: 'mod-donut-rot',
+            type: 'donut',
+            enabled: true,
+            offset: -4,
+            storiesCount: 0,
+          },
+          {
+            id: 'mod-terrace-hole-rot',
+            type: 'terrace',
+            enabled: true,
+            edgeIndex: 4, // targeting courtyard hole edge
+            depth: -2,
+            storiesCount: -1,
+            variant: 'drop',
+          },
+        ],
+      };
+      const origRes = applyBuildingModifiers(bldg);
+
+      for (const angle of testAngles) {
+        const rotBldg = rotateBuilding(bldg, angle);
+        const rotRes = applyBuildingModifiers(rotBldg);
+
+        expect(rotRes.storyPolygons.length).toBe(origRes.storyPolygons.length);
+        for (let i = 0; i < origRes.storyPolygons.length; i++) {
+          // Check outer polygon
+          expect(
+            polygonsMatchAfterUnrotate(
+              rotRes.storyPolygons[i].polygon,
+              origRes.storyPolygons[i].polygon,
+              angle
+            )
+          ).toBe(true);
+
+          // Check holes
+          if (origRes.storyPolygons[i].holes && origRes.storyPolygons[i].holes!.length > 0) {
+            expect(rotRes.storyPolygons[i].holes!.length).toBe(origRes.storyPolygons[i].holes!.length);
+            for (let h = 0; h < origRes.storyPolygons[i].holes!.length; h++) {
+              expect(
+                polygonsMatchAfterUnrotate(
+                  rotRes.storyPolygons[i].holes![h],
+                  origRes.storyPolygons[i].holes![h],
+                  angle
+                )
+              ).toBe(true);
+            }
+          }
+        }
       }
     });
   });

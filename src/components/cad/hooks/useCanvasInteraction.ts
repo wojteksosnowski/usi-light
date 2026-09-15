@@ -1,7 +1,8 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
-import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType } from '../../../types/geometry';
+import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType, DEFAULT_SWEEP_WIDTH } from '../../../types/geometry';
 import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180, getPolygonCentroid, getRotateHandleScreenPos } from '@/utils/math2d';
 import { useUiStore } from '../../../store/useUiStore';
+import { useCadToolStore } from '../../../store/useCadToolStore';
 import {
   calculateDirectionSnap,
   DirectionSnapResult,
@@ -238,7 +239,7 @@ export function useCanvasInteraction({
   linkingSourceId = null,
   drawingMode = 'none',
   onDrawingModeChange,
-  sweepWidth = 5.0,
+  sweepWidth = DEFAULT_SWEEP_WIDTH,
   sweepAlignment = 'center',
   onFinishDrawing,
   onCancelDrawing,
@@ -329,6 +330,7 @@ export function useCanvasInteraction({
 
   const [hoveredBuildings, setHoveredBuildings] = useState<string[]>([]);
   const [hoveredBuildingIndex, setHoveredBuildingIndex] = useState(0);
+  const [hoveredLabelBuildingId, setHoveredLabelBuildingId] = useState<string | null>(null);
   const [rotationHover, setRotationHover] = useState<{
     buildingId: string;
     segmentId: string;
@@ -531,6 +533,36 @@ export function useCanvasInteraction({
     ]
   );
 
+  const handleAdjustObjectParam = useCallback(
+    (direction: 'dec' | 'inc', isLargeStep?: boolean) => {
+      const step = isLargeStep ? 1.0 : 0.5;
+      const factor = direction === 'inc' ? 1 : -1;
+
+      // 1. Jeśli zaznaczony jest budynek z wstęgą
+      if (selectedBuildingId) {
+        const selBldg = buildings.find((b) => b.id === selectedBuildingId);
+        if (selBldg && (selBldg.sweepPath || selBldg.sweepWidth !== undefined)) {
+          const currentWidth = selBldg.sweepWidth ?? DEFAULT_SWEEP_WIDTH;
+          const nextWidth = Math.max(0.5, Math.round((currentWidth + factor * step) * 10) / 10);
+          onUpdateBuildingSweepPath?.(
+            selectedBuildingId,
+            selBldg.sweepPath || [],
+            nextWidth,
+            selBldg.sweepAlignment
+          );
+          useCadToolStore.getState().setSweepWidth(nextWidth);
+          return;
+        }
+      }
+
+      // 2. Globalny/aktywny parametr narzędzia Wstęga
+      const currentToolWidth = useCadToolStore.getState().sweepWidth || DEFAULT_SWEEP_WIDTH;
+      const nextToolWidth = Math.max(0.5, Math.round((currentToolWidth + factor * step) * 10) / 10);
+      useCadToolStore.getState().setSweepWidth(nextToolWidth);
+    },
+    [selectedBuildingId, buildings, onUpdateBuildingSweepPath]
+  );
+
   useEffect(() => {
     onDrawingVerticesCountChange?.(drawingVertices.length);
   }, [drawingVertices.length, onDrawingVerticesCountChange]);
@@ -609,24 +641,6 @@ export function useCanvasInteraction({
     draggingFacadePoint !== null ||
     draggingPinnedPointId !== null
   );
-
-  // Mouse Interactions
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    const newScale = Math.max(0.001, Math.min(100, viewState.scale * zoomFactor));
-
-    setViewState((prev) => ({
-      scale: newScale,
-      panX: mouseX - (mouseX - prev.panX) * (newScale / prev.scale),
-      panY: mouseY - (mouseY - prev.panY) * (newScale / prev.scale),
-    }));
-  };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -1047,6 +1061,9 @@ export function useCanvasInteraction({
       }
       setRotationHover(closest);
     }
+
+    const hitLabelId = getBuildingLabelHitAtPoint(sx, sy, buildings, worldToScreen, viewState.scale, layerSettings);
+    setHoveredLabelBuildingId((prev) => (prev === hitLabelId ? prev : hitLabelId));
 
     let hoveredBldgId: string | undefined;
     let minBldgDistPx = 45;
@@ -1905,6 +1922,7 @@ export function useCanvasInteraction({
       if (!rect) return;
       if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
         setHoveredBuildings([]);
+        setHoveredLabelBuildingId(null);
         return;
       }
       const sx = e.clientX - rect.left;
@@ -2024,6 +2042,7 @@ export function useCanvasInteraction({
     liveFacadeSnap,
     hoveredBuildingId,
     hoveredBuildings,
+    hoveredLabelBuildingId,
     rotationHover,
     dimHoveredEdge,
     effectiveIsInteracting,
@@ -2033,7 +2052,6 @@ export function useCanvasInteraction({
     setCurrentMouseWorld,
     setHoveredBuildingIndex,
 
-    handleWheel,
     handleMouseDown,
     handleDoubleClick,
     handleMouseMove,
@@ -2042,6 +2060,7 @@ export function useCanvasInteraction({
     handleDeleteSelectedVertex,
     handleCycleVertexSelection,
     handleStepRotateBuilding,
+    handleAdjustObjectParam,
     handleAdjustEdgeLengthStep,
     handleEdgeLengthInputChar,
     handleEdgeLengthBackspace,

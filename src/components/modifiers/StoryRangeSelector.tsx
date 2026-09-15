@@ -8,6 +8,18 @@ export interface StoryRangeSelectorProps {
   disabled?: boolean;
 }
 
+const WINDOW_HALF = 3;
+const MAX_ABS = 6;
+
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+/** Domyślne (wyśrodkowane wokół `v`) przesunięcie okna - rozciągnięte tylko na tyle, by pomieścić `v`. */
+const computeDefaultShift = (v: number): number => {
+  if (v > WINDOW_HALF) return clamp(v - WINDOW_HALF, -WINDOW_HALF, WINDOW_HALF);
+  if (v < -WINDOW_HALF) return clamp(v + WINDOW_HALF, -WINDOW_HALF, WINDOW_HALF);
+  return 0;
+};
+
 export const StoryRangeSelector: React.FC<StoryRangeSelectorProps> = ({
   value,
   onChange,
@@ -15,7 +27,29 @@ export const StoryRangeSelector: React.FC<StoryRangeSelectorProps> = ({
   allowWholeBuilding = true,
   disabled = false,
 }) => {
-  const options = [-3, -2, -1, ...(allowWholeBuilding ? [0] : []), 1, 2, 3];
+  // Przesuwające się okno pigułek: wybór skrajnej wartości odsłania kolejną w tym kierunku,
+  // aż do granicy MAX_ABS.
+  const [shift, setShift] = React.useState(() => computeDefaultShift(value));
+  // Śledzi ostatnią wartość wyemitowaną przez ten komponent przez onChange, żeby odróżnić
+  // "ja właśnie zmieniłem value" (nie nadpisuj shiftu ustawionego w handleSelect) od zmiany
+  // faktycznie zewnętrznej (np. przełączenie na inny modyfikator).
+  const lastEmittedRef = React.useRef(value);
+
+  const windowMin = -WINDOW_HALF + shift;
+  const windowMax = WINDOW_HALF + shift;
+
+  React.useEffect(() => {
+    if (value !== lastEmittedRef.current) {
+      setShift(computeDefaultShift(value));
+      lastEmittedRef.current = value;
+    }
+  }, [value]);
+
+  const options: number[] = [];
+  for (let v = windowMin; v <= windowMax; v++) {
+    if (v === 0 && !allowWholeBuilding) continue;
+    options.push(v);
+  }
 
   const formatLabel = (v: number) => (v === 0 ? '0' : v > 0 ? `+${v}` : `${v}`);
 
@@ -36,6 +70,18 @@ export const StoryRangeSelector: React.FC<StoryRangeSelectorProps> = ({
   } else if (value > 0) {
     hintText = `${value} od dołu (podcień)`;
   }
+
+  const handleSelect = (opt: number) => {
+    lastEmittedRef.current = opt;
+    onChange(opt);
+    if (opt === windowMax && windowMax < MAX_ABS) {
+      setShift((s) => s + 1);
+    } else if (opt === windowMin && windowMin > -MAX_ABS) {
+      setShift((s) => s - 1);
+    } else {
+      setShift(computeDefaultShift(opt));
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -61,7 +107,7 @@ export const StoryRangeSelector: React.FC<StoryRangeSelectorProps> = ({
               key={opt}
               type="button"
               disabled={disabled}
-              onClick={() => onChange(opt)}
+              onClick={() => handleSelect(opt)}
               title={formatTitle(opt)}
               style={{
                 flex: 1,

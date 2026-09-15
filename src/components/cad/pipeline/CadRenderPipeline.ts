@@ -11,6 +11,7 @@ import {
   SunlightLayer,
   DimensionsLayer,
   DrawingToolLayer,
+  RecorderVisualsLayer,
 } from './layers';
 
 export * from './types';
@@ -52,6 +53,7 @@ export class CadRenderPipeline {
       new BuildingsLayer(),        // zIndex: 60
       new SunlightLayer(),         // zIndex: 70
       new DimensionsLayer(),       // zIndex: 80
+      new RecorderVisualsLayer(),   // zIndex: 999
     ].sort((a, b) => a.zIndex - b.zIndex);
   }
 

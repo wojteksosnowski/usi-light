@@ -8,3 +8,4 @@ export * from './BuildingsLayer';
 export * from './SunlightLayer';
 export * from './DimensionsLayer';
 export * from './DrawingToolLayer';
+export * from './RecorderVisualsLayer';

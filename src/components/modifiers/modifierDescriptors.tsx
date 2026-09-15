@@ -2,12 +2,26 @@ import {
   createDefaultBayWindowModifier,
   createDefaultCornerCutModifier,
   createDefaultDonutModifier,
+  createDefaultGateModifier,
+  createDefaultPilaModifier,
   createDefaultStoryOffsetModifier,
+  createDefaultSztycaModifier,
   createDefaultTerraceModifier,
+  createDefaultZoneFunctionModifier,
   createDefaultZoneOffsetModifier,
 } from '../../types/modifiers';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
-import { BayWindowIcon, TerraceIcon, DonutIcon, ZoneBufferIcon, ChamferIcon } from '../common/CustomCadIcons';
+import {
+  BayWindowIcon,
+  TerraceIcon,
+  DonutIcon,
+  ZoneBufferIcon,
+  ChamferIcon,
+  GatePassageIcon,
+  SpireIcon,
+  SawtoothIcon,
+  ZoneFunctionIcon,
+} from '../common/CustomCadIcons';
 import { ModifierDescriptorMap } from './modifierDescriptorTypes';
 import { StoryOffsetFields } from './panels/StoryOffsetFields';
 import { ZoneOffsetFields } from './panels/ZoneOffsetFields';
@@ -15,6 +29,10 @@ import { BayWindowFields } from './panels/BayWindowFields';
 import { TerraceFields } from './panels/TerraceFields';
 import { DonutFields } from './panels/DonutFields';
 import { CornerCutFields } from './panels/CornerCutFields';
+import { GateFields } from './panels/GateFields';
+import { SztycaFields } from './panels/SztycaFields';
+import { PilaFields } from './panels/PilaFields';
+import { ZoneFunctionFields } from './panels/ZoneFunctionFields';
 
 function formatSigned(value: number): string {
   return value > 0 ? `+${value}m` : `${value}m`;
@@ -88,4 +106,64 @@ export const MODIFIER_DESCRIPTORS: ModifierDescriptorMap = {
     renderFields: CornerCutFields,
     formatSummary: (m) => `d=${m.depth}m ${formatStoriesSuffix(m.storiesCount)}`,
   },
+  gate: {
+    type: 'gate',
+    title: 'Brama (prześwit)',
+    Icon: GatePassageIcon,
+    accentVar: 'var(--accent-emerald)',
+    createDefault: createDefaultGateModifier,
+    renderFields: GateFields,
+    formatSummary: (m) => `a=${m.width}m ${formatStoriesSuffix(m.storiesCount)}`,
+  },
+  sztyca: {
+    type: 'sztyca',
+    title: 'Sztyca (nadbudowa)',
+    Icon: SpireIcon,
+    accentVar: 'var(--accent-purple)',
+    createDefault: createDefaultSztycaModifier,
+    renderFields: SztycaFields,
+    formatSummary: (m) => `+${m.storiesCount}k (${(m.storiesCount * m.storeyHeight).toFixed(1)}m)`,
+  },
+  pila: {
+    type: 'pila',
+    title: 'Piła (schodkowanie)',
+    Icon: SawtoothIcon,
+    accentVar: 'var(--accent-orange)',
+    createDefault: createDefaultPilaModifier,
+    renderFields: PilaFields,
+    formatSummary: (m) =>
+      `${2 * Math.max(1, m.teethCount)}seg (${m.toothAngle ?? 90}°) ${formatStoriesSuffix(m.storiesCount)}`,
+  },
+  zone_function: {
+    type: 'zone_function',
+    title: 'Strefa funkcji',
+    Icon: ZoneFunctionIcon,
+    accentVar: 'var(--accent-cyan)',
+    createDefault: createDefaultZoneFunctionModifier,
+    renderFields: ZoneFunctionFields,
+    formatSummary: (m) =>
+      m.scope === 'edge_offset'
+        ? `${m.buildingType} (${m.depth ?? 10}m) ${formatStoriesSuffix(m.storiesCount)}`
+        : `${m.buildingType} ${formatStoriesSuffix(m.storiesCount)}`,
+  },
 };
+
+/** Modyfikatory bryły budynku (Grupa 2 w toolbarze): uskok, taras, donat, brama, wykusz, sciecie, sztyca, pila */
+export const TOOLBAR_BUILDING_MODIFIER_TYPES = [
+  'story_offset',
+  'terrace',
+  'donut',
+  'gate',
+  'bay_window',
+  'corner_cut',
+  'sztyca',
+  'pila',
+] as const;
+
+/** Modyfikatory bufora/strefy (Grupa 3 w toolbarze): bufor, strefa funkcji */
+export const TOOLBAR_BUFFER_MODIFIER_TYPES = [
+  'zone_offset',
+  'zone_function',
+] as const;
+
+

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, FlaskConical, Building2, Lock, Unlock, Ghost, ArrowUpToLine, Layers } from 'lucide-react';
+import { CheckCircle2, FlaskConical, Building2, Lock, Unlock, Ghost, ArrowUpToLine, ArrowDownToLine, Layers } from 'lucide-react';
 import { BuildingLoop } from '../../types/geometry';
 import { useSceneStore } from '../../store';
 import { toRomanNumeral } from '@/utils/buildingFloorCalculator';
@@ -10,6 +10,13 @@ interface BuildingLabelMiniPanelProps {
   anchor: { sx: number; sy: number };
   onClose: () => void;
 }
+
+const HEIGHT_SOURCE_LABELS: Record<NonNullable<BuildingLoop['heightSource']>, string> = {
+  manual: 'Ręczna',
+  default: 'Domyślna',
+  'storeys-wfs': 'Kondygnacje (WFS)',
+  'lidar-nmt': 'LiDAR NMT',
+};
 
 interface ToggleDef {
   key: 'isIncluded' | 'isTested' | 'isCityCentre' | 'isLocked' | 'isGhosted';
@@ -23,16 +30,16 @@ interface ToggleDef {
 const TOGGLES: ToggleDef[] = [
   {
     key: 'isIncluded',
-    label: 'Uwzględnij w kalkulacji',
-    title: 'Uwzględnij obiekt w kalkulacjach nasłonecznienia i przesłaniania',
+    label: 'Dodaj do analiz',
+    title: 'Dodaj obiekt jako przeszkodę do analiz §12 i §56, nawet jeśli nie jest w projekcie — nie wpływa na cień ani parametry',
     isActive: (b) => b.isIncluded !== false,
     activeColor: 'var(--accent-emerald)',
     getIcon: () => CheckCircle2,
   },
   {
     key: 'isTested',
-    label: 'Obiekt badany',
-    title: 'Oznacz obiekt jako badany (projektowany)',
+    label: 'W projekcie',
+    title: 'Oznacz obiekt jako część projektowanego zamierzenia — wlicza się do cienia i parametrów',
     isActive: (b) => Boolean(b.isTested),
     activeColor: 'var(--accent-indigo)',
     getIcon: () => FlaskConical,
@@ -76,12 +83,12 @@ export const BuildingLabelMiniPanel: React.FC<BuildingLabelMiniPanelProps> = ({ 
 
   return (
     <div
-      className="ui-card"
+      className="ui-card building-label-mini-panel-spring"
       style={{
         position: 'absolute',
         left: anchor.sx,
         top: anchor.sy + 6,
-        transform: 'translateX(-50%)',
+        transformOrigin: 'top center',
         zIndex: 60,
         padding: '8px',
         borderRadius: '10px',
@@ -93,6 +100,17 @@ export const BuildingLabelMiniPanel: React.FC<BuildingLabelMiniPanelProps> = ({ 
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      <style>{`
+        @keyframes buildingLabelMiniPanelSpring {
+          0% { transform: translateX(-50%) translateY(-6px) scale(0.85); opacity: 0; }
+          55% { transform: translateX(-50%) translateY(1px) scale(1.04); opacity: 1; }
+          80% { transform: translateX(-50%) translateY(0) scale(0.98); }
+          100% { transform: translateX(-50%) translateY(0) scale(1); }
+        }
+        .building-label-mini-panel-spring {
+          animation: buildingLabelMiniPanelSpring 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+      `}</style>
       {building.name && (
         <div
           style={{
@@ -124,6 +142,23 @@ export const BuildingLabelMiniPanel: React.FC<BuildingLabelMiniPanelProps> = ({ 
           <span style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
             {building.defaultHeight}m
           </span>
+          {building.heightSource && (
+            <span
+              title={`Źródło wysokości: ${HEIGHT_SOURCE_LABELS[building.heightSource]}`}
+              style={{
+                fontSize: '8.5px',
+                fontWeight: 700,
+                color: 'var(--text-muted)',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-light)',
+                borderRadius: '999px',
+                padding: '1px 6px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {HEIGHT_SOURCE_LABELS[building.heightSource]}
+            </span>
+          )}
         </div>
         {typeof building.storeysCount === 'number' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--text-secondary)' }}>
@@ -133,6 +168,25 @@ export const BuildingLabelMiniPanel: React.FC<BuildingLabelMiniPanelProps> = ({ 
             </span>
           </div>
         )}
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '5px',
+          color: 'var(--text-secondary)',
+          marginBottom: '2px',
+          paddingBottom: '6px',
+          borderBottom: '1px solid var(--border-color)',
+        }}
+        title="Posadowienie / rzędna dolnej krawędzi"
+      >
+        <ArrowDownToLine size={13} />
+        <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Posadowienie</span>
+        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', marginLeft: 'auto' }}>
+          {(building.elevation ?? 0).toFixed(1)}m
+        </span>
       </div>
 
       {TOGGLES.map((t) => {

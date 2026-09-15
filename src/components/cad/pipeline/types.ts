@@ -8,7 +8,7 @@ import {
   CadLayerSettings,
 } from '../../../types/geometry';
 import { CadRenderContext } from '../types';
-import { GoogleTileManager } from '../../../utils/googleTileManager';
+import { ISatelliteTileManager } from '../../../utils/googleTileManager';
 import { CrsDetectionResult } from '../../../utils/geoTransform';
 import {
   OsnapSnapResult,
@@ -26,6 +26,7 @@ export interface CadRenderFrameContext {
   readonly selectedBuildingId?: string | null;
   readonly selectedBuildingIds?: string[];
   readonly hoveredBuildingId?: string | null;
+  readonly hoveredLabelBuildingId?: string | null;
   readonly hoveredEdge?: { buildingId: string; edgeIndex: number } | null;
   readonly isEditMode?: boolean;
   readonly showNormals?: boolean;
@@ -63,7 +64,7 @@ export interface CadRenderFrameContext {
   readonly viewRotationMode?: boolean;
   readonly showSatelliteLayer?: boolean;
   readonly satelliteOpacity?: number;
-  readonly tileManager?: GoogleTileManager | null;
+  readonly tileManager?: ISatelliteTileManager | null;
   readonly crsInfo?: CrsDetectionResult;
   readonly draggedVertexIndex?: number | null;
   readonly dragVertexPreviewPt?: Point2D | null;

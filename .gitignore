@@ -39,3 +39,9 @@ pnpm-debug.log*
 *.sw?
 .DS_Store
 Thumbs.db
+.vercel
+.env*
+
+# Local agent tooling
+.agents/
+.claude/

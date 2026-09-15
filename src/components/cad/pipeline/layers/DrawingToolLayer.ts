@@ -1,4 +1,4 @@
-import { Point2D } from '../../../../types/geometry';
+import { Point2D, DEFAULT_SWEEP_WIDTH } from '../../../../types/geometry';
 import { CadRenderLayer, CadRenderFrameContext } from '../types';
 import { renderDrawingToolPreview } from '../../renderers/drawingToolRenderer';
 
@@ -33,7 +33,7 @@ export class DrawingToolLayer implements CadRenderLayer {
       selectedVertexIndex = null,
       activeOsnapSnap = null,
       activeBuildingDragSnap = null,
-      sweepWidth = 6.0,
+      sweepWidth = DEFAULT_SWEEP_WIDTH,
       sweepAlignment = 'center',
     } = context;
 

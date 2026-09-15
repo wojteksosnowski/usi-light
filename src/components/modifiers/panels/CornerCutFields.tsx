@@ -5,6 +5,7 @@ import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { SegmentedControl } from '../controls/SegmentedControl';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
 import { StoryRangeSelector } from '../StoryRangeSelector';
+import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
 import { ChamferIcon, FilletIcon, NotchIcon } from '../../common/CustomCadIcons';
 
 const CORNER_CUT_MODE_OPTIONS: { value: CornerCutModifier['mode']; label: string; Icon: React.FC<{ size?: number; color?: string }> }[] = [
@@ -19,7 +20,10 @@ const CORNER_CUT_SCOPE_OPTIONS: { value: CornerCutModifier['scope']; label: stri
   { value: 'vertex', label: 'Jeden narożnik' },
 ];
 
-export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> = ({ modifier, onChange, context }) => (
+export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> = ({ modifier, onChange, context }) => {
+  useDefaultEdgeIndex(modifier.edgeIndex, context.availableEdges, (edgeIndex) => onChange({ edgeIndex }), modifier.scope === 'edge');
+
+  return (
   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
       <LabeledNumberField
@@ -61,6 +65,7 @@ export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> =
         options={context.availableEdges}
         onChange={(edgeIndex) => onChange({ edgeIndex })}
         accentVar="var(--accent-cyan-light)"
+        showAutoOption={false}
       />
     )}
 
@@ -76,4 +81,5 @@ export const CornerCutFields: React.FC<ModifierFieldsProps<CornerCutModifier>> =
       />
     )}
   </div>
-);
+  );
+};

@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Ratelimit } from '@upstash/ratelimit';
 import { nanoid } from 'nanoid';
-import { getRedisAndRatelimit, formatLicenseKey, LicenseRecord } from '../lib/serverStripe';
+import { getRedisAndRatelimit, formatLicenseKey } from '../_lib/serverRedis.js';
+import type { LicenseRecord } from '../_lib/serverRedis.js';
 
 // Tryb zapoznawczy: darmowy klucz PRO na 7 dni, jedno kliknięcie, bez podawania danych.
 // Limitowany rate-limitem per IP, by ograniczyć nadużycia w czasie promocji.
@@ -32,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!cachedTrialRatelimit) {
     cachedTrialRatelimit = new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(1, '24 h'),
+      limiter: Ratelimit.slidingWindow(5, '10 m'),
       analytics: true,
       prefix: 'ratelimit:usi_trial',
     });
@@ -47,29 +48,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { success } = await cachedTrialRatelimit.limit(ip);
     if (!success) {
       return res.status(429).json({
-        error: 'Bezpłatny klucz na 7 dni można wygenerować raz na 24 godziny z tego adresu IP.',
+        error: 'Osiągnięto limit generowania kluczy (maksymalnie 5 zapytań na 10 minut z tego adresu IP). Odczekaj chwilę.',
       });
     }
 
     const days = 7;
+    const now = Date.now();
+    const durationMs = days * 24 * 60 * 60 * 1000;
     const uniqueSuffix = nanoid(8);
     const licenseKey = formatLicenseKey(days, uniqueSuffix);
 
     const licenseRecord: LicenseRecord = {
       key: licenseKey,
       days,
-      status: 'unactivated',
-      createdAt: Date.now(),
-      activatedAt: null,
-      expiresAt: null,
+      status: 'active',
+      createdAt: now,
+      activatedAt: now,
+      expiresAt: now + durationMs,
       customerEmail: null,
       stripeSessionId: `trial-${uniqueSuffix}`,
     };
 
-    const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
-    await redis.set(`license:${licenseKey}`, JSON.stringify(licenseRecord), { ex: ONE_YEAR_SECONDS });
+    // Przechowujemy aktywny klucz przez okres ważności + 30 dni bufora (37 dni)
+    const ttlSeconds = (days + 30) * 24 * 60 * 60;
+    await redis.set(`license:${licenseKey}`, JSON.stringify(licenseRecord), { ex: ttlSeconds });
 
-    return res.status(200).json({ licenseKey, days });
+    return res.status(200).json({
+      licenseKey,
+      days,
+      status: 'active',
+      activatedAt: now,
+      expiresAt: now + durationMs,
+      daysLeft: days,
+    });
   } catch (err: any) {
     console.error('Błąd generowania klucza próbnego:', err);
     return res.status(500).json({ error: 'Wystąpił błąd podczas generowania klucza próbnego.' });

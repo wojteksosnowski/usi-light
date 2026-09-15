@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Point2D } from '../../../types/geometry';
 import { useCadToolStore, useSceneStore } from '../../../store';
 import type { DrawingMode } from '../../../store/useCadToolStore';
+import { isTypingTarget } from '../../../utils/keyboardUtils';
 
 export function useCadHotkeys({
   drawingMode,
@@ -22,7 +23,7 @@ export function useCadHotkeys({
   onCommitEdgeLength,
   onCancelEdgeLength,
   onToggleOsnap,
-  onStepRotateBuilding,
+  onAdjustObjectParam,
 }: {
   drawingMode: DrawingMode;
   drawingVertices: Point2D[];
@@ -42,19 +43,12 @@ export function useCadHotkeys({
   onCommitEdgeLength?: () => void;
   onCancelEdgeLength?: () => void;
   onToggleOsnap?: () => void;
-  onStepRotateBuilding?: (direction: 'cw' | 'ccw') => void;
+  onAdjustObjectParam?: (direction: 'dec' | 'inc', isLargeStep?: boolean) => void;
 }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept when user is typing inside an HTML input/textarea
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
+      if (isTypingTarget(e.target)) {
         return;
       }
 
@@ -175,14 +169,20 @@ export function useCadHotkeys({
           e.preventDefault();
           onCycleVertexSelection?.('next');
         }
-      } else if (drawingMode === 'none') {
-        if (e.key === '[' || e.key === '{' || e.code === 'BracketLeft') {
-          e.preventDefault();
-          onStepRotateBuilding?.('ccw');
-        } else if (e.key === ']' || e.key === '}' || e.code === 'BracketRight') {
-          e.preventDefault();
-          onStepRotateBuilding?.('cw');
-        }
+      } else if (
+        e.key === '[' ||
+        e.key === '{' ||
+        e.code === 'BracketLeft'
+      ) {
+        e.preventDefault();
+        onAdjustObjectParam?.('dec', e.shiftKey);
+      } else if (
+        e.key === ']' ||
+        e.key === '}' ||
+        e.code === 'BracketRight'
+      ) {
+        e.preventDefault();
+        onAdjustObjectParam?.('inc', e.shiftKey);
       } else if (e.key === 'Tab' && hoveredBuildings.length > 1) {
         e.preventDefault();
         setHoveredBuildingIndex((prev) => (prev + 1) % hoveredBuildings.length);
@@ -195,7 +195,7 @@ export function useCadHotkeys({
     selectedVertexIndex,
     onDeleteSelectedVertex,
     onCycleVertexSelection,
-    onStepRotateBuilding,
+    onAdjustObjectParam,
     drawingVertices,
     hoveredBuildings,
     onCancelDrawing,

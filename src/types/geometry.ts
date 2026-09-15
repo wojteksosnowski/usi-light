@@ -8,7 +8,9 @@ export interface Vector2D {
   y: number;
 }
 
-export type BuildingType = 'residential' | 'childcare' | 'other';
+export type BuildingType = 'residential' | 'service' | 'garage';
+
+export const DEFAULT_SWEEP_WIDTH = 12.0;
 
 export interface LineEquation2D {
   A: number; // A*x + B*y + C = 0 (normalized: A^2 + B^2 = 1)
@@ -34,6 +36,7 @@ export interface FacadeSegment {
   isCityCentre: boolean;
   buildingType: BuildingType;
   lineEquation?: LineEquation2D;
+  ringIndex?: number; // 0 (or undefined) = obrys zewnętrzny, 1+ = indeks otworu wewnętrznego + 1
 }
 
 export * from './modifiers';
@@ -41,7 +44,7 @@ import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
 
 
 export type ObjectCategory = 'building' | 'boundary' | 'balcony';
-export type AreaType = 'plot' | 'playground';
+export type AreaType = 'plot' | 'playground' | 'paved';
 
 export interface PlaygroundSamplePoint {
   point: Point2D;
@@ -81,8 +84,11 @@ export interface BuildingLoop {
   isCityCentre: boolean;
   buildingType: BuildingType;
   defaultHeight: number;
+  /** Skąd pochodzi `defaultHeight` — do wyświetlenia w kafelku obiektu (nie wpływa na obliczenia). */
+  heightSource?: 'manual' | 'default' | 'storeys-wfs' | 'lidar-nmt';
   hWindowBottom: number;
   vertices: Point2D[];
+  holes?: Point2D[][]; // Pierścienie otworów wewnętrznych (np. dziedziniec budynku, enklawa działki)
   segments: FacadeSegment[];
   isClockwise?: boolean;
   sweepPath?: Point2D[]; // Otwarta polilinia bazowa dla obiektów typu Wstęga (Sweep)

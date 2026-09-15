@@ -3,6 +3,7 @@ import {
   X,
   CheckCircle2,
   Copy,
+  Download,
   Check,
   Crown,
   KeyRound,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useLicenseStore, useUiStore } from '../../store';
+import { fetchJson, downloadLicenseKeyFile } from '../../utils/apiFetch';
 
 export const PaymentSuccessModal: React.FC = () => {
   const isPaymentSuccessModalOpen = useUiStore((s) => s.isPaymentSuccessModalOpen);
@@ -50,14 +52,20 @@ export const PaymentSuccessModal: React.FC = () => {
 
     const fetchSession = async () => {
       try {
-        const res = await fetch(`/api/stripe/verify-session?session_id=${encodeURIComponent(paymentSuccessSessionId)}`);
-        const data = await res.json();
+        const { ok: resOk, data } = await fetchJson(`/api/stripe/verify-session?session_id=${encodeURIComponent(paymentSuccessSessionId)}`);
 
         if (isMounted) {
-          if (res.ok && data.success && data.licenseKey) {
+          if (resOk && data.success && data.licenseKey) {
             setLicenseKey(data.licenseKey);
             setDays(data.days);
             setCustomerEmail(data.customerEmail);
+
+            // Automatyczne pobranie pliku TXT z kluczem
+            try {
+              downloadLicenseKeyFile(data.licenseKey, data.days || 30, `Pakiet ${data.days || 30} Dni PRO`);
+            } catch (dlErr) {
+              console.warn('Błąd pobierania pliku TXT:', dlErr);
+            }
           } else {
             setError(data.error || 'Nie udało się pobrać szczegółów transakcji.');
           }
@@ -236,30 +244,48 @@ export const PaymentSuccessModal: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="btn-secondary"
-                  style={{
-                    width: 'auto',
-                    padding: '8px 12px',
-                    fontSize: '11px',
-                    gap: '5px',
-                  }}
-                  title="Skopiuj klucz do schowka"
-                >
-                  {copied ? (
-                    <>
-                      <Check size={13} color="#10b981" />
-                      <span style={{ color: '#10b981' }}>Skopiowano</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={13} />
-                      <span>Kopiuj</span>
-                    </>
-                  )}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => licenseKey && downloadLicenseKeyFile(licenseKey, days || 30, `Pakiet ${days || 30} Dni PRO`)}
+                    className="btn-secondary"
+                    style={{
+                      width: 'auto',
+                      padding: '8px 10px',
+                      fontSize: '11px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                    title="Pobierz klucz jako plik tekstowy (.txt)"
+                  >
+                    <Download size={14} color="#fbbf24" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="btn-secondary"
+                    style={{
+                      width: 'auto',
+                      padding: '8px 12px',
+                      fontSize: '11px',
+                      gap: '5px',
+                    }}
+                    title="Skopiuj klucz do schowka"
+                  >
+                    {copied ? (
+                      <>
+                        <Check size={13} color="#10b981" />
+                        <span style={{ color: '#10b981' }}>Skopiowano</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={13} />
+                        <span>Kopiuj</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Quick Activate CTA */}

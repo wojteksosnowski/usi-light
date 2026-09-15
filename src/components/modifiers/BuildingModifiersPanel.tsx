@@ -1,9 +1,8 @@
 import React from 'react';
-import { useSceneStore } from '../../store';
+import { useSceneStore, useUiStore } from '../../store';
 import { Modifier, StoryFootprint } from '../../types/modifiers';
 import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
-import { BuildingIsoPreview } from '../preview/BuildingIsoPreview';
 import { ModifierCard } from './ModifierCard';
 import { MODIFIER_DESCRIPTORS } from './modifierDescriptors';
 import { buildGlobalIndexOptions } from './modifierIndexOptions';
@@ -36,6 +35,28 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
   const modifiers = selectedBuilding?.modifiers || [];
   const storyPolygons: StoryFootprint[] = selectedBuilding?.storyPolygons || [];
 
+  // Akordeon: jeden modyfikator rozwinięty naraz. Domyślnie pierwszy; nowo dodany modyfikator się rozwija.
+  // Stan trzymany w useUiStore (nie lokalnie), żeby podgląd 3D mógł podświetlić krawędź odpowiadającą
+  // aktualnie otwartej karcie, nie tylko pierwszemu modyfikatorowi z listy.
+  const expandedId = useUiStore((s) => s.expandedModifierId);
+  const setExpandedId = useUiStore((s) => s.setExpandedModifierId);
+  const prevModifierIdsRef = React.useRef<string[]>(modifiers.map((m) => m.id));
+
+  React.useEffect(() => {
+    const prevIds = prevModifierIdsRef.current;
+    const currentIds = modifiers.map((m) => m.id);
+    const addedId = currentIds.find((id) => !prevIds.includes(id));
+    if (addedId) {
+      setExpandedId(addedId);
+    } else if (expandedId && !currentIds.includes(expandedId)) {
+      setExpandedId(currentIds[0] ?? null);
+    } else if (!expandedId && currentIds.length > 0) {
+      setExpandedId(currentIds[0]);
+    }
+    prevModifierIdsRef.current = currentIds;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modifiers]);
+
   const availableEdges = React.useMemo(
     () => (selectedBuilding ? buildGlobalIndexOptions(selectedBuilding.vertices?.length || 0, storyPolygons, 'edge') : []),
     [selectedBuilding, storyPolygons]
@@ -58,7 +79,7 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
 
   if (!selectedBuilding) return null;
 
-  const fieldContext = { availableEdges, availableVertices };
+  const fieldContext = { availableEdges, availableVertices, building: selectedBuilding };
 
   return (
     <FloatingInspectorCard
@@ -72,13 +93,8 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
       isCollapsed={isCollapsed}
       onToggleCollapse={onToggleCollapse}
     >
-      {/* 1:1 Isometric Preview */}
-      <div style={{ marginBottom: '14px' }}>
-        <BuildingIsoPreview building={selectedBuilding} />
-      </div>
-
       {/* Modifier Stack List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '0px' }}>
         {modifiers.length === 0 ? (
           <div
             style={{
@@ -105,6 +121,8 @@ export const BuildingModifiersPanel: React.FC<BuildingModifiersPanelProps> = Rea
               isLast={idx === modifiers.length - 1}
               descriptor={MODIFIER_DESCRIPTORS[mod.type]}
               context={fieldContext}
+              isExpanded={expandedId === mod.id}
+              onToggleExpand={() => setExpandedId(expandedId === mod.id ? null : mod.id)}
               onToggle={() => toggleBuildingModifier(selectedBuilding.id, mod.id)}
               onMoveUp={() => reorderBuildingModifiers(selectedBuilding.id, idx, idx - 1)}
               onMoveDown={() => reorderBuildingModifiers(selectedBuilding.id, idx, idx + 1)}

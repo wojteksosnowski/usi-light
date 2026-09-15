@@ -61,6 +61,17 @@ describe('getBuildingSolids', () => {
     expect(solids[1].hTop).toBe(6);
   });
 
+  it('preserves building orientation and vertices for scene-based isometric rendering', () => {
+    const baseVertices = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    const base = createBuilding({ vertices: baseVertices });
+    const solids = getBuildingSolids(base);
+    expect(solids[0].polygon).toEqual(baseVertices);
+  });
   it('returns an empty array for degenerate geometry (no vertices, no storyPolygons)', () => {
     const building = createBuilding({ vertices: [], defaultHeight: 9 });
     expect(getBuildingSolids(building)).toEqual([]);

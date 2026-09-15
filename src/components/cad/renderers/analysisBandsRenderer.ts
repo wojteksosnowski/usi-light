@@ -49,6 +49,14 @@ export function renderAnalysisBands(
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
 
+    const bType = bldg.buildingType || 'residential';
+    // Garaż nie podlega ani § 12 ani § 56
+    if (bType === 'garage') continue;
+
+    // Usługi nie podlegają § 56
+    const canRenderSunlight = showSunlightLines && bType === 'residential';
+    if (!showShadowingLines && !canRenderSunlight) continue;
+
     const segMap = pointsByBuilding.get(bldg.id);
     if (!segMap) continue;
 
@@ -157,7 +165,7 @@ export function renderAnalysisBands(
       }
 
       // --- § 56 Sunlight Band (OUTSIDE the building with mitered corners) ---
-      if (showSunlightLines) {
+      if (canRenderSunlight) {
         interface SunlightInterval {
           color: string;
           startRatio: number;

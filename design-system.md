@@ -32,13 +32,32 @@ Zdefiniowane w [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.c
 | `--accent-yellow` | `#fef08a` (Yellow 200) | Akcent modyfikatora Wykusz (Bay Window) |
 | `--accent-orange` | `#fed7aa` (Orange 200) | Akcent modyfikatora Taras |
 | `--accent-emerald-light` | `#a7f3d0` (Emerald 200) | Akcent modyfikatora Donat |
+| `--bg-glass` | `rgba(11, 19, 41, 0.92)` | Tło szklanych paneli i paska narzędziowego |
+| `--bg-glass-modal` | `rgba(11, 19, 41, 0.95)` | Tło pływających modali i inspektorów |
+| `--bg-overlay` | `rgba(2, 6, 23, 0.82)` | Przyciemnienie tła pod modalami |
+| `--bg-badge` | `rgba(15, 23, 42, 0.85)` | Tło kapsułek informacyjnych i statystyk |
+| `--status-emerald-bg` | `rgba(16, 185, 129, 0.15)` | Miękkie tło statusu sukces / § 12 |
+| `--status-emerald-border` | `rgba(16, 185, 129, 0.4)` | Obramowanie statusu sukces / § 12 |
+| `--status-emerald-text` | `#6ee7b7` | Kolor tekstu sukces / § 12 |
+| `--status-amber-bg` | `rgba(245, 158, 11, 0.15)` | Miękkie tło statusu ostrzeżenie / § 56 |
+| `--status-amber-border` | `rgba(245, 158, 11, 0.4)` | Obramowanie statusu ostrzeżenie / § 56 |
+| `--status-amber-text` | `#fcd34d` | Kolor tekstu ostrzeżenie / § 56 |
+| `--status-rose-bg` | `rgba(244, 63, 94, 0.15)` | Miękkie tło błędu / niezgodności |
+| `--status-rose-border` | `rgba(244, 63, 94, 0.4)` | Obramowanie błędu / niezgodności |
+| `--status-rose-text` | `#fca5a5` | Kolor tekstu błędu / niezgodności |
+| `--status-cyan-bg` | `rgba(56, 189, 248, 0.15)` | Miękkie tło akcentu cyan / eksportu |
+| `--status-cyan-border` | `rgba(56, 189, 248, 0.4)` | Obramowanie akcentu cyan |
+| `--status-cyan-text` | `#7dd3fc` | Kolor tekstu akcentu cyan |
+| `--status-indigo-bg` | `rgba(99, 102, 241, 0.15)` | Miękkie tło akcentu indigo |
+| `--status-indigo-border` | `rgba(99, 102, 241, 0.4)` | Obramowanie akcentu indigo |
+| `--status-indigo-text` | `#c7d2fe` | Kolor tekstu akcentu indigo |
 
-Powyższe 5 tokenów zasila deskryptory modyfikatorów 2.5D (`src/components/modifiers/modifierDescriptors.tsx`) — zone_offset korzysta z `--accent-cyan`, corner_cut z `--accent-cyan-light`. Zob. [[modifier-architecture-guide]].
+Powyższe tokeny zasilają deskryptory modyfikatorów 2.5D (`src/components/modifiers/modifierDescriptors.tsx`) oraz wskaźniki statusu HUD i modali.
 
 ### 1.2. Pływające Powierzchnie Szklane (Glassmorphism Surfaces)
 Pływające panele nad rzutem CAD wykorzystują efekt rozmycia tła:
-- **Tło nakładek HUD / Toolbar**: `rgba(11, 19, 41, 0.92)` z `backdrop-filter: blur(12px)`
-- **Tło modalu inspektora punktu**: `rgba(11, 19, 41, 0.95)` z `backdrop-filter: blur(16px)`
+- **Tło nakładek HUD / Toolbar**: `var(--bg-glass)` (`rgba(11, 19, 41, 0.92)`) z `backdrop-filter: blur(12px)`
+- **Tło modalu inspektora punktu / modali**: `var(--bg-glass-modal)` (`rgba(11, 19, 41, 0.95)`) z `backdrop-filter: blur(16px)`
 - **Obramowanie**: `1px solid var(--border-light)` (`#334155`)
 - **Cienie**: `box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5)`
 
@@ -110,7 +129,14 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
    - Zaokrąglenie: `border-radius: 6px`, `font-size: 11px`, `font-weight: 700`
    - Używany jako statyczny wariant (przycisk "Udostępnij projekt" w sidebarze).
    - Wariant rozszerzony `.cad-publish-btn` (canvas, floating topbar) dodaje do tej samej bazy wizualnej efekt odblasku ramki: krótki (~1s) odblask i refleks świetlny (`.glinting`), wyzwalany po **30 sekundach** bezczynności użytkownika, a następnie powtórzony po kolejnych **15 sekundach** (45s łącznie), po czym zatrzymywany do czasu kolejnej aktywności użytkownika (mechanizm: `useIdleGlint` hook, `src/hooks/useIdleGlint.ts`).
-4. **Kafle przełączników warstw (`.btn-tile`)**:
+4. **Przycisk premium / upgrade (`.btn-gold`)**:
+   - Tło: dwuwarstwowe — pas odblasku `linear-gradient(180deg, rgba(255,255,255,0.4), rgba(255,255,255,0) 55%)` nad `linear-gradient(135deg, var(--accent-yellow), var(--accent-amber))`
+   - Obramowanie: `1px solid rgba(245, 158, 11, 0.6)`, cień `0 2px 8px rgba(245, 158, 11, 0.45)`
+   - Tekst: `var(--bg-sidebar)` (ciemny, dla kontrastu na złotym tle), `font-weight: 700`, `font-size: 11px`
+   - Zaokrąglenie: `border-radius: 8px` (skala `.btn-tile`, **nie** pigułka — na wniosek użytkownika przyciski w tej apce nie mają kształtu pill)
+   - Odblask przy hover: `::after` z ukośnym sweepem, reużywa `@keyframes publish-sweep-glint` z `.cad-publish-btn.glinting` (patrz pkt 3)
+   - Użycie: przycisk "Rozszerz" w `ProBadge.tsx` (stan free, otwiera `PricingModal`)
+5. **Kafle przełączników warstw (`.btn-tile`)**:
    - Zaokrąglenie: `border-radius: 8px`, `font-size: 11.5px`
    - Stan nieaktywny (`.inactive`): tło `rgba(6, 11, 24, 0.6)`, obramowanie `var(--border-color)`, kolor `var(--text-secondary)`
    - Stan aktywny emerald (`.active-emerald`): tło `rgba(16, 185, 129, 0.15)`, ramka `rgba(16, 185, 129, 0.4)`, tekst `#6ee7b7`
@@ -141,6 +167,7 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
 1. **Hardcodowane `#fff` lub `#ffffff` w stylach inline JSX** zamiast `var(--text-primary)` lub dedykowanej klasy.
 2. **Ręczne wartości paddingów/marginesów** w niektórych podkomponentach zamiast standardowych odstępów (4px, 8px, 12px, 16px).
 3. **Mieszanie styli inline ze stylami klasowymi** w nagłówkach i przyciskach HUD.
+4. **Wariant PRO w `ProBadge.tsx`** [ROZWIĄZANE]: Ujednolicono do skali kafli (`border-radius: 8px`) i tokenów CSS (`var(--status-amber-bg)`, `var(--status-amber-border)`).
 
 ### 5.2. Procedura Dopytywania przy Wątpliwościach
 > [!IMPORTANT]

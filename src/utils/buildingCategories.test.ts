@@ -15,7 +15,7 @@ describe('Object Categories: boundary, building, balcony', () => {
     isTested: false,
     isIncluded: true,
     isCityCentre: false,
-    buildingType: 'other',
+    buildingType: 'residential',
     defaultHeight: 0,
     hWindowBottom: 0,
     vertices: [
@@ -25,10 +25,10 @@ describe('Object Categories: boundary, building, balcony', () => {
       { x: 0, y: 30 },
     ],
     segments: [
-      { id: 'bnd-s1', p1: { x: 0, y: 0 }, p2: { x: 40, y: 0 }, normal: { x: 0, y: -1 }, length: 40, angleRad: 0, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'other' },
-      { id: 'bnd-s2', p1: { x: 40, y: 0 }, p2: { x: 40, y: 30 }, normal: { x: 1, y: 0 }, length: 30, angleRad: Math.PI / 2, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'other' },
-      { id: 'bnd-s3', p1: { x: 40, y: 30 }, p2: { x: 0, y: 30 }, normal: { x: 0, y: 1 }, length: 40, angleRad: Math.PI, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'other' },
-      { id: 'bnd-s4', p1: { x: 0, y: 30 }, p2: { x: 0, y: 0 }, normal: { x: -1, y: 0 }, length: 30, angleRad: -Math.PI / 2, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'other' },
+      { id: 'bnd-s1', p1: { x: 0, y: 0 }, p2: { x: 40, y: 0 }, normal: { x: 0, y: -1 }, length: 40, angleRad: 0, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+      { id: 'bnd-s2', p1: { x: 40, y: 0 }, p2: { x: 40, y: 30 }, normal: { x: 1, y: 0 }, length: 30, angleRad: Math.PI / 2, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+      { id: 'bnd-s3', p1: { x: 40, y: 30 }, p2: { x: 0, y: 30 }, normal: { x: 0, y: 1 }, length: 40, angleRad: Math.PI, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+      { id: 'bnd-s4', p1: { x: 0, y: 30 }, p2: { x: 0, y: 0 }, normal: { x: -1, y: 0 }, length: 30, angleRad: -Math.PI / 2, hTop: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
     ],
     isClockwise: false,
     transform: { tx: 0, ty: 0, rotationDeg: 0 },

@@ -1,10 +1,12 @@
 import React from 'react';
+import { BuildingLoop } from '../../types/geometry';
 import { Modifier, ModifierType } from '../../types/modifiers';
 import { GlobalIndexOption } from './modifierIndexOptions';
 
 export interface ModifierFieldContext {
   availableEdges: GlobalIndexOption[];
   availableVertices: GlobalIndexOption[];
+  building?: BuildingLoop;
 }
 
 export interface ModifierFieldsProps<M extends Modifier> {

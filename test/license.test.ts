@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { formatLicenseKey } from '../api/lib/serverStripe';
+import { formatLicenseKey } from '../api/_lib/serverStripe';
 import { useLicenseStore } from '../src/store/useLicenseStore';
 
 const mockStorage: Record<string, string> = {};
@@ -55,7 +55,8 @@ describe('License & Stripe Unit Tests', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        status: 200,
+        text: async () => JSON.stringify(mockResponse),
       } as any);
 
       const result = await useLicenseStore.getState().activateLicense('USI-30D-TEST-1234');
@@ -71,7 +72,8 @@ describe('License & Stripe Unit Tests', () => {
     it('obsługuje błąd nieprawidłowego klucza', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
-        json: async () => ({ error: 'Nie znaleziono klucza.' }),
+        status: 404,
+        text: async () => JSON.stringify({ error: 'Nie znaleziono klucza.' }),
       } as any);
 
       const result = await useLicenseStore.getState().activateLicense('INVALID_KEY');

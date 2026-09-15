@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUp, ArrowDown, Trash2, Eye, EyeOff } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Eye, EyeOff, ChevronDown } from 'lucide-react';
 import { Modifier } from '../../types/modifiers';
 import { ModifierDescriptor, ModifierFieldContext } from './modifierDescriptorTypes';
 
@@ -10,6 +10,8 @@ interface ModifierCardProps {
   isLast: boolean;
   descriptor: ModifierDescriptor;
   context: ModifierFieldContext;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
   onToggle: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -29,6 +31,8 @@ export const ModifierCard: React.FC<ModifierCardProps> = ({
   isLast,
   descriptor,
   context,
+  isExpanded,
+  onToggleExpand,
   onToggle,
   onMoveUp,
   onMoveDown,
@@ -44,20 +48,32 @@ export const ModifierCard: React.FC<ModifierCardProps> = ({
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
+        gap: isExpanded ? '8px' : 0,
         opacity: modifier.enabled ? 1 : 0.6,
         transition: 'all 0.15s ease',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div
+          onClick={onToggleExpand}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', flex: 1, minWidth: 0 }}
+          title={isExpanded ? 'Zwiń modyfikator' : 'Rozwiń modyfikator'}
+        >
+          <ChevronDown
+            size={12}
+            color="var(--text-muted)"
+            style={{ transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.15s ease', flexShrink: 0 }}
+          />
           <descriptor.Icon size={13} color={descriptor.accentVar} />
           <span style={{ fontWeight: 700, fontSize: '11.5px', color: descriptor.accentVar }}>
             {descriptor.title}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
             type="button"
             onClick={onToggle}
@@ -100,7 +116,7 @@ export const ModifierCard: React.FC<ModifierCardProps> = ({
         </div>
       </div>
 
-      <descriptor.renderFields modifier={modifier} onChange={onPatch} context={context} />
+      {isExpanded && <descriptor.renderFields modifier={modifier} onChange={onPatch} context={context} />}
     </div>
   );
 };

@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
         // co produkcyjne funkcje serverless Vercela. Bez tego middleware każdy endpoint poza
         // jawnie wpiętym (dawniej tylko /api/share) trafiał do SPA fallbacku Vite i zwracał pusty body.
         name: 'api-dev-middleware',
+        enforce: 'pre',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
             if (!req.url || !req.url.startsWith('/api/')) {

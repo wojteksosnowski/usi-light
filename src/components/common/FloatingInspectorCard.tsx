@@ -115,8 +115,8 @@ export const FloatingInspectorCard: React.FC<FloatingInspectorCardProps> = React
       className={`inspector-card ${className}`}
       style={{
         position: isEmbedded ? 'relative' : 'absolute',
-        top: isEmbedded ? undefined : '70px',
-        right: isEmbedded ? undefined : '20px',
+        top: isEmbedded ? 'auto' : '70px',
+        right: isEmbedded ? 'auto' : '16px',
         width: typeof width === 'number' ? `${width}px` : width,
         maxHeight: isCollapsed ? 'auto' : typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight,
         overflowY: isCollapsed ? 'hidden' : 'auto',

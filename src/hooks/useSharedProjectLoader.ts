@@ -69,6 +69,7 @@ export function useSharedProjectLoader() {
 
   const setSettings = useSolarAnalysisStore((s) => s.setSettings);
   const setSelectedCity = useSolarAnalysisStore((s) => s.setSelectedCity);
+  const setProjectName = useSolarAnalysisStore((s) => s.setProjectName);
   const setMapsInput = useSolarAnalysisStore((s) => s.setMapsInput);
   const setShowNormals = useSolarAnalysisStore((s) => s.setShowNormals);
   const setShowShadowingLines = useSolarAnalysisStore((s) => s.setShowShadowingLines);
@@ -123,8 +124,8 @@ export function useSharedProjectLoader() {
         }
 
         const data = (await response.json()) as ShareApiGetResponse;
-        if (!data.compressedData) {
-          throw new Error('Otrzymano puste dane projektu.');
+        if (!data || (!data.compressedData && !(data.version === 1 && data.iv && data.ciphertext))) {
+          throw new Error('Otrzymano puste lub nieprawidłowe dane projektu.');
         }
 
         // 3. Deszyfrowanie (E2EE) lub dekompresja formatu legacy w przeglądarce
@@ -144,13 +145,21 @@ export function useSharedProjectLoader() {
           } catch {
             throw new Error('Nie udało się odszyfrować projektu — link jest nieprawidłowy lub uszkodzony.');
           }
-        } else if (data.compressedData) {
-          payload = decompressProjectData(data.compressedData);
+        } else if (typeof data.compressedData === 'string') {
+          try {
+            payload = decompressProjectData(data.compressedData);
+          } catch {
+            throw new Error('Nie udało się odczytać projektu — format danych jest nieprawidłowy.');
+          }
         } else {
           throw new Error('Otrzymano puste lub nieprawidłowe dane projektu.');
         }
 
         // 4. Hydratacja stanu do store'ów aplikacji (Pełny edytor bez trybu prezentacji)
+        if (payload.metadata?.name) {
+          setProjectName(payload.metadata.name);
+        }
+
         if (payload.scene) {
           const buildings =
             payload.v === 2
@@ -256,6 +265,7 @@ export function useSharedProjectLoader() {
     setDxfImportInfo,
     setSettings,
     setSelectedCity,
+    setProjectName,
     setMapsInput,
     setShowNormals,
     setShowShadowingLines,

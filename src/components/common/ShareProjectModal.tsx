@@ -42,6 +42,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
 
   const settings = useSolarAnalysisStore((s) => s.settings);
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
+  const projectName = useSolarAnalysisStore((s) => s.projectName);
   const mapsInput = useSolarAnalysisStore((s) => s.mapsInput);
   const showNormals = useSolarAnalysisStore((s) => s.showNormals);
   const showShadowingLines = useSolarAnalysisStore((s) => s.showShadowingLines);
@@ -123,6 +124,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
         dxfImportInfo,
         settings,
         selectedCity,
+        projectName: projectName.trim() || undefined,
         mapsInput,
         showNormals,
         showShadowingLines,
@@ -194,7 +196,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(2, 6, 23, 0.75)',
+        backgroundColor: 'var(--bg-overlay)',
         backdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
@@ -210,7 +212,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
         style={{
           width: '100%',
           maxWidth: '500px',
-          backgroundColor: 'rgba(11, 19, 41, 0.95)',
+          backgroundColor: 'var(--bg-glass-modal)',
           backdropFilter: 'blur(16px)',
           border: '1px solid var(--border-light)',
           borderRadius: '18px',
@@ -230,8 +232,8 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
                 width: '36px',
                 height: '36px',
                 borderRadius: '10px',
-                backgroundColor: 'rgba(99, 102, 241, 0.15)',
-                border: '1px solid rgba(99, 102, 241, 0.35)',
+                backgroundColor: 'var(--status-indigo-bg)',
+                border: '1px solid var(--status-indigo-border)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -282,6 +284,12 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
             gap: '8px',
           }}
         >
+          {projectName.trim() && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Nazwa projektu:</span>
+              <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>{projectName.trim()}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
             <span style={{ color: 'var(--text-secondary)' }}>Lokalizacja projektu:</span>
             <span style={{ fontWeight: 600, color: 'var(--accent-amber)' }}>{selectedCity} ({settings.latitude.toFixed(2)}°N)</span>
@@ -289,7 +297,7 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
             <span style={{ color: 'var(--text-secondary)' }}>Zawartość sceny:</span>
             <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-              {buildings.length} obiektów ({testedCount} badanych, {obstaclesCount} przesłaniających)
+              {buildings.length} obiektów ({testedCount} w projekcie, {obstaclesCount} pozostałych)
             </span>
           </div>
           {pinnedPoints.length > 0 && (
@@ -411,8 +419,8 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
                 fontSize: '11.5px',
                 color: 'var(--text-secondary)',
                 lineHeight: '1.5',
-                backgroundColor: 'rgba(99, 102, 241, 0.08)',
-                border: '1px solid rgba(99, 102, 241, 0.25)',
+                backgroundColor: 'var(--status-indigo-bg)',
+                border: '1px solid var(--status-indigo-border)',
                 borderRadius: '10px',
                 padding: '10px 12px',
                 display: 'flex',
@@ -432,9 +440,9 @@ export const ShareProjectModal: React.FC<ShareProjectModalProps> = ({ isOpen, on
               <div
                 style={{
                   fontSize: '11px',
-                  color: 'var(--accent-rose)',
-                  backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                  border: '1px solid rgba(244, 63, 94, 0.3)',
+                  color: 'var(--status-rose-text)',
+                  backgroundColor: 'var(--status-rose-bg)',
+                  border: '1px solid var(--status-rose-border)',
                   borderRadius: '8px',
                   padding: '8px 10px',
                   display: 'flex',

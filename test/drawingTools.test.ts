@@ -91,4 +91,12 @@ describe('Drawing Tools: Rectangle and Polyline Creation', () => {
     expect(building.segments[0].length).toBeCloseTo(10.0);
     expect(building.segments[1].length).toBeCloseTo(10.0);
   });
+
+  it('should initialize sweep tool with default 12m width', async () => {
+    const { useCadToolStore } = await import('../src/store/useCadToolStore');
+    expect(useCadToolStore.getState().sweepWidth).toBe(12.0);
+
+    useCadToolStore.getState().setSweepWidth(14.5);
+    expect(useCadToolStore.getState().sweepWidth).toBe(14.5);
+  });
 });
