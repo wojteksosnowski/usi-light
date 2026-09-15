@@ -8,6 +8,55 @@ export interface Vector2D {
   y: number;
 }
 
+/**
+ * Płaski ciągły bufor punktów 2D [x0, y0, x1, y1, ...] dla maksymalnej lokalności pamięci cache
+ */
+export interface PointBuffer {
+  readonly data: Float32Array;
+  readonly stride: number; // domyślnie 2 (x, y)
+  readonly count: number; // liczba punktów (data.length / stride)
+}
+
+/**
+ * Płaski wielokąt z opcjonalnymi otworami zapisanymi w postaci ciągłych indeksów
+ */
+export interface FlatPolygon {
+  readonly vertices: Float32Array; // [x0, y0, x1, y1, ...]
+  readonly holeOffsets?: Uint32Array; // indeksy początków poszczególnych otworów
+}
+
+/**
+ * Skumulowana macierz transformacji afinicznej 2D (3x3 w układzie Canvas/SVG)
+ */
+export interface Matrix2D {
+  readonly a: number;
+  readonly b: number;
+  readonly c: number;
+  readonly d: number;
+  readonly e: number;
+  readonly f: number;
+}
+
+/**
+ * Dyskretna matryca wysokości terenu i budynków do próbkowania O(1) i DDA Raymarchingu
+ */
+export interface HeightmapGrid {
+  readonly width: number;
+  readonly height: number;
+  readonly cellSize: number;
+  readonly minX: number;
+  readonly minY: number;
+  readonly data: Float32Array;
+}
+
+/**
+ * Jednowymiarowy stablicowany bufor danych solarnych indeksowany czasem
+ */
+export interface SolarLutMatrix {
+  readonly data: Float32Array; // [azimuthDeg, elevationDeg, sunDirX, sunDirY, shadowVecX, shadowVecY] * 1440
+  readonly stride: number;
+}
+
 export type BuildingType = 'residential' | 'service' | 'garage';
 
 export const DEFAULT_SWEEP_WIDTH = 12.0;
@@ -88,6 +137,8 @@ export interface BuildingLoop {
   heightSource?: 'manual' | 'default' | 'storeys-wfs' | 'lidar-nmt';
   hWindowBottom: number;
   vertices: Point2D[];
+  /** Płaski bufor Float32Array [x0, y0, x1, y1, ...] synchronizowany z vertices dla operacji macierzowych */
+  flatVertices?: Float32Array;
   holes?: Point2D[][]; // Pierścienie otworów wewnętrznych (np. dziedziniec budynku, enklawa działki)
   segments: FacadeSegment[];
   isClockwise?: boolean;

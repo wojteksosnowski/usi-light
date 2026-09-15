@@ -5,6 +5,7 @@ import { BuildingLoop, ProjectSettings } from '../types/geometry';
 export interface AnalysisWorkerRequest {
   id: number;
   buildings: BuildingLoop[];
+  geometryBuffer?: ArrayBuffer;
   settings: ProjectSettings;
   options?: AnalysisAccuracyOptions;
   sunlightMethod?: 'raycasting' | 'segments';

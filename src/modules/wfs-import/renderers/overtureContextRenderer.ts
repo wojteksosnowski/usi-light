@@ -35,20 +35,21 @@ export interface RenderOvertureContextOptions {
   projectRadius?: number;
 }
 
+import { applyMatrixToContext, resolveViewportMatrix } from '../../../utils/math2d';
+
 export function renderOvertureContext(options: RenderOvertureContextOptions) {
   const { rc, greenAreas, showGreenAreas, projectRadius } = options;
   if (!showGreenAreas || greenAreas.length === 0) return;
 
-  const { ctx, worldToScreen, viewState } = rc;
+  const { ctx, viewState, viewRotationDeg } = rc;
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.lineWidth = 1;
+  const vm = resolveViewportMatrix(rc, viewState, viewRotationDeg);
+  applyMatrixToContext(vm, ctx);
+  ctx.lineWidth = 1 / viewState.scale;
 
   if (projectRadius != null) {
-    const originSc = worldToScreen(0, 0);
-    const radiusPx = projectRadius * viewState.scale;
     ctx.beginPath();
-    ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+    ctx.arc(0, 0, projectRadius, 0, Math.PI * 2);
     ctx.clip();
   }
 

@@ -1,6 +1,8 @@
 import { BuildingLoop, CadLayerSettings, PinnedFacadePoint, ProjectSettings } from '../types/geometry';
 import { DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { normalizeLegacyBuildingTypes } from './legacyBuildingType';
+import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
+import { rebuildBuildingSegments } from './segmentStatistics';
 
 export const LOCAL_STORAGE_PROJECTS_KEY = 'usi_saved_projects_v1';
 
@@ -48,6 +50,100 @@ export interface StoredProjectData extends StoredProjectSummary {
 }
 
 /**
+ * Sanityzuje budynek do kompaktowej postaci przed zapisem do pamięci masowej (LocalStorage).
+ * Usuwa ciężkie, pochodne bufory i tablice (storyPolygons, zonePolygons, rozbudowane segments),
+ * które są w pełni deterministycznie odtwarzane przy odczycie przez potok modyfikatorów.
+ */
+export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
+  if (!bldg) return bldg;
+  const {
+    id,
+    name,
+    layer,
+    vertices,
+    holes,
+    modifiers,
+    sweepPath,
+    sweepWidth,
+    sweepAlignment,
+    defaultHeight,
+    elevation,
+    firstFloorHeight,
+    typicalFloorHeight,
+    hWindowBottom,
+    isCityCentre,
+    isTested,
+    isIncluded,
+    isLocked,
+    category,
+    areaType,
+    buildingType,
+    plotNumber,
+    transform,
+    heightSource,
+    groupId,
+  } = bldg;
+
+  return {
+    id,
+    name,
+    layer,
+    vertices: vertices ? vertices.map((v) => ({ x: v.x, y: v.y })) : [],
+    holes: holes ? holes.map((h) => h.map((v) => ({ x: v.x, y: v.y }))) : undefined,
+    modifiers: modifiers && modifiers.length > 0 ? JSON.parse(JSON.stringify(modifiers)) : undefined,
+    sweepPath: sweepPath ? sweepPath.map((v) => ({ x: v.x, y: v.y })) : undefined,
+    sweepWidth,
+    sweepAlignment,
+    defaultHeight,
+    elevation,
+    firstFloorHeight,
+    typicalFloorHeight,
+    hWindowBottom,
+    isCityCentre,
+    isTested,
+    isIncluded,
+    isLocked,
+    category,
+    areaType,
+    buildingType,
+    plotNumber,
+    transform: transform
+      ? { tx: transform.tx ?? 0, ty: transform.ty ?? 0, rotationDeg: transform.rotationDeg ?? 0 }
+      : { tx: 0, ty: 0, rotationDeg: 0 },
+    heightSource,
+    groupId,
+    segments: [], // Wyczyszczone - odtwarzane natychmiast przy odczycie
+  };
+}
+
+/**
+ * Rehydratuje budynek odczytany z pamięci masowej, odtwarzając segmenty fasad i modyfikatory.
+ */
+export function rehydrateBuildingFromStorage(bldg: BuildingLoop): BuildingLoop {
+  if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return bldg;
+
+  if (bldg.modifiers && bldg.modifiers.length > 0) {
+    try {
+      const modRes = applyBuildingModifiers(bldg);
+      return {
+        ...bldg,
+        storyPolygons: modRes.storyPolygons,
+        zonePolygons: modRes.zonePolygons,
+        segments: modRes.segments,
+      };
+    } catch {
+      return rebuildBuildingSegments(bldg, bldg.vertices);
+    }
+  }
+
+  if (!bldg.segments || bldg.segments.length === 0) {
+    return rebuildBuildingSegments(bldg, bldg.vertices);
+  }
+
+  return bldg;
+}
+
+/**
  * Bezpiecznie pobiera listę podsumowań zapisanych projektów z LocalStorage.
  */
 export function getStoredProjectsList(): StoredProjectSummary[] {
@@ -91,6 +187,7 @@ export function getStoredProjectById(id: string): StoredProjectData | null {
 
     if (found.scene?.buildings && Array.isArray(found.scene.buildings)) {
       normalizeLegacyBuildingTypes(found.scene.buildings);
+      found.scene.buildings = found.scene.buildings.map(rehydrateBuildingFromStorage);
     }
 
     return found as StoredProjectData;
@@ -128,6 +225,9 @@ export function saveProjectToStorage(
   const id = existingId || `proj-${now}-${Math.random().toString(36).substr(2, 5)}`;
   const existingIndex = list.findIndex((p) => p.id === id);
 
+  const rawBuildings = projectPayload.scene?.buildings || [];
+  const sanitizedBuildings = rawBuildings.map(sanitizeBuildingForStorage);
+
   const fullRecord: StoredProjectData = {
     ...projectPayload,
     id,
@@ -136,7 +236,11 @@ export function saveProjectToStorage(
     createdAt: existingIndex >= 0 ? list[existingIndex].createdAt : now,
     updatedAt: now,
     city: projectPayload.solar?.selectedCity,
-    buildingsCount: projectPayload.scene?.buildings?.length ?? 0,
+    buildingsCount: rawBuildings.length,
+    scene: {
+      ...projectPayload.scene,
+      buildings: sanitizedBuildings,
+    },
   };
 
   if (existingIndex >= 0) {
@@ -162,7 +266,13 @@ export function saveProjectToStorage(
       list.pop();
       try {
         window.localStorage.setItem(LOCAL_STORAGE_PROJECTS_KEY, JSON.stringify(list));
-        return fullRecord;
+        return {
+          ...fullRecord,
+          scene: {
+            ...fullRecord.scene,
+            buildings: fullRecord.scene.buildings.map(rehydrateBuildingFromStorage),
+          },
+        };
       } catch {
         // Kontynuuj redukcję
       }
@@ -170,7 +280,13 @@ export function saveProjectToStorage(
     throw new Error('Brak wolnego miejsca w pamięci przeglądarki dla zapisu projektu.');
   }
 
-  return fullRecord;
+  return {
+    ...fullRecord,
+    scene: {
+      ...fullRecord.scene,
+      buildings: fullRecord.scene.buildings.map(rehydrateBuildingFromStorage),
+    },
+  };
 }
 
 /**

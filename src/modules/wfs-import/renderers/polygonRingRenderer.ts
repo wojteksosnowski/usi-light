@@ -11,11 +11,9 @@ export function fillAndStrokeRing(rc: CadRenderContext, ring: Point2D[]) {
 
   const { ctx } = rc;
   ctx.beginPath();
-  const start = rc.worldToScreen(ring[0].x, ring[0].y);
-  ctx.moveTo(start.sx, start.sy);
+  ctx.moveTo(ring[0].x, ring[0].y);
   for (let i = 1; i < ring.length; i++) {
-    const p = rc.worldToScreen(ring[i].x, ring[i].y);
-    ctx.lineTo(p.sx, p.sy);
+    ctx.lineTo(ring[i].x, ring[i].y);
   }
   ctx.closePath();
   ctx.fill();

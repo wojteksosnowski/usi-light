@@ -7,3 +7,4 @@ export * from './shadowEnvelope';
 export * from './boundaryIntersection';
 export * from './miterOffset';
 export * from './sweep';
+export * from './affineMatrix';

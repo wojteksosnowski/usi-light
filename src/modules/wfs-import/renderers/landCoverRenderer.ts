@@ -52,20 +52,21 @@ export interface RenderLandCoverOptions {
  * `buildingsRenderer.ts` `getOrComputeBuildingGeo()`) — w przeciwieństwie do
  * `mpzpZonesRenderer.ts`, który rysuje każdy pierścień niezależnie i zamalowałby otwór.
  */
+import { applyMatrixToContext, resolveViewportMatrix } from '../../../utils/math2d';
+
 export function renderLandCover(options: RenderLandCoverOptions) {
   const { rc, units, showUnits, projectRadius } = options;
   if (!showUnits || units.length === 0) return;
 
-  const { ctx, worldToScreen, viewState } = rc;
+  const { ctx, viewState, viewRotationDeg } = rc;
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.lineWidth = 1;
+  const vm = resolveViewportMatrix(rc, viewState, viewRotationDeg);
+  applyMatrixToContext(vm, ctx);
+  ctx.lineWidth = 1 / viewState.scale;
 
   if (projectRadius != null) {
-    const originSc = worldToScreen(0, 0);
-    const radiusPx = projectRadius * viewState.scale;
     ctx.beginPath();
-    ctx.arc(originSc.sx, originSc.sy, radiusPx, 0, Math.PI * 2);
+    ctx.arc(0, 0, projectRadius, 0, Math.PI * 2);
     ctx.clip();
   }
 
@@ -74,21 +75,17 @@ export function renderLandCover(options: RenderLandCoverOptions) {
     const { fill, stroke } = colorForLandCoverClass(unit.landCoverClass);
 
     const path = new Path2D();
-    const start = rc.worldToScreen(unit.outer[0].x, unit.outer[0].y);
-    path.moveTo(start.sx, start.sy);
+    path.moveTo(unit.outer[0].x, unit.outer[0].y);
     for (let i = 1; i < unit.outer.length; i++) {
-      const p = rc.worldToScreen(unit.outer[i].x, unit.outer[i].y);
-      path.lineTo(p.sx, p.sy);
+      path.lineTo(unit.outer[i].x, unit.outer[i].y);
     }
     path.closePath();
 
     for (const hole of unit.holes || []) {
       if (hole.length < 3) continue;
-      const hStart = rc.worldToScreen(hole[0].x, hole[0].y);
-      path.moveTo(hStart.sx, hStart.sy);
+      path.moveTo(hole[0].x, hole[0].y);
       for (let i = 1; i < hole.length; i++) {
-        const p = rc.worldToScreen(hole[i].x, hole[i].y);
-        path.lineTo(p.sx, p.sy);
+        path.lineTo(hole[i].x, hole[i].y);
       }
       path.closePath();
     }

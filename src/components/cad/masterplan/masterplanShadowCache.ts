@@ -1,5 +1,9 @@
 import { Point2D } from '@/types/geometry';
-import { unionPolygonLoops, differencePolygonLoops } from '@/utils/math2d/polygons';
+import {
+  PolygonWithHoles,
+  unionPolygonsWithHoles,
+  differencePolygonsWithHoles,
+} from '@/utils/math2d/polygons';
 import {
   getMasterplanSolarAngles,
   computeStoryShadowPolygonWithHoles,
@@ -18,15 +22,15 @@ export interface MasterplanColorSample {
 
 export interface MasterplanShadowSample {
   color: string;
-  polys: Point2D[][];
+  polys: PolygonWithHoles[];
 }
 
 export type MasterplanShadowRenderResult =
   | { algorithm: 'legacy'; samples: MasterplanShadowSample[] }
-  | { algorithm: 'soft'; umbraColor: string; umbraPolys: Point2D[][]; bandColor: string; bandPolys: Point2D[][] };
+  | { algorithm: 'soft'; umbraColor: string; umbraPolys: PolygonWithHoles[]; bandColor: string; bandPolys: PolygonWithHoles[] };
 
 /**
- * Cache cieni gruntowych Masterplanu: computeStoryShadowPolygon/unionPolygonLoops są kosztowne
+ * Cache cieni gruntowych Masterplanu: computeStoryShadowPolygon/unionPolygonsWithHoles są kosztowne
  * (polygon-clipping), a wynik nie zależy od viewState (pan/zoom/rotacja) — tylko od geometrii
  * tierów i pozycji słońca. Bez cache renderer przeliczałby je na każdej klatce, w tym podczas
  * czystego pan/zoom.
@@ -66,16 +70,16 @@ function computeLegacySamples(
   const result: MasterplanShadowSample[] = [];
   for (const sample of samples) {
     const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin);
-    const mergedPolys: Point2D[][] = [];
+    const mergedPolys: PolygonWithHoles[] = [];
 
     for (const cluster of clusters) {
-      const clusterPolys: Point2D[][] = [];
+      const clusterPolys: PolygonWithHoles[] = [];
       for (const tier of cluster) {
         const polys = computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom);
         clusterPolys.push(...polys);
       }
       if (clusterPolys.length === 1) mergedPolys.push(clusterPolys[0]);
-      else if (clusterPolys.length > 1) mergedPolys.push(...unionPolygonLoops(clusterPolys));
+      else if (clusterPolys.length > 1) mergedPolys.push(...unionPolygonsWithHoles(clusterPolys));
     }
 
     if (mergedPolys.length > 0) {
@@ -100,23 +104,23 @@ function computeSoftResult(
     angles
   );
 
-  const mergedUmbra: Point2D[][] = [];
-  const bandPolys: Point2D[][] = [];
+  const mergedUmbra: PolygonWithHoles[] = [];
+  const bandPolys: PolygonWithHoles[] = [];
 
   for (const cluster of clusters) {
-    const umbraPolys: Point2D[][] = [];
-    const outerPolys: Point2D[][] = [];
+    const umbraPolys: PolygonWithHoles[] = [];
+    const outerPolys: PolygonWithHoles[] = [];
     for (const tier of cluster) {
       const { umbra, penumbraOuter } = computeSoftStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom);
       umbraPolys.push(...umbra);
       outerPolys.push(...penumbraOuter);
     }
 
-    const clusterUmbra = umbraPolys.length > 1 ? unionPolygonLoops(umbraPolys) : umbraPolys;
-    const clusterOuter = outerPolys.length > 1 ? unionPolygonLoops(outerPolys) : outerPolys;
+    const clusterUmbra = umbraPolys.length > 1 ? unionPolygonsWithHoles(umbraPolys) : umbraPolys;
+    const clusterOuter = outerPolys.length > 1 ? unionPolygonsWithHoles(outerPolys) : outerPolys;
     mergedUmbra.push(...clusterUmbra);
     if (clusterOuter.length > 0) {
-      bandPolys.push(...differencePolygonLoops(clusterOuter, clusterUmbra));
+      bandPolys.push(...differencePolygonsWithHoles(clusterOuter, clusterUmbra));
     }
   }
 
@@ -130,31 +134,45 @@ function computeSoftResult(
 }
 
 /**
- * `clippingResultToLoops` (polygons.ts) spłaszcza wynik unii/przecięcia (obrys zewnętrzny + dziury)
- * do jednej płaskiej listy pierścieni, bez informacji który jest dziurą. Wypełnianie każdego
- * pierścienia OSOBNYM ctx.fill() (jak wcześniej) renderuje dziurę jako kolejny pełny kształt na
- * wierzchu — podwójne wypełnienie, widocznie ciemniejsze. Poprawka: jedna ścieżka ze wszystkimi
- * pierścieniami + jednorazowy ctx.fill('evenodd'), który poprawnie wycina dziury niezależnie od
- * kierunku nawijania pierścienia (ten sam mechanizm co ctx.clip('evenodd') w masterplanRoofsRenderer).
+ * Wypełnia wielokąty z otworami na Canvas 2D.
+ * Każdy PolygonWithHoles rysowany jest w osobnym ctx.beginPath() z obrysem i otworami,
+ * a następnie wypełniany regułą 'evenodd', co zapobiega zakłóceniom parzystości
+ * między niezależnymi wyspami geometrii.
  */
-function fillPolys(ctx: CanvasRenderingContext2D, polys: Point2D[][], color: string): void {
-  const validPolys = polys.filter((poly) => poly.length >= 3);
+export function fillPolys(ctx: CanvasRenderingContext2D, polys: PolygonWithHoles[], color: string): void {
+  if (!polys || polys.length === 0) return;
+
+  const validPolys = polys.filter((p) => p && p.outer && p.outer.length >= 3);
   if (validPolys.length === 0) return;
 
   ctx.fillStyle = color;
-  ctx.beginPath();
-  for (const poly of validPolys) {
-    poly.forEach((p, idx) => {
+  for (const pwh of validPolys) {
+    ctx.beginPath();
+    pwh.outer.forEach((p, idx) => {
       if (idx === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
     });
     ctx.closePath();
+
+    if (pwh.holes && pwh.holes.length > 0) {
+      for (const hole of pwh.holes) {
+        if (!hole || hole.length < 3) continue;
+        hole.forEach((p, idx) => {
+          if (idx === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      }
+    }
+    ctx.fill('evenodd');
   }
-  ctx.fill('evenodd');
 }
 
 /** Rysuje wynik cienia (legacy: próbki penumbry; soft: pełny rdzeń + pas penumbry) na podanym kontekście. */
-export function drawMasterplanShadowResult(ctx: CanvasRenderingContext2D, result: MasterplanShadowRenderResult): void {
+export function drawMasterplanShadowResult(
+  ctx: CanvasRenderingContext2D,
+  result: MasterplanShadowRenderResult
+): void {
   if (result.algorithm === 'legacy') {
     for (const sample of result.samples) {
       fillPolys(ctx, sample.polys, sample.color);
@@ -215,8 +233,8 @@ export function getCachedRoofShadowSamples(
 
   if (algorithm === 'soft') {
     const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
-    const umbraPolys: Point2D[][] = [];
-    const outerPolys: Point2D[][] = [];
+    const umbraPolys: PolygonWithHoles[] = [];
+    const outerPolys: PolygonWithHoles[] = [];
 
     for (const higherTier of higherTiers) {
       const deltaHTop = higherTier.hTop - currentH;
@@ -228,9 +246,9 @@ export function getCachedRoofShadowSamples(
       outerPolys.push(...penumbraOuter);
     }
 
-    const mergedUmbra = umbraPolys.length > 0 ? unionPolygonLoops(umbraPolys) : [];
-    const mergedOuter = outerPolys.length > 0 ? unionPolygonLoops(outerPolys) : [];
-    const bandPolys = mergedOuter.length > 0 ? differencePolygonLoops(mergedOuter, mergedUmbra) : [];
+    const mergedUmbra = umbraPolys.length > 1 ? unionPolygonsWithHoles(umbraPolys) : umbraPolys;
+    const mergedOuter = outerPolys.length > 1 ? unionPolygonsWithHoles(outerPolys) : outerPolys;
+    const bandPolys = mergedOuter.length > 0 ? differencePolygonsWithHoles(mergedOuter, mergedUmbra) : [];
     const midColor = samples[Math.floor(samples.length / 2)]?.color ?? samples[0]?.color ?? 'rgba(30, 41, 59, 0.14)';
 
     result = { algorithm: 'soft', umbraColor: midColor, umbraPolys: mergedUmbra, bandColor: midColor, bandPolys };
@@ -238,7 +256,7 @@ export function getCachedRoofShadowSamples(
     const legacySamples: MasterplanShadowSample[] = [];
     for (const sample of samples) {
       const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin);
-      const samplePolys: Point2D[][] = [];
+      const samplePolys: PolygonWithHoles[] = [];
 
       for (const higherTier of higherTiers) {
         const deltaHTop = higherTier.hTop - currentH;
@@ -249,8 +267,10 @@ export function getCachedRoofShadowSamples(
         samplePolys.push(...shadowRoofPolys);
       }
 
-      if (samplePolys.length > 0) {
-        legacySamples.push({ color: sample.color, polys: unionPolygonLoops(samplePolys) });
+      if (samplePolys.length === 1) {
+        legacySamples.push({ color: sample.color, polys: samplePolys });
+      } else if (samplePolys.length > 1) {
+        legacySamples.push({ color: sample.color, polys: unionPolygonsWithHoles(samplePolys) });
       }
     }
     result = { algorithm: 'legacy', samples: legacySamples };

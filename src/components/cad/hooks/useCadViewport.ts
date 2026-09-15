@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ViewportState } from '../types';
 import { BuildingLoop } from '../../../types/geometry';
 import { useUiStore } from '../../../store/useUiStore';
+import { createViewportMatrix, invertAffineMatrix, transformPoint, AffineMatrix2D } from '@/utils/math2d';
 
 export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -62,34 +63,28 @@ export function useCadViewport(
     }
   }, [viewRotationDeg, viewState.scale, containerRef]);
 
+  const viewportMatrix = useMemo(() => {
+    return createViewportMatrix(viewState.panX, viewState.panY, viewState.scale, viewRotationDeg);
+  }, [viewState.panX, viewState.panY, viewState.scale, viewRotationDeg]);
+
+  const invViewportMatrix = useMemo(() => {
+    return invertAffineMatrix(viewportMatrix);
+  }, [viewportMatrix]);
+
   const worldToScreen = useCallback(
     (wx: number, wy: number) => {
-      const rot = (viewRotationDeg * Math.PI) / 180;
-      const cos = Math.cos(rot);
-      const sin = Math.sin(rot);
-      const rx = wx * cos - wy * sin;
-      const ry = wx * sin + wy * cos;
-      return {
-        sx: viewState.panX + rx * viewState.scale,
-        sy: viewState.panY - ry * viewState.scale,
-      };
+      const pt = transformPoint(viewportMatrix, wx, wy);
+      return { sx: pt.x, sy: pt.y };
     },
-    [viewState, viewRotationDeg]
+    [viewportMatrix]
   );
 
   const screenToWorld = useCallback(
     (sx: number, sy: number) => {
-      const rot = (viewRotationDeg * Math.PI) / 180;
-      const cos = Math.cos(-rot);
-      const sin = Math.sin(-rot);
-      const rx = (sx - viewState.panX) / viewState.scale;
-      const ry = -(sy - viewState.panY) / viewState.scale;
-      return {
-        wx: rx * cos - ry * sin,
-        wy: rx * sin + ry * cos,
-      };
+      const pt = transformPoint(invViewportMatrix, sx, sy);
+      return { wx: pt.x, wy: pt.y };
     },
-    [viewState, viewRotationDeg]
+    [invViewportMatrix]
   );
 
   const fitToExtents = useCallback((ignoreSelection: boolean = false) => {
@@ -221,6 +216,8 @@ export function useCadViewport(
   return {
     viewState,
     setViewState,
+    viewportMatrix,
+    invViewportMatrix,
     worldToScreen,
     screenToWorld,
     fitToExtents,

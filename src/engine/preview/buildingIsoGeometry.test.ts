@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBuildingSolids, computeBuildingFrameBounds } from './buildingIsoGeometry';
+import { getBuildingSolids, computeBuildingFrameBounds, projectToIso, projectPointsToIsoBuffer } from './buildingIsoGeometry';
 import type { BuildingLoop } from '@/types/geometry';
 
 function createBuilding(overrides: Partial<BuildingLoop> = {}): BuildingLoop {
@@ -72,6 +72,7 @@ describe('getBuildingSolids', () => {
     const solids = getBuildingSolids(base);
     expect(solids[0].polygon).toEqual(baseVertices);
   });
+
   it('returns an empty array for degenerate geometry (no vertices, no storyPolygons)', () => {
     const building = createBuilding({ vertices: [], defaultHeight: 9 });
     expect(getBuildingSolids(building)).toEqual([]);
@@ -85,6 +86,21 @@ describe('getBuildingSolids', () => {
       ],
     });
     expect(getBuildingSolids(building)).toEqual([]);
+  });
+});
+
+describe('Isometric Matrix Projection', () => {
+  it('projects 3D vertex to 2D isometric point with 30-deg axonometric matrix', () => {
+    const pt = projectToIso(10, 0, 0);
+    // x * cos(30°) ≈ 8.66025, y * sin(30°) = 0, z = 0
+    expect(pt.x).toBeCloseTo(8.66025, 3);
+    expect(pt.y).toBeCloseTo(5.0, 3);
+
+    const buf3D = new Float32Array([10, 0, 0, 0, 10, 5]);
+    const out2D = projectPointsToIsoBuffer(buf3D);
+    expect(out2D.length).toBe(4);
+    expect(out2D[0]).toBeCloseTo(pt.x, 3);
+    expect(out2D[1]).toBeCloseTo(pt.y, 3);
   });
 });
 

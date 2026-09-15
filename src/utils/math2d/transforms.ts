@@ -1,6 +1,7 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import { calculateOutwardNormal } from './vec2';
-import { isPolygonCCW } from './polygons';
+import { isPolygonCCW, rotatePointAroundPivot } from './polygons';
+import { AffineMatrix2D, transformPointsFlat } from './affineMatrix';
 
 /**
  * Offsets a single polygon edge parallel to itself while preserving adjacent edge directions.
@@ -288,4 +289,108 @@ export function lineSegmentIntersection2D(
     t,
     s: clampedS,
   };
+}
+
+/**
+ * Rotates a 2D point around a given center using affine matrix transformation.
+ */
+export function rotatePoint(p: Point2D, center: Point2D, angleDeg: number): Point2D {
+  const r = rotatePointAroundPivot(p, center, (angleDeg * Math.PI) / 180);
+  return { x: center.x + r.x, y: center.y + r.y };
+}
+
+/**
+ * Rotates a polygon around a given center point.
+ */
+export function rotatePolygon(vertices: Point2D[], center: Point2D, angleDeg: number): Point2D[] {
+  return vertices.map((v) => rotatePoint(v, center, angleDeg));
+}
+
+/**
+ * Translates a polygon by (dx, dy).
+ */
+export function translatePolygon(vertices: Point2D[], dx: number, dy: number): Point2D[] {
+  return vertices.map((v) => ({ x: v.x + dx, y: v.y + dy }));
+}
+
+/**
+ * Konwertuje tablicę obiektów Point2D[] na ciągły bufor Float32Array [x0, y0, x1, y1, ...]
+ */
+export function pointsToBuffer(points: Point2D[], outBuf?: Float32Array): Float32Array {
+  const n = points.length;
+  const buf = outBuf && outBuf.length >= n * 2 ? outBuf : new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    buf[i * 2] = points[i].x;
+    buf[i * 2 + 1] = points[i].y;
+  }
+  return buf;
+}
+
+/**
+ * Konwertuje ciągły bufor Float32Array [x0, y0, x1, y1, ...] na tablicę obiektów Point2D[]
+ */
+export function bufferToPoints(buf: Float32Array, count?: number): Point2D[] {
+  const n = count ?? Math.floor(buf.length / 2);
+  const pts: Point2D[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    pts[i] = { x: buf[i * 2], y: buf[i * 2 + 1] };
+  }
+  return pts;
+}
+
+/**
+ * Wektorowa transformacja macierzą afiniczną [a, b, c, d, e, f] bezpośrednio na buforze Float32Array
+ */
+export function transformPointsBuffer(
+  m: AffineMatrix2D,
+  inBuf: Float32Array,
+  outBuf?: Float32Array
+): Float32Array {
+  const out = outBuf && outBuf.length >= inBuf.length ? outBuf : new Float32Array(inBuf.length);
+  return transformPointsFlat(m, inBuf, out);
+}
+
+/**
+ * Wektorowy obrót bufora Float32Array wokół punktu (cx, cy) o kąt angleDeg
+ */
+export function rotatePointsBuffer(
+  inBuf: Float32Array,
+  cx: number,
+  cy: number,
+  angleDeg: number,
+  outBuf?: Float32Array
+): Float32Array {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  const len = inBuf.length;
+  const out = outBuf && outBuf.length >= len ? outBuf : new Float32Array(len);
+
+  for (let i = 0; i < len; i += 2) {
+    const dx = inBuf[i] - cx;
+    const dy = inBuf[i + 1] - cy;
+    out[i] = cx + dx * cos - dy * sin;
+    out[i + 1] = cy + dx * sin + dy * cos;
+  }
+  return out;
+}
+
+/**
+ * Wektorowa translacja bufora Float32Array o (dx, dy)
+ */
+export function translatePointsBuffer(
+  inBuf: Float32Array,
+  dx: number,
+  dy: number,
+  outBuf?: Float32Array
+): Float32Array {
+  const len = inBuf.length;
+  const out = outBuf && outBuf.length >= len ? outBuf : new Float32Array(len);
+
+  for (let i = 0; i < len; i += 2) {
+    out[i] = inBuf[i] + dx;
+    out[i + 1] = inBuf[i + 1] + dy;
+  }
+  return out;
 }

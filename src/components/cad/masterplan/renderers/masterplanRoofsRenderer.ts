@@ -86,13 +86,12 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     ctx.fill('evenodd');
 
     // 2. Pobierz wszystkie kondygnacje/bryły wyższe (z tego samego budynku - self-shading, oraz z innych budynków - mutual shading)
-    // Filtr przestrzenny (AABB zasięgu cienia higherTier vs. footprint tier) eliminuje tiery, których
-    // cień nigdy nie dotknie tego dachu, niezależnie od ich wysokości — patrz masterplanSpatial.ts.
+    // Dokładny filtr przestrzenny: obliczamy realny zasięg cienia dla deltaHTop (a nie pełnego hTop!)
     const currentH = tier.hTop;
     const tierBounds: Bounds = sortedTierBounds[i];
     const higherTiers = sortedTiers.slice(i + 1).filter((ht, offset) => {
-      if (ht.hTop <= currentH + 0.05) return false;
       const deltaHTop = ht.hTop - currentH;
+      if (deltaHTop <= 0.05) return false;
       const htOffset = computeShadowOffsetVector(deltaHTop, angles);
       const htReachBounds = extendBoundsByOffset(sortedTierBounds[i + 1 + offset], htOffset.dx * 1.05, htOffset.dy * 1.05);
       return boundsOverlap(tierBounds, htReachBounds);

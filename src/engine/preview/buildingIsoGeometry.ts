@@ -130,3 +130,46 @@ export function computeBuildingFrameBounds(solids: IsoSolid[]): FrameBounds | nu
     groundY,
   };
 }
+
+/**
+ * Stała macierz rzutu izometrycznego 3D -> 2D (kąt 30 stopni):
+ * [ cos(30°), -cos(30°),  0 ]
+ * [ sin(30°),  sin(30°), -1 ]
+ */
+const COS_30 = Math.cos((30 * Math.PI) / 180); // ~0.866025
+const SIN_30 = Math.sin((30 * Math.PI) / 180); // 0.5
+
+export function projectToIso(
+  x: number,
+  y: number,
+  z: number,
+  scale: number = 1.0,
+  out?: Point2D
+): Point2D {
+  const sx = (x * COS_30 - y * COS_30) * scale;
+  const sy = (x * SIN_30 + y * SIN_30 - z) * scale;
+  if (out) {
+    out.x = sx;
+    out.y = sy;
+    return out;
+  }
+  return { x: sx, y: sy };
+}
+
+export function projectPointsToIsoBuffer(
+  points3D: Float32Array, // [x0, y0, z0, x1, y1, z1, ...]
+  scale: number = 1.0,
+  out2D?: Float32Array // [x0, y0, x1, y1, ...]
+): Float32Array {
+  const count = Math.floor(points3D.length / 3);
+  const out = out2D && out2D.length >= count * 2 ? out2D : new Float32Array(count * 2);
+
+  for (let i = 0; i < count; i++) {
+    const x = points3D[i * 3];
+    const y = points3D[i * 3 + 1];
+    const z = points3D[i * 3 + 2];
+    out[i * 2] = (x * COS_30 - y * COS_30) * scale;
+    out[i * 2 + 1] = (x * SIN_30 + y * SIN_30 - z) * scale;
+  }
+  return out;
+}

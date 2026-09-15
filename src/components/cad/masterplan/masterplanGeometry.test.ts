@@ -9,8 +9,14 @@ import {
   computeStoryShadowPolygonWithHoles,
   computeSoftStoryShadowPolygon,
 } from './masterplanGeometry';
+import { getCachedGroundShadowSamples } from './masterplanShadowCache';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
-import { isPointInPolygon } from '../../../utils/math2d/polygons';
+import {
+  isPointInPolygon,
+  isPointInPolygonWithHoles,
+  intersectionPolygonLoops,
+  calculateSignedArea,
+} from '../../../utils/math2d/polygons';
 import { applyBuildingModifiers } from '../../../engine/modifiers/modifierPipeline';
 import { createDefaultDonutModifier, createDefaultStoryOffsetModifier } from '../../../types/modifiers';
 
@@ -170,15 +176,7 @@ describe('masterplanGeometry', () => {
     expect(umbra.length).toBeGreaterThanOrEqual(1);
     expect(penumbraOuter.length).toBeGreaterThanOrEqual(1);
 
-    const area = (poly: { x: number; y: number }[]) => {
-      let a = 0;
-      for (let i = 0; i < poly.length; i++) {
-        const p1 = poly[i];
-        const p2 = poly[(i + 1) % poly.length];
-        a += p1.x * p2.y - p2.x * p1.y;
-      }
-      return Math.abs(a) / 2;
-    };
+    const area = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
     const totalArea = (polys: { x: number; y: number }[][]) => polys.reduce((sum, p) => sum + area(p), 0);
 
     expect(totalArea(penumbraOuter)).toBeGreaterThan(totalArea(umbra));
@@ -219,30 +217,18 @@ describe('masterplanGeometry', () => {
   });
 
   describe('computeStoryShadowPolygonWithHoles', () => {
-    const area = (poly: { x: number; y: number }[]) => {
-      let a = 0;
-      for (let i = 0; i < poly.length; i++) {
-        const p1 = poly[i];
-        const p2 = poly[(i + 1) % poly.length];
-        a += p1.x * p2.y - p2.x * p1.y;
+    const area = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
+    const pwhArea = (pwh: { outer: { x: number; y: number }[]; holes?: { x: number; y: number }[][] }) => {
+      let a = area(pwh.outer);
+      if (pwh.holes) {
+        for (const h of pwh.holes) {
+          a -= area(h);
+        }
       }
-      return Math.abs(a) / 2;
+      return Math.max(0, a);
     };
-    // Wynik differencePolygonLoops (polygon-clipping) może zwrócić WIELE pierścieni reprezentujących
-    // jeden poligon z dziurą (outer + hole ring, spłaszczone bez informacji "który jest dziurą" —
-    // patrz komentarz przy fillPolys w masterplanShadowCache.ts). polygon-clipping nawija pierścienie
-    // zewnętrzne CCW (dodatnie), a dziury CW (ujemne) — sumowanie PODPISANEGO pola (nie |pole|) daje
-    // poprawne pole netto automatycznie, bez potrzeby rozróżniania ręcznie.
-    const signedArea = (poly: { x: number; y: number }[]) => {
-      let a = 0;
-      for (let i = 0; i < poly.length; i++) {
-        const p1 = poly[i];
-        const p2 = poly[(i + 1) % poly.length];
-        a += p1.x * p2.y - p2.x * p1.y;
-      }
-      return a / 2;
-    };
-    const totalArea = (polys: { x: number; y: number }[][]) => Math.abs(polys.reduce((sum, p) => sum + signedArea(p), 0));
+    const totalAreaPwh = (polys: { outer: { x: number; y: number }[]; holes?: { x: number; y: number }[][] }[]) =>
+      polys.reduce((sum, p) => sum + pwhArea(p), 0);
 
     const outer = [
       { x: 0, y: 0 },
@@ -259,39 +245,52 @@ describe('masterplanGeometry', () => {
 
     it('produces a smaller shadow area than the solid-outer shadow (the hole actually removes material)', () => {
       const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
-      const solidShadow = computeStoryShadowPolygon(outer, angles, 10, 0);
-      const ringShadow = computeStoryShadowPolygonWithHoles(outer, [hole], angles, 10, 0);
+      const solidShadow = computeStoryShadowPolygon(outer, angles, 5, 0);
+      const ringShadow = computeStoryShadowPolygonWithHoles(outer, [hole], angles, 5, 0);
 
-      expect(totalArea(ringShadow)).toBeLessThan(totalArea([solidShadow]));
+      expect(totalAreaPwh(ringShadow)).toBeLessThan(area(solidShadow));
     });
 
-    it('matches the analytical outer-minus-hole area exactly', () => {
+    it('matches the analytical outer-minus-aperture area exactly', () => {
       const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
-      const outerShadow = computeStoryShadowPolygon(outer, angles, 10, 0);
-      const holeShadow = computeStoryShadowPolygon(hole, angles, 10, 0);
-      const ringShadow = computeStoryShadowPolygonWithHoles(outer, [hole], angles, 10, 0);
+      const outerShadow = computeStoryShadowPolygon(outer, angles, 5, 0);
+      const ringShadow = computeStoryShadowPolygonWithHoles(outer, [hole], angles, 5, 0);
 
-      // Pole pierścienia-cienia powinno być: pole(cień obrysu) - pole(cień dziury). Skoro cień dziury
-      // jest podzbiorem cienia obrysu (dziura wewnątrz obrysu, ten sam offset), to po prostu
-      // pole(outerShadow) - pole(holeShadow) — tolerancja 2 miejsca po przecinku ze względu na
-      // snapping precyzji 1mm w polygon-clipping (differencePolygonLoops), nie identyczność bitowa.
-      expect(totalArea(ringShadow)).toBeCloseTo(area(outerShadow) - area(holeShadow), 1);
+      const topOffset = computeShadowOffsetVector(5, angles);
+      const shiftedHole = hole.map((p) => ({ x: p.x + topOffset.dx, y: p.y + topOffset.dy }));
+      const [expectedAperture] = intersectionPolygonLoops([hole], [shiftedHole]);
+      const expectedApertureArea = expectedAperture ? area(expectedAperture) : 0;
+
+      expect(totalAreaPwh(ringShadow)).toBeCloseTo(area(outerShadow) - expectedApertureArea, 1);
+    });
+
+    it('shades the southern part of the courtyard and illuminates the northern part without leaks', () => {
+      const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
+      // Przy hTop = 5m, długość cienia wynosi ok. 6.25m.
+      // Ściana południowa (y=5) rzuca cień do y ≈ 11.25m w dziedzińcu o wymiarze y ∈ [5, 15].
+      const ringShadow = computeStoryShadowPolygonWithHoles(outer, [hole], angles, 5, 0);
+
+      // Punkt w południowej części dziedzińca (x=10, y=7 < 11.25) leży W CIENIU:
+      const southCourtyardPoint = { x: 10, y: 7 };
+      // Punkt w północnej części dziedzińca (x=10, y=14 > 11.25) pod otworem nieba jest OŚWIETLONY (poza cieniem):
+      const northCourtyardPoint = { x: 10, y: 14 };
+      // Punkt na zewnątrz za ścianą północną (x=10, y=22) leży w litym cieniu ściany północnej (brak prześwitów):
+      const northOutsidePoint = { x: 10, y: 22 };
+
+      expect(isPointInPolygonWithHoles(southCourtyardPoint, ringShadow)).toBe(true);
+      expect(isPointInPolygonWithHoles(northCourtyardPoint, ringShadow)).toBe(false);
+      expect(isPointInPolygonWithHoles(northOutsidePoint, ringShadow)).toBe(true);
     });
 
     it('returns the solid shadow unchanged when there are no holes', () => {
       const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
       const solidShadow = computeStoryShadowPolygon(outer, angles, 10, 0);
       const noHolesResult = computeStoryShadowPolygonWithHoles(outer, undefined, angles, 10, 0);
-      expect(totalArea(noHolesResult)).toBeCloseTo(area(solidShadow), 6);
+      expect(totalAreaPwh(noHolesResult)).toBeCloseTo(area(solidShadow), 6);
     });
   });
 
   describe('inner terrace self-shadow (reference/shadow-test2.json scenario: donut + story_offset)', () => {
-    // Reprodukcja: donut (dziedziniec na całej wysokości) + story_offset (uskok tylko ostatniej
-    // kondygnacji, cofa też wewnętrzną ścianę dziedzińca) -> "wewnętrzny taras" na z=hTop kondygnacji
-    // 0-3: pierścień między MNIEJSZĄ dziurą (piętra 0-3) i WIĘKSZĄ dziurą (piętro 4, po uskoku).
-    // Przed fixem: samo-cień piętra 4 na scalonym tierze 0-3 pokrywał CAŁY wewnętrzny taras (bo
-    // computeStoryShadowPolygon ignorował holes piętra 4, licząc je jak pełny blok).
     const building: BuildingLoop = {
       id: 'inner-terrace',
       name: 'inner-terrace',
@@ -324,16 +323,7 @@ describe('masterplanGeometry', () => {
       const topTier = tiers[tiers.length - 1];
       expect(mergedTier?.holes?.[0]).toBeTruthy();
       expect(topTier.holes?.[0]).toBeTruthy();
-      // Dziura na szczytowej kondygnacji musi być WIĘKSZA (uskok cofa też ścianę wewnętrzną).
-      const holeArea = (poly: { x: number; y: number }[]) => {
-        let a = 0;
-        for (let i = 0; i < poly.length; i++) {
-          const p1 = poly[i];
-          const p2 = poly[(i + 1) % poly.length];
-          a += p1.x * p2.y - p2.x * p1.y;
-        }
-        return Math.abs(a) / 2;
-      };
+      const holeArea = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
       expect(holeArea(topTier.holes![0])).toBeGreaterThan(holeArea(mergedTier!.holes![0]));
     });
 
@@ -347,12 +337,6 @@ describe('masterplanGeometry', () => {
       const shadowWithHoles = computeStoryShadowPolygonWithHoles(topTier.polygon, topTier.holes, angles, deltaHTop, deltaHBase);
       const shadowSolidBuggy = [computeStoryShadowPolygon(topTier.polygon, angles, deltaHTop, deltaHBase)];
 
-      // Taras to pierścień odsłonięty przez uskok: leży WEWNĄTRZ większej dziury piętra szczytowego
-      // (tam nie ma już materiału na najwyższym piętrze — niebo jest widoczne), ale POZA mniejszą
-      // dziurą scalonego tiera (tam podłoga scalonego tiera jest pełna/lita — fizycznie istnieje jako
-      // powierzchnia tarasu). Strona północna (przeciwna do słońca w południe równonocy — słońce na
-      // południu, cień pada na północ): tam samo-zacienianie buggy-wersji jest błędne, bo w
-      // rzeczywistości dziura piętra szczytowego już tam nie ma materiału, który mógłby rzucać cień.
       const maxYSmall = Math.max(...mergedTier.holes![0].map((q) => q.y));
       const maxYBig = Math.max(...topTier.holes![0].map((q) => q.y));
       const xs = mergedTier.holes![0].map((q) => q.x);
@@ -360,21 +344,85 @@ describe('masterplanGeometry', () => {
 
       const insideBiggerHole = isPointInPolygon(terracePoint, topTier.holes![0]);
       const insideSmallerHole = isPointInPolygon(terracePoint, mergedTier.holes![0]);
-      expect(insideBiggerHole).toBe(true); // punkt leży w odsłoniętym obszarze (widoczne niebo z góry)
-      expect(insideSmallerHole).toBe(false); // ale wciąż na litej podłodze scalonego tiera (taras)
-
-      // shadowWithHoles to wynik differencePolygonLoops (obrys minus dziura) — wielopierścieniowy
-      // kształt "donut", interpretowany zasadą even-odd (jak ctx.fill('evenodd')): punkt jest W
-      // KSZTAŁCIE, jeśli leży w NIEPARZYSTEJ liczbie pierścieni, nie "w którymkolwiek" pierścieniu
-      // (bycie tylko w pierścieniu-dziurze oznacza WYŁĄCZENIE, nie włączenie).
-      const isInsideEvenOdd = (point: Point2D, rings: Point2D[][]): boolean =>
-        rings.filter((ring) => isPointInPolygon(point, ring)).length % 2 === 1;
+      expect(insideBiggerHole).toBe(true);
+      expect(insideSmallerHole).toBe(false);
 
       const shadowedByBuggyVersion = shadowSolidBuggy.some((p) => isPointInPolygon(terracePoint, p));
-      const shadowedByFixedVersion = isInsideEvenOdd(terracePoint, shadowWithHoles);
+      const shadowedByFixedVersion = isPointInPolygonWithHoles(terracePoint, shadowWithHoles);
 
-      expect(shadowedByBuggyVersion).toBe(true); // potwierdza, że TEN scenariusz faktycznie wykrywał bug
-      expect(shadowedByFixedVersion).toBe(false); // po fixie: słońce dociera przez powiększoną dziurę piętra 4
+      expect(shadowedByBuggyVersion).toBe(true);
+      expect(shadowedByFixedVersion).toBe(false);
+    });
+  });
+
+  describe('donut courtyard ground shadow in Masterplan (reference/shadow-test3.json scenario)', () => {
+    it('does not fill the entire courtyard with ground shadow at noon equinox', () => {
+      const bldg: BuildingLoop = {
+        id: 'donut-bldg',
+        name: 'donut-bldg',
+        layer: 'BUD_NOWY',
+        isTested: true,
+        isCityCentre: false,
+        buildingType: 'residential',
+        category: 'building',
+        elevation: 0,
+        firstFloorHeight: 3,
+        typicalFloorHeight: 3,
+        defaultHeight: 15,
+        hWindowBottom: 0.85,
+        vertices: [
+          { x: -17.66, y: 51.40 },
+          { x: -17.66, y: -3.51 },
+          { x: -73.63, y: -3.51 },
+          { x: -73.63, y: 51.40 },
+        ],
+        segments: [],
+        modifiers: [createDefaultDonutModifier(), createDefaultStoryOffsetModifier()],
+      } as unknown as BuildingLoop;
+
+      const result = applyBuildingModifiers(bldg);
+      const buildingWithStories = { ...bldg, storyPolygons: result.storyPolygons };
+      const tiers = extractBuildingStoryTiers(buildingWithStories as BuildingLoop);
+
+      const samples = [
+        { color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 },
+      ];
+
+      const shadowResult = getCachedGroundShadowSamples(
+        'legacy',
+        tiers,
+        samples,
+        52.23,
+        21.01,
+        'spring',
+        12.0
+      );
+
+      expect(shadowResult.algorithm).toBe('legacy');
+      if (shadowResult.algorithm === 'legacy') {
+        const pwhList = shadowResult.samples[0].polys;
+        // Dziedziniec rozciąga się w x ∈ [-61.63, -29.66], y ∈ [8.48, 39.40].
+        const midX = (-61.63 - 29.66) / 2; // -45.65m
+
+        const isCoveredByShadow = (pt: Point2D): boolean => {
+          for (const pwh of pwhList) {
+            if (isPointInPolygon(pt, pwh.outer)) {
+              const inHole = pwh.holes?.some((h) => isPointInPolygon(pt, h)) ?? false;
+              if (!inHole) return true;
+            }
+          }
+          return false;
+        };
+
+        // Ściana południowa dziedzińca (y=8.48) o wysokości 15m rzuca cień do y ≈ 27.2m.
+        // Południowa część dziedzińca (y=15 < 27.2m) leży w cieniu rzucanym przez ścianę południową:
+        const southCourtyardPt = { x: midX, y: 15.0 };
+        expect(isCoveredByShadow(southCourtyardPt)).toBe(true);
+
+        // Północna część dziedzińca (y=34 > 27.2m) jest bezpośrednio oświetlona promieniami słońca:
+        const northCourtyardPt = { x: midX, y: 34.0 };
+        expect(isCoveredByShadow(northCourtyardPt)).toBe(false);
+      }
     });
   });
 });

@@ -9,6 +9,10 @@ import {
   intersectionPolygonLoops,
   differencePolygonLoops,
   collapseIdenticalConsecutiveHeightRuns,
+  PolygonWithHoles,
+  unionPolygonsWithHoles,
+  differencePolygonsWithHoles,
+  intersectionPolygonsWithHoles,
 } from '../../../utils/math2d/polygons';
 
 export interface SolarAngles {
@@ -205,12 +209,18 @@ export function computeStoryShadowPolygon(
 }
 
 /**
- * Cień bryły z dziurami (np. dziedziniec z modyfikatora "donut"): shadow(obrys) MINUS shadow(dziura),
- * liczone tą samą wysokością dla obu. computeStoryShadowPolygon (bez holes) traktuje tier jak pełny,
- * lity blok — dla pierścienia to zawyża cień (pokrywa cały wewnętrzny taras, nie tylko rzeczywistą
- * "ściankę"), bo ignoruje że światło przechodzi przez dziurę. Dowód: punkt p jest w cieniu pierścienia
- * ⟺ p jest w cieniu pełnego obrysu I promień do słońca nie jest zablokowany wyłącznie w obrębie dziury
- * ⟺ p ∈ shadow(obrys) \ shadow(dziura).
+ * Cień bryły z dziurami (np. dziedziniec z modyfikatora "donut"):
+ * W modelu fizycznym (zgodnym z podglądem 3D / Three.js), światło słoneczne wpada
+ * przez górny otwór w dachu (aperturę na wysokości hTop) i porusza się w dół szybu dziedzińca.
+ * Promienie padające na wewnętrzne ściany dziedzińca są blokowane, a do płaszczyzny bazowej
+ * dociera wyłącznie wiązka przechodząca przez przekrój otworu bazowego i szczytowego:
+ * LightPatch = (H + baseOffset) ∩ (H + topOffset).
+ * Cień kondygnacji to cień pełnego obrysu MINUS plama światła wewnątrz dziedzińca:
+ * StoryShadow = Sweep(Outer) \ LightPatch.
+ * Dzięki temu:
+ * - Ściana południowa dziedzińca rzuca fizyczny cień na dno dziedzińca,
+ * - Północna część dziedzińca jest prawidłowo oświetlona,
+ * - Żadne światło nie wycieka poza budynek (brak prześwitów w cieniu ściany północnej).
  */
 export function computeStoryShadowPolygonWithHoles(
   polygon: Point2D[],
@@ -218,19 +228,36 @@ export function computeStoryShadowPolygonWithHoles(
   solarAngles: SolarAngles,
   hTop: number,
   hBottom: number = 0
-): Point2D[][] {
+): PolygonWithHoles[] {
   const outerShadow = computeStoryShadowPolygon(polygon, solarAngles, hTop, hBottom);
   if (outerShadow.length < 3) return [];
-  if (!holes || holes.length === 0) return [outerShadow];
+  if (!holes || holes.length === 0) return [{ outer: outerShadow, holes: [] }];
 
-  const holeShadows = holes
-    .filter((h) => h.length >= 3)
-    .map((h) => computeStoryShadowPolygon(h, solarAngles, hTop, hBottom))
-    .filter((s) => s.length >= 3);
+  const validHoles = holes.filter((h) => h && h.length >= 3);
+  if (validHoles.length === 0) return [{ outer: outerShadow, holes: [] }];
 
-  if (holeShadows.length === 0) return [outerShadow];
-  const mergedHoles = holeShadows.length > 1 ? unionPolygonLoops(holeShadows) : holeShadows;
-  return differencePolygonLoops([outerShadow], mergedHoles);
+  const effectiveBottom = Math.max(0, hBottom);
+  const topOffset = computeShadowOffsetVector(hTop, solarAngles);
+  const baseOffset = effectiveBottom > 0 ? computeShadowOffsetVector(effectiveBottom, solarAngles) : { dx: 0, dy: 0, length: 0 };
+
+  // Plama światła to przekrój otworu dolnego i górnego: (H + baseOffset) ∩ (H + topOffset)
+  const lightApertures: PolygonWithHoles[] = [];
+  for (const hole of validHoles) {
+    const hBase: PolygonWithHoles = {
+      outer: hole.map((p) => ({ x: p.x + baseOffset.dx, y: p.y + baseOffset.dy })),
+      holes: [],
+    };
+    const hTopPoly: PolygonWithHoles = {
+      outer: hole.map((p) => ({ x: p.x + topOffset.dx, y: p.y + topOffset.dy })),
+      holes: [],
+    };
+    const inter = intersectionPolygonsWithHoles([hBase], [hTopPoly]);
+    lightApertures.push(...inter);
+  }
+
+  if (lightApertures.length === 0) return [{ outer: outerShadow, holes: [] }];
+  const mergedApertures = lightApertures.length > 1 ? unionPolygonsWithHoles(lightApertures) : lightApertures;
+  return differencePolygonsWithHoles([{ outer: outerShadow, holes: [] }], mergedApertures);
 }
 
 function computeStoryShadowPolygonUncached(
@@ -317,13 +344,15 @@ function computeStoryShadowPolygonUncached(
   }
 
   try {
-    const unionResult = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
-    if (unionResult.length > 0 && unionResult[0].length > 0) {
-      const ringRes = unionResult[0][0];
-      const isClosed =
-        ringRes[0][0] === ringRes[ringRes.length - 1][0] && ringRes[0][1] === ringRes[ringRes.length - 1][1];
-      const sliceEnd = isClosed && ringRes.length > 3 ? ringRes.length - 1 : ringRes.length;
-      return ringRes.slice(0, sliceEnd).map(([x, y]) => ({ x, y }));
+    const polygonLoops: Point2D[][] = [];
+    for (const poly of clippingPolys) {
+      if (poly && poly.length > 0) {
+        polygonLoops.push(poly[0].slice(0, -1).map(([x, y]) => ({ x, y })));
+      }
+    }
+    const unionResult = unionPolygonLoops(polygonLoops);
+    if (unionResult.length > 0 && unionResult[0].length >= 3) {
+      return unionResult[0];
     }
   } catch {
     // Fallback do otoczki wypukłej w razie błędu geometrii
@@ -397,6 +426,11 @@ export function computeSoftStoryShadowPolygon(
   return { umbra, penumbraOuter };
 }
 
+export interface SoftShadowWithHolesResult {
+  umbra: PolygonWithHoles[];
+  penumbraOuter: PolygonWithHoles[];
+}
+
 /**
  * Wariant soft z dziurami: różnica (obrys minus dziura) liczona OSOBNO dla każdego wariantu azymutu,
  * a dopiero potem przecięcie (umbra)/unia (penumbraOuter) — różnica i przecięcie/unia nie są
@@ -409,7 +443,7 @@ export function computeSoftStoryShadowPolygonWithHoles(
   hTop: number,
   hBottom: number = 0,
   sunAngularRadiusDeg: number = 0.267
-): SoftShadowResult {
+): SoftShadowWithHolesResult {
   const anglesMin = perturbAzimuth(solarAngles, -sunAngularRadiusDeg);
   const anglesMax = perturbAzimuth(solarAngles, sunAngularRadiusDeg);
 
@@ -420,8 +454,8 @@ export function computeSoftStoryShadowPolygonWithHoles(
   if (ringMin.length === 0) return { umbra: ringMax, penumbraOuter: ringMax };
   if (ringMax.length === 0) return { umbra: ringMin, penumbraOuter: ringMin };
 
-  const umbra = intersectionPolygonLoops(ringMin, ringMax);
-  const penumbraOuter = unionPolygonLoops([...ringMin, ...ringMax]);
+  const umbra = intersectionPolygonsWithHoles(ringMin, ringMax);
+  const penumbraOuter = unionPolygonsWithHoles([...ringMin, ...ringMax]);
   return { umbra, penumbraOuter };
 }
 

@@ -6,7 +6,7 @@ import {
   extractBuildingStoryTiers,
   MasterplanStoryTier,
 } from '../masterplanGeometry';
-import { getCachedGroundShadowSamples, drawMasterplanShadowResult } from '../masterplanShadowCache';
+import { getCachedGroundShadowSamples, drawMasterplanShadowResult, fillPolys } from '../masterplanShadowCache';
 
 /**
  * Paleta barwna dla podkładu „Masterplan White”
@@ -240,7 +240,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     }
   }
 
-  // 3. Kontaktowe AO gruntowe wokół budynków (rozmyte halo pod spodem)
+  // 3. Kontaktowe AO gruntowe wokół budynków (rozmyte halo pod spodem z wycięciem otworów/patio)
   const actualBuildings = bldgs.filter((b: BuildingLoop) => b.category !== 'boundary' && b.defaultHeight > 0);
   ctx.save();
   ctx.fillStyle = MASTERPLAN_COLORS.aoGround;
@@ -250,14 +250,15 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   ctx.shadowOffsetY = 0;
 
   for (const bldg of actualBuildings) {
-    if (!bldg.vertices || bldg.vertices.length < 3) continue;
-    ctx.beginPath();
-    bldg.vertices.forEach((p: Point2D, idx: number) => {
-      if (idx === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    ctx.closePath();
-    ctx.fill();
+    const tiers = extractBuildingStoryTiers(bldg);
+    const baseTiers = tiers.filter((t) => t.hBottom === 0 || t.storyIndex === 0);
+    const tiersToRender = baseTiers.length > 0 ? baseTiers : [{ polygon: bldg.vertices, holes: bldg.holes || [] }];
+
+    fillPolys(
+      ctx,
+      tiersToRender.map((tier) => ({ outer: tier.polygon, holes: tier.holes || [] })),
+      MASTERPLAN_COLORS.aoGround
+    );
   }
   ctx.restore();
 

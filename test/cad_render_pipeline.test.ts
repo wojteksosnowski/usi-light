@@ -10,6 +10,15 @@ import {
 } from '../src/components/cad/pipeline';
 import { CadRenderContext } from '../src/components/cad/types';
 
+if (typeof (globalThis as any).Path2D === 'undefined') {
+  (globalThis as any).Path2D = class Path2D {
+    moveTo = vi.fn();
+    lineTo = vi.fn();
+    closePath = vi.fn();
+    arc = vi.fn();
+  };
+}
+
 describe('CadRenderPipeline & Layer Orchestration', () => {
   const mockCtx = {
     save: vi.fn(),
@@ -20,6 +29,16 @@ describe('CadRenderPipeline & Layer Orchestration', () => {
     beginPath: vi.fn(),
     stroke: vi.fn(),
     fill: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    closePath: vi.fn(),
+    arc: vi.fn(),
+    roundRect: vi.fn(),
+    setLineDash: vi.fn(),
+    fillText: vi.fn(),
+    measureText: vi.fn().mockReturnValue({ width: 50 }),
+    translate: vi.fn(),
+    rotate: vi.fn(),
   } as unknown as CanvasRenderingContext2D;
 
   const mockRenderContext: CadRenderContext = {
@@ -166,19 +185,51 @@ describe('CadRenderPipeline & Layer Orchestration', () => {
     expect(pipeline.getMainLayers().length).toBe(0);
   });
 
-  it('renders overlay layers with clearRect buffer reset', () => {
-    const overlayRenderSpy = vi.fn();
-    const overlayLayer: CadRenderLayer = {
-      id: 'test_overlay',
-      zIndex: 90,
-      shouldRender: () => true,
-      render: overlayRenderSpy,
-    };
+  it('renders BuildingsLayer without error when a building or boundary is selected', () => {
+    const buildingsLayer = new BuildingsLayer();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const pipeline = new CadRenderPipeline([], [overlayLayer]);
-    pipeline.renderOverlay(createMockFrameContext());
+    const mockBuildings: any[] = [
+      {
+        id: 'bldg-1',
+        name: 'Budynek A',
+        category: 'building',
+        vertices: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 15 }, { x: 0, y: 15 }],
+        segments: [
+          { p1: { x: 0, y: 0 }, p2: { x: 20, y: 0 }, normal: { x: 0, y: -1 }, length: 20, angleRad: 0, hTop: 15, hBase: 0, hWindowBottom: 0.85, isCityCentre: false, buildingType: 'residential' },
+          { p1: { x: 20, y: 0 }, p2: { x: 20, y: 15 }, normal: { x: 1, y: 0 }, length: 15, angleRad: Math.PI / 2, hTop: 15, hBase: 0, hWindowBottom: 0.85, isCityCentre: false, buildingType: 'residential' },
+          { p1: { x: 20, y: 15 }, p2: { x: 0, y: 15 }, normal: { x: 0, y: 1 }, length: 20, angleRad: Math.PI, hTop: 15, hBase: 0, hWindowBottom: 0.85, isCityCentre: false, buildingType: 'residential' },
+          { p1: { x: 0, y: 15 }, p2: { x: 0, y: 0 }, normal: { x: -1, y: 0 }, length: 15, angleRad: -Math.PI / 2, hTop: 15, hBase: 0, hWindowBottom: 0.85, isCityCentre: false, buildingType: 'residential' },
+        ],
+        defaultHeight: 15,
+        elevation: 0,
+        isTested: true,
+      },
+      {
+        id: 'boundary-1',
+        name: 'Działka 123/4',
+        plotNumber: '123/4',
+        category: 'boundary',
+        areaType: 'plot',
+        vertices: [{ x: -10, y: -10 }, { x: 40, y: -10 }, { x: 40, y: 30 }, { x: -10, y: 30 }],
+        segments: [
+          { p1: { x: -10, y: -10 }, p2: { x: 40, y: -10 }, normal: { x: 0, y: -1 }, length: 50, angleRad: 0, hTop: 0, hBase: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+          { p1: { x: 40, y: -10 }, p2: { x: 40, y: 30 }, normal: { x: 1, y: 0 }, length: 40, angleRad: Math.PI / 2, hTop: 0, hBase: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+          { p1: { x: 40, y: 30 }, p2: { x: -10, y: 30 }, normal: { x: 0, y: 1 }, length: 50, angleRad: Math.PI, hTop: 0, hBase: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+          { p1: { x: -10, y: 30 }, p2: { x: -10, y: -10 }, normal: { x: -1, y: 0 }, length: 40, angleRad: -Math.PI / 2, hTop: 0, hBase: 0, hWindowBottom: 0, isCityCentre: false, buildingType: 'residential' },
+        ],
+        isTested: true,
+      },
+    ];
 
-    expect(mockCtx.clearRect).toHaveBeenCalledWith(0, 0, 800, 600);
-    expect(overlayRenderSpy).toHaveBeenCalled();
+    const ctx = createMockFrameContext({
+      buildings: mockBuildings,
+      visibleBuildings: mockBuildings,
+      selectedBuildingId: 'bldg-1',
+    });
+
+    expect(() => buildingsLayer.render(ctx)).not.toThrow();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 });

@@ -237,7 +237,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   }, [buildings, latitude, longitude]);
 
   // Viewport hook
-  const { viewState, setViewState, worldToScreen, screenToWorld } = useCadViewport(
+  const { viewState, setViewState, viewportMatrix, invViewportMatrix, worldToScreen, screenToWorld } = useCadViewport(
     containerRef,
     buildings,
     viewRotationDeg,
@@ -448,6 +448,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       height,
       viewState,
       viewRotationDeg,
+      viewportMatrix,
+      invViewportMatrix,
       worldToScreen,
       screenToWorld,
       latitude,
@@ -591,6 +593,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       height,
       viewState,
       viewRotationDeg,
+      viewportMatrix,
+      invViewportMatrix,
       worldToScreen,
       screenToWorld,
       latitude,

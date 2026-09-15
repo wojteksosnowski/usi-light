@@ -130,4 +130,64 @@ describe('projectStorage', () => {
     expect(remaining.length).toBe(1);
     expect(remaining[0].id).toBe(saved2.id);
   });
+
+  it('sanityzuje budynki przy zapisie i rehydratuje segmenty przy odczycie', () => {
+    const complexBuilding = {
+      ...createSampleBuildings()[0],
+      modifiers: [
+        {
+          id: 'mod-1',
+          type: 'terrace' as const,
+          name: 'Taras',
+          enabled: true,
+          depth: -3.0,
+          storiesCount: -1,
+          edgeIndex: 0,
+        },
+      ],
+    };
+
+    const saved = saveProjectToStorage({
+      name: 'Projekt z modyfikatorami',
+      version: 1,
+      scene: { buildings: [complexBuilding] },
+      solar: { settings: { latitude: 52, longitude: 21, equinoxDate: 'spring', isCityCentreDefault: false, samplingInterval: 0.25 }, selectedCity: 'Warszawa' },
+    });
+
+    const loaded = getStoredProjectById(saved.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.scene.buildings.length).toBe(1);
+    const bldg = loaded!.scene.buildings[0];
+    expect(bldg.segments.length).toBeGreaterThan(0);
+    expect(bldg.storyPolygons).toBeDefined();
+  });
+
+  it('obsługuje błąd QuotaExceeded poprzez automatyczną eksmisję starszych projektów', () => {
+    let failFirst = true;
+    const originalSetItem = window.localStorage.setItem;
+    window.localStorage.setItem = (k: string, v: string) => {
+      if (failFirst && mockStorage[LOCAL_STORAGE_PROJECTS_KEY]) {
+        failFirst = false;
+        throw new Error('QuotaExceededError');
+      }
+      mockStorage[k] = v;
+    };
+
+    saveProjectToStorage({
+      name: 'Stary projekt',
+      version: 1,
+      scene: { buildings: createSampleBuildings() },
+      solar: { settings: { latitude: 52, longitude: 21, equinoxDate: 'spring', isCityCentreDefault: false, samplingInterval: 0.25 }, selectedCity: 'Warszawa' },
+    });
+
+    const newSaved = saveProjectToStorage({
+      name: 'Nowy projekt',
+      version: 1,
+      scene: { buildings: createSampleBuildings() },
+      solar: { settings: { latitude: 52, longitude: 21, equinoxDate: 'spring', isCityCentreDefault: false, samplingInterval: 0.25 }, selectedCity: 'Kraków' },
+    });
+
+    expect(newSaved.name).toBe('Nowy projekt');
+    window.localStorage.setItem = originalSetItem;
+  });
 });

@@ -12,6 +12,8 @@ import { DominantDirection } from '../../utils/segmentStatistics';
 
 export type CadDrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
 
+import { AffineMatrix2D } from '../../utils/math2d/affineMatrix';
+
 export interface ViewportState {
   panX: number;
   panY: number;
@@ -24,6 +26,8 @@ export interface CadRenderContext {
   height: number;
   viewState: ViewportState;
   viewRotationDeg: number;
+  viewportMatrix?: AffineMatrix2D;
+  invViewportMatrix?: AffineMatrix2D;
   worldToScreen: (wx: number, wy: number) => { sx: number; sy: number };
   screenToWorld: (sx: number, sy: number) => { wx: number; wy: number };
   latitude: number;

@@ -62,7 +62,7 @@ WMS/WFS overlays and vector imports from Polish geodata services (GUGiK Geoporta
 - Services on hosts without CORS headers (Kraków, national EGiB, `wfsLCV`) are routed through Vercel serverless proxies (`api/krakow-wfs.ts`, `api/egib-wfs.ts`, `api/lcv-wfs.ts`, all built on `api/_lib/wfsProxy.ts`) rather than fetched directly from the browser.
 
 ### Math Utilities (`src/utils/math2d/`)
-Zero-allocation geometric primitives: `raySegmentDistance2D`, `offsetPolygonEdge`, `computeFullShadowAnalysis`, `generateSweepPolygon`, polygon boolean operations (wrapping `polygon-clipping`, hole-aware via `clippingResultToPolygonsWithHoles`), R-Tree spatial indexing (wrapping `rbush`).
+Zero-allocation geometric primitives: `raySegmentDistance2D`, `offsetPolygonEdge`, `computeFullShadowAnalysis`, `generateSweepPolygon`, polygon boolean operations (wrapping `polygon-clipping`, hole-aware via `clippingResultToPolygonsWithHoles`), R-Tree spatial indexing (wrapping `rbush`), `AffineMatrix2D` (`affineMatrix.ts`) for $3 \times 3$ viewport/canvas matrix transforms, `FlatSolarLUT` for $O(1)$ precomputed solar/shadow vectors, and `HeightmapShadowEngine` for discrete raster shadow mapping.
 
 ### Licensing (Pro gating)
 `useLicenseStore` (`src/store/useLicenseStore.ts`) holds `isPro`/license status, cached to `localStorage` (`usi_license_key`, `usi_license_cache`) and checked/activated via `api/license/{check,activate,trial}.ts`. Paid upgrade flow goes through `api/stripe/{checkout,webhook,verify-session}.ts`. UI gates Pro-only features by checking `isPro` before the action (e.g. see `ProjectGroup.tsx`).

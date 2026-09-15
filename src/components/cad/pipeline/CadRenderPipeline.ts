@@ -92,6 +92,16 @@ export class CadRenderPipeline {
   }
 
   /**
+   * Stosuje sprzętową transformację afiniczną widoku do podanego kontekstu Canvas 2D
+   */
+  public static applyViewportTransform(ctx: CanvasRenderingContext2D, renderContext: CadRenderFrameContext['renderContext']): void {
+    if (renderContext.viewportMatrix) {
+      const m = renderContext.viewportMatrix;
+      ctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+    }
+  }
+
+  /**
    * Renderuje główny stos warstw sceny CAD (0..80)
    */
   public renderMain(context: CadRenderFrameContext): void {

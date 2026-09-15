@@ -128,3 +128,26 @@ export function buildShadowRangeLUT(engineType: SolarEngineType, location: GeoLo
     rays,
   };
 }
+
+/**
+ * Zwraca stablicowany bufor promieni cienia w postaci ciągłej Float32Array (11 promieni * 11 floatów)
+ */
+export function buildFlatShadowRangeLUT(engineType: SolarEngineType, location: GeoLocation): Float32Array {
+  const lut = buildShadowRangeLUT(engineType, location);
+  const flat = new Float32Array(lut.rays.length * 11);
+  let idx = 0;
+  for (const r of lut.rays) {
+    flat[idx++] = r.hourOffset;
+    flat[idx++] = r.solarHour;
+    flat[idx++] = r.azimuthDeg;
+    flat[idx++] = r.altitudeDeg;
+    flat[idx++] = r.shadowDirX;
+    flat[idx++] = r.shadowDirY;
+    flat[idx++] = r.shadowFactor;
+    flat[idx++] = r.unitStepX;
+    flat[idx++] = r.unitStepY;
+    flat[idx++] = r.lineNormA;
+    flat[idx++] = r.lineNormB;
+  }
+  return flat;
+}

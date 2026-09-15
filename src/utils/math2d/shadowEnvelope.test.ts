@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { computeHourlyShadowsLive, computeCombinedShadowEnvelope, computeFastShadowPolygon } from './shadowEnvelope';
+import {
+  computeHourlyShadowsLive,
+  computeCombinedShadowEnvelope,
+  computeFastShadowPolygon,
+  computeFastShadowPolygonWithHoles,
+} from './shadowEnvelope';
 import { unionPolygonLoops, collapseIdenticalConsecutiveHeightRuns } from './polygons';
 import { BuildingLoop, Point2D } from '../../types/geometry';
 import { StoryFootprint, createDefaultDonutModifier, createDefaultStoryOffsetModifier } from '../../types/modifiers';
@@ -208,9 +213,86 @@ describe('shadowEnvelope stabilization anchor (pre-optimization)', () => {
           .map((sf) => computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom))
           .filter((p) => p.length >= 3);
         const collapsedArea = totalArea(unionPolygonLoops(collapsedPolys));
-
         expect(collapsedArea).toBeCloseTo(uncollapsedArea, 6);
       }
     });
+
+    it('respects donut holes in computeFastShadowPolygonWithHoles', () => {
+      const outer = rect(0, 0, 30, 30);
+      const hole = rect(10, 10, 20, 20);
+      const azRad = Math.PI; // Słońce od południa
+      const elevRad = (45 * Math.PI) / 180;
+
+      const signedArea = (poly: Point2D[]) => {
+        let a = 0;
+        for (let i = 0; i < poly.length; i++) {
+          const p1 = poly[i];
+          const p2 = poly[(i + 1) % poly.length];
+          a += p1.x * p2.y - p2.x * p1.y;
+        }
+        return a / 2;
+      };
+      const netArea = (polys: Point2D[][]) => Math.abs(polys.reduce((sum, p) => sum + signedArea(p), 0));
+
+      const solidShadow = computeFastShadowPolygon(outer, azRad, elevRad, 5, 0);
+      const withHoles = computeFastShadowPolygonWithHoles(outer, [hole], azRad, elevRad, 5, 0);
+
+      expect(netArea(withHoles)).toBeLessThan(netArea([solidShadow]));
+    });
+  });
+
+  describe('reference/shadow-test3.json scenario (donut + story_offset courtyard shadow)', () => {
+    it.skipIf(!referenceFileExists('shadow-test3.json'))(
+      'evaluates donut courtyard hole correctly: courtyard center is not fully shaded in noon shadows and envelope preserves light',
+      () => {
+        const scene = loadReferenceScene('shadow-test3.json');
+        const rawBldg = scene.buildings[0];
+        expect(rawBldg).toBeDefined();
+        const bldg = { ...rawBldg, isTested: true };
+        expect(bldg.storyPolygons && bldg.storyPolygons.length).toBeGreaterThan(0);
+
+        // Uruchomienie analizy cienia na budynku z shadow-test3.json (Warszawa, równonoc)
+        const live = computeHourlyShadowsLive([bldg], scene.latitude, scene.longitude, scene.equinoxDate, 0.5, 'segments');
+        expect(live.hourlyShadows.length).toBeGreaterThan(0);
+
+        // Środek dziedzińca dla shadow-test3.json:
+        // Otwór parteru rozciąga się w przybliżeniu od X=-61.63 do X=-29.66 i Y=8.48 do Y=39.40
+        const hole0 = bldg.storyPolygons![0].holes![0];
+        const holeMinX = Math.min(...hole0.map((p) => p.x));
+        const holeMaxX = Math.max(...hole0.map((p) => p.x));
+        const holeMinY = Math.min(...hole0.map((p) => p.y));
+        const holeMaxY = Math.max(...hole0.map((p) => p.y));
+        const courtyardCenter = {
+          x: (holeMinX + holeMaxX) / 2,
+          y: (holeMinY + holeMaxY) / 2,
+        };
+
+        // W południe (offset 0.0, słońce wysoko na południu, azymut 180°, elewacja ~37.7°):
+        // Promienie słoneczne wpadają do dziedzińca, środek dziedzińca (rozmiar 32m x 31m, ściana 12-15m)
+        // nie może być pokryty cieniem w południe!
+        const noonShadow = live.hourlyShadows.find((h) => Math.abs(h.hourOffset) < 0.01);
+        expect(noonShadow).toBeDefined();
+
+        const isPointInPolysEvenOdd = (pt: Point2D, polys: Point2D[][]): boolean => {
+          let insideCount = 0;
+          for (const poly of polys) {
+            let inside = false;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].x, yi = poly[i].y;
+              const xj = poly[j].x, yj = poly[j].y;
+              const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+              if (intersect) inside = !inside;
+            }
+            if (inside) insideCount++;
+          }
+          return insideCount % 2 === 1;
+        };
+
+        // Środek dziedzińca w południe jest nasłoneczniony (nie leży w cieniu noonShadow)
+        const isCourtyardCenterShadedAtNoon = isPointInPolysEvenOdd(courtyardCenter, noonShadow!.polygons);
+        expect(isCourtyardCenterShadedAtNoon).toBe(false);
+      }
+    );
   });
 });

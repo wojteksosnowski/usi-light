@@ -928,8 +928,30 @@ export const useSceneStore = create<SceneState>()(
   setLastDxfText: (text) => set({ lastDxfText: text }),
 
   loadSceneData: (scene) => {
+    const rawBuildings = scene.buildings ?? [];
+    const hydratedBuildings = rawBuildings.map((bldg) => {
+      if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return bldg;
+      if (bldg.modifiers && bldg.modifiers.length > 0) {
+        try {
+          const modRes = applyBuildingModifiers(bldg);
+          return {
+            ...bldg,
+            storyPolygons: modRes.storyPolygons,
+            zonePolygons: modRes.zonePolygons,
+            segments: modRes.segments,
+          };
+        } catch {
+          return rebuildBuildingSegments(bldg, bldg.vertices);
+        }
+      }
+      if (!bldg.segments || bldg.segments.length === 0) {
+        return rebuildBuildingSegments(bldg, bldg.vertices);
+      }
+      return bldg;
+    });
+
     set({
-      buildings: scene.buildings ?? [],
+      buildings: hydratedBuildings,
       selectedBuildingId: scene.selectedBuildingId ?? null,
       selectedBuildingIds: scene.selectedBuildingId ? [scene.selectedBuildingId] : [],
       layerSettings: scene.layerSettings ?? {},

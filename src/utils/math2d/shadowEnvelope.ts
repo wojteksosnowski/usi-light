@@ -1,8 +1,15 @@
 import { Point2D, BuildingLoop, Edge2D, HourlyShadowLoop, ShadowAnalysisResult } from '../../types/geometry';
 import { calculateSolarPosition, getGlobalSolarLUT, GlobalSolarLUT, SolarMethodLUTData } from '../solar';
 import polygonClipping from 'polygon-clipping';
-import { isPolygonCCW } from './polygons';
-import { computeConvexHull, isPolygonConvex, unionPolygonLoops, differencePolygonLoops, collapseIdenticalConsecutiveHeightRuns } from './polygons';
+import {
+  computeConvexHull,
+  isPolygonConvex,
+  isPolygonCCW,
+  unionPolygonLoops,
+  differencePolygonLoops,
+  intersectionPolygonLoops,
+  collapseIdenticalConsecutiveHeightRuns,
+} from './polygons';
 import { StoryFootprint } from '../../types/modifiers';
 
 /**
@@ -50,6 +57,7 @@ function polygonVerticesFingerprint(vertices: Point2D[]): string {
  * zera na każdą klatkę podczas przeciągania (patrz Krok 4 planu optymalizacji "zasięgu cienia").
  */
 const storyShadowPolyCache = new Map<string, Point2D[]>();
+const storyShadowWithHolesCache = new Map<string, Point2D[][]>();
 
 function getCachedFastShadowPolygon(
   polygon: Point2D[],
@@ -67,6 +75,62 @@ function getCachedFastShadowPolygon(
   return result;
 }
 
+export function computeFastShadowPolygonWithHoles(
+  polygon: Point2D[],
+  holes: Point2D[][] | undefined,
+  azRad: number,
+  elevRad: number,
+  hTop: number,
+  hBottom: number = 0
+): Point2D[][] {
+  const outerShadow = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom);
+  if (outerShadow.length < 3) return [];
+  if (!holes || holes.length === 0) return [outerShadow];
+
+  const validHoles = holes.filter((h) => h && h.length >= 3);
+  if (validHoles.length === 0) return [outerShadow];
+
+  const effectiveBottom = Math.max(0, hBottom);
+  const topOffset = getShadowOffsetVector(azRad, elevRad, hTop);
+  const baseOffset = effectiveBottom > 0 ? getShadowOffsetVector(azRad, elevRad, effectiveBottom) : { x: 0, y: 0 };
+
+  const lightApertures: Point2D[][] = [];
+  for (const hole of validHoles) {
+    const hBase = hole.map((p) => ({ x: p.x + baseOffset.x, y: p.y + baseOffset.y }));
+    const hTopPoly = hole.map((p) => ({ x: p.x + topOffset.x, y: p.y + topOffset.y }));
+    const inter = intersectionPolygonLoops([hBase], [hTopPoly]);
+    lightApertures.push(...inter);
+  }
+
+  if (lightApertures.length === 0) return [outerShadow];
+  const mergedApertures = lightApertures.length > 1 ? unionPolygonLoops(lightApertures) : lightApertures;
+  return differencePolygonLoops([outerShadow], mergedApertures);
+}
+
+function getCachedFastShadowPolygonWithHoles(
+  polygon: Point2D[],
+  holes: Point2D[][] | undefined,
+  azRad: number,
+  elevRad: number,
+  hTop: number,
+  hBottom: number
+): Point2D[][] {
+  if (!holes || holes.length === 0) {
+    const single = getCachedFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom);
+    return single.length >= 3 ? [single] : [];
+  }
+
+  const holesKey = holes.map(polygonVerticesFingerprint).join(';');
+  const key = `${polygonVerticesFingerprint(polygon)}#${holesKey}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
+  const cached = storyShadowWithHolesCache.get(key);
+  if (cached) return cached;
+
+  const result = computeFastShadowPolygonWithHoles(polygon, holes, azRad, elevRad, hTop, hBottom);
+  if (storyShadowWithHolesCache.size > 5000) storyShadowWithHolesCache.clear();
+  storyShadowWithHolesCache.set(key, result);
+  return result;
+}
+
 /**
  * Zwraca wektor przesunięcia cienia na płaszczyźnie poziomej.
  * @param sunAzimuthRad - azymut słońca w radianach (0 = Północ, Pi/2 = Wschód, Pi = Południe, 3Pi/2 = Zachód)
@@ -75,8 +139,8 @@ function getCachedFastShadowPolygon(
  */
 /**
  * Dopisuje do `out` poligony cienia dla budynku: per-piętro (bryła 2.5D z modyfikatorami,
- * jeśli dostępna, cache: storyShadowPolyCache) lub — w braku storyPolygons — poligon rzutu z
- * legacy cache (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
+ * jeśli dostępna, cache: storyShadowPolyCache/storyShadowWithHolesCache) lub — w braku storyPolygons —
+ * poligon rzutu z legacy cache (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
  * Współdzielone przez computeFullShadowAnalysis i computeHourlyShadowsLive.
  */
 function collectBuildingShadowPolys(
@@ -101,8 +165,15 @@ function collectBuildingShadowPolys(
     );
     for (const sf of collapsed) {
       if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
-        const p = getCachedFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
-        if (p.length >= 3) out.push(p);
+        if (sf.holes && sf.holes.length > 0) {
+          const polys = getCachedFastShadowPolygonWithHoles(sf.polygon, sf.holes, azRad, elevRad, sf.hTop, sf.hBottom || 0);
+          for (const p of polys) {
+            if (p.length >= 3) out.push(p);
+          }
+        } else {
+          const p = getCachedFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
+          if (p.length >= 3) out.push(p);
+        }
       }
     }
     return;

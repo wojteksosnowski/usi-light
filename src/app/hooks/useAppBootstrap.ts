@@ -12,7 +12,7 @@ import { useSharedProjectLoader } from '@/hooks/useSharedProjectLoader';
 import { registerGeoLayers } from '@/modules/wfs-import/registerGeoLayers';
 import { normalizeLegacyBuildingTypes } from '@/utils/legacyBuildingType';
 import { AnalysisAccuracyOptions } from '@/engine/analysisEngine';
-import { saveProjectToStorage } from '@/utils/projectStorage';
+import { saveProjectToStorage, sanitizeBuildingForStorage } from '@/utils/projectStorage';
 import { extractLicenseKeyFromUrl, stripLicenseFromUrl } from '@/utils/licenseUrl';
 
 const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
@@ -187,7 +187,7 @@ export function useAppBootstrap() {
     if (new URLSearchParams(window.location.search).get('perfScene')) return;
     const scene: SavedSceneData = {
       version: 1,
-      buildings,
+      buildings: buildings.map(sanitizeBuildingForStorage),
       selectedBuildingId,
       pinnedPoints,
       activePinnedPointId,
@@ -203,10 +203,15 @@ export function useAppBootstrap() {
       mapsInput,
       mapsParseError,
     };
+
     try {
       localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(scene));
+    } catch (err) {
+      console.warn('Nie udało się zapisać bieżącego stanu sceny (localStorage):', err);
+    }
 
-      if (currentProjectId) {
+    if (currentProjectId) {
+      try {
         saveProjectToStorage(
           {
             name: projectName.trim() || `Projekt ${selectedCity || 'Światło'}`,
@@ -243,9 +248,9 @@ export function useAppBootstrap() {
           },
           currentProjectId
         );
+      } catch (err) {
+        console.warn('Nie udało się zaktualizować projektu w tle:', err);
       }
-    } catch (err) {
-      console.warn('Nie udało się zapisać sceny:', err);
     }
   }, [
     currentProjectId,
