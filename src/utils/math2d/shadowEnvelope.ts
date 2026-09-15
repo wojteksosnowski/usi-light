@@ -2,7 +2,70 @@ import { Point2D, BuildingLoop, Edge2D, HourlyShadowLoop, ShadowAnalysisResult }
 import { calculateSolarPosition, getGlobalSolarLUT, GlobalSolarLUT, SolarMethodLUTData } from '../solar';
 import polygonClipping from 'polygon-clipping';
 import { isPolygonCCW } from './polygons';
-import { computeConvexHull, isPolygonConvex, unionPolygonLoops, differencePolygonLoops } from './polygons';
+import { computeConvexHull, isPolygonConvex, unionPolygonLoops, differencePolygonLoops, collapseIdenticalConsecutiveHeightRuns } from './polygons';
+import { StoryFootprint } from '../../types/modifiers';
+
+/**
+ * Unia hierarchiczna: zamiast wrzucać wszystkie partie (np. ~20 godzinowych obrysów cienia) do
+ * jednej płaskiej unii, łączy sąsiednie partie parami, poziom po poziomie (sąsiednie godziny mają
+ * ~95% wspólnego przekroju, co drastycznie redukuje geometrię na każdym szczeblu). Współdzielona
+ * przez computeFullShadowAnalysis i computeHourlyShadowsLive.
+ */
+function unionLoopsHierarchical(batches: Point2D[][][]): Point2D[][] {
+  if (batches.length === 0) return [];
+  let current = batches;
+  while (current.length > 1) {
+    const next: Point2D[][][] = [];
+    for (let i = 0; i < current.length; i += 2) {
+      if (i + 1 < current.length) {
+        next.push(unionPolygonLoops([...current[i], ...current[i + 1]]));
+      } else {
+        next.push(current[i]);
+      }
+    }
+    if (next.length === current.length) break;
+    current = next;
+  }
+  return current[0] || [];
+}
+
+/**
+ * Odcisk geometrii poligonu (wszystkie współrzędne, nie tylko pierwszy wierzchołek) — używany jako
+ * składnik klucza `buildingFastShadowCache`. Klucz oparty tylko o pierwszy wierzchołek + liczbę
+ * wierzchołków jest podatny na fałszywe cache-hity po obrocie/edycji budynku, gdy pierwszy
+ * wierzchołek i liczba wierzchołków akurat się nie zmieniają (ten sam bug, który naprawiono w
+ * masterplanGeometry.ts's polygonFingerprint dla cieni Masterplanu).
+ */
+function polygonVerticesFingerprint(vertices: Point2D[]): string {
+  let s = String(vertices.length);
+  for (const p of vertices) {
+    s += `:${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+  }
+  return s;
+}
+
+/**
+ * Cache poligonu cienia per-piętro (storyPolygons), wzorem `buildingFastShadowCache` — bez niego
+ * budynki z modyfikatorami (uskoki/tarasy) nie miały żadnego cache'owania cienia, przeliczane od
+ * zera na każdą klatkę podczas przeciągania (patrz Krok 4 planu optymalizacji "zasięgu cienia").
+ */
+const storyShadowPolyCache = new Map<string, Point2D[]>();
+
+function getCachedFastShadowPolygon(
+  polygon: Point2D[],
+  azRad: number,
+  elevRad: number,
+  hTop: number,
+  hBottom: number
+): Point2D[] {
+  const key = `${polygonVerticesFingerprint(polygon)}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
+  const cached = storyShadowPolyCache.get(key);
+  if (cached) return cached;
+  const result = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom);
+  if (storyShadowPolyCache.size > 5000) storyShadowPolyCache.clear();
+  storyShadowPolyCache.set(key, result);
+  return result;
+}
 
 /**
  * Zwraca wektor przesunięcia cienia na płaszczyźnie poziomej.
@@ -12,8 +75,8 @@ import { computeConvexHull, isPolygonConvex, unionPolygonLoops, differencePolygo
  */
 /**
  * Dopisuje do `out` poligony cienia dla budynku: per-piętro (bryła 2.5D z modyfikatorami,
- * jeśli dostępna) lub — w braku storyPolygons — poligon rzutu z legacy cache
- * (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
+ * jeśli dostępna, cache: storyShadowPolyCache) lub — w braku storyPolygons — poligon rzutu z
+ * legacy cache (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
  * Współdzielone przez computeFullShadowAnalysis i computeHourlyShadowsLive.
  */
 function collectBuildingShadowPolys(
@@ -25,9 +88,20 @@ function collectBuildingShadowPolys(
   out: Point2D[][]
 ): void {
   if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
-    for (const sf of bldg.storyPolygons) {
+    // Kolejne kondygnacje z identycznym obrysem (i dziurami) scalamy w jeden zakres wysokości —
+    // bezstratne dla cienia (patrz collapseIdenticalConsecutiveHeightRuns), mniej wywołań
+    // computeFastShadowPolygon per budynek per godzina.
+    const collapsed = collapseIdenticalConsecutiveHeightRuns<StoryFootprint>(
+      bldg.storyPolygons,
+      (sf) => sf.polygon,
+      (sf) => sf.holes,
+      (sf) => sf.hBottom,
+      (sf) => sf.hTop,
+      (last, hBottom, hTop) => ({ ...last, hBottom, hTop })
+    );
+    for (const sf of collapsed) {
       if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
-        const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
+        const p = getCachedFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
         if (p.length >= 3) out.push(p);
       }
     }
@@ -38,7 +112,7 @@ function collectBuildingShadowPolys(
   const bHTop = bHBase + bldg.defaultHeight;
   if (bHTop <= 0) return;
 
-  const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offsetKey}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+  const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offsetKey}|${polygonVerticesFingerprint(bldg.vertices)}`;
   let poly = buildingFastShadowCache.get(fastKey);
   if (!poly) {
     poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
@@ -248,7 +322,7 @@ export function computeBuildingShadowEnvelope(
   const effectiveBase = Math.max(0, hBase);
   if (hTop <= effectiveBase) return [];
 
-  const cacheKey = `${building.id}|${hTop}|${hBase}|${latitude}|${longitude}|${equinoxDate}|${isChildcare}|${vertices[0].x.toFixed(2)},${vertices[0].y.toFixed(2)},${vertices.length}`;
+  const cacheKey = `${building.id}|${hTop}|${hBase}|${latitude}|${longitude}|${equinoxDate}|${isChildcare}|${polygonVerticesFingerprint(vertices)}`;
   const cached = buildingEnvelopeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -462,26 +536,9 @@ export function computeFullShadowAnalysis(
     }
   }
 
-  // Obwiednia maksymalna generowana ze scalenia obrysów godzinowych.
-  // Zamiast wrzucać setki poligonów do jednej płaskiej unii, łączymy sąsiednie godziny hierarchicznie
-  // (sąsiednie godziny mają ~95% wspólnego przekroju, co drastycznie redukuje geometrię na każdym szczeblu).
-  let envelopeLoops: Point2D[][] = [];
-  if (hourlyShadows.length > 0) {
-    let currentHourBatches: Point2D[][][] = hourlyShadows.map((h) => h.polygons);
-    while (currentHourBatches.length > 1) {
-      const nextHourBatches: Point2D[][][] = [];
-      for (let i = 0; i < currentHourBatches.length; i += 2) {
-        if (i + 1 < currentHourBatches.length) {
-          nextHourBatches.push(unionPolygonLoops([...currentHourBatches[i], ...currentHourBatches[i + 1]]));
-        } else {
-          nextHourBatches.push(currentHourBatches[i]);
-        }
-      }
-      if (nextHourBatches.length === currentHourBatches.length) break;
-      currentHourBatches = nextHourBatches;
-    }
-    envelopeLoops = currentHourBatches[0] || [];
-  }
+  // Obwiednia maksymalna generowana ze scalenia obrysów godzinowych — unia hierarchiczna
+  // (patrz unionLoopsHierarchical) zamiast jednej płaskiej unii wszystkich godzin naraz.
+  const envelopeLoops: Point2D[][] = unionLoopsHierarchical(hourlyShadows.map((h) => h.polygons));
 
   const calculationTimeMs = performance.now() - t0;
 
@@ -520,13 +577,30 @@ export function computeHourlyShadowsLive(
     (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
 
+  // Prekalkulacja AABB footprintu budynków blokujących RAZ (nie w każdej z ~20 iteracji pętli
+  // godzinowej poniżej) — footprint się nie zmienia między godzinami, tylko wektor przesunięcia
+  // cienia (uShadow) się zmienia. Wzorem `blockingWithAABB` w computeFullShadowAnalysis (powyżej).
+  const blockingWithAABB = blockingBuildings.map((bldg) => {
+    if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
+      // Kadrowanie AABB dotyczy wyłącznie legacy ścieżki (bez storyPolygons) — jak w oryginale.
+      return { bldg, bMinX: NaN, bMinY: NaN, bMaxX: NaN, bMaxY: NaN };
+    }
+    let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+    for (const v of bldg.vertices) {
+      if (v.x < bMinX) bMinX = v.x;
+      if (v.y < bMinY) bMinY = v.y;
+      if (v.x > bMaxX) bMaxX = v.x;
+      if (v.y > bMaxY) bMaxY = v.y;
+    }
+    return { bldg, bMinX, bMinY, bMaxX, bMaxY };
+  });
+
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);
   const noonHour = sunlightMethod === 'segments' ? 12.0 : solarLUT.astroSystem.solarNoonDecimal;
 
   const maxOffset = 5;
 
   const result: HourlyShadowLoop[] = [];
-  const allRenderedLoops: Point2D[][] = [];
 
   const step = Math.max(0.2, stepHours);
   for (let o = -maxOffset; o <= maxOffset + 1e-6; o += step) {
@@ -557,25 +631,18 @@ export function computeHourlyShadowsLive(
         }
 
         const blockingPolys: Point2D[][] = [];
-        for (const bldg of blockingBuildings) {
+        for (const item of blockingWithAABB) {
+          const bldg = item.bldg;
           if (!(bldg.storyPolygons && bldg.storyPolygons.length > 0)) {
-            // Kadrowanie AABB dotyczy wyłącznie legacy ścieżki (bez storyPolygons) — jak w oryginale.
             const bHBase = bldg.elevation ?? 0.0;
             const bHTop = bHBase + bldg.defaultHeight;
             if (bHTop <= 0) continue;
 
             const offsetVec = { x: bHTop * uShadow.x, y: bHTop * uShadow.y };
-            let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-            for (const v of bldg.vertices) {
-              if (v.x < bMinX) bMinX = v.x;
-              if (v.y < bMinY) bMinY = v.y;
-              if (v.x > bMaxX) bMaxX = v.x;
-              if (v.y > bMaxY) bMaxY = v.y;
-            }
-            const sMinX = Math.min(bMinX, bMinX + offsetVec.x);
-            const sMaxX = Math.max(bMaxX, bMaxX + offsetVec.x);
-            const sMinY = Math.min(bMinY, bMinY + offsetVec.y);
-            const sMaxY = Math.max(bMaxY, bMaxY + offsetVec.y);
+            const sMinX = Math.min(item.bMinX, item.bMinX + offsetVec.x);
+            const sMaxX = Math.max(item.bMaxX, item.bMaxX + offsetVec.x);
+            const sMinY = Math.min(item.bMinY, item.bMinY + offsetVec.y);
+            const sMaxY = Math.max(item.bMaxY, item.bMaxY + offsetVec.y);
 
             if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
               continue;
@@ -595,19 +662,15 @@ export function computeHourlyShadowsLive(
           hourDecimal: hour,
           azimuthDeg: sData.azimuthDeg,
           elevationDeg: sData.elevationDeg,
-          polygons: finalPolys,
+          polygons: finalHourPolysSafe(finalPolys),
         });
-        for (const p of finalHourPolysSafe(finalPolys)) {
-          allRenderedLoops.push(p);
-        }
       }
     }
   }
 
-  // Obwiednia maksymalna na bieżąco z sumy wszystkich wyrenderowanych obrysów
-  const envelopeLoops: Point2D[][] = allRenderedLoops.length > 0
-    ? unionPolygonLoops(allRenderedLoops)
-    : [];
+  // Obwiednia maksymalna: unia hierarchiczna per godzina (patrz unionLoopsHierarchical), zamiast
+  // jednej płaskiej unii wszystkich poligonów ze wszystkich godzin naraz.
+  const envelopeLoops: Point2D[][] = unionLoopsHierarchical(result.map((h) => h.polygons));
 
   return { hourlyShadows: result, envelopeLoops };
 }

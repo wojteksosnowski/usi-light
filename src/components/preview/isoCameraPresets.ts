@@ -36,3 +36,20 @@ export function getIsoCameraOffset(orientation: IsoOrientation, distance: number
     z: horizontal * Math.cos(azimuthRad),
   };
 }
+
+/**
+ * Jednostkowy wektor w kierunku słońca (Y-up, X=wschód, Z=północ — konwencja tego pliku), z
+ * azymutu/elewacji (konwencja: 0°=Północ, 90°=Wschód, jak w masterplanGeometry.ts/utils/solar.ts).
+ * Używany do ustawienia DirectionalLight tak, by cień w podglądzie 3D odpowiadał rzeczywistej
+ * pozycji słońca, a nie zahardkodowanemu kierunkowi.
+ */
+export function getSunDirection3D(azimuthDeg: number, elevationDeg: number): Vec3Like {
+  const azimuthRad = (azimuthDeg * Math.PI) / 180;
+  const elevationRad = (elevationDeg * Math.PI) / 180;
+  const horizontal = Math.cos(elevationRad);
+  return {
+    x: horizontal * Math.sin(azimuthRad),
+    y: Math.sin(elevationRad),
+    z: horizontal * Math.cos(azimuthRad),
+  };
+}

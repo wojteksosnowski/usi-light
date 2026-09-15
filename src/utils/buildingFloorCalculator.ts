@@ -68,7 +68,11 @@ export function calculateBuildingFloors(
   let storeysCount = explicitStoreysCount && explicitStoreysCount > 0 ? explicitStoreysCount : 1;
   if (!explicitStoreysCount || explicitStoreysCount <= 0) {
     if (hTot > h1) {
-      const rawUpperStoreys = Math.floor((hTot - h1) / ht);
+      // Epsilon zabezpiecza przed niestabilnością floor() na granicy liczby całkowitej: gdy
+      // hTot = h1 + (N-1)*ht dokładnie, reprezentacja zmiennoprzecinkowa dzielenia bywa
+      // N-1-ε (np. 3.9999999999996), co bez epsilonu dawało floor()=N-2 (o jedną kondygnację
+      // mniej niż powinno) i niestabilny wynik przy drobnych zmianach wysokości (jitter).
+      const rawUpperStoreys = Math.floor((hTot - h1) / ht + 1e-6);
       storeysCount = 1 + Math.max(0, rawUpperStoreys);
     } else {
       storeysCount = 1;

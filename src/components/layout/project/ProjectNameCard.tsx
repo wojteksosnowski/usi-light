@@ -88,48 +88,53 @@ export const ProjectNameCard: React.FC = () => {
 
   const handleSaveCurrentProject = () => {
     const effectiveName = projectName.trim() || `Projekt ${selectedCity || 'Światło'}`;
-    const saved = saveProjectToStorage(
-      {
-        name: effectiveName,
-        version: 1,
-        scene: {
-          buildings,
-          selectedBuildingId,
-          layerSettings,
-          selectedLayerName,
-          pinnedPoints,
-          activePinnedPointId,
-          dimensions,
-          dxfUnit,
-          dxfImportInfo,
+    try {
+      const saved = saveProjectToStorage(
+        {
+          name: effectiveName,
+          version: 1,
+          scene: {
+            buildings,
+            selectedBuildingId,
+            layerSettings,
+            selectedLayerName,
+            pinnedPoints,
+            activePinnedPointId,
+            dimensions,
+            dxfUnit,
+            dxfImportInfo,
+          },
+          solar: {
+            settings,
+            selectedCity,
+            mapsInput,
+            mapsParseError,
+            sunlightMethod,
+            showNormals,
+            showShadowingLines,
+            showSunlightLines,
+            showShadowRange,
+            showShadowFill,
+            showSatelliteLayer,
+            satelliteOpacity,
+            activePointMode,
+          },
+          viewport: {
+            viewRotationDeg,
+            savedViewRotationDeg,
+          },
         },
-        solar: {
-          settings,
-          selectedCity,
-          mapsInput,
-          mapsParseError,
-          sunlightMethod,
-          showNormals,
-          showShadowingLines,
-          showSunlightLines,
-          showShadowRange,
-          showShadowFill,
-          showSatelliteLayer,
-          satelliteOpacity,
-          activePointMode,
-        },
-        viewport: {
-          viewRotationDeg,
-          savedViewRotationDeg,
-        },
-      },
-      currentProjectId
-    );
+        currentProjectId
+      );
 
-    setCurrentProjectId(saved.id);
-    setProjectName(saved.name);
-    refreshList();
-    showCopiedToast(`Zapisano projekt „${saved.name}”`);
+      setCurrentProjectId(saved.id);
+      setProjectName(saved.name);
+      refreshList();
+      showCopiedToast(`Zapisano projekt „${saved.name}”`);
+    } catch (err) {
+      console.error('Zapis projektu nie powiódł się:', err);
+      showCopiedToast('Nie udało się zapisać — przekroczono limit pamięci przeglądarki. Usuń stare projekty z listy lub zmniejsz obszar importu geo.');
+    }
   };
 
   const handleLoadProject = (id: string) => {

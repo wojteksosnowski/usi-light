@@ -1,3 +1,4 @@
+import { computePointsBoundingBox } from '@/utils/math2d/polygons';
 import { SolarAngles, MasterplanStoryTier, computeShadowOffsetVector } from './masterplanGeometry';
 
 export interface Bounds {
@@ -8,16 +9,7 @@ export interface Bounds {
 }
 
 export function tierFootprintBounds(tier: MasterplanStoryTier): Bounds {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const p of tier.polygon) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
-  }
+  const { minX, maxX, minY, maxY } = computePointsBoundingBox(tier.polygon);
   return { minX, minY, maxX, maxY };
 }
 

@@ -2,8 +2,9 @@ import { Point2D } from '@/types/geometry';
 import { unionPolygonLoops, differencePolygonLoops } from '@/utils/math2d/polygons';
 import {
   getMasterplanSolarAngles,
-  computeStoryShadowPolygon,
-  computeSoftStoryShadowPolygon,
+  computeStoryShadowPolygonWithHoles,
+  computeSoftStoryShadowPolygonWithHoles,
+  polygonFingerprint,
   MasterplanStoryTier,
 } from './masterplanGeometry';
 import { clusterTiersByShadowOverlap } from './masterplanSpatial';
@@ -34,16 +35,13 @@ let groundLastKey: string | null = null;
 let groundLastResult: MasterplanShadowRenderResult = { algorithm: 'legacy', samples: [] };
 
 function tierFingerprint(t: MasterplanStoryTier): string {
-  // Suma współrzędnych jako tani składnik pozycyjny: przesunięcie/rotacja budynku zmienia sumę,
-  // więc cache poprawnie się unieważnia. Bez tego (tylko id/wysokości/liczba wierzchołków)
-  // przesunięty budynek dostawał "wypalony" (baked) cień z poprzedniej pozycji.
-  let sx = 0;
-  let sy = 0;
-  for (const p of t.polygon) {
-    sx += p.x;
-    sy += p.y;
-  }
-  return `${t.buildingId}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}:${t.polygon.length}:${sx.toFixed(1)}:${sy.toFixed(1)}`;
+  // polygonFingerprint (pełna lista współrzędnych, nie suma) jako składnik pozycyjny: przesunięcie/
+  // rotacja/deformacja budynku zmienia fingerprint, więc cache poprawnie się unieważnia. Suma
+  // współrzędnych (Σx, Σy) jest niezmiennikiem obrotu wokół centroidu — powodowała brak
+  // odświeżania cienia przy obrocie budynku. Dziury wchodzą też do odcisku — od nich zależy wynik
+  // cienia (computeStoryShadowPolygonWithHoles), więc zmiana dziury musi też unieważniać cache.
+  const holesFingerprint = (t.holes && t.holes.length > 0) ? t.holes.map(polygonFingerprint).join(';') : '';
+  return `${t.buildingId}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}:${polygonFingerprint(t.polygon)}#${holesFingerprint}`;
 }
 
 /**
@@ -73,8 +71,8 @@ function computeLegacySamples(
     for (const cluster of clusters) {
       const clusterPolys: Point2D[][] = [];
       for (const tier of cluster) {
-        const poly = computeStoryShadowPolygon(tier.polygon, angles, tier.hTop, tier.hBottom);
-        if (poly.length >= 3) clusterPolys.push(poly);
+        const polys = computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom);
+        clusterPolys.push(...polys);
       }
       if (clusterPolys.length === 1) mergedPolys.push(clusterPolys[0]);
       else if (clusterPolys.length > 1) mergedPolys.push(...unionPolygonLoops(clusterPolys));
@@ -109,7 +107,7 @@ function computeSoftResult(
     const umbraPolys: Point2D[][] = [];
     const outerPolys: Point2D[][] = [];
     for (const tier of cluster) {
-      const { umbra, penumbraOuter } = computeSoftStoryShadowPolygon(tier.polygon, angles, tier.hTop, tier.hBottom);
+      const { umbra, penumbraOuter } = computeSoftStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom);
       umbraPolys.push(...umbra);
       outerPolys.push(...penumbraOuter);
     }
@@ -132,44 +130,27 @@ function computeSoftResult(
 }
 
 /**
- * Ścieżka "coarse": podczas aktywnego przeciągania budynku geometria zmienia się co klatkę,
- * więc cache musi się unieważniać — a surowy koszt unii/przecięcia wielu poligonów (~1.9s CPU
- * w profilu, zdominowany przez wewnętrzne sweep-line polygon-clipping) jest zbyt wysoki na klatkę.
- * Wzorem `accuracyStage: 'live'` w głównym silniku analizy: podczas interakcji pokazujemy tylko
- * pojedynczy hard-shadow per tier, bez unii (nakładające się poligony mogą się wizualnie zsumować
- * ciemniej — akceptowalne na czas przeciągania) i bez penumbry — dociążenie do pełnego wyniku
- * następuje automatycznie, gdy `isInteracting` wróci na `false`.
+ * `clippingResultToLoops` (polygons.ts) spłaszcza wynik unii/przecięcia (obrys zewnętrzny + dziury)
+ * do jednej płaskiej listy pierścieni, bez informacji który jest dziurą. Wypełnianie każdego
+ * pierścienia OSOBNYM ctx.fill() (jak wcześniej) renderuje dziurę jako kolejny pełny kształt na
+ * wierzchu — podwójne wypełnienie, widocznie ciemniejsze. Poprawka: jedna ścieżka ze wszystkimi
+ * pierścieniami + jednorazowy ctx.fill('evenodd'), który poprawnie wycina dziury niezależnie od
+ * kierunku nawijania pierścienia (ten sam mechanizm co ctx.clip('evenodd') w masterplanRoofsRenderer).
  */
-function computeCoarseSamples(
-  tiers: MasterplanStoryTier[],
-  midColor: string,
-  latitude: number,
-  longitude: number,
-  equinoxDate: 'spring' | 'autumn',
-  hourFraction: number
-): MasterplanShadowSample[] {
-  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
-  const polys: Point2D[][] = [];
-  for (const tier of tiers) {
-    if (!tier.polygon || tier.polygon.length < 3 || tier.hTop <= 0) continue;
-    const poly = computeStoryShadowPolygon(tier.polygon, angles, tier.hTop, tier.hBottom);
-    if (poly.length >= 3) polys.push(poly);
-  }
-  return polys.length > 0 ? [{ color: midColor, polys }] : [];
-}
-
 function fillPolys(ctx: CanvasRenderingContext2D, polys: Point2D[][], color: string): void {
+  const validPolys = polys.filter((poly) => poly.length >= 3);
+  if (validPolys.length === 0) return;
+
   ctx.fillStyle = color;
-  for (const poly of polys) {
-    if (poly.length < 3) continue;
-    ctx.beginPath();
+  ctx.beginPath();
+  for (const poly of validPolys) {
     poly.forEach((p, idx) => {
       if (idx === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
     });
     ctx.closePath();
-    ctx.fill();
   }
+  ctx.fill('evenodd');
 }
 
 /** Rysuje wynik cienia (legacy: próbki penumbry; soft: pełny rdzeń + pas penumbry) na podanym kontekście. */
@@ -192,17 +173,14 @@ export function getCachedGroundShadowSamples(
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
-  hourFraction: number,
-  isInteracting: boolean = false
+  hourFraction: number
 ): MasterplanShadowRenderResult {
-  const mode = isInteracting ? 'coarse' : algorithm;
-  const key = `${mode}|${tiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
+  const key = `${algorithm}|${tiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   if (key === groundLastKey) return groundLastResult;
 
   const midSample = samples[Math.floor(samples.length / 2)] ?? samples[0];
-  const result: MasterplanShadowRenderResult = isInteracting
-    ? { algorithm: 'legacy', samples: computeCoarseSamples(tiers, midSample.color, latitude, longitude, equinoxDate, hourFraction) }
-    : algorithm === 'soft'
+  const result: MasterplanShadowRenderResult =
+    algorithm === 'soft'
       ? computeSoftResult(tiers, midSample.color, midSample.color, latitude, longitude, equinoxDate, hourFraction)
       : { algorithm: 'legacy', samples: computeLegacySamples(tiers, samples, latitude, longitude, equinoxDate, hourFraction) };
 
@@ -226,32 +204,16 @@ export function getCachedRoofShadowSamples(
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
-  hourFraction: number,
-  isInteracting: boolean = false
+  hourFraction: number
 ): MasterplanShadowRenderResult {
-  const mode = isInteracting ? 'coarse' : algorithm;
-  const key = `${mode}|${currentH.toFixed(2)}|${higherTiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
+  const key = `${algorithm}|${currentH.toFixed(2)}|${higherTiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   const cached = roofCache.get(currentTierKey);
   if (cached && cached.key === key) return cached.result;
   if (roofCache.size > 5000) roofCache.clear();
 
   let result: MasterplanShadowRenderResult;
 
-  if (isInteracting) {
-    // Podczas przeciągania: cień ΔH liczony bezpośrednio (deltaH per higherTier), bez unii —
-    // ta sama filozofia co computeCoarseSamples dla cieni gruntowych.
-    const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
-    const polys: Point2D[][] = [];
-    for (const higherTier of higherTiers) {
-      const deltaHTop = higherTier.hTop - currentH;
-      const deltaHBase = Math.max(0, higherTier.hBottom - currentH);
-      if (deltaHTop <= 0.05) continue;
-      const poly = computeStoryShadowPolygon(higherTier.polygon, angles, deltaHTop, deltaHBase);
-      if (poly.length >= 3) polys.push(poly);
-    }
-    const midColor = samples[Math.floor(samples.length / 2)]?.color ?? samples[0]?.color ?? 'rgba(30, 41, 59, 0.14)';
-    result = { algorithm: 'legacy', samples: polys.length > 0 ? [{ color: midColor, polys }] : [] };
-  } else if (algorithm === 'soft') {
+  if (algorithm === 'soft') {
     const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
     const umbraPolys: Point2D[][] = [];
     const outerPolys: Point2D[][] = [];
@@ -261,7 +223,7 @@ export function getCachedRoofShadowSamples(
       const deltaHBase = Math.max(0, higherTier.hBottom - currentH);
       if (deltaHTop <= 0.05) continue;
 
-      const { umbra, penumbraOuter } = computeSoftStoryShadowPolygon(higherTier.polygon, angles, deltaHTop, deltaHBase);
+      const { umbra, penumbraOuter } = computeSoftStoryShadowPolygonWithHoles(higherTier.polygon, higherTier.holes, angles, deltaHTop, deltaHBase);
       umbraPolys.push(...umbra);
       outerPolys.push(...penumbraOuter);
     }
@@ -283,8 +245,8 @@ export function getCachedRoofShadowSamples(
         const deltaHBase = Math.max(0, higherTier.hBottom - currentH);
         if (deltaHTop <= 0.05) continue;
 
-        const shadowRoofPoly = computeStoryShadowPolygon(higherTier.polygon, angles, deltaHTop, deltaHBase);
-        if (shadowRoofPoly.length >= 3) samplePolys.push(shadowRoofPoly);
+        const shadowRoofPolys = computeStoryShadowPolygonWithHoles(higherTier.polygon, higherTier.holes, angles, deltaHTop, deltaHBase);
+        samplePolys.push(...shadowRoofPolys);
       }
 
       if (samplePolys.length > 0) {

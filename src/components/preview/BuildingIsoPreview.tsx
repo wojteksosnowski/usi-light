@@ -10,9 +10,11 @@ import type { BuildingLoop, Point2D } from '@/types/geometry';
 import { APP_CONFIG } from '@/config/appConfig';
 import { getBuildingSolids } from '@/engine/preview/buildingIsoGeometry';
 import { miterOffsetPolygon } from '@/utils/math2d/miterOffset';
-import { getIsoCameraOffset, type IsoOrientation } from './isoCameraPresets';
+import { getIsoCameraOffset, getSunDirection3D, type IsoOrientation } from './isoCameraPresets';
 import { getPolygonCentroid, getPolygonInteriorPoint, computePointsBoundingBox, computePolygonArea } from '@/utils/math2d/polygons';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
+import { useSolarAnalysisStore } from '@/store';
+import { calculateSolarPosition } from '@/utils/solar';
 
 /** Clockwise cycle used for the left/right compass arrows, 45° per step. */
 const ORIENTATION_CYCLE: IsoOrientation[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -436,6 +438,16 @@ const IsoScene: React.FC<{
   highlightEdgeIndex,
 }) => {
     const { camera, size, invalidate } = useThree();
+    const solarSettings = useSolarAnalysisStore((s) => s.settings);
+    // Pozycja słońca w południe równonocy (ta sama konwencja co domyślny render Masterplanu) —
+    // podgląd 3D pokazuje cień fizycznie zgodny z tym, co widać w widoku 2D, zamiast zahardkodowanego kierunku światła.
+    const sunDirection = useMemo(() => {
+      const month = solarSettings.equinoxDate === 'autumn' ? 9 : 3;
+      const day = solarSettings.equinoxDate === 'autumn' ? 23 : 21;
+      const pos = calculateSolarPosition(solarSettings.latitude, solarSettings.longitude, month, day, 12.0);
+      const dir = getSunDirection3D(pos.azimuthDeg, pos.elevationDeg);
+      return new THREE.Vector3(dir.x, dir.y, dir.z).normalize();
+    }, [solarSettings.latitude, solarSettings.longitude, solarSettings.equinoxDate]);
     const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
     const centerRef = useRef(new THREE.Vector3());
     const distanceRef = useRef(10);
@@ -596,8 +608,7 @@ const IsoScene: React.FC<{
       // Size the shadow camera's ortho frustum to fit this building
       const light = dirLightRef.current;
       if (light) {
-        const dir = new THREE.Vector3(0.55, 1, 0.4).normalize();
-        light.position.copy(center).addScaledVector(dir, Math.max(safeRadius * 3.5, 8));
+        light.position.copy(center).addScaledVector(sunDirection, Math.max(safeRadius * 3.5, 8));
         light.target.position.copy(center);
         light.target.updateMatrixWorld();
         const extent = Math.max(safeRadius * 1.6, 2);
@@ -615,7 +626,7 @@ const IsoScene: React.FC<{
       }
 
       invalidate();
-    }, [group, size.width, size.height, camera, orientation, invalidate, geometrySignature]);
+    }, [group, size.width, size.height, camera, orientation, invalidate, geometrySignature, sunDirection]);
 
     // Smoothly tween the camera to the newly selected orientation.
     const prevOrientationRef = useRef(orientation);

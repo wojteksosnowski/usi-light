@@ -16,7 +16,7 @@ import { getCachedRoofShadowSamples, drawMasterplanShadowResult } from '../maste
  */
 export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds, hoveredBuildingId } = context;
-  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, isInteracting } = renderContext;
+  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm } = renderContext;
   const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
 
   const bldgs = (visibleBuildings || buildings).filter(
@@ -110,8 +110,7 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
         latitude,
         longitude,
         equinoxDate,
-        hourFraction,
-        isInteracting
+        hourFraction
       );
 
       drawMasterplanShadowResult(ctx, shadowResult);

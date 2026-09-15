@@ -870,3 +870,60 @@ export function polygonCircleIntersectionRatio(
   if (total === 0) return 0;
   return inside / total;
 }
+
+function ringFingerprint(ring: Point2D[]): string {
+  let s = String(ring.length);
+  for (const p of ring) {
+    s += `:${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+  }
+  return s;
+}
+
+function holesFingerprint(holes: Point2D[][] | undefined): string {
+  if (!holes || holes.length === 0) return '';
+  return holes.map(ringFingerprint).join('|');
+}
+
+/**
+ * Scala ciąg kolejnych elementów o identycznym obrysie (i identycznych dziurach) w jeden,
+ * obejmujący pełny zakres wysokości od hBottom pierwszego do hTop ostatniego elementu ciągu.
+ * Bezstratne dla cienia: dla ciągu "plasterków" tej samej sylwetki przesuwanych wzdłuż tego
+ * samego kierunku (wektora słońca), unia ich cieni jest dokładnie równa cieniowi jednego
+ * połączonego zakresu wysokości — więc scalanie nie jest przybliżeniem, tylko redukcją liczby
+ * elementów wejściowych bez zmiany wyniku. Wymaga ciągłości (hTop[i] ≈ hBottom[i+1], epsilon 1mm)
+ * — nigdy nie mości realnej przerwy wysokości mimo identycznego obrysu.
+ */
+export function collapseIdenticalConsecutiveHeightRuns<T>(
+  items: T[],
+  getPolygon: (item: T) => Point2D[],
+  getHoles: (item: T) => Point2D[][] | undefined,
+  getHBottom: (item: T) => number,
+  getHTop: (item: T) => number,
+  withMergedRange: (last: T, hBottom: number, hTop: number) => T
+): T[] {
+  if (items.length <= 1) return items;
+
+  const result: T[] = [];
+  let runStart = items[0];
+  let runStartFingerprint = ringFingerprint(getPolygon(runStart)) + '#' + holesFingerprint(getHoles(runStart));
+  let runLast = runStart;
+
+  for (let i = 1; i < items.length; i++) {
+    const curr = items[i];
+    const currFingerprint = ringFingerprint(getPolygon(curr)) + '#' + holesFingerprint(getHoles(curr));
+    const contiguous = Math.abs(getHTop(runLast) - getHBottom(curr)) < 0.001;
+
+    if (contiguous && currFingerprint === runStartFingerprint) {
+      runLast = curr;
+      continue;
+    }
+
+    result.push(runLast === runStart ? runStart : withMergedRange(runLast, getHBottom(runStart), getHTop(runLast)));
+    runStart = curr;
+    runStartFingerprint = currFingerprint;
+    runLast = curr;
+  }
+
+  result.push(runLast === runStart ? runStart : withMergedRange(runLast, getHBottom(runStart), getHTop(runLast)));
+  return result;
+}

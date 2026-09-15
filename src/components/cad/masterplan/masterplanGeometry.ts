@@ -7,12 +7,16 @@ import {
   computeConvexHull,
   unionPolygonLoops,
   intersectionPolygonLoops,
+  differencePolygonLoops,
+  collapseIdenticalConsecutiveHeightRuns,
 } from '../../../utils/math2d/polygons';
 
 export interface SolarAngles {
   azimuthDeg: number;
   elevationDeg: number;
   sunVector: { x: number; y: number };
+  /** tan(elevationDeg) prekalkulowany raz per próbka słońca — computeShadowOffsetVector używa go liniowo (dzielenie), bez ponownego Math.tan(). */
+  tanElevation: number;
 }
 
 export interface MasterplanStoryTier {
@@ -63,7 +67,19 @@ export function extractBuildingStoryTiers(
         isHovered,
       });
     }
-    if (tiers.length > 0) return tiers;
+    if (tiers.length > 0) {
+      // Kolejne kondygnacje z identycznym obrysem (i dziurami) scalamy w jeden tier obejmujący
+      // pełny zakres wysokości — bezstratne dla cienia (patrz collapseIdenticalConsecutiveHeightRuns),
+      // a redukuje liczbę tierów u źródła dla ground/roof rendererów i cache'u.
+      return collapseIdenticalConsecutiveHeightRuns(
+        tiers,
+        (t) => t.polygon,
+        (t) => t.holes,
+        (t) => t.hBottom,
+        (t) => t.hTop,
+        (last, hBottom, hTop) => ({ ...last, hBottom, hTop })
+      );
+    }
   }
 
   if (Array.isArray(bldg.vertices) && bldg.vertices.length >= 3 && totalHeight > 0) {
@@ -107,16 +123,20 @@ export function getMasterplanSolarAngles(
   // W konwencji CAD: Y jest w górę (Północ), X w prawo (Wschód).
   const shadowDirX = -Math.sin(azRad);
   const shadowDirY = -Math.cos(azRad);
+  const elevationDeg = Math.max(1.0, pos.elevationDeg); // min 1 stopień by uniknąć dzielenia przez 0
 
   return {
     azimuthDeg: pos.azimuthDeg,
-    elevationDeg: Math.max(1.0, pos.elevationDeg), // min 1 stopień by uniknąć dzielenia przez 0
+    elevationDeg,
     sunVector: { x: shadowDirX, y: shadowDirY },
+    tanElevation: Math.tan((elevationDeg * Math.PI) / 180),
   };
 }
 
 /**
  * Wylicza wektor przesunięcia cienia rzucanego na płaszczyznę o różnicy wysokości deltaH.
+ * Liniowe (dzielenie) — tanElevation jest prekalkulowane raz per próbka słońca w SolarAngles,
+ * bez ponownego Math.tan() na każde wywołanie (ta funkcja jest wołana 2× per tier: top/base).
  */
 export function computeShadowOffsetVector(
   deltaH: number,
@@ -126,8 +146,7 @@ export function computeShadowOffsetVector(
     return { dx: 0, dy: 0, length: 0 };
   }
 
-  const elevRad = (solarAngles.elevationDeg * Math.PI) / 180;
-  const length = deltaH / Math.tan(elevRad);
+  const length = deltaH / solarAngles.tanElevation;
 
   return {
     dx: solarAngles.sunVector.x * length,
@@ -135,6 +154,32 @@ export function computeShadowOffsetVector(
     length,
   };
 }
+
+/**
+ * Odcisk geometrii poligonu (wszystkie współrzędne wierzchołków) — używany jako składnik klucza
+ * cache'u w computeStoryShadowPolygon. Nie zależy od tożsamości wywołującego (tier/building), więc
+ * cache działa przezroczyście dla wszystkich miejsc, które wołają tę funkcję.
+ *
+ * Uwaga: suma współrzędnych (Σx, Σy) jest NIEZMIENNIKIEM OBROTU wokół centroidu (obrót w miejscu
+ * nie zmienia sumy = N × centroid) — użycie tylko sumy jako fingerprintu powodowało brak
+ * odświeżania cienia przy obrocie budynku. Pełna lista współrzędnych jest wrażliwa na obrót,
+ * translację i deformację.
+ */
+export function polygonFingerprint(polygon: Point2D[]): string {
+  let s = String(polygon.length);
+  for (const p of polygon) {
+    s += `:${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+  }
+  return s;
+}
+
+/**
+ * Cache pojedynczego rzutowania cienia, wzorem `buildingFastShadowCache` w shadowEnvelope.ts.
+ * Klucz zawiera realne hTop/hBottom/kąty użyte w wywołaniu (nie właściwości tiera) — poprawnie
+ * różnicuje np. roof-shading, gdzie deltaH zależy od odbierającego dachu, i różne próbki penumbry
+ * (różne azymuty) dla tego samego tiera.
+ */
+const storyShadowCache = new Map<string, Point2D[]>();
 
 /**
  * Buduje precyzyjny wielokąt cienia dla pojedynczej kondygnacji/bryły o wysokości hTop i podstawie hBottom.
@@ -145,6 +190,54 @@ export function computeStoryShadowPolygon(
   solarAngles: SolarAngles,
   hTop: number,
   hBottom: number = 0
+): Point2D[] {
+  if (!polygon || polygon.length < 3) return [];
+
+  const cacheKey = `${polygonFingerprint(polygon)}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${solarAngles.azimuthDeg.toFixed(2)}|${solarAngles.elevationDeg.toFixed(2)}`;
+  const cached = storyShadowCache.get(cacheKey);
+  if (cached) return cached;
+
+  const result = computeStoryShadowPolygonUncached(polygon, solarAngles, hTop, hBottom);
+
+  if (storyShadowCache.size > 5000) storyShadowCache.clear();
+  storyShadowCache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Cień bryły z dziurami (np. dziedziniec z modyfikatora "donut"): shadow(obrys) MINUS shadow(dziura),
+ * liczone tą samą wysokością dla obu. computeStoryShadowPolygon (bez holes) traktuje tier jak pełny,
+ * lity blok — dla pierścienia to zawyża cień (pokrywa cały wewnętrzny taras, nie tylko rzeczywistą
+ * "ściankę"), bo ignoruje że światło przechodzi przez dziurę. Dowód: punkt p jest w cieniu pierścienia
+ * ⟺ p jest w cieniu pełnego obrysu I promień do słońca nie jest zablokowany wyłącznie w obrębie dziury
+ * ⟺ p ∈ shadow(obrys) \ shadow(dziura).
+ */
+export function computeStoryShadowPolygonWithHoles(
+  polygon: Point2D[],
+  holes: Point2D[][] | undefined,
+  solarAngles: SolarAngles,
+  hTop: number,
+  hBottom: number = 0
+): Point2D[][] {
+  const outerShadow = computeStoryShadowPolygon(polygon, solarAngles, hTop, hBottom);
+  if (outerShadow.length < 3) return [];
+  if (!holes || holes.length === 0) return [outerShadow];
+
+  const holeShadows = holes
+    .filter((h) => h.length >= 3)
+    .map((h) => computeStoryShadowPolygon(h, solarAngles, hTop, hBottom))
+    .filter((s) => s.length >= 3);
+
+  if (holeShadows.length === 0) return [outerShadow];
+  const mergedHoles = holeShadows.length > 1 ? unionPolygonLoops(holeShadows) : holeShadows;
+  return differencePolygonLoops([outerShadow], mergedHoles);
+}
+
+function computeStoryShadowPolygonUncached(
+  polygon: Point2D[],
+  solarAngles: SolarAngles,
+  hTop: number,
+  hBottom: number
 ): Point2D[] {
   const effectiveBottom = Math.max(0, hBottom);
   if (!polygon || polygon.length < 3 || hTop <= 0 || solarAngles.elevationDeg <= 0.001 || hTop <= effectiveBottom) {
@@ -184,8 +277,8 @@ export function computeStoryShadowPolygon(
   const isCCW = isPolygonCCW(polygon);
   const ring = isCCW ? polygon : [...polygon].reverse();
   const n = ring.length;
-  const azRad = (solarAngles.azimuthDeg * Math.PI) / 180;
-  const sunRayDir = { x: Math.sin(azRad), y: Math.cos(azRad) };
+  // sunRayDir = -sunVector (już prekalkulowany w SolarAngles) — bez ponownego sin/cos.
+  const sunRayDir = { x: -solarAngles.sunVector.x, y: -solarAngles.sunVector.y };
 
   const isSilEdge: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -304,6 +397,34 @@ export function computeSoftStoryShadowPolygon(
   return { umbra, penumbraOuter };
 }
 
+/**
+ * Wariant soft z dziurami: różnica (obrys minus dziura) liczona OSOBNO dla każdego wariantu azymutu,
+ * a dopiero potem przecięcie (umbra)/unia (penumbraOuter) — różnica i przecięcie/unia nie są
+ * przemienne, więc kolejność ma znaczenie (patrz computeStoryShadowPolygonWithHoles).
+ */
+export function computeSoftStoryShadowPolygonWithHoles(
+  polygon: Point2D[],
+  holes: Point2D[][] | undefined,
+  solarAngles: SolarAngles,
+  hTop: number,
+  hBottom: number = 0,
+  sunAngularRadiusDeg: number = 0.267
+): SoftShadowResult {
+  const anglesMin = perturbAzimuth(solarAngles, -sunAngularRadiusDeg);
+  const anglesMax = perturbAzimuth(solarAngles, sunAngularRadiusDeg);
+
+  const ringMin = computeStoryShadowPolygonWithHoles(polygon, holes, anglesMin, hTop, hBottom);
+  const ringMax = computeStoryShadowPolygonWithHoles(polygon, holes, anglesMax, hTop, hBottom);
+
+  if (ringMin.length === 0 && ringMax.length === 0) return { umbra: [], penumbraOuter: [] };
+  if (ringMin.length === 0) return { umbra: ringMax, penumbraOuter: ringMax };
+  if (ringMax.length === 0) return { umbra: ringMin, penumbraOuter: ringMin };
+
+  const umbra = intersectionPolygonLoops(ringMin, ringMax);
+  const penumbraOuter = unionPolygonLoops([...ringMin, ...ringMax]);
+  return { umbra, penumbraOuter };
+}
+
 /** Odchyla azymut słońca o `deltaDeg`, przeliczając `sunVector` (elewacja zostaje bez zmian). */
 function perturbAzimuth(solarAngles: SolarAngles, deltaDeg: number): SolarAngles {
   const azimuthDeg = solarAngles.azimuthDeg + deltaDeg;
@@ -311,6 +432,7 @@ function perturbAzimuth(solarAngles: SolarAngles, deltaDeg: number): SolarAngles
   return {
     azimuthDeg,
     elevationDeg: solarAngles.elevationDeg,
+    tanElevation: solarAngles.tanElevation, // elewacja niezmieniona — reużyj bez ponownego Math.tan()
     sunVector: { x: -Math.sin(azRad), y: -Math.cos(azRad) },
   };
 }

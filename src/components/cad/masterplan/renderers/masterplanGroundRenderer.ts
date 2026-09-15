@@ -46,7 +46,7 @@ export const MASTERPLAN_COLORS = {
  */
 export function renderMasterplanGround(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds } = context;
-  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, isInteracting } = renderContext;
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm } = renderContext;
   const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
 
   const bldgs = visibleBuildings || buildings;
@@ -274,8 +274,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     latitude,
     longitude,
     equinoxDate,
-    hourFraction,
-    isInteracting
+    hourFraction
   );
 
   ctx.save();
