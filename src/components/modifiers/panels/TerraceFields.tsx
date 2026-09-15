@@ -3,7 +3,6 @@ import { TerraceModifier } from '../../../types/modifiers';
 import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
-import { MiniToggle } from '../controls/MiniToggle';
 import { SegmentedControl } from '../controls/SegmentedControl';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
@@ -70,30 +69,27 @@ export const TerraceFields: React.FC<ModifierFieldsProps<TerraceModifier>> = ({ 
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-            <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-              {currentVariant === 'steps' ? 'Uskok łączny a (m):' : 'Głębokość uskoku a (m):'}
-            </span>
-            {calculatedDist !== null && (
-              <MiniToggle
-                label="Auto"
-                checked={isAuto}
-                onChange={handleToggleAuto}
-                accentVar="var(--accent-orange)"
-                title={isAuto ? 'Tryb Auto aktywny (wyliczany na żywo). Kliknij aby przejść w tryb ręczny.' : `Włącz tryb Auto (${calculatedDist}m)`}
-              />
-            )}
-          </div>
-          <LabeledNumberField
-            label=""
-            value={modifier.depth}
-            onChange={handleManualDepthChange}
-            grayed={isAuto}
-            hint={isAuto ? `Tryb Auto: ${depthHint.text}` : depthHint.text}
-            hintColor={depthHint.color}
-          />
-        </div>
+        <LabeledNumberField
+          label={currentVariant === 'steps' ? 'Uskok łączny a (m):' : 'Głębokość uskoku a (m):'}
+          value={modifier.depth}
+          onChange={handleManualDepthChange}
+          grayed={isAuto}
+          toggle={
+            calculatedDist !== null
+              ? {
+                  label: 'Auto',
+                  checked: isAuto,
+                  onChange: handleToggleAuto,
+                  accentVar: 'var(--accent-orange)',
+                  title: isAuto
+                    ? 'Tryb Auto aktywny (wyliczany na żywo). Kliknij aby przejść w tryb ręczny.'
+                    : `Włącz tryb Auto (${calculatedDist}m)`,
+                }
+              : null
+          }
+          hint={isAuto ? `Tryb Auto: ${depthHint.text}` : depthHint.text}
+          hintColor={depthHint.color}
+        />
 
         <StoryRangeSelector
           value={modifier.storiesCount}

@@ -10,6 +10,44 @@ import { computeConvexHull, isPolygonConvex, unionPolygonLoops, differencePolygo
  * @param sunElevationRad - kąt wzniesienia słońca nad horyzontem w radianach
  * @param height - wysokość budynku/ściany
  */
+/**
+ * Dopisuje do `out` poligony cienia dla budynku: per-piętro (bryła 2.5D z modyfikatorami,
+ * jeśli dostępna) lub — w braku storyPolygons — poligon rzutu z legacy cache
+ * (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
+ * Współdzielone przez computeFullShadowAnalysis i computeHourlyShadowsLive.
+ */
+function collectBuildingShadowPolys(
+  bldg: BuildingLoop,
+  azRad: number,
+  elevRad: number,
+  sunlightMethod: 'raycasting' | 'segments',
+  offsetKey: number,
+  out: Point2D[][]
+): void {
+  if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
+    for (const sf of bldg.storyPolygons) {
+      if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
+        const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
+        if (p.length >= 3) out.push(p);
+      }
+    }
+    return;
+  }
+
+  const bHBase = bldg.elevation ?? 0.0;
+  const bHTop = bHBase + bldg.defaultHeight;
+  if (bHTop <= 0) return;
+
+  const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offsetKey}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
+  let poly = buildingFastShadowCache.get(fastKey);
+  if (!poly) {
+    poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
+    if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
+    if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
+  }
+  if (poly.length >= 3) out.push(poly);
+}
+
 export function getShadowOffsetVector(
   sunAzimuthRad: number,
   sunElevationRad: number,
@@ -360,30 +398,7 @@ export function computeFullShadowAnalysis(
 
     const hourPolys: Point2D[][] = [];
     for (const bldg of testedBuildings) {
-      if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
-        for (const sf of bldg.storyPolygons) {
-          if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
-            const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
-            if (p.length >= 3) hourPolys.push(p);
-          }
-        }
-      } else {
-        const bHBase = bldg.elevation ?? 0.0;
-        const bHTop = bHBase + bldg.defaultHeight;
-        if (bHTop <= 0) continue;
-
-        const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
-        let poly = buildingFastShadowCache.get(fastKey);
-        if (!poly) {
-          poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
-          if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-          if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
-        }
-
-        if (poly.length >= 3) {
-          hourPolys.push(poly);
-        }
-      }
+      collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, offset, hourPolys);
     }
 
     if (hourPolys.length > 0) {
@@ -423,25 +438,7 @@ export function computeFullShadowAnalysis(
             continue;
           }
 
-          if (bldg.storyPolygons && bldg.storyPolygons.length > 1) {
-            for (const sf of bldg.storyPolygons) {
-              if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
-                const p = computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
-                if (p.length >= 3) blockingHourPolys.push(p);
-              }
-            }
-          } else {
-            const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offset}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
-            let poly = buildingFastShadowCache.get(fastKey);
-            if (!poly) {
-              poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
-              if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-              if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
-            }
-            if (poly.length >= 3) {
-              blockingHourPolys.push(poly);
-            }
-          }
+          collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, offset, blockingHourPolys);
         }
 
         if (blockingHourPolys.length > 0) {
@@ -543,20 +540,7 @@ export function computeHourlyShadowsLive(
 
     const polys: Point2D[][] = [];
     for (const bldg of testedBuildings) {
-      const bHBase = bldg.elevation ?? 0.0;
-      const bHTop = bHBase + bldg.defaultHeight;
-      if (bHTop <= 0) continue;
-
-      const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${o}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
-      let poly = buildingFastShadowCache.get(fastKey);
-      if (!poly) {
-        poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
-        if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-        if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
-      }
-      if (poly.length >= 3) {
-        polys.push(poly);
-      }
+      collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, o, polys);
     }
 
     if (polys.length > 0) {
@@ -574,37 +558,31 @@ export function computeHourlyShadowsLive(
 
         const blockingPolys: Point2D[][] = [];
         for (const bldg of blockingBuildings) {
-          const bHBase = bldg.elevation ?? 0.0;
-          const bHTop = bHBase + bldg.defaultHeight;
-          if (bHTop <= 0) continue;
+          if (!(bldg.storyPolygons && bldg.storyPolygons.length > 0)) {
+            // Kadrowanie AABB dotyczy wyłącznie legacy ścieżki (bez storyPolygons) — jak w oryginale.
+            const bHBase = bldg.elevation ?? 0.0;
+            const bHTop = bHBase + bldg.defaultHeight;
+            if (bHTop <= 0) continue;
 
-          const offsetVec = { x: bHTop * uShadow.x, y: bHTop * uShadow.y };
-          let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-          for (const v of bldg.vertices) {
-            if (v.x < bMinX) bMinX = v.x;
-            if (v.y < bMinY) bMinY = v.y;
-            if (v.x > bMaxX) bMaxX = v.x;
-            if (v.y > bMaxY) bMaxY = v.y;
-          }
-          const sMinX = Math.min(bMinX, bMinX + offsetVec.x);
-          const sMaxX = Math.max(bMaxX, bMaxX + offsetVec.x);
-          const sMinY = Math.min(bMinY, bMinY + offsetVec.y);
-          const sMaxY = Math.max(bMaxY, bMaxY + offsetVec.y);
+            const offsetVec = { x: bHTop * uShadow.x, y: bHTop * uShadow.y };
+            let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+            for (const v of bldg.vertices) {
+              if (v.x < bMinX) bMinX = v.x;
+              if (v.y < bMinY) bMinY = v.y;
+              if (v.x > bMaxX) bMaxX = v.x;
+              if (v.y > bMaxY) bMaxY = v.y;
+            }
+            const sMinX = Math.min(bMinX, bMinX + offsetVec.x);
+            const sMaxX = Math.max(bMaxX, bMaxX + offsetVec.x);
+            const sMinY = Math.min(bMinY, bMinY + offsetVec.y);
+            const sMaxY = Math.max(bMaxY, bMaxY + offsetVec.y);
 
-          if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
-            continue;
+            if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
+              continue;
+            }
           }
 
-          const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${o}|${bldg.vertices[0].x.toFixed(2)},${bldg.vertices[0].y.toFixed(2)},${bldg.vertices.length}`;
-          let poly = buildingFastShadowCache.get(fastKey);
-          if (!poly) {
-            poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
-            if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-            if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
-          }
-          if (poly.length >= 3) {
-            blockingPolys.push(poly);
-          }
+          collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, o, blockingPolys);
         }
         if (blockingPolys.length > 0) {
           finalPolys = differencePolygonLoops(polys, blockingPolys);

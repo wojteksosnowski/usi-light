@@ -7,7 +7,7 @@ import { DRAWING_CREATION_TOOLS, ALIGN_DRAWING_TOOL } from '../toolbar/drawingTo
 import {
   MODIFIER_DESCRIPTORS,
   TOOLBAR_BUILDING_MODIFIER_TYPES,
-  TOOLBAR_BUFFER_MODIFIER_TYPE,
+  TOOLBAR_BUFFER_MODIFIER_TYPES,
 } from '../modifiers/modifierDescriptors';
 import { ModifierType } from '../../types/modifiers';
 
@@ -215,9 +215,9 @@ export const CadToolBar: React.FC = () => {
 
       {renderSeparator()}
 
-      {/* Grupa 3: Bufor (Strefa / Obszar) */}
-      <div style={{ display: 'inline-flex', alignItems: 'center' }}>
-        {renderModifierButton(TOOLBAR_BUFFER_MODIFIER_TYPE)}
+      {/* Grupa 3: Bufor i Strefy (Bufor, Strefa funkcji) */}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+        {TOOLBAR_BUFFER_MODIFIER_TYPES.map(renderModifierButton)}
       </div>
 
       {renderSeparator()}

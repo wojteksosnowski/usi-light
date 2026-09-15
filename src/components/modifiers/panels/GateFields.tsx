@@ -4,7 +4,6 @@ import { ModifierFieldsProps } from '../modifierDescriptorTypes';
 import { LabeledNumberField } from '../controls/LabeledNumberField';
 import { LabeledSlider } from '../controls/LabeledSlider';
 import { IndexPillSelector } from '../controls/IndexPillSelector';
-import { MiniToggle } from '../controls/MiniToggle';
 import { StoryRangeSelector } from '../StoryRangeSelector';
 import { useDefaultEdgeIndex } from '../useDefaultEdgeIndex';
 import { computeGateSpan } from '../../../utils/math2d/gateGeometry';
@@ -62,43 +61,36 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-            <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-              Szerokość bramy a (m):
-            </span>
-            {maxAllowedWidth !== null && (
-              <MiniToggle
-                label="Auto"
-                checked={isAuto}
-                onChange={handleToggleAuto}
-                accentVar="var(--accent-emerald)"
-                title={
-                  isAuto
+        <LabeledNumberField
+          label="Szerokość bramy a (m):"
+          value={modifier.width}
+          min={0.5}
+          max={maxAllowedWidth !== null ? maxAllowedWidth : 100}
+          step={0.5}
+          onChange={handleManualWidthChange}
+          grayed={isAuto}
+          toggle={
+            maxAllowedWidth !== null
+              ? {
+                  label: 'Auto',
+                  checked: isAuto,
+                  onChange: handleToggleAuto,
+                  accentVar: 'var(--accent-emerald)',
+                  title: isAuto
                     ? 'Tryb Auto aktywny (dopasowany do wierzchołków). Kliknij aby przejść w tryb ręczny.'
-                    : `Włącz pełną dozwoloną szerokość (${maxAllowedWidth}m)`
+                    : `Włącz pełną dozwoloną szerokość (${maxAllowedWidth}m)`,
                 }
-              />
-            )}
-          </div>
-          <LabeledNumberField
-            label=""
-            value={modifier.width}
-            min={0.5}
-            max={maxAllowedWidth !== null ? maxAllowedWidth : 100}
-            step={0.5}
-            onChange={handleManualWidthChange}
-            grayed={isAuto}
-            hint={
-              isAuto
-                ? `Pełna szerokość korytarza: ${modifier.width}m`
-                : maxAllowedWidth !== null
-                ? `Maks. dopuszczalna: ${maxAllowedWidth}m`
-                : undefined
-            }
-            hintColor="var(--accent-emerald)"
-          />
-        </div>
+              : null
+          }
+          hint={
+            isAuto
+              ? `Pełna szerokość: ${modifier.width}m`
+              : maxAllowedWidth !== null
+              ? `Maks. dopuszczalna: ${maxAllowedWidth}m`
+              : undefined
+          }
+          hintColor="var(--accent-emerald)"
+        />
 
         <StoryRangeSelector
           value={modifier.storiesCount}

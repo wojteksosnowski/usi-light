@@ -167,6 +167,7 @@ export function createDefaultBayWindowModifier(): BayWindowModifier {
     width: 4.0, // domyślnie 4m szerokości
     projection: 1.5, // domyślnie 1.5m wysunięcia
     storiesCount: 0, // domyślnie cała wysokość / obszar
+    edgeIndex: 0,
   };
 }
 
@@ -178,6 +179,7 @@ export function createDefaultTerraceModifier(): TerraceModifier {
     depth: -4.0, // domyślnie -4m głębokość uskoku
     storiesCount: -1, // domyślnie ostatnia kondygnacja (penthouse)
     variant: 'drop',
+    edgeIndex: 0,
   };
 }
 
@@ -203,6 +205,8 @@ export function createDefaultCornerCutModifier(): CornerCutModifier {
     storiesCount: 0,
     mode: 'chamfer',
     scope: 'all',
+    edgeIndex: 0,
+    vertexIndex: 0,
   };
 }
 
@@ -218,6 +222,7 @@ export function createDefaultGateModifier(): GateModifier {
     storiesCount: 1,      // domyślnie parter (+1)
     positionRatio: 0.5,   // domyślnie środek
     autoWidth: false,
+    edgeIndex: 0,
   };
 }
 
@@ -247,6 +252,7 @@ export function createDefaultPilaModifier(): PilaModifier {
     toothAngle: 90,
     alignment: 'prev_edge',
     storiesCount: 0,      // cała bryła
+    edgeIndex: 0,
   };
 }
 
@@ -262,6 +268,7 @@ export function createDefaultZoneFunctionModifier(): ZoneFunctionModifier {
     scope: 'storeys',        // domyślnie kondygnacje
     storiesCount: 1,         // domyślnie parter (+1)
     depth: 10.0,             // 10m pasmo od krawędzi
+    edgeIndex: 0,
   };
 }
 

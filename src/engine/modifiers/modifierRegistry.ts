@@ -397,25 +397,29 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
 
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     for (const { storyIndex } of steps) {
-      const footprint = ctx.storyFootprints[storyIndex];
-      const target = resolveIndexTarget(footprint, edgeIndex);
+      const fragments = getStoryFragments(ctx, storyIndex);
+      for (const footprint of fragments) {
+        const resolvedEdgeIndex = resolveOuterEdgeIndexForFragment(footprint, edgeIndex, ctx.baseVertices);
+        if (resolvedEdgeIndex === null) continue;
+        const target = resolveIndexTarget(footprint, resolvedEdgeIndex);
 
-      if (target.isHole) {
-        footprint.holes![target.holeIndex!] = generatePilaPolygon(
-          footprint.holes![target.holeIndex!],
-          teethCount,
-          target.localIndex,
-          toothAngle ?? 90,
-          alignment ?? 'perpendicular'
-        );
-      } else {
-        footprint.polygon = generatePilaPolygon(
-          footprint.polygon,
-          teethCount,
-          edgeIndex,
-          toothAngle ?? 90,
-          alignment ?? 'perpendicular'
-        );
+        if (target.isHole) {
+          footprint.holes![target.holeIndex!] = generatePilaPolygon(
+            footprint.holes![target.holeIndex!],
+            teethCount,
+            target.localIndex,
+            toothAngle ?? 90,
+            alignment ?? 'prev_edge'
+          );
+        } else {
+          footprint.polygon = generatePilaPolygon(
+            footprint.polygon,
+            teethCount,
+            resolvedEdgeIndex,
+            toothAngle ?? 90,
+            alignment ?? 'prev_edge'
+          );
+        }
       }
     }
   },
@@ -440,9 +444,14 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
       const newFootprints: StoryFootprint[] = [];
       for (const sf of ctx.storyFootprints) {
         if (targetStoryIndices.has(sf.storyIndex)) {
+          const resolvedEdgeIndex = resolveOuterEdgeIndexForFragment(sf, edgeIndex, ctx.baseVertices);
+          if (resolvedEdgeIndex === null) {
+            newFootprints.push(sf);
+            continue;
+          }
           const splitResults = splitFootprintByEdgeOffset(
             sf,
-            edgeIndex,
+            resolvedEdgeIndex,
             offsetDepth,
             buildingType
           );

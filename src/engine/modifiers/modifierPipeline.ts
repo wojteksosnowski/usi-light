@@ -10,12 +10,12 @@ import {
   ZoneFootprint,
 } from '../../types/modifiers';
 import { miterOffsetPolygon, offsetPolygonWithJoin, PolygonJoinType } from '../../utils/math2d/miterOffset';
-import { calculateSignedArea, isPolygonCCW } from '../../utils/math2d/polygons';
-import { calculateOutwardNormal, distance } from '../../utils/math2d/vec2';
+import { calculateSignedArea, isPolygonCCW, isSimplePolygonRing } from '../../utils/math2d/polygons';
+import { calculateOutwardNormal, distance, squaredDistance } from '../../utils/math2d/vec2';
 import { computeLineEquation, rebuildBuildingSegments } from '../../utils/segmentStatistics';
 import { calculateBuildingFloors } from '../../utils/buildingFloorCalculator';
 import { applyModifier, ModifierApplyContext } from './modifierRegistry';
-import { deriveEdgeOrigins, deriveHoleOrigins } from './modifierIndexTarget';
+import { deriveEdgeOrigins, deriveHoleOrigins, alignRingStartToOriginal } from './modifierIndexTarget';
 
 export interface ModifierPipelineResult {
   storyPolygons: StoryFootprint[];
@@ -603,8 +603,22 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
     const outerRing = toClosedRing(footprint.polygon);
     if (outerRing.length < 4) return footprint;
 
-    // 1. Jeśli brak otworów, czyścimy obrys zewnętrzny
+    // 1. Jeśli brak otworów:
     if (!footprint.holes || footprint.holes.length === 0) {
+      if (isSimplePolygonRing(footprint.polygon)) {
+        const cleaned = cleanPolygonRing(footprint.polygon, true);
+        if (cleaned && cleaned.length >= 3) {
+          const aligned = alignRingStartToOriginal(cleaned, footprint.polygon);
+          return {
+            ...footprint,
+            polygon: aligned,
+            holes: [],
+            edgeOrigins: deriveEdgeOrigins(aligned, footprint.polygon, footprint.edgeOrigins),
+            holeOrigins: [],
+          };
+        }
+      }
+
       const cleaned = polygonClipping.union([[outerRing]]);
       if (cleaned && cleaned.length > 0 && cleaned[0].length > 0) {
         let bestPoly = cleaned[0][0];
@@ -619,7 +633,7 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
             }
           }
         }
-        const sanitizedOuter = fromClosedRing(bestPoly, true);
+        const sanitizedOuter = alignRingStartToOriginal(fromClosedRing(bestPoly, true), footprint.polygon);
         return {
           ...footprint,
           polygon: sanitizedOuter,
@@ -634,7 +648,7 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
     // 2. Jeśli są otwory: wykonujemy boolean difference (outer - holes)
     const validHoles = footprint.holes.filter((h) => h && h.length >= 3);
     if (validHoles.length === 0) {
-      const sanitizedOuter = fromClosedRing(outerRing, true);
+      const sanitizedOuter = alignRingStartToOriginal(fromClosedRing(outerRing, true), footprint.polygon);
       return {
         ...footprint,
         polygon: sanitizedOuter,
@@ -675,16 +689,26 @@ export function sanitizeStoryFootprint(footprint: StoryFootprint): StoryFootprin
     }
 
     const selectedPoly = diff[bestPolygonIdx];
-    const sanitizedOuter = fromClosedRing(selectedPoly[0], true);
+    const sanitizedOuter = alignRingStartToOriginal(fromClosedRing(selectedPoly[0], true), footprint.polygon);
     const sanitizedHoles: Point2D[][] = [];
 
     // Pozostałe pierścienie wewnętrzne (jeśli hole był całkowicie wewnątrz)
     for (let h = 1; h < selectedPoly.length; h++) {
-      const holePts = fromClosedRing(selectedPoly[h], true);
-      if (holePts.length >= 3) {
-        const hArea = Math.abs(calculateSignedArea(holePts));
+      const rawHolePts = fromClosedRing(selectedPoly[h], true);
+      if (rawHolePts.length >= 3) {
+        const hArea = Math.abs(calculateSignedArea(rawHolePts));
         if (hArea >= 0.5) {
-          sanitizedHoles.push(holePts);
+          let origHoleForAlign: Point2D[] | undefined = undefined;
+          let bestHoleDistSq = Infinity;
+          for (const origH of validHoles) {
+            const dSq = squaredDistance(rawHolePts[0], origH[0]);
+            if (dSq < bestHoleDistSq) {
+              bestHoleDistSq = dSq;
+              origHoleForAlign = origH;
+            }
+          }
+          const alignedHole = alignRingStartToOriginal(rawHolePts, origHoleForAlign);
+          sanitizedHoles.push(alignedHole);
         }
       }
     }
@@ -799,6 +823,32 @@ export interface PilaMetrics {
  * Wyznacza wektory pojedynczego uskoku vecB i vecA dla modyfikatora Piła (układ b-a-b-a).
  * Wektor vecB jest przedłużeniem krawędzi dochodzącej (prev_edge) lub odchodzącej (next_edge).
  */
+/**
+ * Buduje kandydata zęba dla przypadku degeneracyjnego, gdy candUA jest równoległe do krawędzi
+ * (lB ≈ 0) — nadaje zębowi głębokość wzdłuż wejścia (normIn) zamiast wzdłuż zerowego candUB.
+ * Współdzielone przez gałęzie 'prev_edge' i 'next_edge' w computeStepVectors.
+ */
+function makeParallelEdgeCandidate(
+  candUB: Point2D,
+  candUA: Point2D,
+  lenFallback: number,
+  lA: number,
+  normIn: Point2D,
+  tan: Point2D
+): { uB: Point2D; uA: Point2D; lenB: number; lenA: number; score: number } {
+  const inUB = candUB.x * normIn.x + candUB.y * normIn.y >= 0 ? candUB : { x: -candUB.x, y: -candUB.y };
+  const lB = lenFallback > 1e-4 ? lenFallback : lA;
+  const inScore = inUB.x * normIn.x + inUB.y * normIn.y;
+  const tanScore = candUA.x * tan.x + candUA.y * tan.y;
+  return {
+    uB: inUB,
+    uA: candUA,
+    lenB: Math.max(0, lB),
+    lenA: Math.max(0, lA),
+    score: inScore * 2 + tanScore + 10,
+  };
+}
+
 export function computeStepVectors(
   pPrev: Point2D,
   p1: Point2D,
@@ -853,11 +903,14 @@ export function computeStepVectors(
       for (const candUA of [rotCW, rotCCW]) {
         const det = candUB.x * candUA.y - candUB.y * candUA.x;
         if (Math.abs(det) > 1e-4) {
-          const lB = (targetX * candUA.y - targetY * candUA.x) / det;
-          const lA = (candUB.x * targetY - candUB.y * targetX) / det;
+          let lB = (targetX * candUA.y - targetY * candUA.x) / det;
+          let lA = (candUB.x * targetY - candUB.y * targetX) / det;
+          if (Math.abs(lB) < 1e-4 && lA > 1e-4) {
+            // candUA jest równoległe do krawędzi - nadaj zębowi głębokość wzdłuż wejścia
+            candidates.push(makeParallelEdgeCandidate(candUB, candUA, lenPrev, lA, normIn, tan));
+            continue;
+          }
           if (lB >= -1e-4 && lA >= -1e-4) {
-            // Wierzchołek zęba P_mid = P1 + lB * uB
-            // Ząb powinien iść w stronę normIn (do wnętrza): candUB.dot(normIn) + candUA.dot(normIn) >= 0
             const inScore = (candUB.x + candUA.x) * normIn.x + (candUB.y + candUA.y) * normIn.y;
             const tanScore = candUA.x * tan.x + candUA.y * tan.y;
             candidates.push({
@@ -909,8 +962,12 @@ export function computeStepVectors(
         // kSteps * (lenA * candUA + lenB * candUB) = (p2 - p1)
         const det = candUA.x * candUB.y - candUA.y * candUB.x;
         if (Math.abs(det) > 1e-4) {
-          const lA = (targetX * candUB.y - targetY * candUB.x) / det;
-          const lB = (candUA.x * targetY - candUA.y * targetX) / det;
+          let lA = (targetX * candUB.y - targetY * candUB.x) / det;
+          let lB = (candUA.x * targetY - candUA.y * targetX) / det;
+          if (Math.abs(lB) < 1e-4 && lA > 1e-4) {
+            candidates.push(makeParallelEdgeCandidate(candUB, candUA, lenNext, lA, normIn, tan));
+            continue;
+          }
           if (lA >= -1e-4 && lB >= -1e-4) {
             const inScore = (candUB.x + candUA.x) * normIn.x + (candUB.y + candUA.y) * normIn.y;
             const tanScore = candUA.x * tan.x + candUA.y * tan.y;

@@ -148,7 +148,7 @@ export const MODIFIER_DESCRIPTORS: ModifierDescriptorMap = {
   },
 };
 
-/** Modyfikatory bryły budynku (Grupa 2 w toolbarze): uskok, taras, donat, brama, wykusz, sciecie, sztyca, pila, strefa */
+/** Modyfikatory bryły budynku (Grupa 2 w toolbarze): uskok, taras, donat, brama, wykusz, sciecie, sztyca, pila */
 export const TOOLBAR_BUILDING_MODIFIER_TYPES = [
   'story_offset',
   'terrace',
@@ -158,9 +158,12 @@ export const TOOLBAR_BUILDING_MODIFIER_TYPES = [
   'corner_cut',
   'sztyca',
   'pila',
+] as const;
+
+/** Modyfikatory bufora/strefy (Grupa 3 w toolbarze): bufor, strefa funkcji */
+export const TOOLBAR_BUFFER_MODIFIER_TYPES = [
+  'zone_offset',
   'zone_function',
 ] as const;
 
-/** Modyfikator bufora/strefy (Grupa 3 w toolbarze) */
-export const TOOLBAR_BUFFER_MODIFIER_TYPE = 'zone_offset' as const;
 

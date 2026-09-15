@@ -64,7 +64,7 @@ export const MiniToggle: React.FC<MiniToggleProps> = ({
             width: '9px',
             height: '9px',
             borderRadius: '50%',
-            backgroundColor: checked ? '#0f172a' : 'var(--text-muted)',
+            backgroundColor: checked ? 'var(--bg-main)' : 'var(--text-muted)',
             transition: 'left 0.15s ease',
           }}
         />

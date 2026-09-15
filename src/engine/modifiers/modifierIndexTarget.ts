@@ -1,6 +1,6 @@
 import { Point2D } from '../../types/geometry';
 import { StoryFootprint } from '../../types/modifiers';
-import { distance } from '../../utils/math2d/vec2';
+import { distance, squaredDistance } from '../../utils/math2d/vec2';
 
 export interface IndexTargetResolution {
   isHole: boolean;
@@ -225,3 +225,33 @@ export function resolveFragmentVertexIndex(
   }
   return bestIdx;
 }
+
+/**
+ * Cyklicznie wyrównuje wierzchołki nowego pierścienia (np. zwróconego przez polygon-clipping,
+ * który sortuje leksykograficznie wg min X/Y) tak, aby wierzchołek początkowy [0] odpowiadał
+ * punktowi startowemu pierścienia oryginalnego. Zapobiega to przeskakiwaniu indeksów krawędzi
+ * przy obrocie bryły w scenie.
+ */
+export function alignRingStartToOriginal(
+  newRing: Point2D[],
+  originalRing: Point2D[] | undefined
+): Point2D[] {
+  if (!newRing || newRing.length < 3 || !originalRing || originalRing.length < 3) {
+    return newRing;
+  }
+  const origStart = originalRing[0];
+  let bestIdx = 0;
+  let minDistSq = Infinity;
+
+  for (let i = 0; i < newRing.length; i++) {
+    const distSq = squaredDistance(newRing[i], origStart);
+    if (distSq < minDistSq) {
+      minDistSq = distSq;
+      bestIdx = i;
+    }
+  }
+
+  if (bestIdx === 0) return newRing;
+  return [...newRing.slice(bestIdx), ...newRing.slice(0, bestIdx)];
+}
+
