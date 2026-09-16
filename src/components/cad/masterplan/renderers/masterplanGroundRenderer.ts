@@ -4,9 +4,11 @@ import { Point2D, BuildingLoop } from '@/types/geometry';
 import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
 import {
   extractBuildingStoryTiers,
+  getMasterplanSolarAngles,
   MasterplanStoryTier,
 } from '../masterplanGeometry';
-import { getCachedGroundShadowSamples, drawMasterplanShadowResult } from '../masterplanShadowCache';
+import { getCachedGroundShadowSamples, getCachedShadowBoundsForCulling, drawMasterplanShadowResult } from '../masterplanShadowCache';
+import { viewportWorldBounds, cullBuildingsByViewport } from '../masterplanSpatial';
 
 /**
  * Paleta barwna dla podkładu „Masterplan White”
@@ -45,7 +47,7 @@ export const MASTERPLAN_COLORS = {
  */
 export function renderMasterplanGround(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds } = context;
-  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod } = renderContext;
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod, screenToWorld } = renderContext;
   const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
   const method = sunlightMethod ?? 'raycasting';
 
@@ -242,8 +244,16 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
 
   // 3. Pełne Cienie Gruntowe z uwzględnieniem kondygnacji i modyfikatorów (Boolean Union per próbka penumbry)
   const actualBuildings = bldgs.filter((b: BuildingLoop) => b.category !== 'boundary' && b.defaultHeight > 0);
+
+  // Viewport culling: odrzuca budynki, których bryła + szacowany zasięg cienia nie przecinają się
+  // z widocznym obszarem, zanim w ogóle trafią do extractBuildingStoryTiers/klastrowania.
+  const solarAngles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
+  const viewport = viewportWorldBounds({ width, height, screenToWorld });
+  const getCachedShadowBounds = getCachedShadowBoundsForCulling(shadowAlgorithm, method, latitude, longitude, equinoxDate, hourFraction);
+  const culledBuildings = cullBuildingsByViewport(actualBuildings, viewport, solarAngles, getCachedShadowBounds);
+
   const allTiers: MasterplanStoryTier[] = [];
-  for (const bldg of actualBuildings) {
+  for (const bldg of culledBuildings) {
     allTiers.push(...extractBuildingStoryTiers(bldg));
   }
 

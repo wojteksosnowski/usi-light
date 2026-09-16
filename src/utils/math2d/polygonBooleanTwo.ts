@@ -71,6 +71,20 @@ interface Node {
   edgeIndex: number;
 }
 
+// Sorts a split-parameter array in place and drops literal duplicates, avoiding a
+// `Set` + `Array.from` allocation per edge. The real tolerance-based collapse of
+// near-duplicate values still happens later via the `tEnd - tStart < 1e-6` check,
+// so dropping only exact duplicates here changes nothing about the result.
+function dedupeSorted(values: number[]): number[] {
+  values.sort((a, b) => a - b);
+  let writeIdx = 1;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] !== values[i - 1]) values[writeIdx++] = values[i];
+  }
+  values.length = writeIdx;
+  return values;
+}
+
 function ensureCCW(points: Point2D[]): Point2D[] {
   if (points.length < 3) return points;
   return isPolygonCCW(points) ? [...points] : [...points].reverse();
@@ -333,7 +347,7 @@ export function fastUnionTwoSimpleLoops(
       const a2 = loopA[(i + 1) % nA];
       const dx = a2.x - a1.x;
       const dy = a2.y - a1.y;
-      const ts = Array.from(new Set(splitsA[i])).sort((x, y) => x - y);
+      const ts = dedupeSorted(splitsA[i]);
       for (let k = 0; k < ts.length - 1; k++) {
         const tStart = ts[k];
         const tEnd = ts[k + 1];
@@ -354,7 +368,7 @@ export function fastUnionTwoSimpleLoops(
       const b2 = loopB[(j + 1) % nB];
       const dx = b2.x - b1.x;
       const dy = b2.y - b1.y;
-      const ts = Array.from(new Set(splitsB[j])).sort((x, y) => x - y);
+      const ts = dedupeSorted(splitsB[j]);
       for (let k = 0; k < ts.length - 1; k++) {
         const tStart = ts[k];
         const tEnd = ts[k + 1];
@@ -373,6 +387,25 @@ export function fastUnionTwoSimpleLoops(
     const keptSegments: SubSegment[] = [];
     const bMatched = new Uint8Array(subsegsB.length);
 
+    // Order-independent pair key for O(1) shared/cancelling-edge lookup instead of
+    // an O(subsegsA * subsegsB) brute-force scan. Vertex ids are small pool indices,
+    // so a multiplier well above any realistic pool size avoids collisions.
+    const PAIR_KEY_MULT = 1 << 20;
+    const pairKeyOf = (u: number, v: number): number =>
+      u < v ? u * PAIR_KEY_MULT + v : v * PAIR_KEY_MULT + u;
+
+    const bPairIndex = new Map<number, number[]>();
+    for (let j = 0; j < subsegsB.length; j++) {
+      const segB = subsegsB[j];
+      const key = pairKeyOf(segB.u, segB.v);
+      let list = bPairIndex.get(key);
+      if (!list) {
+        list = [];
+        bPairIndex.set(key, list);
+      }
+      list.push(j);
+    }
+
     for (let i = 0; i < subsegsA.length; i++) {
       const segA = subsegsA[i];
       const midA = { x: (segA.p1.x + segA.p2.x) / 2, y: (segA.p1.y + segA.p2.y) / 2 };
@@ -380,17 +413,21 @@ export function fastUnionTwoSimpleLoops(
       // Check if segA matches any segment on B (shared or touching)
       let matchIdx = -1;
       let isCoDirectional = true;
-      for (let j = 0; j < subsegsB.length; j++) {
-        const segB = subsegsB[j];
-        if (segA.u === segB.u && segA.v === segB.v) {
-          matchIdx = j;
-          isCoDirectional = true;
-          break;
-        }
-        if (segA.u === segB.v && segA.v === segB.u) {
-          matchIdx = j;
-          isCoDirectional = false;
-          break;
+      const candidates = bPairIndex.get(pairKeyOf(segA.u, segA.v));
+      if (candidates) {
+        for (let k = 0; k < candidates.length; k++) {
+          const j = candidates[k];
+          const segB = subsegsB[j];
+          if (segA.u === segB.u && segA.v === segB.v) {
+            matchIdx = j;
+            isCoDirectional = true;
+            break;
+          }
+          if (segA.u === segB.v && segA.v === segB.u) {
+            matchIdx = j;
+            isCoDirectional = false;
+            break;
+          }
         }
       }
 
@@ -464,6 +501,7 @@ export function fastUnionTwoSimpleLoops(
     }
 
     const loops: Point2D[][] = [];
+    const loopAbsAreas: number[] = [];
     const maxSteps = graphEdges.length * 4 + 10;
 
     for (const startEdge of graphEdges) {
@@ -522,20 +560,24 @@ export function fastUnionTwoSimpleLoops(
 
       if (currentLoop.length >= 3) {
         const cleaned = cleanDuplicateOrCollinearVertices(currentLoop);
-        if (cleaned.length >= 3 && Math.abs(calculateSignedArea(cleaned)) > 1e-4) {
+        const absArea = Math.abs(calculateSignedArea(cleaned));
+        if (cleaned.length >= 3 && absArea > 1e-4) {
           loops.push(cleaned);
+          loopAbsAreas.push(absArea);
         }
       }
     }
 
     if (loops.length > 0) {
-      loops.sort((l1, l2) => Math.abs(calculateSignedArea(l2)) - Math.abs(calculateSignedArea(l1)));
-      const outer = ensureCCW(loops[0]);
+      const order = loops.map((_, i) => i);
+      order.sort((i1, i2) => loopAbsAreas[i2] - loopAbsAreas[i1]);
+      const sortedLoops = order.map((i) => loops[i]);
+      const outer = ensureCCW(sortedLoops[0]);
       const holes: Point2D[][] = [];
       let hasMultipleOuterComponents = false;
 
-      for (let i = 1; i < loops.length; i++) {
-        const loop = loops[i];
+      for (let i = 1; i < sortedLoops.length; i++) {
+        const loop = sortedLoops[i];
         if (isPointInPolygon(loop[0], outer)) {
           holes.push(isPolygonCCW(loop) ? [...loop].reverse() : loop);
         } else {

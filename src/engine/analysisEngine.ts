@@ -26,6 +26,7 @@ import {
   isPointInPolygon,
 } from '@/utils/math2d';
 import { generatePolygonalVoronoiCells } from '../utils/math2d/voronoi';
+import { getBuildingAABB } from './buildingGeometryCache';
 
 
 import {
@@ -63,37 +64,6 @@ export interface PrefilteredObstacle {
  *    „tyłem” do punktu P i tak jest zasłonięty przez ścianę przednią tej samej bryły.
  * 6. Wykluczenie własnego badanego odcinka oraz obiektów wyłączonych z analizy.
  */
-// Szybki cache AABB budynków w pamięci silnika analitycznego
-interface BuildingAABB {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-}
-const buildingAabbCache = new WeakMap<object, BuildingAABB>();
-
-function getBuildingAABB(bldg: BuildingLoop): BuildingAABB | null {
-  if (!bldg.vertices || bldg.vertices.length < 3) return null;
-  const cached = buildingAabbCache.get(bldg);
-  if (cached) return cached;
-
-  let minX = bldg.vertices[0].x;
-  let maxX = minX;
-  let minY = bldg.vertices[0].y;
-  let maxY = minY;
-  for (let vi = 1; vi < bldg.vertices.length; vi++) {
-    const vx = bldg.vertices[vi].x;
-    const vy = bldg.vertices[vi].y;
-    if (vx < minX) minX = vx;
-    if (vx > maxX) maxX = vx;
-    if (vy < minY) minY = vy;
-    if (vy > maxY) maxY = vy;
-  }
-  const aabb: BuildingAABB = { minX, maxX, minY, maxY };
-  buildingAabbCache.set(bldg, aabb);
-  return aabb;
-}
-
 /**
  * PRE-FILTR KANDYDATÓW DLA ODCINKA FASADY DLA § 12 (Przesłanianie).
  * Wylicza przeszkody mogące potencjalnie przesłaniać DOWOLNY punkt na danym odcinku fasady.

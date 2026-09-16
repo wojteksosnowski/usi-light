@@ -1,5 +1,7 @@
 import { computePointsBoundingBox, unionPolygonLoops, PolygonWithHoles, unionPolygonsWithHoles } from '@/utils/math2d/polygons';
 import { SolarAngles, MasterplanStoryTier, computeShadowOffsetVector } from './masterplanGeometry';
+import { BuildingLoop } from '@/types/geometry';
+import { getBuildingAABB } from '@/engine/buildingGeometryCache';
 
 export interface Bounds {
   minX: number;
@@ -24,6 +26,88 @@ export function extendBoundsByOffset(b: Bounds, dx: number, dy: number): Bounds 
 
 export function boundsOverlap(a: Bounds, b: Bounds): boolean {
   return a.maxX >= b.minX && a.minX <= b.maxX && a.maxY >= b.minY && a.minY <= b.maxY;
+}
+
+/** AABB otaczające wszystkie zewnętrzne obrysy listy poligonów (dziury pomijamy — nie poszerzają zasięgu). */
+export function polygonsWithHolesBounds(polys: PolygonWithHoles[]): Bounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of polys) {
+    for (const pt of p.outer) {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Granice widocznego obszaru (viewport) we współrzędnych świata, z marginesem proporcjonalnym
+ * do rozmiaru viewportu (domyślnie 20% w każdą stronę), by uniknąć "pop-in" budynków przy panowaniu.
+ * Transformuje wszystkie 4 rogi canvasu (nie tylko 2 przekątne), bo widok może być obrócony.
+ */
+export function viewportWorldBounds(
+  rc: { width: number; height: number; screenToWorld: (sx: number, sy: number) => { wx: number; wy: number } },
+  marginRatio = 0.2
+): Bounds {
+  const corners = [
+    rc.screenToWorld(0, 0),
+    rc.screenToWorld(rc.width, 0),
+    rc.screenToWorld(0, rc.height),
+    rc.screenToWorld(rc.width, rc.height),
+  ];
+  let minX = corners[0].wx;
+  let maxX = minX;
+  let minY = corners[0].wy;
+  let maxY = minY;
+  for (let i = 1; i < corners.length; i++) {
+    const { wx, wy } = corners[i];
+    if (wx < minX) minX = wx;
+    if (wx > maxX) maxX = wx;
+    if (wy < minY) minY = wy;
+    if (wy > maxY) maxY = wy;
+  }
+  const marginX = (maxX - minX) * marginRatio;
+  const marginY = (maxY - minY) * marginRatio;
+  return { minX: minX - marginX, maxX: maxX + marginX, minY: minY - marginY, maxY: maxY + marginY };
+}
+
+/**
+ * Odsiewa budynki, których bryła i szacowany zasięg cienia nie przecinają się z viewportem —
+ * tani wstępny filtr przed ekstrakcją tierów (`extractBuildingStoryTiers`), operujący na
+ * cache'owanym AABB budynku (`getBuildingAABB`), nie na pełnej geometrii cienia.
+ *
+ * Gdy dla budynku istnieje już policzony (cache'owany) poligon cienia dla dokładnie tej pozycji
+ * słońca — `getCachedShadowBounds` (dostarczone przez wywołującego, bo klucz cache zależy od
+ * algorytmu/metody/daty, o których ten moduł nic nie wie) — używamy jego dokładnego AABB zamiast
+ * konserwatywnej estymaty wysokościowej. Ciaśniejsza granica = więcej budynków realnie odrzuconych,
+ * bez utraty dokładności (finalne rysowanie i tak korzysta z tego samego, dokładnego poligonu).
+ * Bez trafienia w cache — fallback na `height * shadowScale`, zawsze nadzbiór realnego zasięgu.
+ */
+export function cullBuildingsByViewport(
+  buildings: BuildingLoop[],
+  viewport: Bounds,
+  angles: SolarAngles,
+  getCachedShadowBounds?: (bldg: BuildingLoop) => Bounds | null
+): BuildingLoop[] {
+  return buildings.filter((b) => {
+    const aabb = getBuildingAABB(b);
+    if (!aabb) return true; // zdegenerowana geometria: nie cullować, niech dalszy pipeline zdecyduje
+
+    const cachedBounds = getCachedShadowBounds?.(b);
+    if (cachedBounds) {
+      return boundsOverlap(cachedBounds, viewport);
+    }
+
+    const offset = computeShadowOffsetVector(b.defaultHeight ?? 0, angles);
+    const reach = extendBoundsByOffset(aabb, offset.dx * 1.05, offset.dy * 1.05);
+    return boundsOverlap(reach, viewport);
+  });
 }
 
 /**

@@ -35,6 +35,12 @@ export interface MasterplanStoryTier {
   isProposed: boolean;
   isSelected: boolean;
   isHovered: boolean;
+  /**
+   * Referencja do źródłowego obiektu `BuildingLoop`, do kluczowania cache'u cienia per
+   * obiekt (patrz `buildingShadowCache` w `src/engine/buildingGeometryCache.ts`). Opcjonalna,
+   * żeby nie wymagać jej od miejsc konstruujących tiery ręcznie (np. w testach).
+   */
+  bldgRef?: BuildingLoop;
 }
 
 /**
@@ -71,6 +77,7 @@ export function extractBuildingStoryTiers(
         isProposed,
         isSelected,
         isHovered,
+        bldgRef: bldg,
       });
     }
     if (tiers.length > 0) {
@@ -100,6 +107,7 @@ export function extractBuildingStoryTiers(
         isProposed,
         isSelected,
         isHovered,
+        bldgRef: bldg,
       },
     ];
   }

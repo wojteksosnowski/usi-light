@@ -7,8 +7,15 @@ import {
   computeShadowOffsetVector,
   MasterplanStoryTier,
 } from '../masterplanGeometry';
-import { tierFootprintBounds, extendBoundsByOffset, boundsOverlap, Bounds } from '../masterplanSpatial';
-import { getCachedRoofShadowSamples, drawMasterplanShadowResult } from '../masterplanShadowCache';
+import {
+  tierFootprintBounds,
+  extendBoundsByOffset,
+  boundsOverlap,
+  Bounds,
+  viewportWorldBounds,
+  cullBuildingsByViewport,
+} from '../masterplanSpatial';
+import { getCachedRoofShadowSamples, getCachedShadowBoundsForCulling, drawMasterplanShadowResult } from '../masterplanShadowCache';
 
 /**
  * Renderuje dachy budynków, rzutowanie cieni ΔH od wyższych kondygnacji/budynków (zacienianie wzajemne i własne)
@@ -16,7 +23,7 @@ import { getCachedRoofShadowSamples, drawMasterplanShadowResult } from '../maste
  */
 export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds, hoveredBuildingId } = context;
-  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod } = renderContext;
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod, screenToWorld } = renderContext;
   const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
   const method = sunlightMethod ?? 'raycasting';
 
@@ -26,9 +33,17 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
 
   if (bldgs.length === 0) return;
 
+  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
+
+  // Viewport culling: odrzuca budynki, których bryła + szacowany zasięg cienia nie przecinają się
+  // z widocznym obszarem, zanim w ogóle trafią do extractBuildingStoryTiers.
+  const viewport = viewportWorldBounds({ width, height, screenToWorld });
+  const getCachedShadowBounds = getCachedShadowBoundsForCulling(shadowAlgorithm, method, latitude, longitude, equinoxDate, hourFraction);
+  const culledBldgs = cullBuildingsByViewport(bldgs, viewport, angles, getCachedShadowBounds);
+
   // 1. Ekstrakcja wszystkich poziomów kondygnacji (w tym z modyfikatorów: uskoków/tarasów/sztycy)
   const allTiers: MasterplanStoryTier[] = [];
-  for (const bldg of bldgs) {
+  for (const bldg of culledBldgs) {
     allTiers.push(...extractBuildingStoryTiers(bldg, selectedBuildingId, selectedBuildingIds, hoveredBuildingId));
   }
 
@@ -37,7 +52,6 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
   // 2. Sortowanie poziomów dachowych po wysokości Htop rosnąco (najniższe dachy najpierw, najwyższe na końcu)
   const sortedTiers = [...allTiers].sort((a, b) => a.hTop - b.hTop);
   const sortedTierBounds = sortedTiers.map(tierFootprintBounds);
-  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
 
   ctx.save();
   ctx.translate(viewState.panX, viewState.panY);
