@@ -143,7 +143,6 @@ export class GoogleTileManager implements ISatelliteTileManager {
 
   private loadTile(x: number, y: number, z: number, key: string) {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
 
     const cleanKey = this.apiKey ? this.apiKey.trim() : '';
     const keyParam = cleanKey ? `&key=${encodeURIComponent(cleanKey)}` : '';

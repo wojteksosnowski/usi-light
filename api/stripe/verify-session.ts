@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { nanoid } from 'nanoid';
-import { getStripe, getRedisAndRatelimit, formatLicenseKey, LicenseRecord } from '../_lib/serverStripe.js';
+import { getStripe, getRedisAndRatelimit, formatLicenseKey, LicenseRecord } from '../_lib/serverStripe';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');

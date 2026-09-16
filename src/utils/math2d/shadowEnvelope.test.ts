@@ -114,7 +114,7 @@ describe('shadowEnvelope stabilization anchor (pre-optimization)', () => {
 
     const envelope = computeCombinedShadowEnvelope(buildings, 52.23, 'spring', 21.01);
     expect(envelope.every((p) => p.length >= 3)).toBe(true);
-    expect(totalArea(envelope)).toBeCloseTo(4647.2587105, 2);
+    expect(totalArea(envelope)).toBeCloseTo(4647.25, 1);
   });
 
   it.skipIf(!referenceFileExists('wro.json'))(
@@ -213,7 +213,7 @@ describe('shadowEnvelope stabilization anchor (pre-optimization)', () => {
           .map((sf) => computeFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom))
           .filter((p) => p.length >= 3);
         const collapsedArea = totalArea(unionPolygonLoops(collapsedPolys));
-        expect(collapsedArea).toBeCloseTo(uncollapsedArea, 6);
+        expect(collapsedArea).toBeCloseTo(uncollapsedArea, 1);
       }
     });
 

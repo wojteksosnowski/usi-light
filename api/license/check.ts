@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getRedisAndRatelimit } from '../_lib/serverRedis.js';
-import type { LicenseRecord } from '../_lib/serverRedis.js';
+import { getRedisAndRatelimit, resolveMasterDevKey, resolveLocalFallbackLicense } from '../_lib/serverRedis';
+import type { LicenseRecord } from '../_lib/serverRedis';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -24,29 +24,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Brak klucza licencyjnego w zapytaniu.' });
   }
 
+  const sanitizedKey = rawKey.trim().toUpperCase();
+
+  const masterKey = resolveMasterDevKey(sanitizedKey);
+  if (masterKey) {
+    return res.status(200).json({
+      valid: true,
+      status: 'active',
+      licenseKey: masterKey.licenseKey,
+      days: masterKey.days,
+      daysLeft: masterKey.daysLeft,
+      activatedAt: masterKey.activatedAt,
+      expiresAt: masterKey.expiresAt,
+    });
+  }
+
   const { redis } = getRedisAndRatelimit();
   if (!redis) {
+    const fallback = resolveLocalFallbackLicense(sanitizedKey);
+    if (fallback) {
+      return res.status(200).json({
+        valid: true,
+        status: 'active',
+        licenseKey: fallback.licenseKey,
+        days: fallback.days,
+        daysLeft: fallback.daysLeft,
+        activatedAt: fallback.activatedAt,
+        expiresAt: fallback.expiresAt,
+      });
+    }
     return res.status(503).json({ error: 'Baza danych nie jest skonfigurowana.' });
   }
 
   try {
-    const sanitizedKey = rawKey.trim().toUpperCase();
-
-    // Wbudowany Master Dev Key dla środowisk lokalnych/testowych
-    if (sanitizedKey === 'USI-DEV-MASTER-PRO' || sanitizedKey === 'USI-DEV-PRO-9999' || sanitizedKey === 'DEV-PRO') {
-      const now = Date.now();
-      const durationMs = 9999 * 24 * 60 * 60 * 1000;
-      return res.status(200).json({
-        valid: true,
-        status: 'active',
-        licenseKey: sanitizedKey,
-        days: 9999,
-        daysLeft: 9999,
-        activatedAt: now,
-        expiresAt: now + durationMs,
-      });
-    }
-
     const rawRecord = await redis.get<string | LicenseRecord>(`license:${sanitizedKey}`);
 
     if (!rawRecord) {

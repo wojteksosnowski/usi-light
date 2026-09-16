@@ -21,6 +21,7 @@ import { SetbackPenthouseIcon } from '../icons/SetbackPenthouseIcon';
 import { MODIFIER_DESCRIPTORS } from '../modifiers/modifierDescriptors';
 import { ModifierType } from '../../types/modifiers';
 import { DRAWING_TOOLS } from '../toolbar/drawingToolDescriptors';
+import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 
 const ALIGN_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'align')!;
 const UNION_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'union')!;
@@ -81,6 +82,8 @@ export const ToolsGroup: React.FC = () => {
   const toggleDimensionType = useCadToolStore((s) => s.toggleDimensionType);
   const clearAllDimensions = useCadToolStore((s) => s.clearAllDimensions);
 
+  const isInteracting = useCadToolStore((s) => s.isInteracting);
+
   // Selected building object
   const selectedBuilding = useMemo(
     () => buildings.find((b) => b.id === selectedBuildingId) || null,
@@ -99,10 +102,11 @@ export const ToolsGroup: React.FC = () => {
   const [noisePercentileCutoff, setNoisePercentileCutoff] = useState<number>(
     APP_CONFIG.statistics?.defaultNoisePercentile ?? 20
   );
-  const segmentStats = useMemo(
+  const rawSegmentStats = useMemo(
     () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff }),
     [buildings, noisePercentileCutoff]
   );
+  const segmentStats = useStableWhileInteracting(rawSegmentStats, isInteracting);
 
   return (
     <div className="sidebar-group-content">

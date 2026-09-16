@@ -1357,9 +1357,9 @@ describe('modifierPipeline', () => {
 
         const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
         const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
-        // Gate modifier has storiesCount: 1 (ground floor only)
+        // Gate modifier in mod-test5.json has storiesCount: 2 (ground floor and 1st floor)
         expect(story0Wings.length).toBe(2);
-        expect(story1Wings.length).toBe(1);
+        expect(story1Wings.length).toBe(2);
         assertNoDegenerateGeometry(res);
       }
     );
@@ -1372,8 +1372,8 @@ describe('modifierPipeline', () => {
 
         const story0Wings = res.storyPolygons.filter((s) => s.storyIndex === 0);
         const story1Wings = res.storyPolygons.filter((s) => s.storyIndex === 1);
-        expect(story0Wings.length).toBe(1);
-        expect(story1Wings.length).toBe(1);
+        expect(story0Wings.length).toBe(2);
+        expect(story1Wings.length).toBe(2);
         assertNoDegenerateGeometry(res);
       }
     );

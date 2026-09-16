@@ -10,7 +10,8 @@ import {
   Car,
   TreePine,
 } from 'lucide-react';
-import { useSceneStore, useUiStore } from '../../store';
+import { useSceneStore, useUiStore, useCadToolStore } from '../../store';
+import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 import { computePolygonArea } from '@/utils/math2d';
 import {
   calculateSingleBuildingMetrics,
@@ -121,6 +122,7 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
   const layerSettings = useSceneStore((s) => s.layerSettings);
   const showCopiedToast = useUiStore((s) => s.showCopiedToast);
   const copiedToast = useUiStore((s) => s.copiedToast);
+  const isInteracting = useCadToolStore((s) => s.isInteracting);
 
   // Active building object
   const selectedBuilding = useMemo(() => {
@@ -157,11 +159,13 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     return activePlotBoundaries.reduce((sum, b) => sum + computePolygonArea(b.vertices), 0);
   }, [activePlotBoundaries]);
 
-  // Single building metrics
-  const selectedBuildingMetrics: SingleBuildingMetrics | null = useMemo(() => {
+  // Single building metrics - during drag, reuse last calculated metrics
+  const rawBuildingMetrics: SingleBuildingMetrics | null = useMemo(() => {
     if (!selectedBuilding || selectedBuilding.category === 'boundary') return null;
     return calculateSingleBuildingMetrics(selectedBuilding, activePlotBoundaries);
   }, [selectedBuilding, activePlotBoundaries]);
+
+  const selectedBuildingMetrics = useStableWhileInteracting(rawBuildingMetrics, isInteracting);
 
   // Linked group buildings
   const selectedGroupBuildings = useMemo(() => {
@@ -176,7 +180,7 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
   const isGroupSelected = selectedGroupBuildings.length > 1;
 
   // Group summary calculations
-  const groupSummary = useMemo(() => {
+  const rawGroupSummary = useMemo(() => {
     if (!isGroupSelected) return null;
     const acc = {
       totalPz: 0,
@@ -209,10 +213,14 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
     };
   }, [selectedGroupBuildings, isGroupSelected, activePlotBoundaries]);
 
+  const groupSummary = useStableWhileInteracting(rawGroupSummary, isInteracting);
+
   // Summary of tested buildings (Projektowane)
-  const testedBuildingsSummary: ProjectParametersResult = useMemo(() => {
+  const rawTestedSummary: ProjectParametersResult = useMemo(() => {
     return calculateProjectTotals(buildings, activePlotBoundaries);
   }, [buildings, activePlotBoundaries]);
+
+  const testedBuildingsSummary = useStableWhileInteracting(rawTestedSummary, isInteracting);
 
   const handleCopyToClipboard = () => {
     const lines: string[] = [

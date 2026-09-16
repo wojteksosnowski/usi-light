@@ -370,11 +370,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const shadowRangeLoops = useMemo(() => {
     if (!showShadowRange) return [];
-    if (shadowAnalysis?.envelopeLoops) {
+    if (shadowAnalysis?.envelopeLoops && shadowAnalysis.envelopeLoops.length > 0) {
       return shadowAnalysis.envelopeLoops;
     }
+    if (isInteracting) return [];
     return computeCombinedShadowEnvelope(visibleBuildings, latitude, equinoxDate, longitude);
-  }, [visibleBuildings, showShadowRange, shadowAnalysis, latitude, equinoxDate, longitude]);
+  }, [visibleBuildings, showShadowRange, shadowAnalysis, isInteracting, latitude, equinoxDate, longitude]);
 
   const liveShadowResult = useMemo(() => {
     if (!showShadowRange || !isInteracting) return null;

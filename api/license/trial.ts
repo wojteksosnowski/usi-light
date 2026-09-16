@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Ratelimit } from '@upstash/ratelimit';
 import { nanoid } from 'nanoid';
-import { getRedisAndRatelimit, formatLicenseKey } from '../_lib/serverRedis.js';
-import type { LicenseRecord } from '../_lib/serverRedis.js';
+import { getRedisAndRatelimit, formatLicenseKey } from '../_lib/serverRedis';
+import type { LicenseRecord } from '../_lib/serverRedis';
 
 // Tryb zapoznawczy: darmowy klucz PRO na 7 dni, jedno kliknięcie, bez podawania danych.
 // Limitowany rate-limitem per IP, by ograniczyć nadużycia w czasie promocji.
@@ -25,9 +25,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Niedozwolona metoda HTTP.' });
   }
 
+  const days = 7;
+  const now = Date.now();
+  const durationMs = days * 24 * 60 * 60 * 1000;
+  const uniqueSuffix = nanoid(8);
+  const licenseKey = formatLicenseKey(days, uniqueSuffix);
+
   const { redis } = getRedisAndRatelimit();
   if (!redis) {
-    return res.status(503).json({ error: 'Baza danych nie jest skonfigurowana.' });
+    // Tryb lokalny / deweloperski bez skonfigurowanego Upstash Redis
+    return res.status(200).json({
+      licenseKey,
+      days,
+      status: 'active',
+      activatedAt: now,
+      expiresAt: now + durationMs,
+      daysLeft: days,
+    });
   }
 
   if (!cachedTrialRatelimit) {
@@ -51,12 +65,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: 'Osiągnięto limit generowania kluczy (maksymalnie 5 zapytań na 10 minut z tego adresu IP). Odczekaj chwilę.',
       });
     }
-
-    const days = 7;
-    const now = Date.now();
-    const durationMs = days * 24 * 60 * 60 * 1000;
-    const uniqueSuffix = nanoid(8);
-    const licenseKey = formatLicenseKey(days, uniqueSuffix);
 
     const licenseRecord: LicenseRecord = {
       key: licenseKey,

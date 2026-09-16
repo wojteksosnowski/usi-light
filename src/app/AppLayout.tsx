@@ -28,6 +28,7 @@ import {
 } from '@/engine/analysisEngine';
 import { computeStoryHeightIntervals } from '@/engine/modifiers/modifierPipeline';
 import { SharedProjectLoadStatus } from '@/hooks/useSharedProjectLoader';
+import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 
 interface AppLayoutProps {
   currentAccuracyOptions: AnalysisAccuracyOptions;
@@ -117,13 +118,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
 
   // Segment statistics
-  const segmentStats = useMemo(
+  const rawSegmentStats = useMemo(
     () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff: 20 }),
     [buildings]
   );
+  const segmentStats = useStableWhileInteracting(rawSegmentStats, isInteracting);
 
   // Evaluate pinned points
-  const pinnedPointResults = useMemo<AnalysisPointResult[]>(() => {
+  const rawPinnedPointResults = useMemo<AnalysisPointResult[]>(() => {
     return pinnedPoints
       .map((pt, pIdx) => {
         const bldg = buildings.find((b) => b.id === pt.buildingId);
@@ -217,6 +219,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       })
       .filter(Boolean) as AnalysisPointResult[];
   }, [pinnedPoints, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
+
+  const pinnedPointResults = useStableWhileInteracting(rawPinnedPointResults, isInteracting);
 
   const selectedBuildingPinnedPoints = useMemo<AnalysisPointResult[]>(() => {
     if (!selectedBuildingId) return [];

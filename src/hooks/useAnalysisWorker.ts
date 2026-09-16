@@ -34,7 +34,6 @@ export function useAnalysisWorker(
 
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const workerRef = useRef<Worker | null>(null);
-  const isBusyRef = useRef<boolean>(false);
   const nextReqId = useRef<number>(0);
   const lastAppliedReqId = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
@@ -50,7 +49,6 @@ export function useAnalysisWorker(
 
       worker.onmessage = (e: MessageEvent<AnalysisWorkerResponse>) => {
         if (!isMountedRef.current) return;
-        isBusyRef.current = false;
         const { id, success, output } = e.data;
         if (success && output && id >= lastAppliedReqId.current) {
           lastAppliedReqId.current = id;
@@ -65,7 +63,6 @@ export function useAnalysisWorker(
 
       worker.onerror = (err) => {
         console.warn('Web Worker error, resetting worker:', err);
-        isBusyRef.current = false;
         setIsCalculating(false);
       };
 
@@ -88,11 +85,10 @@ export function useAnalysisWorker(
       }
       workerRef.current?.terminate();
       workerRef.current = null;
-      isBusyRef.current = false;
     };
   }, [initWorker]);
 
-  // Dispatch calculation to Web Worker (with Terminate-on-Supersede guarantee)
+  // Dispatch calculation to Web Worker (with persistent worker and latest-ID filtering)
   const dispatchCalculation = useCallback(
     (
       bldgs: BuildingLoop[],
@@ -108,32 +104,21 @@ export function useAnalysisWorker(
       }
 
       if (workerRef.current) {
-        // If worker is currently busy calculating a previous superseded task,
-        // terminate it immediately in 0.01ms to clear the thread and queue completely!
-        if (isBusyRef.current) {
-          workerRef.current.terminate();
-          workerRef.current = initWorker();
-          isBusyRef.current = false;
-        }
-
-        if (workerRef.current) {
-          setIsCalculating(true);
-          isBusyRef.current = true;
-          const geom = serializeGeometryToFlatBuffer(bldgs);
-          const req: AnalysisWorkerRequest = {
-            id: reqId,
-            buildings: bldgs,
-            geometryBuffer: geom.buffer,
-            settings: st,
-            options: opt,
-            sunlightMethod: method,
-            enabledAnalyses: analyses,
-          };
-          try {
-            workerRef.current.postMessage(req, [geom.buffer]);
-          } catch {
-            workerRef.current.postMessage(req);
-          }
+        setIsCalculating(true);
+        const geom = serializeGeometryToFlatBuffer(bldgs);
+        const req: AnalysisWorkerRequest = {
+          id: reqId,
+          buildings: bldgs,
+          geometryBuffer: geom.buffer,
+          settings: st,
+          options: opt,
+          sunlightMethod: method,
+          enabledAnalyses: analyses,
+        };
+        try {
+          workerRef.current.postMessage(req, [geom.buffer]);
+        } catch {
+          workerRef.current.postMessage(req);
         }
       } else {
         // Fallback to sync if worker is unavailable
@@ -141,7 +126,6 @@ export function useAnalysisWorker(
         if (isMountedRef.current) {
           setAnalysisOutput(output);
           setIsCalculating(false);
-          isBusyRef.current = false;
         }
       }
     },

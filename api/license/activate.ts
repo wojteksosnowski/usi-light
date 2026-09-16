@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getRedisAndRatelimit } from '../_lib/serverRedis.js';
-import type { LicenseRecord } from '../_lib/serverRedis.js';
+import { getRedisAndRatelimit, resolveMasterDevKey, resolveLocalFallbackLicense } from '../_lib/serverRedis';
+import type { LicenseRecord } from '../_lib/serverRedis';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -19,8 +19,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Niedozwolona metoda HTTP.' });
   }
 
+  const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+  const rawKey = body?.licenseKey;
+
+  if (!rawKey || typeof rawKey !== 'string') {
+    return res.status(400).json({ error: 'Proszę podać klucz licencyjny.' });
+  }
+
+  const sanitizedKey = rawKey.trim().toUpperCase();
+
+  const masterKey = resolveMasterDevKey(sanitizedKey);
+  if (masterKey) {
+    return res.status(200).json({
+      success: true,
+      message: 'Master Dev Key został aktywowany (Tryb Deweloperski Unlimited)!',
+      licenseKey: masterKey.licenseKey,
+      status: 'active',
+      days: masterKey.days,
+      daysLeft: masterKey.daysLeft,
+      activatedAt: masterKey.activatedAt,
+      expiresAt: masterKey.expiresAt,
+    });
+  }
+
   const { redis, ratelimit } = getRedisAndRatelimit();
   if (!redis) {
+    const fallback = resolveLocalFallbackLicense(sanitizedKey);
+    if (fallback) {
+      return res.status(200).json({
+        success: true,
+        message: `Klucz został pomyślnie aktywowany na okres ${fallback.days} dni!`,
+        licenseKey: fallback.licenseKey,
+        status: 'active',
+        days: fallback.days,
+        daysLeft: fallback.daysLeft,
+        activatedAt: fallback.activatedAt,
+        expiresAt: fallback.expiresAt,
+      });
+    }
     return res.status(503).json({ error: 'Baza danych nie jest skonfigurowana.' });
   }
 
@@ -32,31 +68,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!success) {
         return res.status(429).json({ error: 'Zbyt wiele prób aktywacji klucza. Odczekaj chwilę.' });
       }
-    }
-
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const rawKey = body?.licenseKey;
-
-    if (!rawKey || typeof rawKey !== 'string') {
-      return res.status(400).json({ error: 'Proszę podać klucz licencyjny.' });
-    }
-
-    const sanitizedKey = rawKey.trim().toUpperCase();
-
-    // Wbudowany Master Dev Key dla środowisk lokalnych/testowych
-    if (sanitizedKey === 'USI-DEV-MASTER-PRO' || sanitizedKey === 'USI-DEV-PRO-9999' || sanitizedKey === 'DEV-PRO') {
-      const now = Date.now();
-      const durationMs = 9999 * 24 * 60 * 60 * 1000;
-      return res.status(200).json({
-        success: true,
-        message: 'Master Dev Key został aktywowany (Tryb Deweloperski Unlimited)!',
-        licenseKey: sanitizedKey,
-        status: 'active',
-        days: 9999,
-        daysLeft: 9999,
-        activatedAt: now,
-        expiresAt: now + durationMs,
-      });
     }
 
     const rawRecord = await redis.get<string | LicenseRecord>(`license:${sanitizedKey}`);

@@ -789,7 +789,7 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
       <div className="iso-preview-canvas-wrap">
         <Canvas
           frameloop="demand"
-          shadows
+          shadows={{ type: THREE.PCFShadowMap }}
           dpr={[1, 2]}
           gl={{
             preserveDrawingBuffer: true,

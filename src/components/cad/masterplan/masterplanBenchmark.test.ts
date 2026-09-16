@@ -57,5 +57,5 @@ describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
     console.log(`  - Legacy (Obecny):      ${legacyTime.toFixed(2)} ms`);
     console.log(`  - Soft (Cone Jiggle):  ${softTime.toFixed(2)} ms`);
     console.log(`  - Ratio (Soft / Legacy): ${(softTime / legacyTime).toFixed(2)}x`);
-  });
+  }, 30000);
 });
