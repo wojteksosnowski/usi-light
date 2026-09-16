@@ -1,6 +1,7 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import polygonClipping from 'polygon-clipping';
 import { buildRingSegments } from '../ringSegments';
+import { fastUnionTwoPolygonsWithHoles, fastUnionTwoSimpleLoops } from './polygonBooleanTwo';
 
 /**
  * Calculates the signed area of a 2D polygon using the Shoelace formula / Green's theorem.
@@ -600,6 +601,17 @@ export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
       continue;
     }
 
+    if (group.length === 2) {
+      const fastRes = fastUnionTwoSimpleLoops(group[0], group[1]);
+      if (fastRes && fastRes.outer && fastRes.outer.length >= 3) {
+        result.push(fastRes.outer);
+        if (fastRes.holes && fastRes.holes.length > 0) {
+          result.push(...fastRes.holes);
+        }
+        continue;
+      }
+    }
+
     // 2. Normalizacja pierścieni dla danej nachodzącej grupy
     const clippingPolys: polygonClipping.Polygon[] = [];
     for (const poly of group) {
@@ -751,19 +763,26 @@ export function booleanUnionBuildings(
   }
 
   try {
-    const unionRes = polygonClipping.union([[polyA]], [[polyB]]);
-    if (!unionRes || unionRes.length === 0) {
-      return { success: false, error: 'Nie udało się połączyć obiektów.' };
+    const unionRes = fastUnionTwoPolygonsWithHoles(
+      { outer: bldgA.vertices, holes: bldgA.holes || [] },
+      { outer: bldgB.vertices, holes: bldgB.holes || [] }
+    );
+
+    if (!unionRes.success || !unionRes.result || unionRes.result.length === 0) {
+      return {
+        success: false,
+        error: unionRes.error || 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.',
+      };
     }
 
-    if (unionRes.length > 1) {
+    if (unionRes.result.length > 1) {
       return {
         success: false,
         error: 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.',
       };
     }
 
-    const pwh = clippingResultToPolygonsWithHoles(unionRes)[0];
+    const pwh = unionRes.result[0];
     if (!pwh || pwh.outer.length < 4) {
       return { success: false, error: 'Wynik sumy nie tworzy poprawnego wielokąta.' };
     }
