@@ -39,7 +39,7 @@ const algorithmButtonBaseStyle: React.CSSProperties = {
 
 /**
  * Kafelek widoku Masterplan White:
- * 1. Przełącznik algorytmu renderowania cieni (Obecny vs Nowy).
+ * 1. Przełącznik algorytmu renderowania cieni (A123 vs A456).
  * 2. Suwak godziny słońca (metoda zegarowa Astro lub odchylenie ±HH:MM dla Linijki).
  */
 export const MasterplanShadowAlgorithmCard: React.FC = () => {
@@ -106,26 +106,26 @@ export const MasterplanShadowAlgorithmCard: React.FC = () => {
             <button
               type="button"
               onClick={() => setAlgorithm('legacy')}
-              title="Obecny algorytm — 3 próbki penumbry (union poligonów)"
+              title="Algorytm A123 (Obecny) — 3 próbki penumbry (union poligonów)"
               style={{
                 ...algorithmButtonBaseStyle,
                 backgroundColor: algorithm === 'legacy' ? 'rgba(245,158,11,0.25)' : 'transparent',
                 color: algorithm === 'legacy' ? 'var(--accent-lock)' : 'var(--text-muted)',
               }}
             >
-              Obecny
+              A123
             </button>
             <button
               type="button"
               onClick={() => setAlgorithm('soft')}
-              title="Nowy algorytm — pojedynczy cień z napompowanym konturem penumbry zależnym od odległości"
+              title="Algorytm A456 — pojedynczy surowy obrys cienia podstawowego (umbra)"
               style={{
                 ...algorithmButtonBaseStyle,
                 backgroundColor: algorithm === 'soft' ? 'rgba(99,102,241,0.25)' : 'transparent',
                 color: algorithm === 'soft' ? 'var(--accent-indigo)' : 'var(--text-muted)',
               }}
             >
-              Nowy
+              A456
             </button>
           </div>
         </div>

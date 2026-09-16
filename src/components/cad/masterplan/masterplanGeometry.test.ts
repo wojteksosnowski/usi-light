@@ -7,7 +7,6 @@ import {
   extractBuildingStoryTiers,
   computeStoryShadowPolygon,
   computeStoryShadowPolygonWithHoles,
-  computeSoftShadowEnvelopeWithHoles,
 } from './masterplanGeometry';
 import { getCachedGroundShadowSamples } from './masterplanShadowCache';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
@@ -176,86 +175,40 @@ describe('masterplanGeometry', () => {
     expect(third).not.toEqual(first);
   });
 
-  it('computes soft shadow envelope with penumbra as a superset of the umbra', () => {
-    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
+  it('A456 generates a single raw umbra ground shadow layer (no penumbra layer)', () => {
     const rect = [
       { x: 0, y: 0 },
       { x: 10, y: 0 },
       { x: 10, y: 10 },
       { x: 0, y: 10 },
     ];
+    const tiers: MasterplanStoryTier[] = [
+      {
+        buildingId: 'b1',
+        storyIndex: 0,
+        polygon: rect,
+        hBottom: 0,
+        hTop: 10,
+        isProposed: false,
+        isSelected: false,
+        isHovered: false,
+      },
+    ];
+    const samples = [
+      { color: 'rgba(30, 41, 59, 0.08)', offsetMin: -1 },
+      { color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 },
+      { color: 'rgba(30, 41, 59, 0.08)', offsetMin: 1 },
+    ];
 
-    const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(rect, undefined, angles, 10, 0);
-    expect(umbra.length).toBe(1);
-    expect(penumbra.length).toBeGreaterThanOrEqual(1);
+    const res = getCachedGroundShadowSamples('soft', tiers, samples, 52.23, 21.01, 'spring', 12.0);
+    expect(res.algorithm).toBe('soft');
+    // A456 generates exactly 1 sample (single raw umbra contour)
+    expect(res.samples.length).toBe(1);
+    expect(res.samples[0].color).toBe('rgba(30, 41, 59, 0.14)');
+    expect(res.samples[0].polys.length).toBe(1);
 
     const area = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
-    const umbraArea = area(umbra[0].outer);
-    const penumbraArea = penumbra.reduce((sum, p) => sum + area(p.outer), 0);
-    expect(umbraArea).toBeGreaterThan(0);
-    // Penumbra to umbra + tarcze słońca wokół wierzchołków dachu — musi być ściśle większa (nadzbiór).
-    expect(penumbraArea).toBeGreaterThan(umbraArea);
-  });
-
-  it('returns empty result for degenerate soft shadow input', () => {
-    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
-    const result = computeSoftShadowEnvelopeWithHoles([], undefined, angles, 10, 0);
-    expect(result.umbra).toEqual([]);
-    expect(result.penumbra).toEqual([]);
-  });
-
-  it('penumbra fully contains the umbra footprint at the ground contact corners (hBottom=0)', () => {
-    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
-    const rect = [
-      { x: 0, y: 0 },
-      { x: 10, y: 0 },
-      { x: 10, y: 10 },
-      { x: 0, y: 10 },
-    ];
-
-    const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(rect, undefined, angles, 10, 0);
-    const insetCorners = [
-      { x: 0.1, y: 0.1 },
-      { x: 9.9, y: 0.1 },
-      { x: 9.9, y: 9.9 },
-      { x: 0.1, y: 9.9 },
-    ];
-    for (const v of insetCorners) {
-      expect(umbra.some((p) => isPointInPolygon(v, p.outer))).toBe(true);
-      expect(penumbra.some((p) => isPointInPolygon(v, p.outer))).toBe(true);
-    }
-  });
-
-  it('generates distinct (non-identical) umbra and penumbra for a building with a hole (donut modifier)', () => {
-    // Regresja: bug polegał na kolizji klucza cache dla ścieżki z dziurami, przez co
-    // penumbra była identyczna z umbrą (zero widocznego półcienia) dla budynków typu "donut".
-    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
-    const outer = [
-      { x: 0, y: 0 },
-      { x: 20, y: 0 },
-      { x: 20, y: 20 },
-      { x: 0, y: 20 },
-    ];
-    const hole = [
-      { x: 5, y: 5 },
-      { x: 15, y: 5 },
-      { x: 15, y: 15 },
-      { x: 5, y: 15 },
-    ];
-
-    const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(outer, [hole], angles, 10, 0);
-    expect(umbra.length).toBeGreaterThan(0);
-    expect(penumbra.length).toBeGreaterThan(0);
-
-    const area = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
-    const pwhArea = (pwh: { outer: { x: number; y: number }[]; holes?: { x: number; y: number }[][] }) => {
-      let a = area(pwh.outer);
-      if (pwh.holes) for (const h of pwh.holes) a -= area(h);
-      return Math.max(0, a);
-    };
-    const umbraArea = umbra.reduce((sum, p) => sum + pwhArea(p), 0);
-    const penumbraArea = penumbra.reduce((sum, p) => sum + pwhArea(p), 0);
-    expect(penumbraArea).toBeGreaterThan(umbraArea);
+    expect(area(res.samples[0].polys[0].outer)).toBeGreaterThan(0);
   });
 
   describe('computeStoryShadowPolygonWithHoles', () => {

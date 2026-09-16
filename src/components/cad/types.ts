@@ -114,6 +114,7 @@ export interface CadCanvasProps {
   showSatelliteLayer?: boolean;
   satelliteOpacity?: number;
   googleMapsApiKey?: string;
+  viewMode2D?: 'cad' | 'masterplan_white';
 }
 
 

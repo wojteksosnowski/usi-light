@@ -94,19 +94,3 @@ export function getOrComputeBuildingShadow(
   return result;
 }
 
-/** Jak `getOrComputeBuildingShadow`, ale dla pary umbra/penumbra liczonej jednym wywołaniem `compute`. */
-export function getOrComputeBuildingSoftShadow(
-  bldg: BuildingLoop | undefined,
-  umbraKey: SunBucketKey,
-  penumbraKey: SunBucketKey,
-  compute: () => { umbra: PolygonWithHoles[]; penumbra: PolygonWithHoles[] }
-): { umbra: PolygonWithHoles[]; penumbra: PolygonWithHoles[] } {
-  if (!bldg) return compute();
-  const cachedUmbra = getCachedBuildingShadow(bldg, umbraKey);
-  const cachedPenumbra = getCachedBuildingShadow(bldg, penumbraKey);
-  if (cachedUmbra && cachedPenumbra) return { umbra: cachedUmbra, penumbra: cachedPenumbra };
-  const result = compute();
-  setCachedBuildingShadow(bldg, umbraKey, result.umbra);
-  setCachedBuildingShadow(bldg, penumbraKey, result.penumbra);
-  return result;
-}

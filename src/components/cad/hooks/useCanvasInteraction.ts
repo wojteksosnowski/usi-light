@@ -24,6 +24,34 @@ import {
 import { APP_CONFIG } from '../../../config/appConfig';
 import { CadCanvasProps, ViewportState } from '../types';
 import { EditingEdgeLengthState, getBuildingLabelHitAtPoint } from '../renderers/buildingsRenderer';
+import { getMasterplanLabelHitAtPoint } from '../masterplan/masterplanLabels';
+
+function getLabelHitAtPoint(
+  viewMode2D: string,
+  sx: number,
+  sy: number,
+  buildings: BuildingLoop[],
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  scale: number,
+  selectedBuildingId: string | null | undefined,
+  selectedBuildingIds: string[] | null | undefined,
+  hoveredBuildingId: string | null | undefined,
+  layerSettings: Record<string, any>
+): string | null {
+  return viewMode2D === 'masterplan_white'
+    ? getMasterplanLabelHitAtPoint(
+        sx,
+        sy,
+        buildings,
+        worldToScreen,
+        scale,
+        selectedBuildingId,
+        selectedBuildingIds,
+        hoveredBuildingId,
+        layerSettings
+      )
+    : getBuildingLabelHitAtPoint(sx, sy, buildings, worldToScreen, scale, layerSettings);
+}
 
 export function isBuildingLocked(
   bldg: { layer?: string; isLocked?: boolean } | null | undefined,
@@ -278,6 +306,7 @@ export function useCanvasInteraction({
   showSatelliteLayer = false,
   satelliteOpacity = 0.65,
   googleMapsApiKey = '',
+  viewMode2D = 'cad',
   viewState,
   setViewState,
   worldToScreen,
@@ -953,12 +982,16 @@ export function useCanvasInteraction({
         }
       }
 
-      const hitLabelBldgId = getBuildingLabelHitAtPoint(
+      const hitLabelBldgId = getLabelHitAtPoint(
+        viewMode2D,
         sx,
         sy,
         buildings,
         worldToScreen,
         viewState.scale,
+        selectedBuildingId,
+        selectedBuildingIds,
+        hoveredBuildingId,
         layerSettings
       );
       if (hitLabelBldgId) {
@@ -1062,7 +1095,18 @@ export function useCanvasInteraction({
       setRotationHover(closest);
     }
 
-    const hitLabelId = getBuildingLabelHitAtPoint(sx, sy, buildings, worldToScreen, viewState.scale, layerSettings);
+    const hitLabelId = getLabelHitAtPoint(
+      viewMode2D,
+      sx,
+      sy,
+      buildings,
+      worldToScreen,
+      viewState.scale,
+      selectedBuildingId,
+      selectedBuildingIds,
+      hoveredBuildingId,
+      layerSettings
+    );
     setHoveredLabelBuildingId((prev) => (prev === hitLabelId ? prev : hitLabelId));
 
     let hoveredBldgId: string | undefined;

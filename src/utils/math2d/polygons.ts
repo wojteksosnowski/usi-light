@@ -960,8 +960,8 @@ export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
 
   if (isPointInPolygon(centroid, vertices)) {
     const cDist = getDistToBoundary(centroid);
-    const boxSpan = Math.max(maxX - minX, maxY - minY);
-    if (cDist >= boxSpan * 0.1) {
+    const minSpan = Math.min(maxX - minX, maxY - minY);
+    if (cDist >= minSpan * 0.35 || cDist >= 0.5) {
       return centroid;
     }
   }
@@ -971,16 +971,19 @@ export function getPolygonInteriorPoint(vertices: Point2D[]): Point2D {
   const stepX = (maxX - minX) / steps;
   const stepY = (maxY - minY) / steps;
   let bestPt = centroid;
-  let bestDist = -1;
+  let bestDist = isPointInPolygon(centroid, vertices) ? getDistToBoundary(centroid) : -1;
+  let bestDistToCentroid = Infinity;
 
   for (let ix = 1; ix < steps; ix++) {
     for (let iy = 1; iy < steps; iy++) {
       const candidate = { x: minX + ix * stepX, y: minY + iy * stepY };
       if (isPointInPolygon(candidate, vertices)) {
         const d = getDistToBoundary(candidate);
-        if (d > bestDist) {
+        const distToCentroid = Math.hypot(candidate.x - centroid.x, candidate.y - centroid.y);
+        if (d > bestDist + 1e-4 || (Math.abs(d - bestDist) <= 1e-4 && distToCentroid < bestDistToCentroid)) {
           bestDist = d;
           bestPt = candidate;
+          bestDistToCentroid = distToCentroid;
         }
       }
     }
@@ -1108,3 +1111,52 @@ export function collapseIdenticalConsecutiveHeightRuns<T>(
   result.push(runLast === runStart ? runStart : withMergedRange(runLast, getHBottom(runStart), getHTop(runLast)));
   return result;
 }
+
+/**
+ * Oblicza dominujący kąt orientacji wielokąta (w radianach, w przestrzeni świata CAD) ze wzorów liniowych krawędzi.
+ * Wykorzystuje ważoną długością krawędzi transformację podwójnego kąta (double-angle representation),
+ * co gwarantuje poprawność dla odcinków przeciwległych i prostopadłych.
+ * Zwraca kąt w zakresie [-π/2, π/2].
+ */
+export function computePolygonDominantAngle(vertices: Point2D[]): number {
+  if (!vertices || vertices.length < 2) return 0;
+
+  const n = vertices.length;
+  let sumSin2Theta = 0;
+  let sumCos2Theta = 0;
+  let totalLength = 0;
+
+  for (let i = 0; i < n; i++) {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % n];
+    if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) {
+      continue;
+    }
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-4) continue;
+
+    // Kąt odcinka w przestrzeni świata
+    const theta = Math.atan2(dy, dx);
+    const weight = len;
+
+    // Reprezentacja 2*theta usuwa niejednoznaczność zwrotu wektora (kierunek 0 rad i pi rad to ta sama linia)
+    sumSin2Theta += weight * Math.sin(2 * theta);
+    sumCos2Theta += weight * Math.cos(2 * theta);
+    totalLength += weight;
+  }
+
+  if (totalLength < 1e-4) return 0;
+
+  // Dominujący kąt linii w zakresie [-π/2, π/2]
+  let dominantAngle = Math.atan2(sumSin2Theta, sumCos2Theta) / 2;
+
+  // Normalizacja do [-π/2, π/2]
+  while (dominantAngle > Math.PI / 2) dominantAngle -= Math.PI;
+  while (dominantAngle < -Math.PI / 2) dominantAngle += Math.PI;
+
+  return dominantAngle;
+}
+

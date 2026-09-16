@@ -6,7 +6,7 @@ import { getCachedGroundShadowSamples, MasterplanColorSample } from './masterpla
 import { BuildingLoop } from '../../../types/geometry';
 
 describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
-  it('benchmarks legacy vs soft (cone jiggle) on real-world large scene', () => {
+  it('benchmarks legacy vs A456 (single raw umbra) on real-world large scene', () => {
     const filePath = path.resolve(__dirname, '../../../../reference/warszawa.json');
     if (!fs.existsSync(filePath)) {
       console.log('File reference/warszawa.json not found, skipping benchmark.');
@@ -46,7 +46,7 @@ describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
     }
     const legacyTime = (performance.now() - t0Legacy) / hours.length;
 
-    // 2. Benchmark Soft (Cone Jiggle)
+    // 2. Benchmark A456 (Single Raw Umbra)
     const t0Soft = performance.now();
     for (const h of hours) {
       getCachedGroundShadowSamples('soft', allTiers, samples, 52.23, 21.01, 'spring', h);
@@ -54,8 +54,8 @@ describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
     const softTime = (performance.now() - t0Soft) / hours.length;
 
     console.log(`[BENCHMARK_RESULT] Average computation time per sun position frame:`);
-    console.log(`  - Legacy (Obecny):      ${legacyTime.toFixed(2)} ms`);
-    console.log(`  - Soft (Cone Jiggle):  ${softTime.toFixed(2)} ms`);
-    console.log(`  - Ratio (Soft / Legacy): ${(softTime / legacyTime).toFixed(2)}x`);
+    console.log(`  - A123 (Legacy):          ${legacyTime.toFixed(2)} ms`);
+    console.log(`  - A456 (Raw Umbra):       ${softTime.toFixed(2)} ms`);
+    console.log(`  - Ratio (A456 / A123):    ${(softTime / legacyTime).toFixed(2)}x`);
   }, 30000);
 });

@@ -16,6 +16,11 @@ import {
   cullBuildingsByViewport,
 } from '../masterplanSpatial';
 import { getCachedRoofShadowSamples, getCachedShadowBoundsForCulling, drawMasterplanShadowResult } from '../masterplanShadowCache';
+import {
+  buildMasterplanLabelCandidates,
+  resolveMasterplanLabelCollisions,
+  renderMasterplanLabels,
+} from '../masterplanLabels';
 
 /**
  * Renderuje dachy budynków, rzutowanie cieni ΔH od wyższych kondygnacji/budynków (zacienianie wzajemne i własne)
@@ -175,43 +180,25 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     ctx.restore();
   }
 
-  // 4. Etykiety wysokościowe (bez 'H=') w środku geometrycznym najwyższego dachu każdego budynku
-  ctx.save();
-  ctx.font = `600 ${Math.max(9, Math.min(13, 11 * viewState.scale))}px Inter, system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.restore(); // Przywrócenie transformacji sprzed pętli dachów
 
-  for (const bldg of bldgs) {
-    if (!bldg.vertices || bldg.vertices.length < 3) continue;
-    const hVal = bldg.defaultHeight || 0;
-    const label = hVal % 1 === 0 ? `${hVal}m` : `${hVal.toFixed(1)}m`;
+  // 4. Inteligentny układ etykiet Master Plan:
+  // - Etykiety nie mieszczące się w geometrii kształtu znikają (zasada z CAD)
+  // - Wykrywanie i rozwiązywanie kolizji (rozsuwanie / łączenie etykiet budynek+obszar, budynek+budynek)
+  const allObjects = (visibleBuildings || buildings).filter(
+    (b: BuildingLoop) => b.vertices && b.vertices.length >= 3
+  );
 
-    const center = getPolygonCenter(bldg.vertices);
-    const screenPt = renderContext.worldToScreen(center.x, center.y);
+  const candidates = buildMasterplanLabelCandidates(
+    allObjects,
+    renderContext.worldToScreen,
+    viewState.scale,
+    selectedBuildingId,
+    selectedBuildingIds,
+    hoveredBuildingId
+  );
 
-    // Rysujemy etykietę w przestrzeni ekranu (bez odwracania Y)
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    const textWidth = ctx.measureText(label).width;
-    ctx.fillRect(screenPt.sx - textWidth / 2 - 4, screenPt.sy - 8, textWidth + 8, 16);
-
-    ctx.fillStyle = '#334155';
-    ctx.fillText(label, screenPt.sx, screenPt.sy);
-    ctx.restore();
-  }
-
-  ctx.restore();
-  ctx.restore();
-}
-
-function getPolygonCenter(points: Point2D[]): Point2D {
-  let sumX = 0;
-  let sumY = 0;
-  for (const p of points) {
-    sumX += p.x;
-    sumY += p.y;
-  }
-  return { x: sumX / points.length, y: sumY / points.length };
+  const resolvedLabels = resolveMasterplanLabelCollisions(candidates);
+  renderMasterplanLabels(ctx, resolvedLabels);
 }
 

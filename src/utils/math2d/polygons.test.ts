@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { booleanUnionBuildings, getPolygonCentroid, collapseIdenticalConsecutiveHeightRuns } from './polygons';
+import { booleanUnionBuildings, getPolygonCentroid, collapseIdenticalConsecutiveHeightRuns, computePolygonDominantAngle } from './polygons';
 import { BuildingLoop, Point2D } from '../../types/geometry';
+
 
 interface TestTier {
   polygon: Point2D[];
@@ -216,3 +217,34 @@ describe('booleanUnionBuildings', () => {
     expect(result.error).toContain('Obiekty muszą się stykać lub przenikać');
   });
 });
+
+describe('computePolygonDominantAngle', () => {
+  it('detects 0 rad (horizontal) for axis-aligned rectangle longer horizontally', () => {
+    // 50m x 10m horizontal rect
+    const poly = rect(0, 0, 50, 10);
+    const angle = computePolygonDominantAngle(poly);
+    expect(Math.abs(angle)).toBeCloseTo(0, 2);
+  });
+
+  it('detects 45 degrees for polygon rotated by 45 degrees', () => {
+    // 40m x 10m rotated by 45 deg (pi/4 rad)
+    const angleRad = Math.PI / 4;
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+    const base = [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+      { x: 40, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    const rotated = base.map((p) => ({
+      x: p.x * cos - p.y * sin,
+      y: p.x * sin + p.y * cos,
+    }));
+
+    const computedAngle = computePolygonDominantAngle(rotated);
+    expect(computedAngle).toBeCloseTo(angleRad, 2);
+  });
+});
+
+

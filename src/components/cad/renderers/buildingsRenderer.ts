@@ -1,6 +1,6 @@
 import { CadRenderContext } from '../types';
 import { Point2D } from '../../../types/geometry';
-import { getPolygonInteriorPoint, isPointInPolygon, splitSegmentByOccludingPolygons, distancePointToSegment, calculateOutwardNormal, isPolygonCCW, applyMatrixToContext, createViewportMatrix } from '@/utils/math2d';
+import { getPolygonInteriorPoint, computePolygonDominantAngle, isPointInPolygon, splitSegmentByOccludingPolygons, distancePointToSegment, calculateOutwardNormal, isPolygonCCW, applyMatrixToContext, createViewportMatrix } from '@/utils/math2d';
 import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
 
 export interface EditingEdgeLengthState {
@@ -13,8 +13,8 @@ export interface EditingEdgeLengthState {
   previewVertices?: any[];
 }
 
-// Global Path2D and AABB cache keyed by building reference and vertex version
-interface BuildingCachedGeometry {
+// Global Path2D, AABB and Label Cache keyed by building reference and vertex version
+export interface BuildingCachedGeometry {
   path: Path2D;
   minX: number;
   minY: number;
@@ -22,6 +22,14 @@ interface BuildingCachedGeometry {
   maxY: number;
   centerX: number;
   centerY: number;
+  /** Stały punkt wstawienia etykiety w układzie świata (metry) */
+  labelAnchor: Point2D;
+  /** Dominujący kąt krawędzi obiektu w radianach [-π/2, π/2] */
+  dominantAngleRad: number;
+  /** Minimalny próg skali zoom (viewState.scale), poniżej którego etykieta nie mieści się w geometrii */
+  minScaleForLabel: number;
+  /** Rozmiar karty etykiety (cardW, cardH) w pikselach */
+  cardSize: { cardW: number; cardH: number };
   /** Pole powierzchni (shoelace) po bldg.vertices - liczone raz, używane m.in. przez etykiety działek. */
   area: number;
   /** Path2D per kondygnacja różniąca się od podstawy (tylko gdy storyPolygons.length > 1), w tej samej kolejności co bldg.storyPolygons. */
@@ -32,7 +40,8 @@ interface BuildingCachedGeometry {
   zonePaths?: Path2D[];
 }
 
-const buildingGeoCache = new WeakMap<object, BuildingCachedGeometry>();
+export const buildingGeoCache = new WeakMap<object, BuildingCachedGeometry>();
+
 
 // Styl obiektów badanych (isTested=true) musi być wyraźnie bardziej eksponowany niż obiektów-przeszkód.
 const TESTED_STROKE = { normal: '#0ea5e9', selected: '#0284c7' };
@@ -66,6 +75,22 @@ function getBoundaryStyle(areaType: 'plot' | 'playground' | 'paved' = 'plot', is
   };
 }
 
+// Path2D nie ma stanu zależnego od wywołania - jedna definicja modułowa zamiast tworzenia
+// nowej funkcji-fabryki przy każdym cache miss w getOrComputeBuildingGeo.
+function createSafePath2D(): Path2D {
+  if (typeof Path2D !== 'undefined') {
+    return new Path2D();
+  }
+  return {
+    moveTo: () => {},
+    lineTo: () => {},
+    closePath: () => {},
+    arc: () => {},
+    roundRect: () => {},
+    rect: () => {},
+  } as unknown as Path2D;
+}
+
 // Cache szerokości tekstu (ctx.measureText) kluczowany po (font, tekst) - deterministyczne,
 // nie wymaga inwalidacji: ten sam font+tekst zawsze da tę samą szerokość.
 const textWidthCache = new Map<string, number>();
@@ -83,7 +108,7 @@ function measureTextWidthCached(ctx: CanvasRenderingContext2D, text: string): nu
  * etykiety, hit-test kliknięcia (getBuildingLabelHitAtPoint) i zakotwiczenie minipanelu
  * (getBuildingLabelScreenAnchor), żeby nie utrzymywać trzech kopii tej samej tabeli rozmiarów.
  */
-function getBuildingLabelCardSize(bldg: any): { cardW: number; cardH: number } {
+export function getBuildingLabelCardSize(bldg: any): { cardW: number; cardH: number } {
   const isBoundary = bldg.category === 'boundary';
   const isPlayground = isBoundary && bldg.areaType === 'playground';
   const isBalcony = bldg.category === 'balcony';
@@ -120,16 +145,13 @@ export function getBuildingLabelHitAtPoint(
     const geo = getOrComputeBuildingGeo(bldg);
     if (!geo) continue;
 
-    const { sx: csx, sy: csy } = worldToScreen(geo.centerX, geo.centerY);
+    // Szybkie odrzucenie O(1) po wyliczonym progu zoom
+    if (scale < geo.minScaleForLabel) continue;
+
+    const { sx: csx, sy: csy } = worldToScreen(geo.labelAnchor.x, geo.labelAnchor.y);
     if (!Number.isFinite(csx) || !Number.isFinite(csy)) continue;
 
-    const screenBldgW = (geo.maxX - geo.minX) * scale;
-    const screenBldgH = (geo.maxY - geo.minY) * scale;
-
-    const { cardW, cardH } = getBuildingLabelCardSize(bldg);
-
-    if (cardW > screenBldgW || cardH > screenBldgH) continue;
-
+    const { cardW, cardH } = geo.cardSize;
     const halfW = cardW / 2;
     const halfH = cardH / 2;
     if (
@@ -157,13 +179,14 @@ export function getBuildingLabelScreenAnchor(
   const geo = getOrComputeBuildingGeo(bldg);
   if (!geo) return null;
 
-  const { sx, sy } = worldToScreen(geo.centerX, geo.centerY);
+  const { sx, sy } = worldToScreen(geo.labelAnchor.x, geo.labelAnchor.y);
   if (!Number.isFinite(sx) || !Number.isFinite(sy)) return null;
 
-  const { cardH } = getBuildingLabelCardSize(bldg);
+  const { cardH } = geo.cardSize;
 
   return { sx, bottomSy: sy + cardH / 2 };
 }
+
 
 /**
  * Renders Lucide-style Lock icon on canvas
@@ -255,9 +278,11 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   const cached = buildingGeoCache.get(cacheKey);
   if (cached) return cached;
 
-  const path = new Path2D();
+  const path = createSafePath2D();
   let minX = Infinity;
   let minY = Infinity;
+
+
   let maxX = -Infinity;
   let maxY = -Infinity;
   let sumX = 0;
@@ -315,6 +340,24 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   if (validCount < 3) return null;
 
   const interior = getPolygonInteriorPoint(largestWingVertices);
+  const dominantAngleRad = computePolygonDominantAngle(largestWingVertices);
+
+  // Rozmiar karty etykiety w pikselach
+  const cardSize = getBuildingLabelCardSize(bldg);
+
+  // Wymiary obwiedni w metrach (przestrzeń świata)
+  const spanX = Math.max(0.1, maxX - minX);
+  const spanY = Math.max(0.1, maxY - minY);
+  const maxSpan = Math.max(spanX, spanY);
+  const minSpan = Math.min(spanX, spanY);
+
+  // Minimalna skala (viewState.scale w px/m), przy której etykieta mieści się w geometrii
+  // Etykieta mieści się, gdy:
+  // a) Standardowy bounding box: cardW <= spanX * scale && cardH <= spanY * scale
+  // b) Kształt wydłużony (wąskie skrzydło): cardW <= maxSpan * scale && cardH * 0.75 <= minSpan * scale
+  const minScaleStandard = Math.max(cardSize.cardW / spanX, cardSize.cardH / spanY);
+  const minScaleElongated = Math.max(cardSize.cardW / maxSpan, (cardSize.cardH * 0.75) / minSpan);
+  const minScaleForLabel = Math.min(minScaleStandard, minScaleElongated);
 
   // Pole powierzchni (shoelace) po bldg.vertices (nie activeFootprint) - używane przez etykiety działek.
   let area = 0;
@@ -346,7 +389,7 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
         Math.hypot(poly[0].x - bldg.vertices[0].x, poly[0].y - bldg.vertices[0].y) > 0.01;
 
       if (isDifferentFromBase) {
-        const storyPath = new Path2D();
+        const storyPath = createSafePath2D();
         storyPath.moveTo(poly[0].x, poly[0].y);
         for (let i = 1; i < poly.length; i++) {
           storyPath.lineTo(poly[i].x, poly[i].y);
@@ -361,7 +404,7 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
       if (sf.holes && sf.holes.length > 0) {
         for (const hole of sf.holes) {
           if (hole.length < 3) continue;
-          const holePath = new Path2D();
+          const holePath = createSafePath2D();
           holePath.moveTo(hole[0].x, hole[0].y);
           for (let h = 1; h < hole.length; h++) {
             holePath.lineTo(hole[h].x, hole[h].y);
@@ -380,11 +423,11 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
     zonePaths = [];
     for (const zf of bldg.zonePolygons) {
       if (!zf.polygon || zf.polygon.length < 3) {
-        zonePaths.push(new Path2D());
+        zonePaths.push(createSafePath2D());
         continue;
       }
       const poly = zf.polygon;
-      const zonePath = new Path2D();
+      const zonePath = createSafePath2D();
       zonePath.moveTo(poly[0].x, poly[0].y);
       for (let i = 1; i < poly.length; i++) {
         zonePath.lineTo(poly[i].x, poly[i].y);
@@ -406,6 +449,7 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
     }
   }
 
+
   const res: BuildingCachedGeometry = {
     path,
     minX,
@@ -414,6 +458,10 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
     maxY,
     centerX: interior.x,
     centerY: interior.y,
+    labelAnchor: interior,
+    dominantAngleRad,
+    minScaleForLabel,
+    cardSize,
     area,
     storyPaths,
     storyHolePaths,
@@ -422,6 +470,9 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   buildingGeoCache.set(cacheKey, res);
   return res;
 }
+
+export { getOrComputeBuildingGeo };
+
 
 export function renderBuildings(
   rc: CadRenderContext,
@@ -452,6 +503,7 @@ export function renderBuildings(
 
   const { ctx, worldToScreen, screenToWorld, width, height, viewState, viewRotationDeg } = rc;
   const s = viewState.scale;
+  const viewRotRad = ((viewRotationDeg || 0) * Math.PI) / 180;
 
   // Viewport bounds in world space for culling
   const c1 = screenToWorld(0, 0);
@@ -1012,43 +1064,53 @@ export function renderBuildings(
 
     // Centroid Label for Building
     if (geo) {
-      const cx = geo.centerX;
-      const cy = geo.centerY;
-      const { sx: csx, sy: csy } = worldToScreen(cx, cy);
+      // Szybkie odrzucenie O(1) przy oddalonym zoomie
+      if (viewState.scale >= geo.minScaleForLabel) {
+        const cx = geo.labelAnchor.x;
+        const cy = geo.labelAnchor.y;
+        const { sx: csx, sy: csy } = worldToScreen(cx, cy);
 
-      const screenBldgW = (geo.maxX - geo.minX) * viewState.scale;
-      const screenBldgH = (geo.maxY - geo.minY) * viewState.scale;
+        if (Number.isFinite(csx) && Number.isFinite(csy)) {
+          const isBoundary = bldg.category === 'boundary';
+          const isPlayground = isBoundary && bldg.areaType === 'playground';
+          const isBalcony = bldg.category === 'balcony';
+          const isLabelHovered = bldg.id === hoveredLabelBuildingId;
 
-      if (Number.isFinite(csx) && Number.isFinite(csy)) {
-        const isBoundary = bldg.category === 'boundary';
-        const isPlayground = isBoundary && bldg.areaType === 'playground';
-        const isBalcony = bldg.category === 'balcony';
-        const isLabelHovered = bldg.id === hoveredLabelBuildingId;
+          // Oblicz kąt ekranowy dla orientacji etykiety
+          let screenAngle = geo.dominantAngleRad - viewRotRad;
+          while (screenAngle > Math.PI / 2) screenAngle -= Math.PI;
+          while (screenAngle < -Math.PI / 2) screenAngle += Math.PI;
 
-        if (isBoundary) {
-          // Pole działki / utwardzenia - z cache (liczone raz przy budowie geo, nie co klatkę)
-          const isPaved = isBoundary && bldg.areaType === 'paved';
-          const areaText = isPaved
-            ? `Utwardzenie ${Math.round(geo.area)} m²`
-            : `${Math.round(geo.area)} m²`;
+          const hasRotation = Math.abs(screenAngle) > 0.02;
 
-          const hasPlotNumber = !isPlayground && !isPaved && !!(bldg.plotNumber && bldg.plotNumber.trim());
-          const headerName = hasPlotNumber
-            ? (bldg.plotNumber!.startsWith('Dz.') ? bldg.plotNumber! : `Dz. ${bldg.plotNumber}`)
-            : '';
+          ctx.save();
+          ctx.translate(csx, csy);
+          if (hasRotation) {
+            ctx.rotate(screenAngle);
+          }
 
-          const showHeader = hasPlotNumber;
+          if (isBoundary) {
+            // Pole działki / utwardzenia - z cache (liczone raz przy budowie geo, nie co klatkę)
+            const isPaved = isBoundary && bldg.areaType === 'paved';
+            const areaText = isPaved
+              ? `Utwardzenie ${Math.round(geo.area)} m²`
+              : `${Math.round(geo.area)} m²`;
 
-          ctx.font = showHeader ? 'bold 12px Inter, sans-serif' : 'bold 11px Inter, monospace';
-          const nameW = showHeader ? measureTextWidthCached(ctx, headerName) : 0;
-          ctx.font = '10px Inter, monospace';
-          const areaW = measureTextWidthCached(ctx, areaText);
+            const hasPlotNumber = !isPlayground && !isPaved && !!(bldg.plotNumber && bldg.plotNumber.trim());
+            const headerName = hasPlotNumber
+              ? (bldg.plotNumber!.startsWith('Dz.') ? bldg.plotNumber! : `Dz. ${bldg.plotNumber}`)
+              : '';
 
-          const cardW = showHeader ? Math.max(nameW, areaW) + 20 : areaW + 16;
-          const cardH = showHeader ? 34 : 22;
+            const showHeader = hasPlotNumber;
 
-          // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
-          if (cardW <= screenBldgW && cardH <= screenBldgH) {
+            ctx.font = showHeader ? 'bold 12px Inter, sans-serif' : 'bold 11px Inter, monospace';
+            const nameW = showHeader ? measureTextWidthCached(ctx, headerName) : 0;
+            ctx.font = '10px Inter, monospace';
+            const areaW = measureTextWidthCached(ctx, areaText);
+
+            const cardW = showHeader ? Math.max(nameW, areaW) + 20 : areaW + 16;
+            const cardH = showHeader ? 34 : 22;
+
             ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
             ctx.strokeStyle = isLabelHovered
               ? '#38bdf8'
@@ -1059,7 +1121,7 @@ export function renderBuildings(
               : (isSelected ? '#ef4444' : 'rgba(239, 68, 68, 0.5)');
             ctx.lineWidth = isLabelHovered ? 2 : isSelected ? 1.5 : 1;
             ctx.beginPath();
-            ctx.roundRect(csx - cardW / 2, csy - cardH / 2, cardW, cardH, 6);
+            ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 6);
             ctx.fill();
             ctx.stroke();
 
@@ -1069,93 +1131,87 @@ export function renderBuildings(
               ctx.font = 'bold 12px Inter, sans-serif';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(headerName, csx, csy - 6);
+              ctx.fillText(headerName, 0, -6);
 
               // Powierzchnia
               ctx.fillStyle = '#cbd5e1';
               ctx.font = '10px Inter, monospace';
-              ctx.fillText(areaText, csx, csy + 8);
+              ctx.fillText(areaText, 0, 8);
             } else {
               // Tylko powierzchnia / opis utwardzenia
               ctx.fillStyle = isPlayground ? '#fbbf24' : isPaved ? '#cbd5e1' : '#fca5a5';
               ctx.font = 'bold 11px Inter, monospace';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(areaText, csx, csy);
+              ctx.fillText(areaText, 0, 0);
             }
-          }
-        } else if (isBalcony) {
-          const balconyText = `Balkon ${bldg.defaultHeight}m`;
+          } else if (isBalcony) {
+            const balconyText = `Balkon ${bldg.defaultHeight}m`;
 
-          ctx.font = 'bold 11px Inter, sans-serif';
-          const textW = measureTextWidthCached(ctx, balconyText);
-          const iconCount = (isLocked ? 1 : 0) + (isGhosted ? 1 : 0);
-          const iconsW = iconCount * 14;
-          const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
-          const cardW = contentW + 16;
-          const cardH = 22;
+            ctx.font = 'bold 11px Inter, sans-serif';
+            const textW = measureTextWidthCached(ctx, balconyText);
+            const iconCount = (isLocked ? 1 : 0) + (isGhosted ? 1 : 0);
+            const iconsW = iconCount * 14;
+            const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
+            const cardW = contentW + 16;
+            const cardH = 22;
 
-          // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
-          if (cardW <= screenBldgW && cardH <= screenBldgH) {
             ctx.fillStyle = 'rgba(11, 19, 41, 0.9)';
             ctx.strokeStyle = isLabelHovered ? '#38bdf8' : isSelected ? '#c084fc' : 'rgba(192, 132, 252, 0.5)';
             ctx.lineWidth = isLabelHovered ? 2 : 1;
             ctx.beginPath();
-            ctx.roundRect(csx - cardW / 2, csy - cardH / 2, cardW, cardH, 5);
+            ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 5);
             ctx.fill();
             ctx.stroke();
 
-            const startX = csx - contentW / 2;
+            const startX = -contentW / 2;
             ctx.fillStyle = '#d8b4fe';
             ctx.font = 'bold 11px Inter, sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(balconyText, startX, csy);
+            ctx.fillText(balconyText, startX, 0);
 
             let curIconX = startX + textW + 8;
             if (isLocked) {
-              drawLucideLockIcon(ctx, curIconX, csy, '#fbbf24');
+              drawLucideLockIcon(ctx, curIconX, 0, '#fbbf24');
               curIconX += 13;
             }
             if (isGhosted) {
-              drawLucideGhostIcon(ctx, curIconX, csy, '#c084fc');
+              drawLucideGhostIcon(ctx, curIconX, 0, '#c084fc');
             }
-          }
-        } else {
-          const heightText = `${bldg.defaultHeight}m`;
+          } else {
+            const heightText = `${bldg.defaultHeight}m`;
 
-          // Powiększony opis wysokości budynku o 20% (13px -> 16px)
-          ctx.font = 'bold 16px Inter, sans-serif';
-          const textW = measureTextWidthCached(ctx, heightText);
-          const iconCount = (isLocked ? 1 : 0) + (isGhosted ? 1 : 0);
-          const iconsW = iconCount * 14;
-          const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
+            // Powiększony opis wysokości budynku o 20% (13px -> 16px)
+            ctx.font = 'bold 16px Inter, sans-serif';
+            const textW = measureTextWidthCached(ctx, heightText);
+            const iconCount = (isLocked ? 1 : 0) + (isGhosted ? 1 : 0);
+            const iconsW = iconCount * 14;
+            const contentW = textW + (iconCount > 0 ? 6 + iconsW : 0);
 
-          // Kolorowe wskaźniki statusu [included: zielony, tested: indygo, cityCentre: pomarańczowy, typ: usługowy/garaż]
-          const isIncluded = bldg.isIncluded !== false;
-          const isService = bldg.buildingType === 'service';
-          const isGarage = bldg.buildingType === 'garage';
-          const isCityCentre = bldg.isCityCentre || (Array.isArray(bldg.segments) && bldg.segments.some((s: any) => s.isCityCentre));
+            // Kolorowe wskaźniki statusu [included: zielony, tested: indygo, cityCentre: pomarańczowy, typ: usługowy/garaż]
+            const isIncluded = bldg.isIncluded !== false;
+            const isService = bldg.buildingType === 'service';
+            const isGarage = bldg.buildingType === 'garage';
+            const isCityCentre = bldg.isCityCentre || (Array.isArray(bldg.segments) && bldg.segments.some((s: any) => s.isCityCentre));
 
-          const dots: { color: string; active: boolean }[] = [
-            { color: '#10b981', active: isIncluded },
-            { color: '#6366f1', active: isTested },
-            { color: '#f59e0b', active: isCityCentre },
-          ];
-          if (isService) {
-            dots.push({ color: '#f59e0b', active: true });
-          } else if (isGarage) {
-            dots.push({ color: '#64748b', active: true });
-          }
+            const dots: { color: string; active: boolean }[] = [
+              { color: '#10b981', active: isIncluded },
+              { color: '#6366f1', active: isTested },
+              { color: '#f59e0b', active: isCityCentre },
+            ];
+            if (isService) {
+              dots.push({ color: '#f59e0b', active: true });
+            } else if (isGarage) {
+              dots.push({ color: '#64748b', active: true });
+            }
 
-          const dotRadius = 2.5;
-          const dotSpacing = 7;
-          const totalDotsW = (dots.length - 1) * dotSpacing;
-          const cardW = Math.max(contentW + 16, totalDotsW + 18, 42);
-          const cardH = 34;
+            const dotRadius = 2.5;
+            const dotSpacing = 7;
+            const totalDotsW = (dots.length - 1) * dotSpacing;
+            const cardW = Math.max(contentW + 16, totalDotsW + 18, 42);
+            const cardH = 34;
 
-          // Nie pokazuj etykiety jeśli nie mieści się w obiekcie
-          if (cardW <= screenBldgW && cardH <= screenBldgH) {
             ctx.fillStyle = 'rgba(11, 19, 41, 0.9)';
             ctx.strokeStyle = isLabelHovered
               ? '#38bdf8'
@@ -1164,31 +1220,31 @@ export function renderBuildings(
               : 'rgba(100, 116, 139, 0.4)';
             ctx.lineWidth = isLabelHovered ? 2 : 1;
             ctx.beginPath();
-            ctx.roundRect(csx - cardW / 2, csy - cardH / 2, cardW, cardH, 6);
+            ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 6);
             ctx.fill();
             ctx.stroke();
 
             // Renderuj powiększony tekst wysokości
-            const startX = csx - contentW / 2;
+            const startX = -contentW / 2;
             ctx.fillStyle = isTested ? '#93c5fd' : '#f8fafc';
             ctx.font = 'bold 16px Inter, sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(heightText, startX, csy - 6);
+            ctx.fillText(heightText, startX, -6);
 
             // Renderuj wektorowe ikony kłódki / ducha
             let curIconX = startX + textW + 8;
             if (isLocked) {
-              drawLucideLockIcon(ctx, curIconX, csy - 6, '#fbbf24');
+              drawLucideLockIcon(ctx, curIconX, -6, '#fbbf24');
               curIconX += 13;
             }
             if (isGhosted) {
-              drawLucideGhostIcon(ctx, curIconX, csy - 6, '#c084fc');
+              drawLucideGhostIcon(ctx, curIconX, -6, '#c084fc');
             }
 
             // Rząd kolorowych kropek statusu pod wysokością
-            const startDotX = csx - totalDotsW / 2;
-            const dotY = csy + 8;
+            const startDotX = -totalDotsW / 2;
+            const dotY = 8;
 
             for (let dIdx = 0; dIdx < dots.length; dIdx++) {
               const d = dots[dIdx];
@@ -1199,9 +1255,12 @@ export function renderBuildings(
               ctx.fill();
             }
           }
+
+          ctx.restore();
         }
       }
     }
+
     ctx.restore();
   }
 

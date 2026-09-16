@@ -6,12 +6,11 @@ import {
 import {
   getMasterplanSolarAngles,
   computeStoryShadowPolygonWithHoles,
-  computeSoftShadowEnvelopeWithHoles,
   polygonFingerprint,
   MasterplanStoryTier,
 } from './masterplanGeometry';
 import { clusterTiersByShadowOverlap, unionPolygonsWithHolesHierarchical, Bounds, polygonsWithHolesBounds } from './masterplanSpatial';
-import { getCachedBuildingShadow, makeSunBucketKey, getOrComputeBuildingShadow, getOrComputeBuildingSoftShadow } from '@/engine/buildingGeometryCache';
+import { getCachedBuildingShadow, makeSunBucketKey, getOrComputeBuildingShadow } from '@/engine/buildingGeometryCache';
 
 export type MasterplanShadowAlgorithm = 'legacy' | 'soft';
 
@@ -98,14 +97,13 @@ function computeLegacySamples(
 }
 
 /**
- * Miękki cień (penumbra jako promienista tarcza słońca wokół umbry):
- * Generuje 2 warstwy — Penumbra (nadzbiór, rysowana pierwsza) i Umbra (podzbiór, na wierzchu).
- * Używa unii hierarchicznej per klaster AABB.
+ * Algorytm A456 (pojedynczy surowy obrys cienia podstawowego — umbra):
+ * Generuje 1 warstwę cienia podstawowego dla aktualnej pozycji słońca (offset 0).
+ * Używa unii hierarchicznej per klaster AABB i bufora per obiekt.
  */
 function computeSoftSamples(
   tiers: MasterplanStoryTier[],
   umbraColor: string,
-  penumbraColor: string,
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
@@ -116,29 +114,23 @@ function computeSoftSamples(
   const validTiers = tiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0);
   const clusters = clusterTiersByShadowOverlap(validTiers, angles);
 
-  const penumbraPolysAll: PolygonWithHoles[] = [];
   const umbraPolysAll: PolygonWithHoles[] = [];
 
   for (const cluster of clusters) {
-    const cPenumbra: PolygonWithHoles[] = [];
     const cUmbra: PolygonWithHoles[] = [];
 
     for (const tier of cluster) {
-      const umbraKey = makeSunBucketKey(tier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, 'umbra');
-      const penumbraKey = makeSunBucketKey(tier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, 'penumbra');
-      const { umbra, penumbra } = getOrComputeBuildingSoftShadow(tier.bldgRef, umbraKey, penumbraKey, () =>
-        computeSoftShadowEnvelopeWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom)
+      const umbraKey = makeSunBucketKey(tier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0);
+      const polys = getOrComputeBuildingShadow(tier.bldgRef, umbraKey, () =>
+        computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom)
       );
-      cUmbra.push(...umbra);
-      cPenumbra.push(...penumbra);
+      cUmbra.push(...polys);
     }
 
     accumulatePolygons(umbraPolysAll, cUmbra);
-    accumulatePolygons(penumbraPolysAll, cPenumbra);
   }
 
   const samples: MasterplanShadowSample[] = [];
-  if (penumbraPolysAll.length > 0) samples.push({ color: penumbraColor, polys: penumbraPolysAll });
   if (umbraPolysAll.length > 0) samples.push({ color: umbraColor, polys: umbraPolysAll });
 
   return samples;
@@ -225,7 +217,7 @@ export function getCachedGroundShadowSamples(
 
   const shadowSamples =
     algorithm === 'soft'
-      ? computeSoftSamples(tiers, umbraSample.color, penumbraSample.color, latitude, longitude, equinoxDate, hourFraction, method)
+      ? computeSoftSamples(tiers, umbraSample.color, latitude, longitude, equinoxDate, hourFraction, method)
       : computeLegacySamples(tiers, samples, latitude, longitude, equinoxDate, hourFraction, method);
 
   const result: MasterplanShadowRenderResult = { algorithm, samples: shadowSamples };
@@ -260,7 +252,6 @@ export function getCachedRoofShadowSamples(
 
   if (algorithm === 'soft') {
     const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
-    const penumbraPolys: PolygonWithHoles[] = [];
     const umbraPolys: PolygonWithHoles[] = [];
 
     for (const higherTier of higherTiers) {
@@ -269,24 +260,17 @@ export function getCachedRoofShadowSamples(
       if (deltaHTop <= 0.05) continue;
 
       const extra = `roof:${currentH.toFixed(2)}`;
-      const umbraKey = makeSunBucketKey(higherTier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, `${extra}:umbra`);
-      const penumbraKey = makeSunBucketKey(higherTier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, `${extra}:penumbra`);
-      const { umbra, penumbra } = getOrComputeBuildingSoftShadow(higherTier.bldgRef, umbraKey, penumbraKey, () =>
-        computeSoftShadowEnvelopeWithHoles(higherTier.polygon, higherTier.holes, angles, deltaHTop, deltaHBase)
+      const key = makeSunBucketKey(higherTier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, extra);
+      const shadowRoofPolys = getOrComputeBuildingShadow(higherTier.bldgRef, key, () =>
+        computeStoryShadowPolygonWithHoles(higherTier.polygon, higherTier.holes, angles, deltaHTop, deltaHBase)
       );
-      umbraPolys.push(...umbra);
-      penumbraPolys.push(...penumbra);
+      umbraPolys.push(...shadowRoofPolys);
     }
 
-    const penumbraColor = samples[0]?.color ?? DEFAULT_PENUMBRA_SAMPLE.color;
     const umbraColor = samples[1]?.color ?? samples[0]?.color ?? DEFAULT_UMBRA_SAMPLE.color;
-
-    const mergedPenumbra: PolygonWithHoles[] = [];
     const mergedUmbra: PolygonWithHoles[] = [];
-    accumulatePolygons(mergedPenumbra, penumbraPolys);
     accumulatePolygons(mergedUmbra, umbraPolys);
 
-    if (mergedPenumbra.length > 0) shadowSamples.push({ color: penumbraColor, polys: mergedPenumbra });
     if (mergedUmbra.length > 0) shadowSamples.push({ color: umbraColor, polys: mergedUmbra });
   } else {
     for (const sample of samples) {

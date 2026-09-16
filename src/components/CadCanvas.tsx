@@ -12,6 +12,7 @@ import { RecorderOverlay, SessionCatalogModal } from '../modules/action-recorder
 import { Recording3DPipWindow } from './preview/Recording3DPipWindow';
 import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
 import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
+import { getMasterplanLabelScreenAnchor } from './cad/masterplan/masterplanLabels';
 import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
 import { GoogleTileManager } from '../utils/googleTileManager';
 import { HereTileManager } from '../utils/hereTileManager';
@@ -289,6 +290,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   // Canvas interaction hook
   const interaction = useCanvasInteraction({
     ...props,
+    viewMode2D,
     containerRef,
     canvasRef,
     viewState,
@@ -741,7 +743,17 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     ? buildings.find((b) => b.id === expandedLabelBuildingId) || null
     : null;
   const expandedLabelAnchor = expandedLabelBuilding
-    ? getBuildingLabelScreenAnchor(expandedLabelBuilding, worldToScreen)
+    ? viewMode2D === 'masterplan_white'
+      ? getMasterplanLabelScreenAnchor(
+          expandedLabelBuilding,
+          buildings,
+          worldToScreen,
+          viewState.scale,
+          selectedBuildingId,
+          selectedBuildingIds,
+          interaction.hoveredBuildingId
+        )
+      : getBuildingLabelScreenAnchor(expandedLabelBuilding, worldToScreen)
     : null;
 
   return (
