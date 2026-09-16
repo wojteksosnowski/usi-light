@@ -35,6 +35,7 @@ export interface CadRenderContext {
   equinoxDate: 'spring' | 'autumn';
   sunlightMethod?: 'raycasting' | 'segments';
   masterplanShadowAlgorithm?: 'legacy' | 'soft';
+  masterplanHourFraction?: number;
   isInteracting?: boolean;
 }
 
@@ -65,6 +66,7 @@ export interface CadCanvasProps {
   longitude?: number;
   equinoxDate?: 'spring' | 'autumn';
   masterplanShadowAlgorithm?: 'legacy' | 'soft';
+  masterplanHourFraction?: number;
   fitRequest?: { nonce: number; ignoreSelection: boolean };
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;

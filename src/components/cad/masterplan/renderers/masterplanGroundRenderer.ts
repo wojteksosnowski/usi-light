@@ -6,7 +6,7 @@ import {
   extractBuildingStoryTiers,
   MasterplanStoryTier,
 } from '../masterplanGeometry';
-import { getCachedGroundShadowSamples, drawMasterplanShadowResult, fillPolys } from '../masterplanShadowCache';
+import { getCachedGroundShadowSamples, drawMasterplanShadowResult } from '../masterplanShadowCache';
 
 /**
  * Paleta barwna dla podkładu „Masterplan White”
@@ -26,7 +26,6 @@ export const MASTERPLAN_COLORS = {
   projectBoundary: '#DC2626',
   projectBoundaryPlayground: '#D97706',
   projectBoundaryPaved: '#64748B',
-  aoGround: 'rgba(15, 23, 42, 0.12)',
   shadowSamples: [
     { weight: 0.25, color: 'rgba(30, 41, 59, 0.08)', offsetMin: -1 },
     { weight: 0.50, color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 },
@@ -42,12 +41,13 @@ export const MASTERPLAN_COLORS = {
 };
 
 /**
- * Renderuje podkład geodezyjny (plamy wód, zieleni, dróg, działek), kontaktowe AO oraz cienie gruntowe.
+ * Renderuje podkład geodezyjny (plamy wód, zieleni, dróg, działek) oraz cienie gruntowe.
  */
 export function renderMasterplanGround(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds } = context;
-  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm } = renderContext;
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod } = renderContext;
   const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
+  const method = sunlightMethod ?? 'raycasting';
 
   const bldgs = visibleBuildings || buildings;
 
@@ -240,29 +240,8 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     }
   }
 
-  // 3. Kontaktowe AO gruntowe wokół budynków (rozmyte halo pod spodem z wycięciem otworów/patio)
+  // 3. Pełne Cienie Gruntowe z uwzględnieniem kondygnacji i modyfikatorów (Boolean Union per próbka penumbry)
   const actualBuildings = bldgs.filter((b: BuildingLoop) => b.category !== 'boundary' && b.defaultHeight > 0);
-  ctx.save();
-  ctx.fillStyle = MASTERPLAN_COLORS.aoGround;
-  ctx.shadowColor = 'rgba(15, 23, 42, 0.25)';
-  ctx.shadowBlur = Math.max(3, 4 * viewState.scale);
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 0;
-
-  for (const bldg of actualBuildings) {
-    const tiers = extractBuildingStoryTiers(bldg);
-    const baseTiers = tiers.filter((t) => t.hBottom === 0 || t.storyIndex === 0);
-    const tiersToRender = baseTiers.length > 0 ? baseTiers : [{ polygon: bldg.vertices, holes: bldg.holes || [] }];
-
-    fillPolys(
-      ctx,
-      tiersToRender.map((tier) => ({ outer: tier.polygon, holes: tier.holes || [] })),
-      MASTERPLAN_COLORS.aoGround
-    );
-  }
-  ctx.restore();
-
-  // 4. Pełne Cienie Gruntowe z uwzględnieniem kondygnacji i modyfikatorów (Boolean Union per próbka penumbry)
   const allTiers: MasterplanStoryTier[] = [];
   for (const bldg of actualBuildings) {
     allTiers.push(...extractBuildingStoryTiers(bldg));
@@ -275,7 +254,8 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     latitude,
     longitude,
     equinoxDate,
-    hourFraction
+    hourFraction,
+    method
   );
 
   ctx.save();

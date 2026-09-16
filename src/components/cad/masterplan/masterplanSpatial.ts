@@ -1,4 +1,4 @@
-import { computePointsBoundingBox } from '@/utils/math2d/polygons';
+import { computePointsBoundingBox, unionPolygonLoops, PolygonWithHoles, unionPolygonsWithHoles } from '@/utils/math2d/polygons';
 import { SolarAngles, MasterplanStoryTier, computeShadowOffsetVector } from './masterplanGeometry';
 
 export interface Bounds {
@@ -84,4 +84,29 @@ export function clusterTiersByShadowOverlap(
     group.push(tiers[i]);
   }
   return [...groups.values()];
+}
+
+/**
+ * Łączy wielokąty parami hierarchicznie poziom po poziomie (Hierarchical Pairwise Union),
+ * drastycznie redukując złożoność obliczeniową i liczbę wierzchołków wchodzących do sweep-line.
+ */
+export function unionPolygonsWithHolesHierarchical(polys: PolygonWithHoles[]): PolygonWithHoles[] {
+  if (polys.length === 0) return [];
+  if (polys.length === 1) return polys;
+  if (polys.length === 2) return unionPolygonsWithHoles(polys);
+
+  let current = polys.map((p) => [p]);
+  while (current.length > 1) {
+    const next: PolygonWithHoles[][] = [];
+    for (let i = 0; i < current.length; i += 2) {
+      if (i + 1 < current.length) {
+        next.push(unionPolygonsWithHoles([...current[i], ...current[i + 1]]));
+      } else {
+        next.push(current[i]);
+      }
+    }
+    if (next.length === current.length) break;
+    current = next;
+  }
+  return current[0] || [];
 }

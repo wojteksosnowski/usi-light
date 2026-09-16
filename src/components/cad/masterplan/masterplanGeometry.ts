@@ -1,5 +1,5 @@
 import { Point2D, BuildingLoop } from '../../../types/geometry';
-import { calculateSolarPosition } from '../../../utils/solar';
+import { calculateSolarPosition, LinijkaSolarSystem } from '../../../utils/solar';
 import polygonClipping from 'polygon-clipping';
 import {
   isPolygonCCW,
@@ -19,8 +19,10 @@ export interface SolarAngles {
   azimuthDeg: number;
   elevationDeg: number;
   sunVector: { x: number; y: number };
-  /** tan(elevationDeg) prekalkulowany raz per próbka słońca — computeShadowOffsetVector używa go liniowo (dzielenie), bez ponownego Math.tan(). */
-  tanElevation: number;
+  /** Mnożnik cienia na jednostkę wysokości (1.0 / tanElevation), prekalkulowany raz per próbka słońca. */
+  shadowScale: number;
+  /** Stały współczynnik rozproszenia stożka półcienia: tan(sunAngularRadius) / tan(elevation) — promień tarczy słońca per jednostka wysokości nad płaszczyzną rzutowania. */
+  kBlur: number;
 }
 
 export interface MasterplanStoryTier {
@@ -106,34 +108,57 @@ export function extractBuildingStoryTiers(
 }
 
 /**
- * Pobiera kąty i wektor słońca dla zadanej geolokalizacji, daty i godziny (z opcjonalnym offsetem minutowym np. -1 lub +1).
+ * Pobiera kąty i wektor słońca dla zadanej geolokalizacji, daty, godziny i metody (astro vs linijka).
+ * (z opcjonalnym offsetem minutowym np. -1 lub +1).
  */
 export function getMasterplanSolarAngles(
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn' = 'spring',
   hourFraction: number = 12.0,
-  minuteOffset: number = 0
+  minuteOffset: number = 0,
+  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): SolarAngles {
-  const month = equinoxDate === 'spring' ? 3 : 9;
-  const day = equinoxDate === 'spring' ? 21 : 23;
+  const isLinijka = method === 'segments' || method === 'linijka';
   const effectiveHourFraction = hourFraction + minuteOffset / 60;
 
-  const pos = calculateSolarPosition(latitude, longitude, month, day, effectiveHourFraction);
-  const azRad = (pos.azimuthDeg * Math.PI) / 180;
+  let azimuthDeg: number;
+  let elevationDeg: number;
+
+  if (isLinijka) {
+    const linijkaSys = new LinijkaSolarSystem(latitude, longitude, equinoxDate);
+    azimuthDeg = linijkaSys.getAzimuthForHour(effectiveHourFraction);
+    elevationDeg = linijkaSys.getElevationForAzimuth(azimuthDeg);
+  } else {
+    const month = equinoxDate === 'spring' ? 3 : 9;
+    const day = equinoxDate === 'spring' ? 21 : 23;
+    const pos = calculateSolarPosition(latitude, longitude, month, day, effectiveHourFraction);
+    azimuthDeg = pos.azimuthDeg;
+    elevationDeg = pos.elevationDeg;
+  }
+
+  const azRad = (azimuthDeg * Math.PI) / 180;
 
   // Wektor padania cienia (w przeciwnym kierunku niż wektor biegnący do słońca):
   // Słońce na azymucie theta: światło idzie z kierunku theta, rzucając cień w kierunku [-sin(theta), -cos(theta)]
   // W konwencji CAD: Y jest w górę (Północ), X w prawo (Wschód).
   const shadowDirX = -Math.sin(azRad);
   const shadowDirY = -Math.cos(azRad);
-  const elevationDeg = Math.max(1.0, pos.elevationDeg); // min 1 stopień by uniknąć dzielenia przez 0
+  const clampedElevationDeg = Math.max(1.0, elevationDeg); // min 1 stopień by uniknąć dzielenia przez 0
+  const tanElevation = Math.tan((clampedElevationDeg * Math.PI) / 180);
+  const shadowScale = 1.0 / tanElevation;
+
+  // Stały kąt półcienia dla widoku Masterplan (1.25 stopnia)
+  const sunAngularRadiusDeg = 1.25;
+  const tanSunRadius = Math.tan((sunAngularRadiusDeg * Math.PI) / 180);
+  const kBlur = tanSunRadius * shadowScale;
 
   return {
-    azimuthDeg: pos.azimuthDeg,
-    elevationDeg,
+    azimuthDeg,
+    elevationDeg: clampedElevationDeg,
     sunVector: { x: shadowDirX, y: shadowDirY },
-    tanElevation: Math.tan((elevationDeg * Math.PI) / 180),
+    shadowScale,
+    kBlur,
   };
 }
 
@@ -150,7 +175,7 @@ export function computeShadowOffsetVector(
     return { dx: 0, dy: 0, length: 0 };
   }
 
-  const length = deltaH / solarAngles.tanElevation;
+  const length = deltaH * solarAngles.shadowScale;
 
   return {
     dx: solarAngles.sunVector.x * length,
@@ -389,86 +414,81 @@ export function buildShadowSweepPolygon(
   return computeConvexHull(allPts);
 }
 
-export interface SoftShadowResult {
-  umbra: Point2D[][];
-  penumbraOuter: Point2D[][];
-}
-
-/**
- * Wariant "soft" cienia kondygnacji: umbra = przecięcie dwóch hard-shadowów liczonych pod
- * azymutem odchylonym o ±promień kątowy tarczy słonecznej, penumbraOuter = ich unia.
- * Fizycznie poprawne: przy hBottom≈0 (styk ściany z gruntem) offset dla obu azymutów wynosi {0,0}
- * niezależnie od kąta, więc penumbra ma tam szerokość zero z definicji geometrii — bez potrzeby
- * śledzenia, który wierzchołek scalonego poligonu pochodzi z podstawy a który z dachu.
- * Koszt: 2× computeStoryShadowPolygon (liniowe, bez pierwiastków) + 1 intersection + 1 union.
- */
-export function computeSoftStoryShadowPolygon(
-  polygon: Point2D[],
-  solarAngles: SolarAngles,
-  hTop: number,
-  hBottom: number = 0,
-  sunAngularRadiusDeg: number = 0.267
-): SoftShadowResult {
-  const anglesMin = perturbAzimuth(solarAngles, -sunAngularRadiusDeg);
-  const anglesMax = perturbAzimuth(solarAngles, sunAngularRadiusDeg);
-
-  const polyMin = computeStoryShadowPolygon(polygon, anglesMin, hTop, hBottom);
-  const polyMax = computeStoryShadowPolygon(polygon, anglesMax, hTop, hBottom);
-
-  if (polyMin.length < 3 && polyMax.length < 3) return { umbra: [], penumbraOuter: [] };
-  if (polyMin.length < 3 || polyMax.length < 3) {
-    const single = polyMin.length >= 3 ? [polyMin] : [polyMax];
-    return { umbra: single, penumbraOuter: single };
-  }
-
-  const umbra = intersectionPolygonLoops([polyMin], [polyMax]);
-  const penumbraOuter = unionPolygonLoops([polyMin, polyMax]);
-  return { umbra, penumbraOuter };
-}
-
-export interface SoftShadowWithHolesResult {
+export interface SoftShadowEnvelopeResult {
   umbra: PolygonWithHoles[];
-  penumbraOuter: PolygonWithHoles[];
+  penumbra: PolygonWithHoles[];
+}
+
+const SOFT_SHADOW_DISC_SEGMENTS = 8;
+
+/** Jednostkowy okrąg (promień 1) prekalkulowany raz przy starcie modułu — buildSunDiscPolygon tylko skaluje i przesuwa, bez Math.cos/sin per wywołanie. */
+const SOFT_SHADOW_UNIT_CIRCLE: Point2D[] = Array.from({ length: SOFT_SHADOW_DISC_SEGMENTS }, (_, i) => {
+  const theta = (i / SOFT_SHADOW_DISC_SEGMENTS) * Math.PI * 2;
+  return { x: Math.cos(theta), y: Math.sin(theta) };
+});
+
+/** Aproksymacja tarczy słońca rzutowanej na płaszczyznę: N-kąt foremny wokół danego wierzchołka cienia. */
+function buildSunDiscPolygon(center: Point2D, radius: number): Point2D[] {
+  return SOFT_SHADOW_UNIT_CIRCLE.map((u) => ({ x: center.x + u.x * radius, y: center.y + u.y * radius }));
+}
+
+/** Tarcze słońca wokół każdego wierzchołka dachu (już przesuniętego o topOffset) — współdzielone przez ścieżkę wypukłą i ogólną. */
+function buildRoofSunDiscs(polygon: Point2D[], topOffset: { dx: number; dy: number }, radius: number): Point2D[][] {
+  return polygon.map((v) => buildSunDiscPolygon({ x: v.x + topOffset.dx, y: v.y + topOffset.dy }, radius));
 }
 
 /**
- * Wariant soft z dziurami: różnica (obrys minus dziura) liczona OSOBNO dla każdego wariantu azymutu,
- * a dopiero potem przecięcie (umbra)/unia (penumbraOuter) — różnica i przecięcie/unia nie są
- * przemienne, więc kolejność ma znaczenie (patrz computeStoryShadowPolygonWithHoles).
+ * Miękki cień (penumbra) jako promienista tarcza słońca wokół każdego przesuniętego wierzchołka dachu:
+ * - Wierzchołki podstawy (hBottom) pozostają ostre (przesunięte o baseOffset), jak w umbrze.
+ * - Każdy wierzchołek dachu (hTop) otoczony jest N-kątną tarczą o promieniu rBlur = hTop * kBlur —
+ *   `hTop` to tu wysokość WZGLĘDEM płaszczyzny, na którą pada cień (dla gruntu: wysokość absolutna;
+ *   dla cienia na dach niższego budynku: różnica wysokości absolutnych, przekazywana przez wywołującego).
+ * - Penumbra to unia tych tarcz z umbrą — geometrycznie zawiera umbrę w całości, więc kolejność
+ *   rysowania (penumbra pod spodem, umbra na wierzchu) jest zawsze poprawna.
+ * - Dla wielokątów wypukłych bez dziur: szybka ścieżka przez computeConvexHull, bez unii boolowskiej.
  */
-export function computeSoftStoryShadowPolygonWithHoles(
+export function computeSoftShadowEnvelopeWithHoles(
   polygon: Point2D[],
   holes: Point2D[][] | undefined,
   solarAngles: SolarAngles,
   hTop: number,
-  hBottom: number = 0,
-  sunAngularRadiusDeg: number = 0.267
-): SoftShadowWithHolesResult {
-  const anglesMin = perturbAzimuth(solarAngles, -sunAngularRadiusDeg);
-  const anglesMax = perturbAzimuth(solarAngles, sunAngularRadiusDeg);
+  hBottom: number = 0
+): SoftShadowEnvelopeResult {
+  if (!polygon || polygon.length < 3 || hTop <= 0) {
+    return { umbra: [], penumbra: [] };
+  }
 
-  const ringMin = computeStoryShadowPolygonWithHoles(polygon, holes, anglesMin, hTop, hBottom);
-  const ringMax = computeStoryShadowPolygonWithHoles(polygon, holes, anglesMax, hTop, hBottom);
+  const effectiveBottom = Math.max(0, hBottom);
+  if (hTop - effectiveBottom <= 0.05) return { umbra: [], penumbra: [] };
 
-  if (ringMin.length === 0 && ringMax.length === 0) return { umbra: [], penumbraOuter: [] };
-  if (ringMin.length === 0) return { umbra: ringMax, penumbraOuter: ringMax };
-  if (ringMax.length === 0) return { umbra: ringMin, penumbraOuter: ringMin };
+  const umbra = computeStoryShadowPolygonWithHoles(polygon, holes, solarAngles, hTop, hBottom);
+  const rBlur = hTop * (solarAngles.kBlur || 0.02);
+  if (umbra.length === 0 || rBlur <= 0.001) {
+    return { umbra, penumbra: umbra };
+  }
 
-  const umbra = intersectionPolygonsWithHoles(ringMin, ringMax);
-  const penumbraOuter = unionPolygonsWithHoles([...ringMin, ...ringMax]);
-  return { umbra, penumbraOuter };
-}
+  const topOffset = computeShadowOffsetVector(hTop, solarAngles);
+  const hasHoles = holes && holes.length > 0 && holes.some((h) => h && h.length >= 3);
 
-/** Odchyla azymut słońca o `deltaDeg`, przeliczając `sunVector` (elewacja zostaje bez zmian). */
-function perturbAzimuth(solarAngles: SolarAngles, deltaDeg: number): SolarAngles {
-  const azimuthDeg = solarAngles.azimuthDeg + deltaDeg;
-  const azRad = (azimuthDeg * Math.PI) / 180;
-  return {
-    azimuthDeg,
-    elevationDeg: solarAngles.elevationDeg,
-    tanElevation: solarAngles.tanElevation, // elewacja niezmieniona — reużyj bez ponownego Math.tan()
-    sunVector: { x: -Math.sin(azRad), y: -Math.cos(azRad) },
-  };
+  // Ścieżka szybka: wielokąty wypukłe bez dziur — otoczka wypukła punktów bazowych
+  // i tarcz słońca rozstawionych wokół każdego wierzchołka dachu, bez unii boolowskiej.
+  const roofDiscs = buildRoofSunDiscs(polygon, topOffset, rBlur);
+
+  if (!hasHoles && isPolygonConvex(polygon)) {
+    const baseOffset = effectiveBottom > 0 ? computeShadowOffsetVector(effectiveBottom, solarAngles) : { dx: 0, dy: 0, length: 0 };
+    const basePts = polygon.map((v) => ({ x: v.x + baseOffset.dx, y: v.y + baseOffset.dy }));
+    const penumbraHull = computeConvexHull([...basePts, ...roofDiscs.flat()]);
+    return {
+      umbra,
+      penumbra: penumbraHull.length >= 3 ? [{ outer: penumbraHull, holes: [] }] : umbra,
+    };
+  }
+
+  // Ścieżka ogólna (wklęsłe i/lub z dziurami): unia tarcz słońca wokół każdego przesuniętego
+  // wierzchołka dachu z bazowym cieniem (umbra) — jedna spójna metoda, bez przekłamywania sunVector.
+  const discs: PolygonWithHoles[] = roofDiscs.map((outer) => ({ outer, holes: [] }));
+  const penumbra = unionPolygonsWithHoles([...umbra, ...discs]);
+  return { umbra, penumbra: penumbra.length > 0 ? penumbra : umbra };
 }
 
 export { computeConvexHull };

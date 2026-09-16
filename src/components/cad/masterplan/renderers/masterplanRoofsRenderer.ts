@@ -16,8 +16,9 @@ import { getCachedRoofShadowSamples, drawMasterplanShadowResult } from '../maste
  */
 export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds, hoveredBuildingId } = context;
-  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm } = renderContext;
+  const { ctx, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod } = renderContext;
   const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
+  const method = sunlightMethod ?? 'raycasting';
 
   const bldgs = (visibleBuildings || buildings).filter(
     (b: BuildingLoop) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
@@ -36,7 +37,7 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
   // 2. Sortowanie poziomów dachowych po wysokości Htop rosnąco (najniższe dachy najpierw, najwyższe na końcu)
   const sortedTiers = [...allTiers].sort((a, b) => a.hTop - b.hTop);
   const sortedTierBounds = sortedTiers.map(tierFootprintBounds);
-  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
+  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
 
   ctx.save();
   ctx.translate(viewState.panX, viewState.panY);
@@ -109,7 +110,8 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
         latitude,
         longitude,
         equinoxDate,
-        hourFraction
+        hourFraction,
+        method
       );
 
       drawMasterplanShadowResult(ctx, shadowResult);

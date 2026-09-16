@@ -7,7 +7,7 @@ import {
   extractBuildingStoryTiers,
   computeStoryShadowPolygon,
   computeStoryShadowPolygonWithHoles,
-  computeSoftStoryShadowPolygon,
+  computeSoftShadowEnvelopeWithHoles,
 } from './masterplanGeometry';
 import { getCachedGroundShadowSamples } from './masterplanShadowCache';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
@@ -29,6 +29,19 @@ describe('masterplanGeometry', () => {
     expect(angles.azimuthDeg).toBeLessThanOrEqual(360);
     expect(Number.isFinite(angles.sunVector.x)).toBe(true);
     expect(Number.isFinite(angles.sunVector.y)).toBe(true);
+  });
+
+  it('calculates solar angles correctly for Linijka method', () => {
+    // Linijka at noon (12:00) gives azimuth 180°
+    const anglesNoon = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0, 'segments');
+    expect(anglesNoon.azimuthDeg).toBeCloseTo(180, 1);
+    expect(anglesNoon.sunVector.y).toBeCloseTo(1, 1); // Shadow cast north (+Y in CAD)
+
+    // Linijka morning (10:00 -> -2h) and afternoon (14:00 -> +2h)
+    const anglesMorning = getMasterplanSolarAngles(52.23, 21.01, 'spring', 10.0, 0, 'linijka');
+    const anglesAfternoon = getMasterplanSolarAngles(52.23, 21.01, 'spring', 14.0, 0, 'linijka');
+    expect(anglesMorning.azimuthDeg).toBeLessThan(180);
+    expect(anglesAfternoon.azimuthDeg).toBeGreaterThan(180);
   });
 
   it('computes positive shadow offset vector length for positive deltaH', () => {
@@ -163,7 +176,7 @@ describe('masterplanGeometry', () => {
     expect(third).not.toEqual(first);
   });
 
-  it('computes soft shadow with a penumbra envelope larger than the umbra', () => {
+  it('computes soft shadow envelope with penumbra as a superset of the umbra', () => {
     const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
     const rect = [
       { x: 0, y: 0 },
@@ -172,24 +185,26 @@ describe('masterplanGeometry', () => {
       { x: 0, y: 10 },
     ];
 
-    const { umbra, penumbraOuter } = computeSoftStoryShadowPolygon(rect, angles, 10, 0);
-    expect(umbra.length).toBeGreaterThanOrEqual(1);
-    expect(penumbraOuter.length).toBeGreaterThanOrEqual(1);
+    const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(rect, undefined, angles, 10, 0);
+    expect(umbra.length).toBe(1);
+    expect(penumbra.length).toBeGreaterThanOrEqual(1);
 
     const area = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
-    const totalArea = (polys: { x: number; y: number }[][]) => polys.reduce((sum, p) => sum + area(p), 0);
-
-    expect(totalArea(penumbraOuter)).toBeGreaterThan(totalArea(umbra));
+    const umbraArea = area(umbra[0].outer);
+    const penumbraArea = penumbra.reduce((sum, p) => sum + area(p.outer), 0);
+    expect(umbraArea).toBeGreaterThan(0);
+    // Penumbra to umbra + tarcze słońca wokół wierzchołków dachu — musi być ściśle większa (nadzbiór).
+    expect(penumbraArea).toBeGreaterThan(umbraArea);
   });
 
   it('returns empty result for degenerate soft shadow input', () => {
     const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
-    const result = computeSoftStoryShadowPolygon([], angles, 10, 0);
+    const result = computeSoftShadowEnvelopeWithHoles([], undefined, angles, 10, 0);
     expect(result.umbra).toEqual([]);
-    expect(result.penumbraOuter).toEqual([]);
+    expect(result.penumbra).toEqual([]);
   });
 
-  it('has zero penumbra spread at the contact footprint with the ground plane (hBottom=0)', () => {
+  it('penumbra fully contains the umbra footprint at the ground contact corners (hBottom=0)', () => {
     const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
     const rect = [
       { x: 0, y: 0 },
@@ -198,12 +213,7 @@ describe('masterplanGeometry', () => {
       { x: 0, y: 10 },
     ];
 
-    // Przy hBottom=0 offset podstawy wynosi {0,0} niezależnie od azymutu (perturbacji ±kąta
-    // tarczy słonecznej), więc wierzchołki footprintu budynku muszą leżeć w obu (umbra i
-    // penumbraOuter) — zerowa szerokość penumbry w punkcie styku ze ziemią, bez dziury między nimi.
-    const { umbra, penumbraOuter } = computeSoftStoryShadowPolygon(rect, angles, 10, 0);
-    // Punkty tuż przy narożnikach footprintu (nie dokładnie na granicy, by uniknąć niejednoznaczności
-    // testu punkt-na-krawędzi) muszą leżeć w umbrze — brak przerwy/rozjazdu przy styku z gruntem.
+    const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(rect, undefined, angles, 10, 0);
     const insetCorners = [
       { x: 0.1, y: 0.1 },
       { x: 9.9, y: 0.1 },
@@ -211,9 +221,41 @@ describe('masterplanGeometry', () => {
       { x: 0.1, y: 9.9 },
     ];
     for (const v of insetCorners) {
-      const inUmbra = umbra.some((poly) => isPointInPolygon(v, poly));
-      expect(inUmbra).toBe(true);
+      expect(umbra.some((p) => isPointInPolygon(v, p.outer))).toBe(true);
+      expect(penumbra.some((p) => isPointInPolygon(v, p.outer))).toBe(true);
     }
+  });
+
+  it('generates distinct (non-identical) umbra and penumbra for a building with a hole (donut modifier)', () => {
+    // Regresja: bug polegał na kolizji klucza cache dla ścieżki z dziurami, przez co
+    // penumbra była identyczna z umbrą (zero widocznego półcienia) dla budynków typu "donut".
+    const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0);
+    const outer = [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 20 },
+      { x: 0, y: 20 },
+    ];
+    const hole = [
+      { x: 5, y: 5 },
+      { x: 15, y: 5 },
+      { x: 15, y: 15 },
+      { x: 5, y: 15 },
+    ];
+
+    const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(outer, [hole], angles, 10, 0);
+    expect(umbra.length).toBeGreaterThan(0);
+    expect(penumbra.length).toBeGreaterThan(0);
+
+    const area = (poly: { x: number; y: number }[]) => Math.abs(calculateSignedArea(poly));
+    const pwhArea = (pwh: { outer: { x: number; y: number }[]; holes?: { x: number; y: number }[][] }) => {
+      let a = area(pwh.outer);
+      if (pwh.holes) for (const h of pwh.holes) a -= area(h);
+      return Math.max(0, a);
+    };
+    const umbraArea = umbra.reduce((sum, p) => sum + pwhArea(p), 0);
+    const penumbraArea = penumbra.reduce((sum, p) => sum + pwhArea(p), 0);
+    expect(penumbraArea).toBeGreaterThan(umbraArea);
   });
 
   describe('computeStoryShadowPolygonWithHoles', () => {

@@ -2,16 +2,15 @@ import { Point2D } from '@/types/geometry';
 import {
   PolygonWithHoles,
   unionPolygonsWithHoles,
-  differencePolygonsWithHoles,
 } from '@/utils/math2d/polygons';
 import {
   getMasterplanSolarAngles,
   computeStoryShadowPolygonWithHoles,
-  computeSoftStoryShadowPolygonWithHoles,
+  computeSoftShadowEnvelopeWithHoles,
   polygonFingerprint,
   MasterplanStoryTier,
 } from './masterplanGeometry';
-import { clusterTiersByShadowOverlap } from './masterplanSpatial';
+import { clusterTiersByShadowOverlap, unionPolygonsWithHolesHierarchical } from './masterplanSpatial';
 
 export type MasterplanShadowAlgorithm = 'legacy' | 'soft';
 
@@ -25,9 +24,10 @@ export interface MasterplanShadowSample {
   polys: PolygonWithHoles[];
 }
 
-export type MasterplanShadowRenderResult =
-  | { algorithm: 'legacy'; samples: MasterplanShadowSample[] }
-  | { algorithm: 'soft'; umbraColor: string; umbraPolys: PolygonWithHoles[]; bandColor: string; bandPolys: PolygonWithHoles[] };
+export interface MasterplanShadowRenderResult {
+  algorithm: MasterplanShadowAlgorithm;
+  samples: MasterplanShadowSample[];
+}
 
 /**
  * Cache cieni gruntowych Masterplanu: computeStoryShadowPolygon/unionPolygonsWithHoles są kosztowne
@@ -35,15 +35,19 @@ export type MasterplanShadowRenderResult =
  * tierów i pozycji słońca. Bez cache renderer przeliczałby je na każdej klatce, w tym podczas
  * czystego pan/zoom.
  */
+const DEFAULT_PENUMBRA_SAMPLE: MasterplanColorSample = { color: 'rgba(30, 41, 59, 0.08)', offsetMin: -1 };
+const DEFAULT_UMBRA_SAMPLE: MasterplanColorSample = { color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 };
+
 let groundLastKey: string | null = null;
 let groundLastResult: MasterplanShadowRenderResult = { algorithm: 'legacy', samples: [] };
 
+/** Scala listę poligonów klastra do wyniku: bez unii dla pojedynczego elementu, hierarchicznie dla wielu. */
+function accumulatePolygons(dest: PolygonWithHoles[], src: PolygonWithHoles[]): void {
+  if (src.length === 1) dest.push(src[0]);
+  else if (src.length > 1) dest.push(...unionPolygonsWithHolesHierarchical(src));
+}
+
 function tierFingerprint(t: MasterplanStoryTier): string {
-  // polygonFingerprint (pełna lista współrzędnych, nie suma) jako składnik pozycyjny: przesunięcie/
-  // rotacja/deformacja budynku zmienia fingerprint, więc cache poprawnie się unieważnia. Suma
-  // współrzędnych (Σx, Σy) jest niezmiennikiem obrotu wokół centroidu — powodowała brak
-  // odświeżania cienia przy obrocie budynku. Dziury wchodzą też do odcisku — od nich zależy wynik
-  // cienia (computeStoryShadowPolygonWithHoles), więc zmiana dziury musi też unieważniać cache.
   const holesFingerprint = (t.holes && t.holes.length > 0) ? t.holes.map(polygonFingerprint).join(';') : '';
   return `${t.buildingId}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}:${polygonFingerprint(t.polygon)}#${holesFingerprint}`;
 }
@@ -59,9 +63,10 @@ function computeLegacySamples(
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
-  hourFraction: number
+  hourFraction: number,
+  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): MasterplanShadowSample[] {
-  const baseAngles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
+  const baseAngles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
   const clusters = clusterTiersByShadowOverlap(
     tiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0),
     baseAngles
@@ -69,7 +74,7 @@ function computeLegacySamples(
 
   const result: MasterplanShadowSample[] = [];
   for (const sample of samples) {
-    const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin);
+    const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin, method);
     const mergedPolys: PolygonWithHoles[] = [];
 
     for (const cluster of clusters) {
@@ -78,8 +83,7 @@ function computeLegacySamples(
         const polys = computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom);
         clusterPolys.push(...polys);
       }
-      if (clusterPolys.length === 1) mergedPolys.push(clusterPolys[0]);
-      else if (clusterPolys.length > 1) mergedPolys.push(...unionPolygonsWithHoles(clusterPolys));
+      accumulatePolygons(mergedPolys, clusterPolys);
     }
 
     if (mergedPolys.length > 0) {
@@ -89,55 +93,57 @@ function computeLegacySamples(
   return result;
 }
 
-function computeSoftResult(
+/**
+ * Miękki cień (penumbra jako promienista tarcza słońca wokół umbry):
+ * Generuje 2 warstwy — Penumbra (nadzbiór, rysowana pierwsza) i Umbra (podzbiór, na wierzchu).
+ * Używa unii hierarchicznej per klaster AABB.
+ */
+function computeSoftSamples(
   tiers: MasterplanStoryTier[],
-  midColor: string,
-  outerColor: string,
+  umbraColor: string,
+  penumbraColor: string,
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
-  hourFraction: number
-): MasterplanShadowRenderResult {
-  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
-  const clusters = clusterTiersByShadowOverlap(
-    tiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0),
-    angles
-  );
+  hourFraction: number,
+  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
+): MasterplanShadowSample[] {
+  const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
+  const validTiers = tiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0);
+  const clusters = clusterTiersByShadowOverlap(validTiers, angles);
 
-  const mergedUmbra: PolygonWithHoles[] = [];
-  const bandPolys: PolygonWithHoles[] = [];
+  const penumbraPolysAll: PolygonWithHoles[] = [];
+  const umbraPolysAll: PolygonWithHoles[] = [];
 
   for (const cluster of clusters) {
-    const umbraPolys: PolygonWithHoles[] = [];
-    const outerPolys: PolygonWithHoles[] = [];
+    const cPenumbra: PolygonWithHoles[] = [];
+    const cUmbra: PolygonWithHoles[] = [];
+
     for (const tier of cluster) {
-      const { umbra, penumbraOuter } = computeSoftStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom);
-      umbraPolys.push(...umbra);
-      outerPolys.push(...penumbraOuter);
+      const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(
+        tier.polygon,
+        tier.holes,
+        angles,
+        tier.hTop,
+        tier.hBottom
+      );
+      cUmbra.push(...umbra);
+      cPenumbra.push(...penumbra);
     }
 
-    const clusterUmbra = umbraPolys.length > 1 ? unionPolygonsWithHoles(umbraPolys) : umbraPolys;
-    const clusterOuter = outerPolys.length > 1 ? unionPolygonsWithHoles(outerPolys) : outerPolys;
-    mergedUmbra.push(...clusterUmbra);
-    if (clusterOuter.length > 0) {
-      bandPolys.push(...differencePolygonsWithHoles(clusterOuter, clusterUmbra));
-    }
+    accumulatePolygons(umbraPolysAll, cUmbra);
+    accumulatePolygons(penumbraPolysAll, cPenumbra);
   }
 
-  return {
-    algorithm: 'soft',
-    umbraColor: midColor,
-    umbraPolys: mergedUmbra,
-    bandColor: outerColor,
-    bandPolys,
-  };
+  const samples: MasterplanShadowSample[] = [];
+  if (penumbraPolysAll.length > 0) samples.push({ color: penumbraColor, polys: penumbraPolysAll });
+  if (umbraPolysAll.length > 0) samples.push({ color: umbraColor, polys: umbraPolysAll });
+
+  return samples;
 }
 
 /**
  * Wypełnia wielokąty z otworami na Canvas 2D.
- * Każdy PolygonWithHoles rysowany jest w osobnym ctx.beginPath() z obrysem i otworami,
- * a następnie wypełniany regułą 'evenodd', co zapobiega zakłóceniom parzystości
- * między niezależnymi wyspami geometrii.
  */
 export function fillPolys(ctx: CanvasRenderingContext2D, polys: PolygonWithHoles[], color: string): void {
   if (!polys || polys.length === 0) return;
@@ -168,20 +174,14 @@ export function fillPolys(ctx: CanvasRenderingContext2D, polys: PolygonWithHoles
   }
 }
 
-/** Rysuje wynik cienia (legacy: próbki penumbry; soft: pełny rdzeń + pas penumbry) na podanym kontekście. */
+/** Rysuje wynik cienia (warstwy próbek) na podanym kontekście. */
 export function drawMasterplanShadowResult(
   ctx: CanvasRenderingContext2D,
   result: MasterplanShadowRenderResult
 ): void {
-  if (result.algorithm === 'legacy') {
-    for (const sample of result.samples) {
-      fillPolys(ctx, sample.polys, sample.color);
-    }
-    return;
+  for (const sample of result.samples) {
+    fillPolys(ctx, sample.polys, sample.color);
   }
-
-  fillPolys(ctx, result.bandPolys, result.bandColor);
-  fillPolys(ctx, result.umbraPolys, result.umbraColor);
 }
 
 export function getCachedGroundShadowSamples(
@@ -191,17 +191,21 @@ export function getCachedGroundShadowSamples(
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
-  hourFraction: number
+  hourFraction: number,
+  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): MasterplanShadowRenderResult {
-  const key = `${algorithm}|${tiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
+  const key = `${algorithm}|${method}|${tiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   if (key === groundLastKey) return groundLastResult;
 
-  const midSample = samples[Math.floor(samples.length / 2)] ?? samples[0];
-  const result: MasterplanShadowRenderResult =
-    algorithm === 'soft'
-      ? computeSoftResult(tiers, midSample.color, midSample.color, latitude, longitude, equinoxDate, hourFraction)
-      : { algorithm: 'legacy', samples: computeLegacySamples(tiers, samples, latitude, longitude, equinoxDate, hourFraction) };
+  const penumbraSample = samples[0] ?? DEFAULT_PENUMBRA_SAMPLE;
+  const umbraSample = samples[1] ?? samples[0] ?? DEFAULT_UMBRA_SAMPLE;
 
+  const shadowSamples =
+    algorithm === 'soft'
+      ? computeSoftSamples(tiers, umbraSample.color, penumbraSample.color, latitude, longitude, equinoxDate, hourFraction, method)
+      : computeLegacySamples(tiers, samples, latitude, longitude, equinoxDate, hourFraction, method);
+
+  const result: MasterplanShadowRenderResult = { algorithm, samples: shadowSamples };
   groundLastKey = key;
   groundLastResult = result;
   return result;
@@ -209,7 +213,6 @@ export function getCachedGroundShadowSamples(
 
 /**
  * Cache cieni dachowych (ΔH) Masterplanu, per kondygnacja odbierająca cień (currentTierKey).
- * Wynik zależy od zestawu wyższych tierów i currentH, więc jest keyowany osobno per bieżący tier.
  */
 const roofCache = new Map<string, { key: string; result: MasterplanShadowRenderResult }>();
 
@@ -222,40 +225,50 @@ export function getCachedRoofShadowSamples(
   latitude: number,
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
-  hourFraction: number
+  hourFraction: number,
+  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): MasterplanShadowRenderResult {
-  const key = `${algorithm}|${currentH.toFixed(2)}|${higherTiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
+  const key = `${algorithm}|${method}|${currentH.toFixed(2)}|${higherTiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   const cached = roofCache.get(currentTierKey);
   if (cached && cached.key === key) return cached.result;
   if (roofCache.size > 5000) roofCache.clear();
 
-  let result: MasterplanShadowRenderResult;
+  let shadowSamples: MasterplanShadowSample[] = [];
 
   if (algorithm === 'soft') {
-    const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0);
+    const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
+    const penumbraPolys: PolygonWithHoles[] = [];
     const umbraPolys: PolygonWithHoles[] = [];
-    const outerPolys: PolygonWithHoles[] = [];
 
     for (const higherTier of higherTiers) {
       const deltaHTop = higherTier.hTop - currentH;
       const deltaHBase = Math.max(0, higherTier.hBottom - currentH);
       if (deltaHTop <= 0.05) continue;
 
-      const { umbra, penumbraOuter } = computeSoftStoryShadowPolygonWithHoles(higherTier.polygon, higherTier.holes, angles, deltaHTop, deltaHBase);
+      const { umbra, penumbra } = computeSoftShadowEnvelopeWithHoles(
+        higherTier.polygon,
+        higherTier.holes,
+        angles,
+        deltaHTop,
+        deltaHBase
+      );
       umbraPolys.push(...umbra);
-      outerPolys.push(...penumbraOuter);
+      penumbraPolys.push(...penumbra);
     }
 
-    const mergedUmbra = umbraPolys.length > 1 ? unionPolygonsWithHoles(umbraPolys) : umbraPolys;
-    const mergedOuter = outerPolys.length > 1 ? unionPolygonsWithHoles(outerPolys) : outerPolys;
-    const bandPolys = mergedOuter.length > 0 ? differencePolygonsWithHoles(mergedOuter, mergedUmbra) : [];
-    const midColor = samples[Math.floor(samples.length / 2)]?.color ?? samples[0]?.color ?? 'rgba(30, 41, 59, 0.14)';
+    const penumbraColor = samples[0]?.color ?? DEFAULT_PENUMBRA_SAMPLE.color;
+    const umbraColor = samples[1]?.color ?? samples[0]?.color ?? DEFAULT_UMBRA_SAMPLE.color;
 
-    result = { algorithm: 'soft', umbraColor: midColor, umbraPolys: mergedUmbra, bandColor: midColor, bandPolys };
+    const mergedPenumbra: PolygonWithHoles[] = [];
+    const mergedUmbra: PolygonWithHoles[] = [];
+    accumulatePolygons(mergedPenumbra, penumbraPolys);
+    accumulatePolygons(mergedUmbra, umbraPolys);
+
+    if (mergedPenumbra.length > 0) shadowSamples.push({ color: penumbraColor, polys: mergedPenumbra });
+    if (mergedUmbra.length > 0) shadowSamples.push({ color: umbraColor, polys: mergedUmbra });
   } else {
-    const legacySamples: MasterplanShadowSample[] = [];
     for (const sample of samples) {
-      const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin);
+      const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, sample.offsetMin, method);
       const samplePolys: PolygonWithHoles[] = [];
 
       for (const higherTier of higherTiers) {
@@ -267,15 +280,13 @@ export function getCachedRoofShadowSamples(
         samplePolys.push(...shadowRoofPolys);
       }
 
-      if (samplePolys.length === 1) {
-        legacySamples.push({ color: sample.color, polys: samplePolys });
-      } else if (samplePolys.length > 1) {
-        legacySamples.push({ color: sample.color, polys: unionPolygonsWithHoles(samplePolys) });
-      }
+      const mergedSample: PolygonWithHoles[] = [];
+      accumulatePolygons(mergedSample, samplePolys);
+      if (mergedSample.length > 0) shadowSamples.push({ color: sample.color, polys: mergedSample });
     }
-    result = { algorithm: 'legacy', samples: legacySamples };
   }
 
+  const result: MasterplanShadowRenderResult = { algorithm, samples: shadowSamples };
   roofCache.set(currentTierKey, { key, result });
   return result;
 }

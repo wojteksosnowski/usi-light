@@ -41,6 +41,7 @@ interface SolarAnalysisState {
   // Analysis calculations & modes
   sunlightMethod: 'raycasting' | 'segments';
   masterplanShadowAlgorithm: 'legacy' | 'soft';
+  masterplanHourFraction: number;
   accuracyStage: AccuracyStage;
   analysisOutput: AnalysisBatchOutput;
   isCalculating: boolean;
@@ -73,6 +74,7 @@ interface SolarAnalysisState {
 
   setSunlightMethod: (method: 'raycasting' | 'segments') => void;
   setMasterplanShadowAlgorithm: (algo: 'legacy' | 'soft') => void;
+  setMasterplanHourFraction: (hour: number) => void;
   setAccuracyStage: (stage: AccuracyStage) => void;
   setAnalysisOutput: (output: AnalysisBatchOutput) => void;
   setIsCalculating: (calculating: boolean) => void;
@@ -117,6 +119,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   // Linijka Słońca jest domyślną metodą obliczeń w '56'
   sunlightMethod: 'segments',
   masterplanShadowAlgorithm: 'legacy',
+  masterplanHourFraction: 12.0,
   accuracyStage: 'final',
   analysisOutput: {
     results: [],
@@ -197,6 +200,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
 
   setSunlightMethod: (method) => set({ sunlightMethod: method }),
   setMasterplanShadowAlgorithm: (algo) => set({ masterplanShadowAlgorithm: algo }),
+  setMasterplanHourFraction: (hour) => set({ masterplanHourFraction: hour }),
   setAccuracyStage: (stage) => set({ accuracyStage: stage }),
   setAnalysisOutput: (output) => set({ analysisOutput: output }),
   setIsCalculating: (calculating) => set({ isCalculating: calculating }),
