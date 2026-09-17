@@ -461,4 +461,253 @@ export const ZoneFunctionIcon: React.FC<IconProps> = ({
   </svg>
 );
 
+/* ==========================================================================
+   Monochromatyczne, linearne ikony OSNAP & OTRACK (UI Design System)
+   ========================================================================== */
+
+/** Ikona OSNAP: Wierzchołek / Koniec ściany (Endpoint - kwadrat konturowy) */
+export const SnapEndpointIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <rect x="5" y="5" width="14" height="14" rx="1.5" />
+  </svg>
+);
+
+/** Ikona OSNAP: Środek odcinka (Midpoint - trójkąt konturowy) */
+export const SnapMidpointIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <polygon points="12 4 21 20 3 20" />
+  </svg>
+);
+
+/** Ikona OSNAP: Przecięcie (Intersection - krzyżyk / X w okręgu) */
+export const SnapIntersectionIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="6" y1="6" x2="18" y2="18" />
+    <line x1="6" y1="18" x2="18" y2="6" />
+  </svg>
+);
+
+/** Ikona OSNAP: Rzut prostopadły (Perpendicular - kątownik 90°) */
+export const SnapPerpendicularIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="4" y1="20" x2="20" y2="20" />
+    <line x1="12" y1="4" x2="12" y2="20" />
+    <polyline points="12 14 18 14 18 20" />
+  </svg>
+);
+
+/** Ikona OSNAP: Punkt na krawędzi (Nearest - klepsydra / kropka na linii) */
+export const SnapNearestIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="3" y1="19" x2="21" y2="5" />
+    <circle cx="12" cy="12" r="3" fill="none" />
+  </svg>
+);
+
+/** Ikona OSNAP: Przedłużenie krawędzi (Extension - linia przerywana z grotem) */
+export const SnapExtensionIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="3" y1="12" x2="10" y2="12" />
+    <line x1="14" y1="12" x2="17" y2="12" strokeDasharray="2 2" />
+    <line x1="19" y1="12" x2="21" y2="12" />
+    <polyline points="16 7 21 12 16 17" />
+  </svg>
+);
+
+/** Ikona OTRACK: Osie kardynalne Ortho (0° / 90°) */
+export const SnapOrthoIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="12" y1="3" x2="12" y2="21" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <circle cx="12" cy="12" r="2" />
+  </svg>
+);
+
+/** Ikona OTRACK: Siatka dominująca projektu (kątomierz / kąt dominujący) */
+export const SnapDominantIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path d="M4 19h16" />
+    <path d="M4 19a8 8 0 0 1 16 0" />
+    <line x1="12" y1="19" x2="16" y2="10" />
+  </svg>
+);
+
+/** Ikona OTRACK: Kąty ścian - równoległe / prostopadłe */
+export const SnapRelativeIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="5" y1="6" x2="19" y2="6" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+    <line x1="12" y1="12" x2="12" y2="19" />
+  </svg>
+);
+
+/** Ikona OTRACK: Przecięcia osi i prowadnic (Dual-Guide Intersection) */
+export const SnapDualIntersectionIcon: React.FC<IconProps> = ({
+  size = 14,
+  color = 'currentColor',
+  className,
+  style,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <line x1="3" y1="7" x2="21" y2="17" />
+    <line x1="3" y1="17" x2="21" y2="7" />
+    <circle cx="12" cy="12" r="2.5" />
+  </svg>
+);
+
 

@@ -1,4 +1,4 @@
-import { Point2D, BuildingLoop } from '../../../types/geometry';
+import { Point2D, BuildingLoop, ObjectCategory } from '../../../types/geometry';
 import { APP_CONFIG } from '../../../config/appConfig';
 import { DominantDirection } from '../../../utils/segmentStatistics';
 import {
@@ -23,7 +23,7 @@ import {
  * 2. Active polyline segments (0° parallel and 90° exact perpendicular).
  * 3. Static reference segments (e.g. from currently edited polygon/sweep).
  * 4. Currently hovered / intersected building walls and selected building static walls.
- * 5. Nearest neighbouring building walls (sorted by spatial proximity).
+ * 5. Nearest neighbouring building walls (sorted by spatial proximity and category affinity).
  * 6. Default Cartesian Ortho axes (0° / 90°).
  */
 export function collectTargetDirections(
@@ -36,7 +36,9 @@ export function collectTargetDirections(
   selectedBuildingId?: string,
   excludeBuildingId?: string,
   excludeSegmentIndices?: number[],
-  staticReferenceSegments: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[] = []
+  staticReferenceSegments: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[] = [],
+  otrackModes?: { ortho?: boolean; dominant?: boolean; relative?: boolean },
+  activeCategory?: ObjectCategory
 ): DirectionCandidate[] {
   const candidates: DirectionCandidate[] = [];
   const seenAngles: number[] = [];
@@ -58,8 +60,9 @@ export function collectTargetDirections(
   };
 
   // 1. Dominant scene axes from statistics (Siatka główna)
+  const allowDominant = otrackModes?.dominant !== false;
   const domPair: { angle: number; ortho: number } | null =
-    dominantDirections && dominantDirections.length > 0
+    allowDominant && dominantDirections && dominantDirections.length > 0
       ? { angle: dominantDirections[0].angleDeg, ortho: dominantDirections[0].orthogonalDeg }
       : null;
 
@@ -68,16 +71,10 @@ export function collectTargetDirections(
     addCandidate(domPair.ortho, 'dominant', `Siatka poprzeczna (${domPair.ortho.toFixed(1)}°)`, 2);
   }
 
-  const isNearDominant = (ang: number) => {
-    if (!domPair) return false;
-    const d1 = angleDiff180(ang, domPair.angle);
-    const d2 = angleDiff180(ang, domPair.ortho);
-    return d1 <= 4.0 || d2 <= 4.0;
-  };
-
   // 2. All segments of active Polyline history (0° Parallel & 90° Perpendicular ONLY)
+  const allowRelative = otrackModes?.relative !== false;
   const nPoly = polylineVertices.length;
-  if (nPoly >= 2) {
+  if (allowRelative && nPoly >= 2) {
     for (let i = nPoly - 2; i >= 0; i--) {
       const pA = polylineVertices[i];
       const pB = polylineVertices[i + 1];
@@ -92,18 +89,15 @@ export function collectTargetDirections(
       const segAngle = normalizeAngle180((Math.atan2(dy, dx) * 180) / Math.PI);
       const perpAngle = normalizeAngle180(segAngle + 90);
 
-      const effectiveSegAngle = isNearDominant(segAngle) && domPair ? domPair.angle : segAngle;
-      const effectivePerpAngle = isNearDominant(perpAngle) && domPair ? domPair.ortho : perpAngle;
-
       addCandidate(
-        effectiveSegAngle,
+        segAngle,
         'parallel',
         isLastSeg ? 'Polilinia (Równoległy)' : `Polilinia (Równoległy do seg. ${segIdx})`,
         basePri,
         { p1: pA, p2: pB }
       );
       addCandidate(
-        effectivePerpAngle,
+        perpAngle,
         'perpendicular',
         isLastSeg ? 'Polilinia (Prostopadły 90°)' : `Polilinia (Prostopadły 90° do seg. ${segIdx})`,
         basePri,
@@ -113,15 +107,12 @@ export function collectTargetDirections(
   }
 
   // 3. Static reference segments (np. pozostałe stałe krawędzie edytowanego wielokąta/wstęgi)
-  if (Array.isArray(staticReferenceSegments) && staticReferenceSegments.length > 0) {
+  if (allowRelative && Array.isArray(staticReferenceSegments) && staticReferenceSegments.length > 0) {
     for (const refSeg of staticReferenceSegments) {
       const sdx = refSeg.p2.x - refSeg.p1.x;
       const sdy = refSeg.p2.y - refSeg.p1.y;
       if (Math.hypot(sdx, sdy) >= 0.05) {
-        const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-        const segAng = isNearDominant(rawSegAng) && domPair
-          ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
-          : rawSegAng;
+        const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
         const sLabel = refSeg.label || 'Krawędź (Równoległy)';
         const pLabel = refSeg.label ? refSeg.label.replace('Równoległy', 'Prostopadły 90°') : 'Krawędź (Prostopadły 90°)';
         addCandidate(segAng, 'parallel', sLabel, 3, refSeg);
@@ -132,14 +123,14 @@ export function collectTargetDirections(
 
   // 4. Priorytetyzacja wskazanego/najechanego obiektu
   const prioritizedBuildingIds = new Set<string>();
-  if (hoveredBuildingId && hoveredBuildingId !== excludeBuildingId) {
+  if (allowRelative && hoveredBuildingId && hoveredBuildingId !== excludeBuildingId) {
     prioritizedBuildingIds.add(hoveredBuildingId);
   }
-  if (selectedBuildingId && selectedBuildingId !== excludeBuildingId) {
+  if (allowRelative && selectedBuildingId && selectedBuildingId !== excludeBuildingId) {
     prioritizedBuildingIds.add(selectedBuildingId);
   }
 
-  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false);
+  const prioBuildings = allowRelative ? buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false) : [];
   for (const bldg of prioBuildings) {
     if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     if (Array.isArray(bldg.segments)) {
@@ -149,11 +140,7 @@ export function collectTargetDirections(
         const sdx = seg.p2.x - seg.p1.x;
         const sdy = seg.p2.y - seg.p1.y;
         if (Math.hypot(sdx, sdy) >= 0.05) {
-          const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-          const segAng = isNearDominant(rawSegAng) && domPair
-            ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
-            : rawSegAng;
-
+          const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
           const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
           const sourceSeg = { p1: seg.p1, p2: seg.p2, buildingId: bldg.id, edgeIndex: sIdx };
           addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4, sourceSeg);
@@ -174,10 +161,7 @@ export function collectTargetDirections(
           const sdx = p2.x - p1.x;
           const sdy = p2.y - p1.y;
           if (Math.hypot(sdx, sdy) >= 0.05) {
-            const rawSegAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-            const segAng = isNearDominant(rawSegAng) && domPair
-              ? (angleDiff180(rawSegAng, domPair.angle) <= 4.0 ? domPair.angle : domPair.ortho)
-              : rawSegAng;
+            const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
             const sourceSeg = { p1, p2, buildingId: `${bldg.id}_zone_${zIdx}`, edgeIndex: i };
             addCandidate(segAng, 'parallel', `Bufor (${displayName}) (Równoległy)`, 4, sourceSeg);
             addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `Bufor (${displayName}) (Prostopadły 90°)`, 4, sourceSeg);
@@ -188,93 +172,97 @@ export function collectTargetDirections(
   }
 
   // 5. Pozostałe pobliskie budynki posortowane według odległości
-  const maxSegments = APP_CONFIG.directionSnapping.maxNearbySegments;
-  const otherNearbySegs: {
-    angleDeg: number;
-    dist: number;
-    buildingName: string;
-    seg: { p1: Point2D; p2: Point2D };
-    buildingId: string;
-    edgeIndex: number;
-  }[] = [];
+  if (allowRelative) {
+    const maxSegments = APP_CONFIG.directionSnapping.maxNearbySegments;
+    const otherNearbySegs: {
+      angleDeg: number;
+      dist: number;
+      buildingName: string;
+      seg: { p1: Point2D; p2: Point2D };
+      buildingId: string;
+      edgeIndex: number;
+    }[] = [];
 
-  for (const bldg of buildings) {
-    if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id)) continue;
-    if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
-    const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
-    if (Array.isArray(bldg.segments)) {
-      for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
-        if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
-        const seg = bldg.segments[sIdx];
-        const midX = (seg.p1.x + seg.p2.x) / 2;
-        const midY = (seg.p1.y + seg.p2.y) / 2;
-        const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
-        const dist = Math.min(
-          Math.hypot(origin.x - midX, origin.y - midY),
-          distToMid
-        );
-        const sdx = seg.p2.x - seg.p1.x;
-        const sdy = seg.p2.y - seg.p1.y;
-        const segLen = Math.hypot(sdx, sdy);
-        if (segLen >= 0.05) {
-          const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-          if (isNearDominant(segAng)) continue;
-
-          otherNearbySegs.push({
-            angleDeg: segAng,
-            dist,
-            buildingName: displayName,
-            seg: { p1: seg.p1, p2: seg.p2 },
-            buildingId: bldg.id,
-            edgeIndex: sIdx,
-          });
-        }
-      }
-    }
-
-    if (Array.isArray(bldg.zonePolygons)) {
+    for (const bldg of buildings) {
+      if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id)) continue;
       if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
-      bldg.zonePolygons.forEach((zf, zIdx) => {
-        if (!zf.polygon || zf.polygon.length < 2) return;
-        const nZ = zf.polygon.length;
-        for (let i = 0; i < nZ; i++) {
-          const p1 = zf.polygon[i];
-          const p2 = zf.polygon[(i + 1) % nZ];
-          const midX = (p1.x + p2.x) / 2;
-          const midY = (p1.y + p2.y) / 2;
+      const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+      if (Array.isArray(bldg.segments)) {
+        for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
+          if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+          const seg = bldg.segments[sIdx];
+          const midX = (seg.p1.x + seg.p2.x) / 2;
+          const midY = (seg.p1.y + seg.p2.y) / 2;
           const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
-          const dist = Math.min(Math.hypot(origin.x - midX, origin.y - midY), distToMid);
-          const sdx = p2.x - p1.x;
-          const sdy = p2.y - p1.y;
+          const dist = Math.min(
+            Math.hypot(origin.x - midX, origin.y - midY),
+            distToMid
+          );
+          const sdx = seg.p2.x - seg.p1.x;
+          const sdy = seg.p2.y - seg.p1.y;
           const segLen = Math.hypot(sdx, sdy);
+          const isSameCat = activeCategory && bldg.category === activeCategory;
+          const effDist = isSameCat ? dist * 0.5 : dist;
           if (segLen >= 0.05) {
             const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-            if (isNearDominant(segAng)) continue;
-
             otherNearbySegs.push({
               angleDeg: segAng,
-              dist,
-              buildingName: `Bufor (${displayName})`,
-              seg: { p1, p2 },
-              buildingId: `${bldg.id}_zone_${zIdx}`,
-              edgeIndex: i,
+              dist: effDist,
+              buildingName: displayName,
+              seg: { p1: seg.p1, p2: seg.p2 },
+              buildingId: bldg.id,
+              edgeIndex: sIdx,
             });
           }
         }
-      });
+      }
+
+      if (Array.isArray(bldg.zonePolygons)) {
+        if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+        bldg.zonePolygons.forEach((zf, zIdx) => {
+          if (!zf.polygon || zf.polygon.length < 2) return;
+          const nZ = zf.polygon.length;
+          for (let i = 0; i < nZ; i++) {
+            const p1 = zf.polygon[i];
+            const p2 = zf.polygon[(i + 1) % nZ];
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
+            const dist = Math.min(Math.hypot(origin.x - midX, origin.y - midY), distToMid);
+            const isSameCat = activeCategory && bldg.category === activeCategory;
+            const effDist = isSameCat ? dist * 0.5 : dist;
+            const sdx = p2.x - p1.x;
+            const sdy = p2.y - p1.y;
+            const segLen = Math.hypot(sdx, sdy);
+            if (segLen >= 0.05) {
+              const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+              otherNearbySegs.push({
+                angleDeg: segAng,
+                dist: effDist,
+                buildingName: `Bufor (${displayName})`,
+                seg: { p1, p2 },
+                buildingId: `${bldg.id}_zone_${zIdx}`,
+                edgeIndex: i,
+              });
+            }
+          }
+        });
+      }
+    }
+
+    otherNearbySegs.sort((a, b) => a.dist - b.dist);
+    for (const item of otherNearbySegs.slice(0, maxSegments)) {
+      const sourceSeg = { p1: item.seg.p1, p2: item.seg.p2, buildingId: item.buildingId, edgeIndex: item.edgeIndex };
+      addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 6, sourceSeg);
+      addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 6, sourceSeg);
     }
   }
 
-  otherNearbySegs.sort((a, b) => a.dist - b.dist);
-  for (const item of otherNearbySegs.slice(0, maxSegments)) {
-    const sourceSeg = { p1: item.seg.p1, p2: item.seg.p2, buildingId: item.buildingId, edgeIndex: item.edgeIndex };
-    addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 6, sourceSeg);
-    addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 6, sourceSeg);
-  }
-
   // 6. Domyślne osie kartezjańskie Ortho (0° / 90°)
-  addCandidate(0, 'dominant', 'Oś X (0.0°)', 8);
-  addCandidate(90, 'dominant', 'Oś Y (90.0°)', 8);
+  if (otrackModes?.ortho !== false) {
+    addCandidate(0, 'dominant', 'Oś X (0.0°)', 8);
+    addCandidate(90, 'dominant', 'Oś Y (90.0°)', 8);
+  }
 
   return candidates;
 }
@@ -298,8 +286,10 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     minDistanceMeters = APP_CONFIG.directionSnapping.minDistanceMeters,
     hoveredBuildingId,
     selectedBuildingId,
+    activeCategory,
     excludeBuildingId,
     excludeSegmentIndices,
+    otrackModes,
   } = options;
 
   if (!currentMouseWorld || !originPoint) return null;
@@ -325,7 +315,9 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     selectedBuildingId,
     excludeBuildingId,
     excludeSegmentIndices,
-    staticReferenceSegments
+    staticReferenceSegments,
+    otrackModes,
+    activeCategory
   );
 
   const guideHalfLength = APP_CONFIG.directionSnapping.guideLineLengthMeters;
@@ -334,8 +326,10 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
   let bestIntersection: DirectionSnapResult | null = null;
   let bestIntScore = 999999;
 
+  const allowDualIntersection = otrackModes?.dualIntersection !== false;
+
   // 1a. Przecięcie dwóch prowadnic (Dual-Guide Intersection Snapping)
-  if (secondaryOriginPoints && secondaryOriginPoints.length > 0) {
+  if (allowDualIntersection && secondaryOriginPoints && secondaryOriginPoints.length > 0) {
     for (const secOrigin of secondaryOriginPoints) {
       if (Math.hypot(secOrigin.x - originPoint.x, secOrigin.y - originPoint.y) < 0.05) continue;
 
@@ -349,7 +343,9 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         selectedBuildingId,
         excludeBuildingId,
         excludeSegmentIndices,
-        staticReferenceSegments
+        staticReferenceSegments,
+        otrackModes,
+        activeCategory
       );
 
       for (const cand1 of primaryCandidates) {
@@ -638,6 +634,8 @@ export class DirectionSnapStrategy implements SnapStrategy {
       selectedBuildingId: context.selectedBuildingId,
       excludeBuildingId: context.excludeBuildingId,
       excludeSegmentIndices: context.excludeSegmentIndices,
+      activeCategory: context.activeCategory,
+      otrackModes: context.otrackModes,
     });
 
     if (!dirSnap) return null;

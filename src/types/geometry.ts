@@ -148,6 +148,10 @@ export interface BuildingLoop {
   playgroundVoronoi?: boolean; // Czy generować komórki Voronoi dla placu zabaw (domyślnie true)
   playgroundParams?: PlaygroundVoronoiConfig; // Opcjonalne parametry gęstości siatki Voronoi (faza testowa)
   groupId?: string; // Group ID for linked / grouped buildings that move together
+  /** Bufor znormalizowanych równań prostych krawędzi Ax + By + C = 0 cache'owany w obiekcie */
+  cachedLineEquations?: import('../utils/lineBufferEngine').CachedLineEquation[];
+  /** Wykryte osie bazowe/dominanty kierunkowe cache'owane w obiekcie */
+  cachedDominantAxes?: import('../utils/segmentStatistics').DominantDirection[];
   transform: {
     tx: number;
     ty: number;

@@ -1,30 +1,27 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
-import { SnapContext, SnapResult, SnapStrategy } from '../types';
+import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
 
 export class EdgeSnapStrategy implements SnapStrategy {
   readonly name = 'EdgeSnapStrategy';
-  readonly priority = 40; // Niższy niż punkty dyskretne, wyższy niż kierunek i siatka
+  readonly priority = 50; // Niższy priorytet niż punkty charakterystyczne
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    if (!context.isOsnapActive) return null;
+    const snaps = this.findAllSnaps(point, context);
+    return snaps.length > 0 ? snaps[0] : null;
+  }
 
-    const allowNearest = context.activeSnapTypes ? context.activeSnapTypes.edge !== false : true;
-    const allowExtension = context.activeSnapTypes ? context.activeSnapTypes.extension !== false : true;
-    if (!allowNearest && !allowExtension) return null;
+  findAllSnaps(point: Point2D, context: SnapContext): SnapResult[] {
+    if (!context.isOsnapActive) return [];
 
-    const thresholdPx = context.thresholdPx ?? 12;
-    const minEdgeLength = context.minEdgeLengthMeters ?? 0.05;
+    const allowNearest = !context.activeSnapTypes || context.activeSnapTypes.nearest !== false;
+    const allowExtension = !context.activeSnapTypes || context.activeSnapTypes.extension !== false;
+    if (!allowNearest && !allowExtension) return [];
 
-    const sRef = context.worldToScreen(point.x + 1, point.y);
-    const pxPerMeter = Math.hypot(sRef.sx - context.mouseScreen.sx, sRef.sy - context.mouseScreen.sy) || 20;
-    const snapRadiusWorld = (thresholdPx * 2) / pxPerMeter + 0.5;
+    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
 
-    // Snap do przedłużenia krawędzi wymaga pełnego skanu (punkt może być daleko od
-    // własnego AABB segmentu, ale blisko jego nieskończonego przedłużenia) - świadoma
-    // decyzja zakresu: indeks przestrzenny używany tylko gdy przedłużenia są wyłączone.
     let candidateEdges: CachedLineEquation[];
-    if (context.spatialIndex && !allowExtension) {
+    if (context.spatialIndex) {
       candidateEdges = context.spatialIndex.queryBBox(
         point.x - snapRadiusWorld,
         point.y - snapRadiusWorld,
@@ -39,25 +36,16 @@ export class EdgeSnapStrategy implements SnapStrategy {
         ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
         : context.lineBuffer;
     }
-    const activeEdges = candidateEdges.filter((e) => e.length >= minEdgeLength);
 
-    if (activeEdges.length === 0) return null;
+    if (candidateEdges.length === 0) return [];
 
-    let best: {
-      edge: CachedLineEquation;
-      point: Point2D;
-      distPx: number;
-      effDistPx: number;
-      isOnSegment: boolean;
-      t: number;
-    } | null = null;
-
-    let minEffDist = thresholdPx;
+    const results: SnapResult[] = [];
     const hysteresisBonus = context.hysteresisBonusPx ?? 3.5;
 
-    for (const edge of activeEdges) {
-      const signedLineDist = edge.A * point.x + edge.B * point.y + edge.C;
-      if (Math.abs(signedLineDist) > snapRadiusWorld) continue;
+    for (const edge of candidateEdges) {
+      if (context.excludeSegmentIndices && context.excludeBuildingId === edge.objectId) {
+        if (context.excludeSegmentIndices.includes(edge.edgeIndex)) continue;
+      }
 
       const proj = projectPointToLine(point, edge);
       const sProj = context.worldToScreen(proj.projectedPoint.x, proj.projectedPoint.y);
@@ -67,7 +55,7 @@ export class EdgeSnapStrategy implements SnapStrategy {
         if (proj.isOnSegment && !allowNearest) continue;
         if (!proj.isOnSegment && !allowExtension) continue;
 
-        // Jeśli kursor jest w pobliżu wierzchołków lub środka tej krawędzi,
+        // Jeśli kursor jest w pobliżu wierzchołków lub środka tej krawędzi (strefa ±8px),
         // ustępujemy pierwszeństwa dyskretnym punktom charakterystycznym (Vertex/Midpoint)
         if (proj.isOnSegment && allowNearest) {
           const sP1 = context.worldToScreen(edge.p1.x, edge.p1.y);
@@ -77,7 +65,7 @@ export class EdgeSnapStrategy implements SnapStrategy {
           const dP2 = Math.hypot(context.mouseScreen.sx - sP2.sx, context.mouseScreen.sy - sP2.sy);
           const dMid = Math.hypot(context.mouseScreen.sx - sMid.sx, context.mouseScreen.sy - sMid.sy);
 
-          if (dP1 <= thresholdPx || dP2 <= thresholdPx || dMid <= thresholdPx) {
+          if (dP1 <= 8.0 || dP2 <= 8.0 || dMid <= 8.0) {
             continue;
           }
         }
@@ -93,6 +81,13 @@ export class EdgeSnapStrategy implements SnapStrategy {
           effDist -= 2.0;
         }
 
+        const catBonus = computeCategoryAffinityBonus(
+          edge.category,
+          context.activeCategory,
+          context.categoryAffinityWeights
+        );
+        effDist -= catBonus;
+
         if (
           context.previousSnapResult &&
           (context.previousSnapResult.type === 'edge' || context.previousSnapResult.type === 'extension')
@@ -103,56 +98,47 @@ export class EdgeSnapStrategy implements SnapStrategy {
         }
 
         effDist = Math.max(0, effDist);
-        if (effDist <= minEffDist) {
-          minEffDist = effDist;
-          best = {
-            edge,
-            point: proj.projectedPoint,
-            distPx,
-            effDistPx: effDist,
-            isOnSegment: proj.isOnSegment,
-            t: proj.t,
-          };
-        }
+
+        const guideExtLength = 50;
+        const guideLines = isExt
+          ? [
+              {
+                p1: {
+                  x: edge.p1.x - guideExtLength * edge.uX,
+                  y: edge.p1.y - guideExtLength * edge.uY,
+                },
+                p2: {
+                  x: edge.p2.x + guideExtLength * edge.uX,
+                  y: edge.p2.y + guideExtLength * edge.uY,
+                },
+                type: 'extension' as const,
+                isStatistical: false,
+              },
+            ]
+          : undefined;
+
+        const displayName = edge.objectName || edge.objectId;
+        results.push({
+          point: { ...proj.projectedPoint },
+          snapped: true,
+          type: isExt ? 'extension' : 'edge',
+          label: isExt ? 'Przedłużenie (Extension)' : 'Punkt na krawędzi (Nearest)',
+          description: isExt
+            ? `Przedłużenie krawędzi (${displayName})`
+            : `Rzut na krawędź (${displayName})`,
+          screenDistancePx: distPx,
+          sourceBuildingId: edge.objectId,
+          sourceCategory: edge.category,
+          sourceName: edge.objectName,
+          sourceEdgeIndex: edge.edgeIndex,
+          cachedEdge: edge,
+          guideLines,
+          metadata: { effDistPx: effDist },
+        });
       }
     }
 
-    if (best) {
-      const isExt = !best.isOnSegment;
-      const guideExtLength = 50;
-      const guideLines = isExt
-        ? [
-            {
-              p1: {
-                x: best.edge.p1.x - guideExtLength * best.edge.uX,
-                y: best.edge.p1.y - guideExtLength * best.edge.uY,
-              },
-              p2: {
-                x: best.edge.p2.x + guideExtLength * best.edge.uX,
-                y: best.edge.p2.y + guideExtLength * best.edge.uY,
-              },
-              type: 'extension',
-              isStatistical: false,
-            },
-          ]
-        : undefined;
-
-      return {
-        point: { ...best.point },
-        snapped: true,
-        type: isExt ? 'extension' : 'edge',
-        label: isExt ? 'Przedłużenie (Extension)' : 'Punkt na krawędzi (Nearest)',
-        description: isExt
-          ? `Przedłużenie krawędzi (${best.edge.objectId})`
-          : `Rzut na krawędź (${best.edge.objectId})`,
-        screenDistancePx: best.distPx,
-        sourceBuildingId: best.edge.objectId,
-        sourceEdgeIndex: best.edge.edgeIndex,
-        cachedEdge: best.edge,
-        guideLines,
-      };
-    }
-
-    return null;
+    results.sort((a, b) => ((a.metadata?.effDistPx as number) ?? 0) - ((b.metadata?.effDistPx as number) ?? 0));
+    return results;
   }
 }

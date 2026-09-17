@@ -24,6 +24,7 @@ export function useCadHotkeys({
   onCancelEdgeLength,
   onToggleOsnap,
   onAdjustObjectParam,
+  onCycleSnapCandidate,
 }: {
   drawingMode: DrawingMode;
   drawingVertices: Point2D[];
@@ -44,6 +45,7 @@ export function useCadHotkeys({
   onCancelEdgeLength?: () => void;
   onToggleOsnap?: () => void;
   onAdjustObjectParam?: (direction: 'dec' | 'inc', isLargeStep?: boolean) => void;
+  onCycleSnapCandidate?: () => void;
 }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -188,9 +190,14 @@ export function useCadHotkeys({
       ) {
         e.preventDefault();
         onAdjustObjectParam?.('inc', e.shiftKey);
-      } else if (e.key === 'Tab' && hoveredBuildings.length > 1) {
-        e.preventDefault();
-        setHoveredBuildingIndex((prev) => (prev + 1) % hoveredBuildings.length);
+      } else if (e.key === 'Tab') {
+        if (drawingMode !== 'none' || selectedVertexIndex !== null || isEditingEdgeLength) {
+          e.preventDefault();
+          onCycleSnapCandidate?.();
+        } else if (hoveredBuildings.length > 1) {
+          e.preventDefault();
+          setHoveredBuildingIndex((prev) => (prev + 1) % hoveredBuildings.length);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -201,6 +208,7 @@ export function useCadHotkeys({
     onDeleteSelectedVertex,
     onCycleVertexSelection,
     onAdjustObjectParam,
+    onCycleSnapCandidate,
     drawingVertices,
     hoveredBuildings,
     onCancelDrawing,

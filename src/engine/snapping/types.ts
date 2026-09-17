@@ -1,47 +1,60 @@
-import { Point2D, BuildingLoop } from '../../types/geometry';
+import { Point2D, BuildingLoop, ObjectCategory } from '../../types/geometry';
 import { CachedLineEquation } from '../../utils/lineBufferEngine';
 import { DominantDirection } from '../../utils/segmentStatistics';
 import { SpatialLineIndex } from './SpatialLineIndex';
 
 export type SnapType =
   | 'vertex'
+  | 'intersection'
   | 'midpoint'
+  | 'perpendicular'
   | 'edge'
   | 'extension'
   | 'direction'
-  | 'perpendicular'
   | 'otrack_intersection'
   | 'otrack_ray'
   | 'grid'
   | 'none';
 
+export interface ActiveSnapState {
+  candidate: SnapResult;
+  screenPos: { sx: number; sy: number };
+  captureRadiusPx: number; // np. 12px
+  releaseRadiusPx: number; // np. 18px
+  acquiredAt: number;
+}
+
+export interface ToleranceBounds {
+  screenPx: number;
+  minWorldMeters: number;
+  maxWorldMeters: number;
+}
+
 export interface SnapGuideLine {
   p1: Point2D;
   p2: Point2D;
-  type?: string;
-  isStatistical?: boolean;
+  type: 'parallel' | 'perpendicular' | 'intersection' | 'extension' | 'dominant' | 'otrack';
+  label?: string;
+  sourceOrigin?: Point2D;
+  sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number };
 }
 
 export interface TrackingRay {
-  anchorId: string;
   origin: Point2D;
-  type: 'horizontal' | 'vertical' | 'parallel' | 'perpendicular';
-  isStatistical?: boolean;
-  label: string;
-  A: number;
-  B: number;
-  C: number;
   angleRad: number;
-  p1: Point2D;
-  p2: Point2D;
+  type: 'ortho_h' | 'ortho_v' | 'edge_parallel' | 'edge_perp' | 'dominant';
+  sourceAnchor: AnchorPoint;
+  label: string;
 }
 
 export interface AnchorPoint {
-  id: string;
+  id: string; // np. `anchor_${objectId}_${vertexIndex}`
   point: Point2D;
-  sourceType: 'vertex' | 'midpoint' | 'intersection' | 'custom';
-  sourceBuildingId?: string;
-  sourceEdgeId?: string;
+  sourceObjectId: string;
+  sourceCategory?: ObjectCategory;
+  sourceName?: string;
+  sourceVertexIndex?: number;
+  sourceEdgeIndex?: number;
   sourceEdgeAngle?: number;
   acquiredAt: number;
 }
@@ -58,9 +71,13 @@ export interface SnapResult {
   isStatisticalGuide?: boolean;
   sourcePoint?: Point2D;
   sourceBuildingId?: string;
+  sourceCategory?: ObjectCategory;
+  sourceName?: string;
   sourceEdgeIndex?: number;
   cachedEdge?: CachedLineEquation;
   intersectingAnchors?: [AnchorPoint, AnchorPoint];
+  secondarySnap?: SnapResult;
+  secondaryGuideLines?: SnapGuideLine[];
   metadata?: Record<string, unknown>;
 }
 
@@ -84,10 +101,22 @@ export interface SnapContext {
   excludeSegmentIndices?: number[];
   hoveredBuildingId?: string;
   selectedBuildingId?: string;
+  activeCategory?: ObjectCategory;
+  sourceObjectId?: string;
+  categoryAffinityWeights?: Partial<Record<ObjectCategory, number>>;
   previousSnapResult?: SnapResult | null;
   hysteresisBonusPx?: number;
   minEdgeLengthMeters?: number;
+  minToleranceMeters?: number; // np. 0.05m dla skrajnego zoom in
+  maxToleranceMeters?: number; // np. 3.00m dla skrajnego zoom out
+  candidateIndex?: number; // Indeks wybranego kandydata z klawisza Tab
   activeSnapTypes?: Partial<Record<SnapType, boolean>>;
+  otrackModes?: {
+    ortho?: boolean;
+    dominant?: boolean;
+    relative?: boolean;
+    dualIntersection?: boolean;
+  };
   /** Indeks przestrzenny (rbush) nad lineBuffer, wstrzykiwany przez SnapCoordinator.
    *  Gdy undefined, strategie korzystają z liniowego skanu (kompatybilność wsteczna). */
   spatialIndex?: SpatialLineIndex;
@@ -97,6 +126,54 @@ export interface SnapStrategy {
   readonly name: string;
   readonly priority: number;
   findSnap(point: Point2D, context: SnapContext): SnapResult | null;
+  /** Opcjonalna metoda zwracająca wszystkich pasujących kandydatów dla przełączania Tab */
+  findAllSnaps?(point: Point2D, context: SnapContext): SnapResult[];
+}
+
+/**
+ * Oblicza bonus odległościowy (odejmowany od effDist w px) wynikający z preferencji kategorii obiektu
+ */
+export function computeCategoryAffinityBonus(
+  targetCategory: ObjectCategory | undefined,
+  activeCategory: ObjectCategory | undefined,
+  customWeights?: Partial<Record<ObjectCategory, number>>
+): number {
+  if (!activeCategory || !targetCategory) return 0;
+  if (customWeights && typeof customWeights[targetCategory] === 'number') {
+    return customWeights[targetCategory]!;
+  }
+  // Standardowa hierarchia wag w pikselach:
+  if (activeCategory === targetCategory) {
+    return 5.0; // Silny bonus dla tej samej kategorii (np. działka do działki, budynek do budynku)
+  }
+  if (activeCategory === 'balcony' && targetCategory === 'building') {
+    return 6.0; // Balkon naturalnie lgnie do elewacji budynku
+  }
+  if (activeCategory === 'building' && targetCategory === 'boundary') {
+    return 2.0; // Budynek chętnie wyrównuje się do granicy działki
+  }
+  return 0.0;
+}
+
+/**
+ * Oblicza promień tolerancji w jednostkach świata z uwzględnieniem ograniczeń min/max (clamping)
+ */
+export function computeClampedWorldTolerance(
+  point: Point2D,
+  context: SnapContext,
+  defaultScreenPx = 12,
+  minMeters = 0.05,
+  maxMeters = 3.0
+): { worldRadius: number; pxPerMeter: number; thresholdPx: number } {
+  const thresholdPx = context.thresholdPx ?? defaultScreenPx;
+  const s0 = context.worldToScreen(point.x, point.y);
+  const s1 = context.worldToScreen(point.x + 1, point.y);
+  const pxPerMeter = Math.hypot(s1.sx - s0.sx, s1.sy - s0.sy) || 20;
+  const rawWorld = (thresholdPx * 2) / pxPerMeter + 0.2;
+  const minM = context.minToleranceMeters ?? minMeters;
+  const maxM = context.maxToleranceMeters ?? maxMeters;
+  const worldRadius = Math.min(maxM, Math.max(minM, rawWorld));
+  return { worldRadius, pxPerMeter, thresholdPx };
 }
 
 // Compatibility types for drawingToolRenderer & CadCanvas
@@ -120,6 +197,8 @@ export interface OsnapSnapResult {
   description: string;
   sourcePoint?: Point2D;
   sourceBuildingId?: string;
+  sourceCategory?: ObjectCategory;
+  sourceName?: string;
   sourceEdgeIndex?: number;
   rayLine?: { p1: Point2D; p2: Point2D };
   activeRays?: TrackingRay[];
@@ -128,6 +207,9 @@ export interface OsnapSnapResult {
   cachedEdge?: CachedLineEquation;
   parallelAngleDeg?: number;
   collinearDistance?: number;
+  secondarySnap?: OsnapSnapResult;
+  secondaryRayLine?: { p1: Point2D; p2: Point2D };
+  secondaryType?: OsnapSnapType;
 }
 
 export interface DirectionSnapResult {
@@ -159,8 +241,15 @@ export interface CalculateDirectionSnapOptions {
   minDistanceMeters?: number;
   hoveredBuildingId?: string;
   selectedBuildingId?: string;
+  activeCategory?: ObjectCategory;
   excludeBuildingId?: string;
   excludeSegmentIndices?: number[];
+  otrackModes?: {
+    ortho?: boolean;
+    dominant?: boolean;
+    relative?: boolean;
+    dualIntersection?: boolean;
+  };
 }
 
 export interface DirectionCandidate {

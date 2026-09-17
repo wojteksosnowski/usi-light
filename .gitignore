@@ -45,3 +45,4 @@ Thumbs.db
 # Local agent tooling
 .agents/
 .claude/
+scratch/

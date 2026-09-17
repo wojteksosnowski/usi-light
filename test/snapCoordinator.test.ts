@@ -10,10 +10,20 @@ import {
   calculateDirectionSnap,
   collectTargetDirections,
   evaluateBuildingDragMultiSnap,
+  evaluateEdgeDragSnap,
   evaluateCollinearAndParallelLock,
 } from '../src/engine/snapping';
 import { BuildingLoop, Point2D } from '../src/types/geometry';
-import { createCachedLineEquation } from '../src/utils/lineBufferEngine';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  createCachedLineEquation,
+  getOrBuildBuildingLineBuffer,
+  flattenLineBuffer,
+  buildLineBufferFromBuildings,
+  buildLineBufferForPolygon,
+} from '../src/utils/lineBufferEngine';
+import { analyzeSegmentsStatistics } from '../src/utils/segmentStatistics';
 import {
   normalizeAngle180,
   normalizeAngle360,
@@ -484,5 +494,243 @@ describe('Direction Snapping & Math2D Angular Utilities', () => {
     if (snap) {
       expect(snap.relationType).not.toBe('guide_intersection');
     }
+  });
+
+  it('correctly snaps to rotated building vertices/edges and provides exact real angles (snap-test1.json scenario)', () => {
+    const worldToScreen = (wx: number, wy: number) => ({ sx: wx * 20, sy: wy * 20 });
+    const screenToWorld = (sx: number, sy: number) => ({ wx: sx / 20, wy: sy / 20 });
+    const coordinator = new SnapCoordinator();
+
+    const filePath = path.resolve('C:/py/usi-light/reference/snap-test1.json');
+    const rawData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const testBuildings: BuildingLoop[] = rawData.buildings;
+    const bldgA = testBuildings.find((b) => b.name === 'BudynekA')!;
+    expect(bldgA).toBeDefined();
+
+    // 1. Walidacja regeneracji bufora linii z nieaktualnego cache z pliku JSON
+    const bldgALines = getOrBuildBuildingLineBuffer(bldgA);
+    expect(bldgALines.length).toBe(4);
+    expect(bldgALines[0].p1.x).toBeCloseTo(bldgA.vertices[0].x, 3);
+    expect(bldgALines[0].p1.y).toBeCloseTo(bldgA.vertices[0].y, 3);
+
+    const fullLineBuffer = flattenLineBuffer(buildLineBufferFromBuildings([bldgA]));
+
+    // 2. Wykrywanie wierzchołka 3 BudynekA (indeks 2: x=-97.05, y=57.34 lub indeks 3: x=-153.65, y=88.02)
+    const v3 = bldgA.vertices[2]; // (-97.0548, 57.3452)
+    const mouseNearV3: Point2D = { x: v3.x + 0.08, y: v3.y - 0.08 };
+    const ctxV3: SnapContext = {
+      mouseWorld: mouseNearV3,
+      mouseScreen: worldToScreen(mouseNearV3.x, mouseNearV3.y),
+      worldToScreen,
+      screenToWorld,
+      buildings: [bldgA],
+      lineBuffer: fullLineBuffer,
+      isOsnapActive: true,
+      isDirectionSnappingActive: false,
+      thresholdPx: 14,
+    };
+    const snapV3 = coordinator.evaluate(mouseNearV3, ctxV3);
+    expect(snapV3.snapped).toBe(true);
+    expect(snapV3.type).toBe('vertex');
+    expect(snapV3.point.x).toBeCloseTo(v3.x, 2);
+    expect(snapV3.point.y).toBeCloseTo(v3.y, 2);
+
+    // 3. Wykrywanie krawędzi 3-4 BudynekA (pomiędzy v2 i v3)
+    const v4 = bldgA.vertices[3]; // (-153.6516, 88.0255)
+    const midEdge34: Point2D = { x: (v3.x + v4.x) / 2 + 0.05, y: (v3.y + v4.y) / 2 - 0.05 };
+    const ctxEdge: SnapContext = {
+      mouseWorld: midEdge34,
+      mouseScreen: worldToScreen(midEdge34.x, midEdge34.y),
+      worldToScreen,
+      screenToWorld,
+      buildings: [bldgA],
+      lineBuffer: fullLineBuffer,
+      isOsnapActive: true,
+      isDirectionSnappingActive: false,
+      thresholdPx: 14,
+    };
+    const snapEdge = coordinator.evaluate(midEdge34, ctxEdge);
+    expect(snapEdge.snapped).toBe(true);
+    // snapEdge może być midpoint lub edge
+    expect(['midpoint', 'edge']).toContain(snapEdge.type);
+
+    // 4. Weryfikacja dokładnego kąta siatki dominującej i prowadnicy kierunkowej
+    const stats = analyzeSegmentsStatistics([bldgA]);
+    expect(stats.dominantDirections.length).toBeGreaterThan(0);
+    // Rzeczywisty kąt krawędzi BudynekA wynosi 151.53847897620443 (lub ortogonalny 61.53847897620436)
+    const domAngle = stats.dominantDirections[0].orthogonalDeg;
+    expect(domAngle).toBeCloseTo(151.538, 2);
+
+    // Direction snap od wierzchołka v4 wzdłuż BudynekA
+    const mouseAlongEdge: Point2D = { x: v4.x + 10 * Math.cos((151.538 * Math.PI) / 180), y: v4.y + 10 * Math.sin((151.538 * Math.PI) / 180) };
+    const dirSnap = calculateDirectionSnap({
+      originPoint: v4,
+      currentMouseWorld: mouseAlongEdge,
+      buildings: [bldgA],
+      dominantDirections: stats.dominantDirections,
+      hoveredBuildingId: bldgA.id,
+      angleToleranceDeg: 5.0,
+    });
+    expect(dirSnap).not.toBeNull();
+    // Kąt prowadnicy musi być DOKŁADNYM kątem ściany bez zaokrąglenia do 152.0
+    expect(dirSnap?.guideAngleDeg).toBeCloseTo(151.538, 2);
+  });
+
+  it('snaps perpendicular to an infinite edge extension beyond physical segment bounds', () => {
+    const coordinator = new SnapCoordinator();
+    const worldToScreen = (wx: number, wy: number) => ({ sx: wx * 20, sy: wy * 20 });
+    const screenToWorld = (sx: number, sy: number) => ({ wx: sx / 20, wy: sy / 20 });
+    // Reference edge on x-axis from (0, 0) to (10, 0)
+    const edge = createCachedLineEquation('e1', 'b1', 0, { x: 0, y: 0 }, { x: 10, y: 0 });
+    // Origin at (25, 15) -> perpendicular projection onto y=0 line is (25, 0), which is outside x: 0..10
+    const origin: Point2D = { x: 25, y: 15 };
+    const mouseNearProj: Point2D = { x: 25.05, y: 0.05 };
+
+    const ctx: SnapContext = {
+      mouseWorld: mouseNearProj,
+      mouseScreen: worldToScreen(mouseNearProj.x, mouseNearProj.y),
+      worldToScreen,
+      screenToWorld,
+      lineBuffer: [edge],
+      isOsnapActive: true,
+      originPoint: origin,
+      thresholdPx: 14,
+    };
+
+    const snap = coordinator.evaluate(mouseNearProj, ctx);
+    expect(snap.snapped).toBe(true);
+    expect(snap.type).toBe('perpendicular');
+    expect(snap.point.x).toBeCloseTo(25, 2);
+    expect(snap.point.y).toBeCloseTo(0, 2);
+    expect(snap.label).toContain('przedłużenia');
+    expect(snap.guideLines).toBeDefined();
+    expect(snap.guideLines?.some((g) => g.type === 'extension')).toBe(true);
+  });
+
+  it('reliably locks vertex-to-vertex during building drag even with non-aligned edge directions', () => {
+    // Reference building rotated at 37 degrees
+    const refVerts: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 8, y: 6 },
+      { x: 2, y: 14 },
+      { x: -6, y: 8 },
+    ];
+    const refBuffer = buildLineBufferForPolygon('ref-rot', refVerts);
+
+    // Moving building rotated at 71 degrees, moving near corner (8, 6)
+    const movingVerts: Point2D[] = [
+      { x: 8.15, y: 6.1 }, // Close to (8, 6)
+      { x: 13.15, y: 18.1 },
+      { x: 1.15, y: 22.1 },
+      { x: -3.85, y: 10.1 },
+    ];
+
+    const snap = evaluateBuildingDragMultiSnap({
+      movingVertices: movingVerts,
+      movingBuildingId: 'mov-rot',
+      referenceBuffer: refBuffer,
+      distanceThresholdMeters: 0.5, // 30px at 60px/m
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relation).toBe('vertex_to_vertex');
+    expect(snap?.deltaX).toBeCloseTo(-0.15, 2);
+    expect(snap?.deltaY).toBeCloseTo(-0.1, 2);
+  });
+
+  it('supports midpoint dragging relations (vertex to midpoint and midpoint to midpoint)', () => {
+    const refVerts: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 }, // Midpoint at (5, 0)
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+    const refBuffer = buildLineBufferForPolygon('ref-box', refVerts);
+
+    // Moving building with vertex near (5, 0)
+    const movingVerts: Point2D[] = [
+      { x: 5.1, y: 0.1 }, // Corner near ref midpoint (5, 0)
+      { x: 15.1, y: 0.1 },
+      { x: 15.1, y: 10.1 },
+      { x: 5.1, y: 10.1 },
+    ];
+
+    const snap = evaluateBuildingDragMultiSnap({
+      movingVertices: movingVerts,
+      movingBuildingId: 'mov-box',
+      referenceBuffer: refBuffer,
+      distanceThresholdMeters: 0.35,
+    });
+
+    expect(snap).not.toBeNull();
+    expect(snap?.relation).toBe('vertex_to_midpoint');
+    expect(snap?.deltaX).toBeCloseTo(-0.1, 2);
+    expect(snap?.deltaY).toBeCloseTo(-0.1, 2);
+    expect(snap?.label).toContain('środka ściany');
+  });
+
+  it('detects simultaneous Dual-Snap (primary discrete snap + secondary auxiliary snap)', () => {
+    const coordinator = new SnapCoordinator();
+    const worldToScreen = (wx: number, wy: number) => ({ sx: wx * 20, sy: wy * 20 });
+    const screenToWorld = (sx: number, sy: number) => ({ wx: sx / 20, wy: sy / 20 });
+
+    // Edge 1 from (0,0) to (10,0) (Horizontal) -> midpoint at (5, 0)
+    const edge1 = createCachedLineEquation('e1', 'b1', 0, { x: 0, y: 0 }, { x: 10, y: 0 });
+    // Edge 2 from (5, 0) to (5, 10) (Vertical, intersecting edge1 at (5, 0))
+    const edge2 = createCachedLineEquation('e2', 'b2', 0, { x: 5, y: 0 }, { x: 5, y: 10 });
+
+    const mouseNearIntersection: Point2D = { x: 5.02, y: 0.02 };
+    const ctx: SnapContext = {
+      mouseWorld: mouseNearIntersection,
+      mouseScreen: worldToScreen(mouseNearIntersection.x, mouseNearIntersection.y),
+      worldToScreen,
+      screenToWorld,
+      lineBuffer: [edge1, edge2],
+      isOsnapActive: true,
+      thresholdPx: 14,
+    };
+
+    const snap = coordinator.evaluate(mouseNearIntersection, ctx);
+    expect(snap.snapped).toBe(true);
+    expect(snap.secondarySnap).toBeDefined();
+    expect(snap.secondarySnap?.snapped).toBe(true);
+  });
+
+  it('maintains sticky lock during edge drag when small mouse jitter occurs', () => {
+    const refEdge = createCachedLineEquation('ref-col', 'bldg-ref', 0, { x: 0, y: 10 }, { x: 20, y: 10 });
+    const edgeP1 = { x: 5, y: 9.8 };
+    const edgeP2 = { x: 15, y: 9.8 };
+    const normal = { x: 0, y: 1 };
+
+    // 1. Initial snap when mouse moves to y = 9.9
+    const initialSnap = evaluateEdgeDragSnap({
+      edgeP1,
+      edgeP2,
+      normal,
+      buildingId: 'bldg-mov',
+      edgeIndex: 0,
+      tentativeDelta: { dx: 0, dy: 0.1 },
+      referenceBuffer: [refEdge],
+      distanceThresholdMeters: 0.2,
+    });
+    expect(initialSnap).not.toBeNull();
+
+    // 2. Mouse jitters slightly past threshold (e.g. dy = 0.25 -> total distance 0.25m from y=10)
+    // With sticky lock (up to 0.2 * 1.5 = 0.30m), it should HOLD the snap!
+    const jitterSnap = evaluateEdgeDragSnap({
+      edgeP1,
+      edgeP2,
+      normal,
+      buildingId: 'bldg-mov',
+      edgeIndex: 0,
+      tentativeDelta: { dx: 0, dy: 0.24 }, // 0.24m jitter (exceeds 0.2m but within 0.3m release)
+      referenceBuffer: [refEdge],
+      distanceThresholdMeters: 0.2,
+      previousSnap: initialSnap,
+    });
+
+    expect(jitterSnap).not.toBeNull();
+    expect(jitterSnap?.relation).toBe('edge_to_edge_collinear');
+    expect(jitterSnap?.deltaOffset.dy).toBeCloseTo(0.2); // Still locks cleanly to y = 10.0!
   });
 });

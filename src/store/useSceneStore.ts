@@ -3,6 +3,7 @@ import { temporal } from 'zundo';
 import { BuildingLoop, CadLayerSettings, Point2D, Modifier, DimensionReference, DEFAULT_SWEEP_WIDTH } from '../types/geometry';
 import { createBuildingFromVertices, DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { computeLineEquation, rebuildBuildingSegments } from '../utils/segmentStatistics';
+import { translateLineBuffer, rotateLineBuffer } from '../utils/lineBufferEngine';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 
@@ -151,6 +152,9 @@ function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: number): 
   });
 
   const currentTransform = bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 };
+  const newCachedLines = bldg.cachedLineEquations
+    ? translateLineBuffer(bldg.cachedLineEquations, dx, dy)
+    : undefined;
 
   return {
     ...bldg,
@@ -159,6 +163,7 @@ function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: number): 
     storyPolygons: newStoryPolygons,
     zonePolygons: newZonePolygons,
     segments: newSegments,
+    cachedLineEquations: newCachedLines,
     transform: {
       ...currentTransform,
       tx: (currentTransform.tx || 0) + dx,
@@ -214,6 +219,10 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
     rotationDeg: Number(((((bldg.transform?.rotationDeg || 0) + deltaDeg) % 360 + 360) % 360).toFixed(2)),
   };
 
+  const newCachedLines = bldg.cachedLineEquations
+    ? rotateLineBuffer(bldg.cachedLineEquations, pivot, deltaAngleRad)
+    : undefined;
+
   return {
     ...bldg,
     vertices: newVertices,
@@ -222,6 +231,7 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
     storyPolygons: newStoryPolygons,
     zonePolygons: newZonePolygons,
     segments: newSegments,
+    cachedLineEquations: newCachedLines,
   };
 }
 

@@ -3,6 +3,8 @@ import { Point2D, BuildingLoop } from '../types/geometry';
 export interface CachedLineEquation {
   id: string; // np. `${objectId}_edge_${index}`
   objectId: string;
+  category?: import('../types/geometry').ObjectCategory;
+  objectName?: string;
   edgeIndex: number;
   p1: Point2D;
   p2: Point2D;
@@ -33,7 +35,9 @@ export function createCachedLineEquation(
   objectId: string,
   edgeIndex: number,
   p1: Point2D,
-  p2: Point2D
+  p2: Point2D,
+  category?: import('../types/geometry').ObjectCategory,
+  objectName?: string
 ): CachedLineEquation {
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
@@ -43,6 +47,8 @@ export function createCachedLineEquation(
     return {
       id,
       objectId,
+      category,
+      objectName,
       edgeIndex,
       p1: { ...p1 },
       p2: { ...p2 },
@@ -71,6 +77,8 @@ export function createCachedLineEquation(
   return {
     id,
     objectId,
+    category,
+    objectName,
     edgeIndex,
     p1: { ...p1 },
     p2: { ...p2 },
@@ -89,7 +97,9 @@ export function createCachedLineEquation(
  */
 export function buildLineBufferForPolygon(
   objectId: string,
-  vertices: Point2D[]
+  vertices: Point2D[],
+  category?: import('../types/geometry').ObjectCategory,
+  objectName?: string
 ): CachedLineEquation[] {
   const buffer: CachedLineEquation[] = [];
   const n = vertices.length;
@@ -98,13 +108,44 @@ export function buildLineBufferForPolygon(
   for (let i = 0; i < n; i++) {
     const p1 = vertices[i];
     const p2 = vertices[(i + 1) % n];
-    buffer.push(createCachedLineEquation(`${objectId}_edge_${i}`, objectId, i, p1, p2));
+    buffer.push(createCachedLineEquation(`${objectId}_edge_${i}`, objectId, i, p1, p2, category, objectName));
   }
   return buffer;
 }
 
 /**
- * Tworzy pełny bufor linii dla wszystkich aktywnych budynków
+ * Pobiera lub generuje zbuforowane równania prostych dla pojedynczego obiektu
+ */
+export function getOrBuildBuildingLineBuffer(bldg: BuildingLoop): CachedLineEquation[] {
+  if (bldg.cachedLineEquations && bldg.cachedLineEquations.length > 0) {
+    const v = bldg.vertices;
+    if (v && v.length >= 2) {
+      const first = bldg.cachedLineEquations[0];
+      const p1Match = Math.hypot(first.p1.x - v[0].x, first.p1.y - v[0].y) < 1e-3;
+      const p2Match = Math.hypot(first.p2.x - v[1].x, first.p2.y - v[1].y) < 1e-3;
+      if (p1Match && p2Match) {
+        return bldg.cachedLineEquations;
+      }
+    }
+  }
+  const bldgLines: CachedLineEquation[] = [];
+  const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : undefined);
+  if (bldg.vertices && bldg.vertices.length >= 2) {
+    bldgLines.push(...buildLineBufferForPolygon(bldg.id, bldg.vertices, bldg.category, displayName));
+  }
+  if (Array.isArray(bldg.zonePolygons)) {
+    bldg.zonePolygons.forEach((zf, zIdx) => {
+      if (zf.polygon && zf.polygon.length >= 2) {
+        bldgLines.push(...buildLineBufferForPolygon(`${bldg.id}_zone_${zIdx}`, zf.polygon, bldg.category, displayName));
+      }
+    });
+  }
+  bldg.cachedLineEquations = bldgLines;
+  return bldgLines;
+}
+
+/**
+ * Tworzy pełny bufor linii dla wszystkich aktywnych budynków z wykorzystaniem pamięci podręcznej obiektów
  */
 export function buildLineBufferFromBuildings(
   buildings: BuildingLoop[],
@@ -117,20 +158,7 @@ export function buildLineBufferFromBuildings(
     const lyr = bldg.layer || 'Domyślna (0)';
     if (layerSettings[lyr]?.isVisible === false) continue;
 
-    const bldgLines: CachedLineEquation[] = [];
-    if (bldg.vertices && bldg.vertices.length >= 2) {
-      bldgLines.push(...buildLineBufferForPolygon(bldg.id, bldg.vertices));
-    }
-
-    // Dodaj krawędzie stref buforowych / obszarów z modyfikatorów
-    if (Array.isArray(bldg.zonePolygons)) {
-      bldg.zonePolygons.forEach((zf, zIdx) => {
-        if (zf.polygon && zf.polygon.length >= 2) {
-          bldgLines.push(...buildLineBufferForPolygon(`${bldg.id}_zone_${zIdx}`, zf.polygon));
-        }
-      });
-    }
-
+    const bldgLines = getOrBuildBuildingLineBuffer(bldg);
     if (bldgLines.length > 0) {
       lineBufferMap.set(bldg.id, bldgLines);
     }
@@ -237,13 +265,20 @@ export function updateVertexInLineBuffer(
 
   const newBuffer = [...buffer];
 
+  const prevCat = buffer[prevEdgeIdx]?.category;
+  const prevName = buffer[prevEdgeIdx]?.objectName;
+  const currCat = buffer[currEdgeIdx]?.category;
+  const currName = buffer[currEdgeIdx]?.objectName;
+
   // Krawędź k-1: V_{k-1} -> V_k
   newBuffer[prevEdgeIdx] = createCachedLineEquation(
     `${objectId}_edge_${prevEdgeIdx}`,
     objectId,
     prevEdgeIdx,
     vertices[prevEdgeIdx],
-    vertices[k]
+    vertices[k],
+    prevCat,
+    prevName
   );
 
   // Krawędź k: V_k -> V_{k+1}
@@ -252,7 +287,9 @@ export function updateVertexInLineBuffer(
     objectId,
     currEdgeIdx,
     vertices[k],
-    vertices[(k + 1) % n]
+    vertices[(k + 1) % n],
+    currCat,
+    currName
   );
 
   return newBuffer;

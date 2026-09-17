@@ -23,6 +23,8 @@ import { ModifierType } from '../../types/modifiers';
 import { DRAWING_TOOLS } from '../toolbar/drawingToolDescriptors';
 import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 
+import { SnappingToolsCard } from './tools/SnappingToolsCard';
+
 const ALIGN_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'align')!;
 const UNION_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'union')!;
 
@@ -55,6 +57,7 @@ export const ToolsGroup: React.FC = () => {
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
   const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
   const toggleDirectionSnapping = useCadToolStore((s) => s.toggleDirectionSnapping);
+  const noisePercentileCutoff = useCadToolStore((s) => s.noisePercentileCutoff);
 
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
@@ -99,9 +102,6 @@ export const ToolsGroup: React.FC = () => {
   }, [dimensions, selectedBuildingId]);
 
   // Statistical analysis of facade segments directions
-  const [noisePercentileCutoff, setNoisePercentileCutoff] = useState<number>(
-    APP_CONFIG.statistics?.defaultNoisePercentile ?? 20
-  );
   const rawSegmentStats = useMemo(
     () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff }),
     [buildings, noisePercentileCutoff]
@@ -110,6 +110,9 @@ export const ToolsGroup: React.FC = () => {
 
   return (
     <div className="sidebar-group-content">
+      {/* 3.0 Kafel Dociągania (OSNAP / OTRACK / HPF) */}
+      <SnappingToolsCard />
+
       {/* 3.1 Narzędzia Rysowania i Edycji */}
       <div className="ui-card">
         <div className="ui-title">
@@ -118,26 +121,6 @@ export const ToolsGroup: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          {/* Główny przełącznik przyciągania */}
-          <div style={{ marginBottom: '4px' }}>
-            <button
-              type="button"
-              onClick={toggleOsnap}
-              className={`btn-tile ${isOsnapActive ? 'active-emerald' : 'inactive'}`}
-              style={{ padding: '7px 10px', justifyContent: 'space-between', width: '100%' }}
-              title="Włącz / wyłącz przyciąganie geometryczne [S / F3] (przytrzymaj SHIFT aby wymusić kąty kardynalne i dominujące)"
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Magnet size={13} color={isOsnapActive ? '#10b981' : '#64748b'} />
-                <span style={{ fontWeight: 600, fontSize: '11px' }}>Przyciąganie [S / F3]</span>
-              </div>
-              <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                {isOsnapActive ? 'WŁ' : 'WYŁ'}
-              </span>
-            </button>
-          </div>
-
-
           {/* Rząd 1: Prostokąt, Polilinia, Wstęga — zarejestrowane w DRAWING_TOOLS (współdzielone z CadToolBar) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
             {DRAWING_TOOLS.filter((t) => t.mode === 'rectangle' || t.mode === 'polyline' || t.mode === 'sweep').map((tool) => (

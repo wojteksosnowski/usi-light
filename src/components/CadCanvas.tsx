@@ -320,6 +320,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     onCommitEdgeLength: interaction.handleCommitEdgeLength,
     onCancelEdgeLength: interaction.handleCancelEdgeLength,
     onToggleOsnap,
+    onCycleSnapCandidate: interaction.handleCycleSnapCandidate,
   });
 
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({

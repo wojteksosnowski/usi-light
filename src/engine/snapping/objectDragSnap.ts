@@ -61,6 +61,9 @@ export function evaluateCollinearAndParallelLock(
 
 export type BuildingDragSnapRelation =
   | 'vertex_to_vertex'
+  | 'vertex_to_midpoint'
+  | 'midpoint_to_vertex'
+  | 'midpoint_to_midpoint'
   | 'vertex_to_edge'
   | 'edge_to_vertex'
   | 'edge_to_edge_collinear'
@@ -124,7 +127,7 @@ export function evaluateBuildingDragMultiSnap(
     if (v.y < bMinY) bMinY = v.y;
     if (v.y > bMaxY) bMaxY = v.y;
   }
-  const pad = distanceThresholdMeters + 0.1;
+  const pad = distanceThresholdMeters * 2 + 0.5;
   const aabb = {
     minX: bMinX - pad,
     maxX: bMaxX + pad,
@@ -259,24 +262,133 @@ export function evaluateBuildingDragMultiSnap(
     }
   }
 
-  // 3. Punkt do Krawędzi (Vertex-to-Edge)
+  // 3. Punkt do Środka Krawędzi (Vertex-to-Midpoint)
+  let bestV2M: BuildingDragSnapResult | null = null;
+  let minV2MDist = distanceThresholdMeters;
+
+  for (const vMove of movingVertices) {
+    for (const refEdge of nearbyRefBuffer) {
+      const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
+      const dist = Math.hypot(vMove.x - midRef.x, vMove.y - midRef.y);
+      if (dist <= minV2MDist) {
+        minV2MDist = dist;
+        bestV2M = {
+          relation: 'vertex_to_midpoint',
+          deltaX: midRef.x - vMove.x,
+          deltaY: midRef.y - vMove.y,
+          distanceMeters: dist,
+          label: 'Narożnik do środka ściany',
+          sourcePoint: { ...vMove },
+          targetPoint: midRef,
+          referenceEdge: refEdge,
+        };
+      }
+    }
+  }
+
+  if (bestV2M) {
+    return bestV2M;
+  }
+
+  // 4. Środek Krawędzi do Punktu (Midpoint-to-Vertex)
+  let bestM2V: BuildingDragSnapResult | null = null;
+  let minM2VDist = distanceThresholdMeters;
+
+  for (let i = 0; i < n; i++) {
+    const p1 = movingVertices[i];
+    const p2 = movingVertices[(i + 1) % n];
+    const midMove = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+    for (const refEdge of nearbyRefBuffer) {
+      for (const vRef of [refEdge.p1, refEdge.p2]) {
+        const dist = Math.hypot(midMove.x - vRef.x, midMove.y - vRef.y);
+        if (dist <= minM2VDist) {
+          minM2VDist = dist;
+          bestM2V = {
+            relation: 'midpoint_to_vertex',
+            deltaX: vRef.x - midMove.x,
+            deltaY: vRef.y - midMove.y,
+            distanceMeters: dist,
+            label: 'Środek ściany do narożnika',
+            sourcePoint: midMove,
+            targetPoint: { ...vRef },
+            referenceEdge: refEdge,
+          };
+        }
+      }
+    }
+  }
+
+  if (bestM2V) {
+    return bestM2V;
+  }
+
+  // 5. Środek Krawędzi do Środka Krawędzi (Midpoint-to-Midpoint)
+  let bestM2M: BuildingDragSnapResult | null = null;
+  let minM2MDist = distanceThresholdMeters;
+
+  for (let i = 0; i < n; i++) {
+    const p1 = movingVertices[i];
+    const p2 = movingVertices[(i + 1) % n];
+    const midMove = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+    for (const refEdge of nearbyRefBuffer) {
+      const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
+      const dist = Math.hypot(midMove.x - midRef.x, midMove.y - midRef.y);
+      if (dist <= minM2MDist) {
+        minM2MDist = dist;
+        bestM2M = {
+          relation: 'midpoint_to_midpoint',
+          deltaX: midRef.x - midMove.x,
+          deltaY: midRef.y - midMove.y,
+          distanceMeters: dist,
+          label: 'Środek ściany do środka ściany',
+          sourcePoint: midMove,
+          targetPoint: midRef,
+          referenceEdge: refEdge,
+        };
+      }
+    }
+  }
+
+  if (bestM2M) {
+    return bestM2M;
+  }
+
+  // 6. Punkt do Krawędzi (Vertex-to-Edge & Vertex-to-Edge Extension)
   let bestV2E: BuildingDragSnapResult | null = null;
   let minV2EDist = distanceThresholdMeters;
 
   for (const vMove of movingVertices) {
-    for (const refEdge of nearbyRefBuffer) {
+    for (const refEdge of otherBuffer) {
       const proj = projectPointToLine(vMove, refEdge);
-      if (proj.isOnSegment && proj.distance <= minV2EDist) {
+      const t = (vMove.x - refEdge.p1.x) * refEdge.uX + (vMove.y - refEdge.p1.y) * refEdge.uY;
+      const isExt = !proj.isOnSegment && t >= -guidelineLengthMeters && t <= refEdge.length + guidelineLengthMeters;
+
+      if ((proj.isOnSegment || isExt) && proj.distance <= minV2EDist) {
         minV2EDist = proj.distance;
         bestV2E = {
           relation: 'vertex_to_edge',
           deltaX: proj.projectedPoint.x - vMove.x,
           deltaY: proj.projectedPoint.y - vMove.y,
           distanceMeters: proj.distance,
-          label: 'Punkt do ściany',
+          label: isExt ? 'Punkt na przedłużeniu ściany' : 'Punkt do ściany',
           sourcePoint: { ...vMove },
           targetPoint: proj.projectedPoint,
           referenceEdge: refEdge,
+          guideline: isExt
+            ? {
+                p1: {
+                  x: refEdge.p1.x - guidelineLengthMeters * refEdge.uX,
+                  y: refEdge.p1.y - guidelineLengthMeters * refEdge.uY,
+                },
+                p2: {
+                  x: refEdge.p2.x + guidelineLengthMeters * refEdge.uX,
+                  y: refEdge.p2.y + guidelineLengthMeters * refEdge.uY,
+                },
+              }
+            : undefined,
+          isExtension: isExt,
         };
       }
     }
@@ -286,7 +398,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestV2E;
   }
 
-  // 4. Krawędź przesuwanego obiektu do Punktu referencyjnego (Edge-to-Vertex)
+  // 7. Krawędź przesuwanego obiektu do Punktu referencyjnego (Edge-to-Vertex & Edge Extension)
   let bestE2V: BuildingDragSnapResult | null = null;
   let minE2VDist = distanceThresholdMeters;
 
@@ -295,21 +407,41 @@ export function evaluateBuildingDragMultiSnap(
     const p2 = movingVertices[(i + 1) % n];
     const movingEdge = createCachedLineEquation(`moving-${i}`, movingBuildingId, i, p1, p2);
 
-    for (const refEdge of nearbyRefBuffer) {
-      for (const vRef of [refEdge.p1, refEdge.p2]) {
+    for (const refEdge of otherBuffer) {
+      const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
+      for (const vRef of [refEdge.p1, refEdge.p2, midRef]) {
         const proj = projectPointToLine(vRef, movingEdge);
-        if (proj.isOnSegment && proj.distance <= minE2VDist) {
+        const t = (vRef.x - movingEdge.p1.x) * movingEdge.uX + (vRef.y - movingEdge.p1.y) * movingEdge.uY;
+        const isExt = !proj.isOnSegment && t >= -guidelineLengthMeters && t <= movingEdge.length + guidelineLengthMeters;
+        const isMid = vRef === midRef;
+
+        if ((proj.isOnSegment || isExt) && proj.distance <= minE2VDist) {
           minE2VDist = proj.distance;
           bestE2V = {
             relation: 'edge_to_vertex',
             deltaX: vRef.x - proj.projectedPoint.x,
             deltaY: vRef.y - proj.projectedPoint.y,
             distanceMeters: proj.distance,
-            label: 'Ściana do punktu',
+            label: isExt
+              ? (isMid ? 'Przedłużenie ściany do środka ściany' : 'Przedłużenie ściany do punktu')
+              : (isMid ? 'Ściana do środka ściany' : 'Ściana do punktu'),
             sourcePoint: { ...proj.projectedPoint },
             targetPoint: { ...vRef },
             referenceEdge: refEdge,
             movingEdge,
+            guideline: isExt
+              ? {
+                  p1: {
+                    x: movingEdge.p1.x - guidelineLengthMeters * movingEdge.uX,
+                    y: movingEdge.p1.y - guidelineLengthMeters * movingEdge.uY,
+                  },
+                  p2: {
+                    x: movingEdge.p2.x + guidelineLengthMeters * movingEdge.uX,
+                    y: movingEdge.p2.y + guidelineLengthMeters * movingEdge.uY,
+                  },
+                }
+              : undefined,
+            isExtension: isExt,
           };
         }
       }
@@ -320,7 +452,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestE2V;
   }
 
-  // 5. Pojedyncze wyrównanie kolinearne (Single Collinear Snap)
+  // 8. Pojedyncze wyrównanie kolinearne (Single Collinear Snap)
   let bestCollinear: BuildingDragSnapResult | null = null;
   let minCollinearDist = distanceThresholdMeters;
 
@@ -341,6 +473,8 @@ export function evaluateBuildingDragMultiSnap(
   }
 
   return bestCollinear;
+
+  return bestCollinear;
 }
 
 export interface EvaluateEdgeDragSnapOptions {
@@ -349,11 +483,15 @@ export interface EvaluateEdgeDragSnapOptions {
   normal: { x: number; y: number };
   buildingId: string;
   edgeIndex: number;
+  initialVertices?: Point2D[];
+  initialSweepPath?: Point2D[];
+  isSweep?: boolean;
   tentativeDelta: { dx: number; dy: number };
   referenceBuffer: CachedLineEquation[];
   distanceThresholdMeters?: number;
   angleToleranceRad?: number;
   guidelineLengthMeters?: number;
+  previousSnap?: EdgeDragSnapResult | null;
 }
 
 export interface EdgeDragSnapResult {
@@ -369,8 +507,10 @@ export interface EdgeDragSnapResult {
 
 /**
  * Calculates snapping for a single dragged edge of a polygon or sweep path along its normal axis:
- * 1. Collinear snap with other edges in the scene (referenceBuffer)
- * 2. Vertex alignment snap (edge passing through vertices of other buildings)
+ * 1. Collinear snap with parallel edges in the scene (referenceBuffer)
+ * 2. Corner intersection snap with guidelines of non-parallel edges in the scene
+ * 3. Corner snap to external vertices and midpoints
+ * 4. Edge line passing through external vertices / midpoints (including extension guidelines)
  */
 export function evaluateEdgeDragSnap(
   options: EvaluateEdgeDragSnapOptions
@@ -381,11 +521,15 @@ export function evaluateEdgeDragSnap(
     normal,
     buildingId,
     edgeIndex,
+    initialVertices,
+    initialSweepPath,
+    isSweep = false,
     tentativeDelta,
     referenceBuffer,
     distanceThresholdMeters = 0.35,
     angleToleranceRad = (1.5 * Math.PI) / 180,
     guidelineLengthMeters = 100,
+    previousSnap,
   } = options;
 
   const dx = edgeP2.x - edgeP1.x;
@@ -400,9 +544,49 @@ export function evaluateEdgeDragSnap(
   // Normal displacement requested by tentative mouse delta
   const rawD = tentativeDelta.dx * normal.x + tentativeDelta.dy * normal.y;
 
+  // Motion direction of endpoints during polygon / polyline offset
+  let vDir1 = { x: normal.x, y: normal.y };
+  let vDir2 = { x: normal.x, y: normal.y };
+
+  if (isSweep && initialSweepPath && initialSweepPath.length >= 2) {
+    if (edgeIndex > 0) {
+      const v0 = initialSweepPath[edgeIndex - 1];
+      const dPrev = { x: edgeP1.x - v0.x, y: edgeP1.y - v0.y };
+      const denomPrev = dPrev.x * normal.x + dPrev.y * normal.y;
+      if (Math.abs(denomPrev) > 1e-4) {
+        vDir1 = { x: dPrev.x / denomPrev, y: dPrev.y / denomPrev };
+      }
+    }
+    if (edgeIndex < initialSweepPath.length - 2) {
+      const v3 = initialSweepPath[edgeIndex + 2];
+      const dNext = { x: v3.x - edgeP2.x, y: v3.y - edgeP2.y };
+      const denomNext = dNext.x * normal.x + dNext.y * normal.y;
+      if (Math.abs(denomNext) > 1e-4) {
+        vDir2 = { x: dNext.x / denomNext, y: dNext.y / denomNext };
+      }
+    }
+  } else if (initialVertices && initialVertices.length >= 3) {
+    const n = initialVertices.length;
+    const prevIdx = (edgeIndex - 1 + n) % n;
+    const v0 = initialVertices[prevIdx];
+    const dPrev = { x: edgeP1.x - v0.x, y: edgeP1.y - v0.y };
+    const denomPrev = dPrev.x * normal.x + dPrev.y * normal.y;
+    if (Math.abs(denomPrev) > 1e-4) {
+      vDir1 = { x: dPrev.x / denomPrev, y: dPrev.y / denomPrev };
+    }
+
+    const nextIdx = (edgeIndex + 2) % n;
+    const v3 = initialVertices[nextIdx];
+    const dNext = { x: v3.x - edgeP2.x, y: v3.y - edgeP2.y };
+    const denomNext = dNext.x * normal.x + dNext.y * normal.y;
+    if (Math.abs(denomNext) > 1e-4) {
+      vDir2 = { x: dNext.x / denomNext, y: dNext.y / denomNext };
+    }
+  }
+
   // Tentative points of shifted edge
-  const tentP1 = { x: edgeP1.x + rawD * normal.x, y: edgeP1.y + rawD * normal.y };
-  const tentP2 = { x: edgeP2.x + rawD * normal.x, y: edgeP2.y + rawD * normal.y };
+  const tentP1 = { x: edgeP1.x + rawD * vDir1.x, y: edgeP1.y + rawD * vDir1.y };
+  const tentP2 = { x: edgeP2.x + rawD * vDir2.x, y: edgeP2.y + rawD * vDir2.y };
 
   const otherBuffer = referenceBuffer.filter((e) => e.objectId !== buildingId);
   if (otherBuffer.length === 0) return null;
@@ -416,19 +600,20 @@ export function evaluateEdgeDragSnap(
   for (const refEdge of otherBuffer) {
     const angleDiff = angleDiffPi(edgeAngle, refEdge.angle);
     if (angleDiff <= angleToleranceRad) {
-      // Distance from tentative edge line to refEdge line
-      // refEdge equation: refEdge.A * x + refEdge.B * y + refEdge.C = 0
       const signedDist = refEdge.A * tentP1.x + refEdge.B * tentP1.y + refEdge.C;
-      const absDist = Math.abs(signedDist);
+      let absDist = Math.abs(signedDist);
 
-      if (absDist <= minDiff) {
-        // Project onto normal to find required change in d:
-        // We want refEdge.A * (edgeP1.x + targetD * normal.x) + refEdge.B * (edgeP1.y + targetD * normal.y) + refEdge.C = 0
+      const isPrev = previousSnap && previousSnap.referenceEdge?.id === refEdge.id;
+      const maxAllowed = isPrev ? distanceThresholdMeters * 1.5 : distanceThresholdMeters;
+      if (isPrev) {
+        absDist = Math.max(0, absDist - distanceThresholdMeters * 0.4);
+      }
+
+      if (absDist <= minDiff && absDist <= maxAllowed) {
         const denom = refEdge.A * normal.x + refEdge.B * normal.y;
         if (Math.abs(denom) > 1e-4) {
           const originalSignedDist = refEdge.A * edgeP1.x + refEdge.B * edgeP1.y + refEdge.C;
           const targetD = -originalSignedDist / denom;
-          const correctionD = targetD - rawD;
 
           const t1 = (tentP1.x - refEdge.p1.x) * refEdge.uX + (tentP1.y - refEdge.p1.y) * refEdge.uY;
           const t2 = (tentP2.x - refEdge.p1.x) * refEdge.uX + (tentP2.y - refEdge.p1.y) * refEdge.uY;
@@ -449,7 +634,7 @@ export function evaluateEdgeDragSnap(
           bestSnap = {
             deltaOffset: { dx: targetD * normal.x, dy: targetD * normal.y },
             relation: 'edge_to_edge_collinear',
-            distanceMeters: absDist,
+            distanceMeters: Math.abs(signedDist),
             label: isExtension ? 'Przedłużenie ściany (Kolinearny)' : 'Wyrównanie ścian (Kolinearny)',
             referenceEdge: refEdge,
             guideline,
@@ -464,31 +649,185 @@ export function evaluateEdgeDragSnap(
     return bestSnap;
   }
 
-  // 2. Snap to vertices of other buildings (Edge line passing through corner / midpoint of other building)
+  // 2. Corner intersection snap with guidelines of non-parallel edges (Non-parallel guideline extension)
   for (const refEdge of otherBuffer) {
-    for (const vRef of [refEdge.p1, refEdge.p2]) {
-      // Distance from vRef to tentative line through tentP1 with direction u = (uX, uY)
-      // Normal to edge line is (-uY, uX)
-      const distToLine = Math.abs((vRef.x - tentP1.x) * (-uY) + (vRef.y - tentP1.y) * uX);
-      if (distToLine <= minDiff) {
-        // Find targetD such that (vRef - (edgeP1 + targetD * normal)) . (-uY, uX) = 0
-        // (vRef.x - edgeP1.x - targetD * normal.x) * (-uY) + (vRef.y - edgeP1.y - targetD * normal.y) * uX = 0
-        const num = (vRef.x - edgeP1.x) * (-uY) + (vRef.y - edgeP1.y) * uX;
-        const den = normal.x * (-uY) + normal.y * uX;
-        if (Math.abs(den) > 1e-4) {
-          const targetD = num / den;
-          minDiff = distToLine;
+    const angleDiff = angleDiffPi(edgeAngle, refEdge.angle);
+    if (angleDiff > angleToleranceRad) {
+      const isPrev = previousSnap && previousSnap.referenceEdge?.id === refEdge.id;
+      const maxAllowed = isPrev ? distanceThresholdMeters * 1.5 : distanceThresholdMeters;
+
+      // Test Corner 1
+      const denom1 = refEdge.A * vDir1.x + refEdge.B * vDir1.y;
+      if (Math.abs(denom1) > 1e-4) {
+        const targetD1 = -(refEdge.A * edgeP1.x + refEdge.B * edgeP1.y + refEdge.C) / denom1;
+        let diff1 = Math.abs(targetD1 - rawD);
+        if (isPrev) diff1 = Math.max(0, diff1 - distanceThresholdMeters * 0.3);
+
+        if (diff1 <= minDiff && diff1 <= maxAllowed) {
+          const pt1 = { x: edgeP1.x + targetD1 * vDir1.x, y: edgeP1.y + targetD1 * vDir1.y };
+          const t1 = (pt1.x - refEdge.p1.x) * refEdge.uX + (pt1.y - refEdge.p1.y) * refEdge.uY;
+          if (t1 >= -guidelineLengthMeters && t1 <= refEdge.length + guidelineLengthMeters) {
+            const isExt = t1 < 0 || t1 > refEdge.length;
+            minDiff = diff1;
+            bestSnap = {
+              deltaOffset: { dx: targetD1 * normal.x, dy: targetD1 * normal.y },
+              relation: 'vertex_to_edge',
+              distanceMeters: Math.abs(targetD1 - rawD),
+              label: isExt ? 'Narożnik na przedłużeniu ściany' : 'Narożnik do ściany',
+              targetPoint: pt1,
+              referenceEdge: refEdge,
+              guideline: {
+                p1: {
+                  x: refEdge.p1.x - guidelineLengthMeters * refEdge.uX,
+                  y: refEdge.p1.y - guidelineLengthMeters * refEdge.uY,
+                },
+                p2: {
+                  x: refEdge.p2.x + guidelineLengthMeters * refEdge.uX,
+                  y: refEdge.p2.y + guidelineLengthMeters * refEdge.uY,
+                },
+              },
+              isExtension: isExt,
+            };
+          }
+        }
+      }
+
+      // Test Corner 2
+      const denom2 = refEdge.A * vDir2.x + refEdge.B * vDir2.y;
+      if (Math.abs(denom2) > 1e-4) {
+        const targetD2 = -(refEdge.A * edgeP2.x + refEdge.B * edgeP2.y + refEdge.C) / denom2;
+        let diff2 = Math.abs(targetD2 - rawD);
+        if (isPrev) diff2 = Math.max(0, diff2 - distanceThresholdMeters * 0.3);
+
+        if (diff2 <= minDiff && diff2 <= maxAllowed) {
+          const pt2 = { x: edgeP2.x + targetD2 * vDir2.x, y: edgeP2.y + targetD2 * vDir2.y };
+          const t2 = (pt2.x - refEdge.p1.x) * refEdge.uX + (pt2.y - refEdge.p1.y) * refEdge.uY;
+          if (t2 >= -guidelineLengthMeters && t2 <= refEdge.length + guidelineLengthMeters) {
+            const isExt = t2 < 0 || t2 > refEdge.length;
+            minDiff = diff2;
+            bestSnap = {
+              deltaOffset: { dx: targetD2 * normal.x, dy: targetD2 * normal.y },
+              relation: 'vertex_to_edge',
+              distanceMeters: Math.abs(targetD2 - rawD),
+              label: isExt ? 'Narożnik na przedłużeniu ściany' : 'Narożnik do ściany',
+              targetPoint: pt2,
+              referenceEdge: refEdge,
+              guideline: {
+                p1: {
+                  x: refEdge.p1.x - guidelineLengthMeters * refEdge.uX,
+                  y: refEdge.p1.y - guidelineLengthMeters * refEdge.uY,
+                },
+                p2: {
+                  x: refEdge.p2.x + guidelineLengthMeters * refEdge.uX,
+                  y: refEdge.p2.y + guidelineLengthMeters * refEdge.uY,
+                },
+              },
+              isExtension: isExt,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  if (bestSnap) {
+    return bestSnap;
+  }
+
+  // 3. Corner snap to external vertices and midpoints
+  for (const refEdge of otherBuffer) {
+    const isPrev = previousSnap && previousSnap.referenceEdge?.id === refEdge.id;
+    const maxAllowed = isPrev ? distanceThresholdMeters * 1.5 : distanceThresholdMeters;
+    const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
+
+    for (const vRef of [refEdge.p1, refEdge.p2, midRef]) {
+      const isMid = vRef === midRef;
+
+      // Check Corner 1
+      const vSq1 = vDir1.x * vDir1.x + vDir1.y * vDir1.y;
+      if (vSq1 > 1e-6) {
+        const targetD1 = ((vRef.x - edgeP1.x) * vDir1.x + (vRef.y - edgeP1.y) * vDir1.y) / vSq1;
+        const pt1 = { x: edgeP1.x + targetD1 * vDir1.x, y: edgeP1.y + targetD1 * vDir1.y };
+        const distPt = Math.hypot(pt1.x - vRef.x, pt1.y - vRef.y);
+        let diff1 = Math.abs(targetD1 - rawD);
+        if (isPrev) diff1 = Math.max(0, diff1 - distanceThresholdMeters * 0.3);
+
+        if (distPt <= distanceThresholdMeters && diff1 <= minDiff && diff1 <= maxAllowed) {
+          minDiff = diff1;
+          bestSnap = {
+            deltaOffset: { dx: targetD1 * normal.x, dy: targetD1 * normal.y },
+            relation: isMid ? 'vertex_to_midpoint' : 'vertex_to_vertex',
+            distanceMeters: Math.abs(targetD1 - rawD),
+            label: isMid ? 'Narożnik do środka ściany' : 'Narożnik do narożnika',
+            targetPoint: { ...vRef },
+            referenceEdge: refEdge,
+          };
+        }
+      }
+
+      // Check Corner 2
+      const vSq2 = vDir2.x * vDir2.x + vDir2.y * vDir2.y;
+      if (vSq2 > 1e-6) {
+        const targetD2 = ((vRef.x - edgeP2.x) * vDir2.x + (vRef.y - edgeP2.y) * vDir2.y) / vSq2;
+        const pt2 = { x: edgeP2.x + targetD2 * vDir2.x, y: edgeP2.y + targetD2 * vDir2.y };
+        const distPt = Math.hypot(pt2.x - vRef.x, pt2.y - vRef.y);
+        let diff2 = Math.abs(targetD2 - rawD);
+        if (isPrev) diff2 = Math.max(0, diff2 - distanceThresholdMeters * 0.3);
+
+        if (distPt <= distanceThresholdMeters && diff2 <= minDiff && diff2 <= maxAllowed) {
+          minDiff = diff2;
+          bestSnap = {
+            deltaOffset: { dx: targetD2 * normal.x, dy: targetD2 * normal.y },
+            relation: isMid ? 'vertex_to_midpoint' : 'vertex_to_vertex',
+            distanceMeters: Math.abs(targetD2 - rawD),
+            label: isMid ? 'Narożnik do środka ściany' : 'Narożnik do narożnika',
+            targetPoint: { ...vRef },
+            referenceEdge: refEdge,
+          };
+        }
+      }
+    }
+  }
+
+  if (bestSnap) {
+    return bestSnap;
+  }
+
+  // 4. Snap to vertices / midpoints of other buildings (Edge line passing through corner / midpoint)
+  for (const refEdge of otherBuffer) {
+    const isPrev = previousSnap && previousSnap.referenceEdge?.id === refEdge.id;
+    const maxAllowed = isPrev ? distanceThresholdMeters * 1.5 : distanceThresholdMeters;
+    const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
+
+    for (const vRef of [refEdge.p1, refEdge.p2, midRef]) {
+      const isMid = vRef === midRef;
+      const num = (vRef.x - edgeP1.x) * (-uY) + (vRef.y - edgeP1.y) * uX;
+      const den = normal.x * (-uY) + normal.y * uX;
+      if (Math.abs(den) > 1e-4) {
+        const targetD = num / den;
+        let diff = Math.abs(targetD - rawD);
+        if (isPrev) diff = Math.max(0, diff - distanceThresholdMeters * 0.3);
+
+        if (diff <= minDiff && diff <= maxAllowed) {
+          const tentP1AtTarget = { x: edgeP1.x + targetD * normal.x, y: edgeP1.y + targetD * normal.y };
+          const t = (vRef.x - tentP1AtTarget.x) * uX + (vRef.y - tentP1AtTarget.y) * uY;
+          const isExt = t < 0 || t > len;
+
+          minDiff = diff;
           bestSnap = {
             deltaOffset: { dx: targetD * normal.x, dy: targetD * normal.y },
             relation: 'edge_to_vertex',
-            distanceMeters: distToLine,
-            label: 'Ściana do narożnika',
+            distanceMeters: Math.abs(targetD - rawD),
+            label: isExt
+              ? (isMid ? 'Przedłużenie ściany do środka ściany' : 'Przedłużenie ściany do narożnika')
+              : (isMid ? 'Ściana do środka ściany' : 'Ściana do narożnika'),
             targetPoint: { ...vRef },
             referenceEdge: refEdge,
             guideline: {
               p1: { x: vRef.x - guidelineLengthMeters * uX, y: vRef.y - guidelineLengthMeters * uY },
               p2: { x: vRef.x + guidelineLengthMeters * uX, y: vRef.y + guidelineLengthMeters * uY },
             },
+            isExtension: isExt,
           };
         }
       }

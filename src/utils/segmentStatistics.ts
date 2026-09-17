@@ -36,6 +36,7 @@ export function rebuildBuildingSegments(bldg: BuildingLoop, newVertices: Point2D
     vertices: newVertices.map((v) => ({ x: v.x, y: v.y })),
     segments,
     isClockwise: !isCCW,
+    cachedLineEquations: undefined,
   };
 }
 
@@ -84,8 +85,8 @@ export function analyzeSegmentsStatistics(
   buildings: BuildingLoop[],
   options?: AnalyzeSegmentsOptions
 ): SegmentStatistics {
-  const noisePercentileCutoff = options?.noisePercentileCutoff ?? 20; // Domyślnie 20%
-  const minLengthThreshold = options?.minLengthMeters ?? 0.15;
+    const noisePercentileCutoff = options?.noisePercentileCutoff ?? 20; // Domyślnie 20%
+  const minLengthThreshold = options?.minLengthMeters ?? 0.30; // Filtr górnoprzepustowy: min 0.30m
 
   let totalSegments = 0;
   let totalLength = 0;
@@ -126,7 +127,7 @@ export function analyzeSegmentsStatistics(
     length: 0,
   }));
 
-  // Fine-grained 1-degree histogram for dominant axis detection (tylko segmenty powyżej progu)
+  // Fine-grained 1-degree histogram for dominant axis detection (tylko segmenty powyżej progu filtru HPF)
   const fineHistogram = new Float64Array(180);
 
   for (const bldg of buildings) {
@@ -156,7 +157,7 @@ export function analyzeSegmentsStatistics(
       bins[bIdx].count++;
       bins[bIdx].length += len;
 
-      // Add to fine histogram tylko dla segmentów istotnych (powyżej odcięcia szumu)
+      // Add to fine histogram tylko dla segmentów istotnych (powyżej odcięcia filtru górnoprzepustowego)
       if (len >= lengthCutoffMeters) {
         const centerDeg = Math.round(angle) % 180;
         for (let offset = -3; offset <= 3; offset++) {
@@ -170,7 +171,7 @@ export function analyzeSegmentsStatistics(
 
   const averageLength = totalSegments > 0 ? totalLength / totalSegments : 0;
 
-  // Detect dominant orthogonal pair (angle and angle + 90)
+  // Detect dominant orthogonal pair (angle and angle + 90) - wzajemne wzmacnianie par prostopadłych
   const dominantDirections: DominantDirection[] = [];
   if (totalLength > 0) {
     let bestAngle = 0;
@@ -178,6 +179,7 @@ export function analyzeSegmentsStatistics(
 
     for (let a = 0; a < 90; a++) {
       const ortho = a + 90;
+      // Wzmocnienie ortogonalne: kierunki prostopadłe nie rywalizują, lecz wspólnie tworzą nośnik siatki
       const combinedScore = fineHistogram[a] + fineHistogram[ortho];
       if (combinedScore > bestScore) {
         bestScore = combinedScore;
@@ -185,26 +187,33 @@ export function analyzeSegmentsStatistics(
       }
     }
 
-    // Measure exact length aligned within ±7.5° of bestAngle or bestAngle + 90
+    // Wyznaczenie dokładnego, rzeczywistego kąta siatki dominującej (średnia ważona rzeczywistych kątów segmentów)
+    let weightedAngleSum = 0;
+    let totalDominantWeight = 0;
     let dominantLength = 0;
+
     for (const bldg of buildings) {
       if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
       for (const seg of bldg.segments) {
         const lineEq = seg.lineEquation ?? computeLineEquation(seg.p1, seg.p2, seg.normal);
-        const diff1 = Math.abs(lineEq.angleDeg - bestAngle);
-        const diff2 = Math.abs(lineEq.angleDeg - (bestAngle + 90));
-        if (diff1 <= 7.5 || diff1 >= 172.5 || diff2 <= 7.5 || diff2 >= 172.5) {
+        let offset = ((lineEq.angleDeg - bestAngle) % 90 + 90) % 90;
+        if (offset > 45) offset -= 90;
+
+        if (Math.abs(offset) <= 7.5) {
           dominantLength += seg.length;
+          weightedAngleSum += (bestAngle + offset) * seg.length;
+          totalDominantWeight += seg.length;
         }
       }
     }
 
+    const exactAngle = totalDominantWeight > 0 ? ((((weightedAngleSum / totalDominantWeight) % 180) + 180) % 180) : bestAngle;
     const percentage = totalLength > 0 ? (dominantLength / totalLength) * 100 : 0;
-    // Odrzucenie marginalnych próbek: wymagane co najmniej 15% łącznej długości
+    // Odrzucenie marginalnych próbek: wymagane co najmniej 15% łącznej długości (lub mała liczba ścian)
     if (percentage >= 15.0 || totalSegments <= 4) {
       dominantDirections.push({
-        angleDeg: bestAngle,
-        orthogonalDeg: (bestAngle + 90) % 180,
+        angleDeg: exactAngle,
+        orthogonalDeg: (exactAngle + 90) % 180,
         totalLength: dominantLength,
         percentage,
         isTrackingActive: true,

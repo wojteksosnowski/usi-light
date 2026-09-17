@@ -6,9 +6,26 @@ import { useSceneStore } from './useSceneStore';
 
 export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
 
+export interface OsnapModes {
+  vertex: boolean;
+  midpoint: boolean;
+  intersection: boolean;
+  perpendicular: boolean;
+  edge: boolean;
+  extension: boolean;
+}
+
+export interface OtrackModes {
+  ortho: boolean;
+  dominant: boolean;
+  relative: boolean;
+  dualIntersection: boolean;
+}
+
 interface CadToolState {
   // Drawing Tools
   drawingMode: DrawingMode;
+  drawingCategory: import('../types/geometry').ObjectCategory;
   drawingVerticesCount: number;
 
   // Sweep (Wstęga) settings
@@ -23,6 +40,10 @@ interface CadToolState {
   // Snapping settings
   isDirectionSnappingActive: boolean;
   isOsnapActive: boolean;
+  osnapModes: OsnapModes;
+  otrackModes: OtrackModes;
+  noisePercentileCutoff: number;
+  snapRadiusPx: number;
 
   // Dimensions
   dimensions: DimensionItem[];
@@ -46,6 +67,7 @@ interface CadToolState {
 
   // Actions
   setDrawingMode: (mode: DrawingMode) => void;
+  setDrawingCategory: (category: import('../types/geometry').ObjectCategory) => void;
   setDrawingVerticesCount: (count: number) => void;
   setSweepWidth: (width: number) => void;
   setSweepAlignment: (alignment: SweepAlignment) => void;
@@ -57,6 +79,17 @@ interface CadToolState {
   setIsOsnapActive: (active: boolean) => void;
   toggleDirectionSnapping: () => void;
   setIsDirectionSnappingActive: (active: boolean) => void;
+
+  toggleOsnapMode: (mode: keyof OsnapModes) => void;
+  setOsnapModes: (modes: Partial<OsnapModes>) => void;
+  setAllOsnapModes: (active: boolean) => void;
+
+  toggleOtrackMode: (mode: keyof OtrackModes) => void;
+  setOtrackModes: (modes: Partial<OtrackModes>) => void;
+  setAllOtrackModes: (active: boolean) => void;
+
+  setNoisePercentileCutoff: (cutoff: number) => void;
+  setSnapRadiusPx: (radius: number) => void;
 
   // Dimension actions
   setDimensions: (dims: DimensionItem[] | ((prev: DimensionItem[]) => DimensionItem[])) => void;
@@ -86,6 +119,7 @@ interface CadToolState {
 
 export const useCadToolStore = create<CadToolState>((set, get) => ({
   drawingMode: 'none',
+  drawingCategory: 'building',
   drawingVerticesCount: 0,
 
   sweepWidth: DEFAULT_SWEEP_WIDTH,
@@ -97,6 +131,22 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   isDirectionSnappingActive: APP_CONFIG.directionSnapping.enabledDefault,
   isOsnapActive: APP_CONFIG.osnap?.enabledDefault ?? true,
+  osnapModes: {
+    vertex: true,
+    midpoint: true,
+    intersection: true,
+    perpendicular: true,
+    edge: true,
+    extension: true,
+  },
+  otrackModes: {
+    ortho: true,
+    dominant: true,
+    relative: true,
+    dualIntersection: true,
+  },
+  noisePercentileCutoff: APP_CONFIG.statistics?.defaultNoisePercentile ?? 20,
+  snapRadiusPx: APP_CONFIG.osnap?.snapRadiusPx ?? 14,
 
   dimensions: [],
   isDimensionToolActive: false,
@@ -113,6 +163,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   isInteracting: false,
 
   setDrawingMode: (mode) => set({ drawingMode: mode }),
+  setDrawingCategory: (category) => set({ drawingCategory: category }),
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
   setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : DEFAULT_SWEEP_WIDTH) }),
   setSweepAlignment: (alignment) => set({ sweepAlignment: alignment }),
@@ -127,6 +178,59 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   setIsOsnapActive: (active) => set({ isOsnapActive: active }),
   toggleDirectionSnapping: () => set((state) => ({ isDirectionSnappingActive: !state.isDirectionSnappingActive })),
   setIsDirectionSnappingActive: (active) => set({ isDirectionSnappingActive: active }),
+
+  toggleOsnapMode: (mode) =>
+    set((state) => ({
+      osnapModes: {
+        ...state.osnapModes,
+        [mode]: !state.osnapModes[mode],
+      },
+    })),
+  setOsnapModes: (modes) =>
+    set((state) => ({
+      osnapModes: {
+        ...state.osnapModes,
+        ...modes,
+      },
+    })),
+  setAllOsnapModes: (active) =>
+    set(() => ({
+      osnapModes: {
+        vertex: active,
+        midpoint: active,
+        intersection: active,
+        perpendicular: active,
+        edge: active,
+        extension: active,
+      },
+    })),
+
+  toggleOtrackMode: (mode) =>
+    set((state) => ({
+      otrackModes: {
+        ...state.otrackModes,
+        [mode]: !state.otrackModes[mode],
+      },
+    })),
+  setOtrackModes: (modes) =>
+    set((state) => ({
+      otrackModes: {
+        ...state.otrackModes,
+        ...modes,
+      },
+    })),
+  setAllOtrackModes: (active) =>
+    set(() => ({
+      otrackModes: {
+        ortho: active,
+        dominant: active,
+        relative: active,
+        dualIntersection: active,
+      },
+    })),
+
+  setNoisePercentileCutoff: (cutoff) => set({ noisePercentileCutoff: Math.max(0, Math.min(80, cutoff)) }),
+  setSnapRadiusPx: (radius) => set({ snapRadiusPx: Math.max(6, Math.min(30, radius)) }),
 
   setDimensions: (updater) => {
     set((state) => ({

@@ -1,21 +1,21 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation } from '../../../utils/lineBufferEngine';
-import { SnapContext, SnapResult, SnapStrategy } from '../types';
+import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
 
 export class VertexSnapStrategy implements SnapStrategy {
   readonly name = 'VertexSnapStrategy';
   readonly priority = 10; // Najwyższy priorytet - dyskretne punkty charakterystyczne
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    if (!context.isOsnapActive) return null;
-    if (context.activeSnapTypes && context.activeSnapTypes.vertex === false) return null;
+    const snaps = this.findAllSnaps(point, context);
+    return snaps.length > 0 ? snaps[0] : null;
+  }
 
-    const thresholdPx = context.thresholdPx ?? 12;
+  findAllSnaps(point: Point2D, context: SnapContext): SnapResult[] {
+    if (!context.isOsnapActive) return [];
+    if (context.activeSnapTypes && context.activeSnapTypes.vertex === false) return [];
 
-    // Przeliczenie promienia w świecie dla szybkiego AABB culling
-    const sRef = context.worldToScreen(point.x + 1, point.y);
-    const pxPerMeter = Math.hypot(sRef.sx - context.mouseScreen.sx, sRef.sy - context.mouseScreen.sy) || 20;
-    const snapRadiusWorld = (thresholdPx * 2) / pxPerMeter + 0.5;
+    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
 
     let candidateEdges: CachedLineEquation[];
     if (context.spatialIndex) {
@@ -34,7 +34,7 @@ export class VertexSnapStrategy implements SnapStrategy {
         : context.lineBuffer;
     }
 
-    if (candidateEdges.length === 0) return null;
+    if (candidateEdges.length === 0) return [];
 
     const endpointsList: { point: Point2D; edge: CachedLineEquation }[] = [];
     for (const edge of candidateEdges) {
@@ -49,9 +49,8 @@ export class VertexSnapStrategy implements SnapStrategy {
       }
     }
 
-    let best: { edge: CachedLineEquation; point: Point2D; distPx: number; effDistPx: number } | null = null;
-    let minEffDist = thresholdPx;
-
+    const results: SnapResult[] = [];
+    const seenKeys = new Set<string>();
     const hysteresisBonus = context.hysteresisBonusPx ?? 3.5;
 
     for (const item of endpointsList) {
@@ -59,6 +58,10 @@ export class VertexSnapStrategy implements SnapStrategy {
       const distPx = Math.hypot(context.mouseScreen.sx - s.sx, context.mouseScreen.sy - s.sy);
 
       if (distPx <= thresholdPx) {
+        const key = `${item.point.x.toFixed(4)}_${item.point.y.toFixed(4)}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
         let effDist = distPx;
         if (
           item.edge.objectId &&
@@ -66,6 +69,14 @@ export class VertexSnapStrategy implements SnapStrategy {
         ) {
           effDist -= 2.0;
         }
+
+        // Bonus pierwszeństwa dla kategorii obiektu (np. edycja działki faworyzuje działki)
+        const catBonus = computeCategoryAffinityBonus(
+          item.edge.category,
+          context.activeCategory,
+          context.categoryAffinityWeights
+        );
+        effDist -= catBonus;
 
         if (context.previousSnapResult && context.previousSnapResult.type === 'vertex') {
           const prevPt = context.previousSnapResult.point;
@@ -78,28 +89,26 @@ export class VertexSnapStrategy implements SnapStrategy {
         }
 
         effDist = Math.max(0, effDist);
-        if (effDist <= minEffDist) {
-          minEffDist = effDist;
-          best = { edge: item.edge, point: item.point, distPx, effDistPx: effDist };
-        }
+        const displayName = item.edge.objectName || item.edge.objectId;
+        results.push({
+          point: { ...item.point },
+          snapped: true,
+          type: 'vertex',
+          label: 'Wierzchołek (Endpoint)',
+          description: `Wierzchołek obiektu (${displayName})`,
+          screenDistancePx: distPx,
+          sourcePoint: item.point,
+          sourceBuildingId: item.edge.objectId,
+          sourceCategory: item.edge.category,
+          sourceName: item.edge.objectName,
+          sourceEdgeIndex: item.edge.edgeIndex,
+          cachedEdge: item.edge,
+          metadata: { effDistPx: effDist },
+        });
       }
     }
 
-    if (best) {
-      return {
-        point: { ...best.point },
-        snapped: true,
-        type: 'vertex',
-        label: 'Wierzchołek (Endpoint)',
-        description: `Wierzchołek obiektu (${best.edge.objectId})`,
-        screenDistancePx: best.distPx,
-        sourcePoint: best.point,
-        sourceBuildingId: best.edge.objectId,
-        sourceEdgeIndex: best.edge.edgeIndex,
-        cachedEdge: best.edge,
-      };
-    }
-
-    return null;
+    results.sort((a, b) => ((a.metadata?.effDistPx as number) ?? 0) - ((b.metadata?.effDistPx as number) ?? 0));
+    return results;
   }
 }

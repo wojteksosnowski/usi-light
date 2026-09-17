@@ -134,6 +134,7 @@ export const APP_CONFIG = {
     endpointColor: '#10b981', // Zielony kwadrat
     midpointColor: '#06b6d4', // Cyjanowy trójkąt
     intersectionColor: '#f43f5e', // Różowy krzyżyk/klepsydra
+    perpendicularColor: '#0ea5e9', // Błękitny kątownik prostokątny
     nearestColor: '#38bdf8', // Błękitna klepsydra
     extensionColor: '#38bdf8', // Błękitna linia przedłużenia konkretnej ściany
     otrackAnchorColor: '#f59e0b', // Bursztynowy okrąg akwizycji
@@ -141,6 +142,8 @@ export const APP_CONFIG = {
     statisticalRayColor: '#f59e0b', // Bursztynowa prowadnica OTRACK (kierunki statystyczne / ortho 0°/90°)
     edgeRayColor: '#38bdf8', // Błękitna prowadnica OTRACK (pochodząca z konkretnej ściany/krawędzi)
     collinearColor: '#a855f7', // Fioletowa linia blokady kolinearnej
+    minToleranceMeters: 0.05,
+    maxToleranceMeters: 3.0,
   },
 
   // Konfiguracja analizy statystycznej kierunków fasad

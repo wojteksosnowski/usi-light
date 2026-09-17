@@ -1,6 +1,6 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import { calculateOutwardNormal } from './vec2';
-import { isPolygonCCW, rotatePointAroundPivot } from './polygons';
+import { isPolygonCCW, rotatePointAroundPivot, isSimplePolygonRing } from './polygons';
 import { AffineMatrix2D, transformPointsFlat } from './affineMatrix';
 
 /**
@@ -24,7 +24,7 @@ export function offsetPolygonEdge(
 
   // Normal displacement (projection of mouse delta onto edge normal)
   const d = delta.x * normal.x + delta.y * normal.y;
-  if (Math.abs(d) < 1e-6) return vertices;
+  if (Math.abs(d) < 1e-6 || !Number.isFinite(d)) return vertices;
 
   // Previous edge V0 -> V1
   const prevIdx = (edgeIndex - 1 + n) % n;
@@ -54,11 +54,15 @@ export function offsetPolygonEdge(
     newV2 = { x: v2.x + d * normal.x, y: v2.y + d * normal.y };
   }
 
+  if (!Number.isFinite(newV1.x) || !Number.isFinite(newV1.y) || !Number.isFinite(newV2.x) || !Number.isFinite(newV2.y)) {
+    return vertices;
+  }
+
   // Sanity check: minimum edge length
   const newEdgeLen = Math.hypot(newV2.x - newV1.x, newV2.y - newV1.y);
   if (newEdgeLen < 0.1) return vertices;
 
-  const newVerts = [...vertices];
+  const newVerts = vertices.map((v) => ({ ...v }));
   newVerts[edgeIndex] = newV1;
   newVerts[(edgeIndex + 1) % n] = newV2;
 
@@ -70,6 +74,13 @@ export function offsetPolygonEdge(
     area += pA.x * pB.y - pB.x * pA.y;
   }
   if (Math.abs(area) < 0.2) return vertices;
+
+  // Verify winding orientation did not flip
+  const newIsCCW = isPolygonCCW(newVerts);
+  if (newIsCCW !== isCCW) return vertices;
+
+  // Verify simple polygon ring (no self-intersections / bowties)
+  if (!isSimplePolygonRing(newVerts)) return vertices;
 
   return newVerts;
 }
@@ -106,6 +117,7 @@ export function updateBuildingWithNewVertices(
     vertices: newVertices,
     segments: updatedSegments,
     isClockwise: !isCCW,
+    cachedLineEquations: undefined,
   };
 }
 

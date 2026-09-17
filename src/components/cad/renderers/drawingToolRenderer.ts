@@ -255,6 +255,23 @@ export function renderDrawingToolPreview(
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
         ctx.stroke();
+      } else if (snapType === 'perpendicular') {
+        // Right-angle perpendicular glyph
+        ctx.beginPath();
+        ctx.moveTo(pSnap.sx - halfG, pSnap.sy - halfG);
+        ctx.lineTo(pSnap.sx - halfG, pSnap.sy + halfG);
+        ctx.lineTo(pSnap.sx + halfG, pSnap.sy + halfG);
+        ctx.strokeStyle = APP_CONFIG.osnap?.perpendicularColor || '#10b981';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.rect(pSnap.sx - halfG, pSnap.sy, halfG, halfG);
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+        ctx.fill();
+        ctx.strokeStyle = APP_CONFIG.osnap?.perpendicularColor || '#10b981';
+        ctx.lineWidth = 1;
+        ctx.stroke();
       } else if (snapType === 'nearest') {
         // Hourglass / Bowtie glyph (Blue)
         ctx.beginPath();
@@ -282,6 +299,68 @@ export function renderDrawingToolPreview(
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
         ctx.stroke();
+      }
+
+      // Render Secondary Snap (Dual-Snap auxiliary detection) if available
+      if (osnapSnapResult.secondarySnap) {
+        const secSnap = osnapSnapResult.secondarySnap;
+        const pSec = worldToScreen(secSnap.snappedPoint.x, secSnap.snappedPoint.y);
+
+        if (osnapSnapResult.secondaryRayLine) {
+          const s1 = worldToScreen(osnapSnapResult.secondaryRayLine.p1.x, osnapSnapResult.secondaryRayLine.p1.y);
+          const s2 = worldToScreen(osnapSnapResult.secondaryRayLine.p2.x, osnapSnapResult.secondaryRayLine.p2.y);
+          if (Number.isFinite(s1.sx) && Number.isFinite(s2.sx)) {
+            ctx.beginPath();
+            ctx.strokeStyle = APP_CONFIG.osnap?.extensionColor || '#38bdf8';
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([3, 3]);
+            ctx.moveTo(s1.sx, s1.sy);
+            ctx.lineTo(s2.sx, s2.sy);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+
+        if (Number.isFinite(pSec.sx) && Number.isFinite(pSec.sy)) {
+          const secGlyphSize = 8;
+          const halfSec = secGlyphSize / 2;
+          ctx.save();
+          ctx.globalAlpha = 0.75;
+          if (secSnap.type === 'endpoint') {
+            ctx.beginPath();
+            ctx.rect(pSec.sx - halfSec, pSec.sy - halfSec, secGlyphSize, secGlyphSize);
+            ctx.strokeStyle = APP_CONFIG.osnap?.endpointColor || '#10b981';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([2, 2]);
+            ctx.stroke();
+          } else if (secSnap.type === 'midpoint') {
+            ctx.beginPath();
+            ctx.moveTo(pSec.sx, pSec.sy - halfSec);
+            ctx.lineTo(pSec.sx + halfSec, pSec.sy + halfSec);
+            ctx.lineTo(pSec.sx - halfSec, pSec.sy + halfSec);
+            ctx.closePath();
+            ctx.strokeStyle = APP_CONFIG.osnap?.midpointColor || '#06b6d4';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([2, 2]);
+            ctx.stroke();
+          } else if (secSnap.type === 'perpendicular') {
+            ctx.beginPath();
+            ctx.moveTo(pSec.sx - halfSec, pSec.sy - halfSec);
+            ctx.lineTo(pSec.sx - halfSec, pSec.sy + halfSec);
+            ctx.lineTo(pSec.sx + halfSec, pSec.sy + halfSec);
+            ctx.strokeStyle = APP_CONFIG.osnap?.perpendicularColor || '#10b981';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            ctx.arc(pSec.sx, pSec.sy, 3.5, 0, Math.PI * 2);
+            ctx.strokeStyle = APP_CONFIG.osnap?.nearestColor || '#38bdf8';
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([2, 2]);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
       }
 
       // Information Badge near cursor
