@@ -1076,18 +1076,9 @@ export function renderBuildings(
           const isBalcony = bldg.category === 'balcony';
           const isLabelHovered = bldg.id === hoveredLabelBuildingId;
 
-          // Oblicz kąt ekranowy dla orientacji etykiety
-          let screenAngle = geo.dominantAngleRad - viewRotRad;
-          while (screenAngle > Math.PI / 2) screenAngle -= Math.PI;
-          while (screenAngle < -Math.PI / 2) screenAngle += Math.PI;
-
-          const hasRotation = Math.abs(screenAngle) > 0.02;
-
+          // W widoku roboczym CAD wszystkie etykiety rysowane są w 100% poziomo (brak obrotu)
           ctx.save();
           ctx.translate(csx, csy);
-          if (hasRotation) {
-            ctx.rotate(screenAngle);
-          }
 
           if (isBoundary) {
             // Pole działki / utwardzenia - z cache (liczone raz przy budowie geo, nie co klatkę)
@@ -1097,11 +1088,13 @@ export function renderBuildings(
               : `${Math.round(geo.area)} m²`;
 
             const hasPlotNumber = !isPlayground && !isPaved && !!(bldg.plotNumber && bldg.plotNumber.trim());
-            const headerName = hasPlotNumber
-              ? (bldg.plotNumber!.startsWith('Dz.') ? bldg.plotNumber! : `Dz. ${bldg.plotNumber}`)
+            const headerName = bldg.name && bldg.name.trim()
+              ? bldg.name.trim()
+              : hasPlotNumber
+              ? bldg.plotNumber!.trim()
               : '';
 
-            const showHeader = hasPlotNumber;
+            const showHeader = !!headerName;
 
             ctx.font = showHeader ? 'bold 12px Inter, sans-serif' : 'bold 11px Inter, monospace';
             const nameW = showHeader ? measureTextWidthCached(ctx, headerName) : 0;

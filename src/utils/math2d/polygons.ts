@@ -1113,47 +1113,119 @@ export function collapseIdenticalConsecutiveHeightRuns<T>(
 }
 
 /**
- * Oblicza dominujący kąt orientacji wielokąta (w radianach, w przestrzeni świata CAD) ze wzorów liniowych krawędzi.
- * Wykorzystuje ważoną długością krawędzi transformację podwójnego kąta (double-angle representation),
- * co gwarantuje poprawność dla odcinków przeciwległych i prostopadłych.
- * Zwraca kąt w zakresie [-π/2, π/2].
+ * Oblicza dominujący kierunek (oś podłużną) wielokąta w przestrzeni świata CAD (w radianach, [-π/2, π/2]).
+ * Wykorzystuje zasady czystej algebry liniowej i wzorów wektorowych (ax + by = 0) bez trygonometrii w pętli:
+ * 1. Filtr górnoprzepustowy w przestrzeni L² (eliminuje krótkie fazowania i szum wierzchołków).
+ * 2. Wzmocnienie ortogonalne 4-theta oparte na tożsamościach wielomianowych wektorów (dx, dy).
+ * 3. Rozstrzygnięcie osi podłużnej za pomocą rzutów skalarnych (dot product) bez wywołań trygonometrycznych per krawędź.
  */
 export function computePolygonDominantAngle(vertices: Point2D[]): number {
   if (!vertices || vertices.length < 2) return 0;
 
   const n = vertices.length;
-  let sumSin2Theta = 0;
-  let sumCos2Theta = 0;
-  let totalLength = 0;
 
+  // 1. Pierwszy przebieg: wyznaczenie L_max² dla filtru górnoprzepustowego (bez Math.sqrt)
+  let maxLenSq = 0;
   for (let i = 0; i < n; i++) {
     const p1 = vertices[i];
     const p2 = vertices[(i + 1) % n];
     if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) {
       continue;
     }
-
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-4) continue;
-
-    // Kąt odcinka w przestrzeni świata
-    const theta = Math.atan2(dy, dx);
-    const weight = len;
-
-    // Reprezentacja 2*theta usuwa niejednoznaczność zwrotu wektora (kierunek 0 rad i pi rad to ta sama linia)
-    sumSin2Theta += weight * Math.sin(2 * theta);
-    sumCos2Theta += weight * Math.cos(2 * theta);
-    totalLength += weight;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq > maxLenSq) {
+      maxLenSq = lenSq;
+    }
   }
 
-  if (totalLength < 1e-4) return 0;
+  if (maxLenSq < 1e-6) return 0;
 
-  // Dominujący kąt linii w zakresie [-π/2, π/2]
-  let dominantAngle = Math.atan2(sumSin2Theta, sumCos2Theta) / 2;
+  // Próg filtru górnoprzepustowego (15% długości L_max, tj. 0.0225 * L_max², min. 0.09 m²)
+  const filterThresholdSq = Math.min(maxLenSq * 0.5, Math.max(maxLenSq * 0.0225, 0.09));
 
-  // Normalizacja do [-π/2, π/2]
+  // Zwraca wektor krawędzi (dx, dy, lenSq) lub null, jeśli para wierzchołków jest niepoprawna
+  const edgeVector = (i: number): { dx: number; dy: number; lenSq: number } | null => {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % n];
+    if (!p1 || !p2 || !Number.isFinite(p1.x) || !Number.isFinite(p1.y) || !Number.isFinite(p2.x) || !Number.isFinite(p2.y)) {
+      return null;
+    }
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    return { dx, dy, lenSq: dx * dx + dy * dy };
+  };
+
+  // Składowe wektora 4θ ważone L⁴ (konstruktywne dodawanie ścian prostopadłych)
+  // cos(2θ) = (dx² - dy²) / L², sin(2θ) = 2 dx dy / L²
+  // cos(4θ) = cos²(2θ) - sin²(2θ), sin(4θ) = 2 sin(2θ) cos(2θ)
+  const edge4ThetaContribution = (dx: number, dy: number): { vX: number; vY: number } => {
+    const diff2 = dx * dx - dy * dy;
+    const cross2 = 2 * dx * dy;
+    return { vX: diff2 * diff2 - cross2 * cross2, vY: 2 * cross2 * diff2 };
+  };
+
+  // 2. Akumulacja poczwórnego kąta 4θ w wielomianach algebraicznych (bez trygonometrii per krawędź)
+  let sumX4 = 0;
+  let sumY4 = 0;
+  let validCount = 0;
+
+  for (let i = 0; i < n; i++) {
+    const edge = edgeVector(i);
+    if (!edge || edge.lenSq < filterThresholdSq) continue;
+
+    const { vX, vY } = edge4ThetaContribution(edge.dx, edge.dy);
+    sumX4 += vX;
+    sumY4 += vY;
+    validCount++;
+  }
+
+  // Jeśli filtr odrzucił zbyt wiele, akumulujemy bez filtru
+  if (validCount === 0 || (Math.abs(sumX4) < 1e-8 && Math.abs(sumY4) < 1e-8)) {
+    sumX4 = 0;
+    sumY4 = 0;
+    for (let i = 0; i < n; i++) {
+      const edge = edgeVector(i);
+      if (!edge || edge.lenSq < 1e-6) continue;
+
+      const { vX, vY } = edge4ThetaContribution(edge.dx, edge.dy);
+      sumX4 += vX;
+      sumY4 += vY;
+    }
+  }
+
+  if (Math.abs(sumX4) < 1e-8 && Math.abs(sumY4) < 1e-8) {
+    return 0;
+  }
+
+  // 3. Wyznaczenie kąta bazowego siatki ortogonalnej (dokładnie jedno wywołanie atan2)
+  const baseAngle = Math.atan2(sumY4, sumX4) / 4;
+
+  // 4. Rozstrzygnięcie osi podłużnej (dominującej) za pomocą rzutów skalarnych (dot product)
+  const cos1 = Math.cos(baseAngle);
+  const sin1 = Math.sin(baseAngle);
+  const cos2 = -sin1;
+  const sin2 = cos1;
+
+  let score1 = 0;
+  let score2 = 0;
+
+  for (let i = 0; i < n; i++) {
+    const edge = edgeVector(i);
+    if (!edge || (edge.lenSq < filterThresholdSq && validCount > 0)) continue;
+
+    // Rzuty skalarne na oś 1 i oś 2
+    const dot1 = edge.dx * cos1 + edge.dy * sin1;
+    const dot2 = edge.dx * cos2 + edge.dy * sin2;
+
+    score1 += dot1 * dot1;
+    score2 += dot2 * dot2;
+  }
+
+  let dominantAngle = score1 >= score2 ? baseAngle : baseAngle + Math.PI / 2;
+
+  // 5. Normalizacja do [-π/2, π/2]
   while (dominantAngle > Math.PI / 2) dominantAngle -= Math.PI;
   while (dominantAngle < -Math.PI / 2) dominantAngle += Math.PI;
 

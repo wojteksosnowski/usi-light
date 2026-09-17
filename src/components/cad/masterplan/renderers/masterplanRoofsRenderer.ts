@@ -195,7 +195,8 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     viewState.scale,
     selectedBuildingId,
     selectedBuildingIds,
-    hoveredBuildingId
+    hoveredBuildingId,
+    viewRotationDeg
   );
 
   const resolvedLabels = resolveMasterplanLabelCollisions(candidates);

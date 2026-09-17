@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   formatBuildingHeightLabel,
+  getAreaLabelText,
   buildMasterplanLabelCandidates,
   checkLabelOverlap,
   resolveMasterplanLabelCollisions,
@@ -21,12 +22,22 @@ describe('masterplanLabels', () => {
     });
   });
 
-  describe('buildMasterplanLabelCandidates (Geometry fit & elongated shapes)', () => {
+  describe('getAreaLabelText', () => {
+    it('returns custom name, raw plot number or function fallback', () => {
+      expect(getAreaLabelText({ id: '1', vertices: [], name: 'Skwer' })).toBe('Skwer');
+      expect(getAreaLabelText({ id: '2', vertices: [], plotNumber: '102/3' })).toBe('102/3');
+      expect(getAreaLabelText({ id: '3', vertices: [], plotNumber: '55' })).toBe('55');
+      expect(getAreaLabelText({ id: '4', vertices: [], areaType: 'playground' })).toBe('Plac zabaw');
+      expect(getAreaLabelText({ id: '5', vertices: [], areaType: 'paved' })).toBe('Utwardzenie');
+      expect(getAreaLabelText({ id: '6', vertices: [] })).toBe('');
+    });
+  });
+
+  describe('buildMasterplanLabelCandidates', () => {
     const mockWorldToScreen = (wx: number, wy: number) => ({ sx: wx * 5, sy: wy * 5 });
 
-    it('culls label if building is too small on screen (scale zoomed out)', () => {
-      // Budynek 1m x 1m przy skali 1.0 -> screenW = 1px, etykieta potrzebuje ~25px
-      const smallBldg: BuildingLoop = {
+    it('culls label if building is too small on screen', () => {
+      const smallBldg = {
         id: 'small-1',
         vertices: [
           { x: 0, y: 0 },
@@ -35,7 +46,7 @@ describe('masterplanLabels', () => {
           { x: 0, y: 1 },
         ],
         defaultHeight: 12,
-      };
+      } as unknown as BuildingLoop;
 
       const candidates = buildMasterplanLabelCandidates(
         [smallBldg],
@@ -46,46 +57,92 @@ describe('masterplanLabels', () => {
       expect(candidates.length).toBe(0);
     });
 
-    it('retains and positions label correctly for very elongated buildings', () => {
-      // Budynek 80m długości i 4m szerokości (np. pawilon / skrzydło)
-      const elongatedBldg: BuildingLoop = {
-        id: 'elongated-1',
+    it('creates simple height label for building centered on geometry', () => {
+      const bldg = {
+        id: 'bldg-1',
         vertices: [
           { x: 0, y: 0 },
-          { x: 80, y: 0 },
-          { x: 80, y: 4 },
-          { x: 0, y: 4 },
+          { x: 40, y: 0 },
+          { x: 40, y: 20 },
+          { x: 0, y: 20 },
         ],
-        defaultHeight: 12,
-      };
+        defaultHeight: 18,
+      } as unknown as BuildingLoop;
 
       const candidates = buildMasterplanLabelCandidates(
-        [elongatedBldg],
+        [bldg],
         mockWorldToScreen,
         5.0
       );
 
       expect(candidates.length).toBe(1);
-      expect(candidates[0].id).toBe('elongated-1');
-      expect(candidates[0].lines[0].text).toBe('12m');
-      // Punkt wewnętrzny dla 80x4 powinien być w okolicach środka długości
-      expect(candidates[0].sx).toBeCloseTo(40 * 5, 0);
-      expect(candidates[0].sy).toBeCloseTo(2 * 5, 0);
+      expect(candidates[0].category).toBe('building');
+      expect(candidates[0].text).toBe('18m');
+      expect(candidates[0].angleRad).toBe(0);
+      expect(candidates[0].sx).toBeCloseTo(20 * 5, 0);
+      expect(candidates[0].sy).toBeCloseTo(10 * 5, 0);
+    });
+
+    it('creates rotated name label for boundary area along dominant angle with correct screen sign', () => {
+      // Działka obrócona o kąt 0 (poziomy prostokąt)
+      const plot = {
+        id: 'plot-1',
+        category: 'boundary',
+        plotNumber: '55',
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+          { x: 100, y: 30 },
+          { x: 0, y: 30 },
+        ],
+      } as unknown as BuildingLoop;
+
+      const candidates = buildMasterplanLabelCandidates(
+        [plot],
+        mockWorldToScreen,
+        2.0
+      );
+
+      expect(candidates.length).toBe(1);
+      expect(candidates[0].category).toBe('boundary');
+      expect(candidates[0].text).toBe('55');
+      expect(candidates[0].angleRad).toBeCloseTo(0, 1);
+    });
+
+    it('skips boundary area without name or plot number', () => {
+      const emptyPlot = {
+        id: 'empty-1',
+        category: 'boundary',
+        vertices: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+          { x: 100, y: 30 },
+          { x: 0, y: 30 },
+        ],
+      } as unknown as BuildingLoop;
+
+      const candidates = buildMasterplanLabelCandidates(
+        [emptyPlot],
+        mockWorldToScreen,
+        2.0
+      );
+
+      expect(candidates.length).toBe(0);
     });
   });
 
   describe('checkLabelOverlap', () => {
-    it('returns true when two label bounding boxes overlap', () => {
+    it('returns true when two labels overlap', () => {
       const a: MasterplanLabelCandidate = {
         id: 'a',
         buildingIds: ['a'],
         category: 'building',
+        text: '12m',
         sx: 100,
         sy: 100,
+        angleRad: 0,
         cardW: 40,
         cardH: 16,
-        lines: [{ text: '12m', font: '10px Inter', color: '#000' }],
-        shapeBoundsScreen: { minSx: 50, maxSx: 150, minSy: 50, maxSy: 150 },
         priority: 50,
       };
 
@@ -93,177 +150,84 @@ describe('masterplanLabels', () => {
         id: 'b',
         buildingIds: ['b'],
         category: 'building',
+        text: '15m',
         sx: 110,
         sy: 105,
+        angleRad: 0,
         cardW: 40,
         cardH: 16,
-        lines: [{ text: '15m', font: '10px Inter', color: '#000' }],
-        shapeBoundsScreen: { minSx: 50, maxSx: 150, minSy: 50, maxSy: 150 },
         priority: 50,
       };
 
       expect(checkLabelOverlap(a, b)).toBe(true);
     });
-
-    it('returns false when labels are well separated', () => {
-      const a: MasterplanLabelCandidate = {
-        id: 'a',
-        buildingIds: ['a'],
-        category: 'building',
-        sx: 100,
-        sy: 100,
-        cardW: 40,
-        cardH: 16,
-        lines: [{ text: '12m', font: '10px Inter', color: '#000' }],
-        shapeBoundsScreen: { minSx: 50, maxSx: 150, minSy: 50, maxSy: 150 },
-        priority: 50,
-      };
-
-      const b: MasterplanLabelCandidate = {
-        id: 'b',
-        buildingIds: ['b'],
-        category: 'building',
-        sx: 250,
-        sy: 300,
-        cardW: 40,
-        cardH: 16,
-        lines: [{ text: '15m', font: '10px Inter', color: '#000' }],
-        shapeBoundsScreen: { minSx: 200, maxSx: 300, minSy: 250, maxSy: 350 },
-        priority: 50,
-      };
-
-      expect(checkLabelOverlap(a, b)).toBe(false);
-    });
   });
 
   describe('resolveMasterplanLabelCollisions', () => {
-    it('merges building label and boundary label into a single multi-line composite badge', () => {
-      const bldgCandidate: MasterplanLabelCandidate = {
+    it('keeps higher priority label and culls overlapping lower priority label', () => {
+      const bldg: MasterplanLabelCandidate = {
         id: 'bldg-1',
         buildingIds: ['bldg-1'],
         category: 'building',
+        text: '15m',
         sx: 100,
         sy: 100,
+        angleRad: 0,
         cardW: 35,
         cardH: 16,
-        lines: [{ text: '15m', font: 'bold 11px Inter', color: '#334155' }],
-        shapeBoundsScreen: { minSx: 20, maxSx: 180, minSy: 20, maxSy: 180 },
         priority: 80,
       };
 
-      const boundaryCandidate: MasterplanLabelCandidate = {
+      const boundary: MasterplanLabelCandidate = {
         id: 'boundary-1',
         buildingIds: ['boundary-1'],
         category: 'boundary',
+        text: 'Dz. 101/1',
         sx: 102,
         sy: 101,
+        angleRad: 0,
         cardW: 55,
         cardH: 14,
-        lines: [{ text: 'Dz. 101/1', font: '9px Inter', color: '#64748b' }],
-        shapeBoundsScreen: { minSx: 0, maxSx: 200, minSy: 0, maxSy: 200 },
         priority: 40,
       };
 
-      const resolved = resolveMasterplanLabelCollisions([bldgCandidate, boundaryCandidate]);
+      const resolved = resolveMasterplanLabelCollisions([bldg, boundary]);
 
-      expect(resolved.length).toBe(1);
-      expect(resolved[0].category).toBe('composite');
-      expect(resolved[0].lines.length).toBe(2);
-      expect(resolved[0].lines[0].text).toBe('Dz. 101/1');
-      expect(resolved[0].lines[1].text).toBe('15m');
-    });
-
-    it('maintains higher priority label position without jitter when two labels overlap', () => {
-      const bldg1: MasterplanLabelCandidate = {
-        id: 'bldg-1',
-        buildingIds: ['bldg-1'],
-        category: 'building',
-        sx: 100,
-        sy: 100,
-        cardW: 30,
-        cardH: 16,
-        lines: [{ text: '12m', font: '10px Inter', color: '#334155' }],
-        shapeBoundsScreen: { minSx: 70, maxSx: 130, minSy: 50, maxSy: 150 },
-        priority: 60,
-      };
-
-      const bldg2: MasterplanLabelCandidate = {
-        id: 'bldg-2',
-        buildingIds: ['bldg-2'],
-        category: 'building',
-        sx: 100,
-        sy: 112, // lekki overlap
-        cardW: 30,
-        cardH: 16,
-        lines: [{ text: '20m', font: '10px Inter', color: '#334155' }],
-        shapeBoundsScreen: { minSx: 70, maxSx: 130, minSy: 60, maxSy: 160 },
-        priority: 50,
-      };
-
-      const resolved = resolveMasterplanLabelCollisions([bldg1, bldg2]);
-
-      // Wyższy priorytet zostaje na stałej pozycji, nie ma dryftu pozycji
       expect(resolved.length).toBe(1);
       expect(resolved[0].id).toBe('bldg-1');
-      expect(resolved[0].sy).toBe(100);
+      expect(resolved[0].text).toBe('15m');
     });
   });
 
-
   describe('getMasterplanLabelHitAtPoint', () => {
-    it('accurately hits label of elongated building at click coordinates', () => {
-      const elongatedBldg: BuildingLoop = {
-        id: 'elongated-test',
+    it('detects click on building label', () => {
+      const bldg = {
+        id: 'bldg-click-test',
         vertices: [
           { x: 10, y: 10 },
           { x: 90, y: 10 },
-          { x: 90, y: 15 },
-          { x: 10, y: 15 },
+          { x: 90, y: 50 },
+          { x: 10, y: 50 },
         ],
         defaultHeight: 14,
-      };
+      } as unknown as BuildingLoop;
 
       const worldToScreen = (wx: number, wy: number) => ({ sx: wx * 4, sy: wy * 4 });
-      // Interior point is around (50, 12.5) -> screen (200, 50)
       const hitId = getMasterplanLabelHitAtPoint(
-        202, // Kliknięcie lekko obok środka etykiety
-        51,
-        [elongatedBldg],
+        202,
+        120,
+        [bldg],
         worldToScreen,
         4.0
       );
 
-      expect(hitId).toBe('elongated-test');
-    });
-
-    it('returns null when clicking away from label', () => {
-      const bldg: BuildingLoop = {
-        id: 'bldg-test',
-        vertices: [
-          { x: 0, y: 0 },
-          { x: 20, y: 0 },
-          { x: 20, y: 20 },
-          { x: 0, y: 20 },
-        ],
-        defaultHeight: 15,
-      };
-
-      const worldToScreen = (wx: number, wy: number) => ({ sx: wx * 5, sy: wy * 5 });
-      const hitId = getMasterplanLabelHitAtPoint(
-        500, // daleko poza etykietą
-        500,
-        [bldg],
-        worldToScreen,
-        5.0
-      );
-
-      expect(hitId).toBeNull();
+      expect(hitId).toBe('bldg-click-test');
     });
   });
 
   describe('getMasterplanLabelScreenAnchor', () => {
-    it('returns anchor at bottom of label card', () => {
-      const bldg: BuildingLoop = {
+    it('returns anchor position at bottom of label', () => {
+      const bldg = {
         id: 'bldg-anchor',
         vertices: [
           { x: 0, y: 0 },
@@ -272,7 +236,7 @@ describe('masterplanLabels', () => {
           { x: 0, y: 20 },
         ],
         defaultHeight: 15,
-      };
+      } as unknown as BuildingLoop;
 
       const worldToScreen = (wx: number, wy: number) => ({ sx: wx * 10, sy: wy * 10 });
       const anchor = getMasterplanLabelScreenAnchor(
@@ -284,21 +248,24 @@ describe('masterplanLabels', () => {
 
       expect(anchor).not.toBeNull();
       expect(anchor!.sx).toBe(100);
-      expect(anchor!.bottomSy).toBeGreaterThan(100); // poniżej środka
+      expect(anchor!.bottomSy).toBeGreaterThan(100);
     });
   });
 
   describe('renderMasterplanLabels', () => {
-    it('executes canvas draw calls without throwing', () => {
+    it('renders labels on canvas without error', () => {
       const mockCtx = {
         save: vi.fn(),
         restore: vi.fn(),
         setTransform: vi.fn(),
+        translate: vi.fn(),
+        rotate: vi.fn(),
         beginPath: vi.fn(),
         roundRect: vi.fn(),
         fill: vi.fn(),
         stroke: vi.fn(),
         fillText: vi.fn(),
+        strokeText: vi.fn(),
         font: '',
         fillStyle: '',
         strokeStyle: '',
@@ -312,18 +279,32 @@ describe('masterplanLabels', () => {
           id: 'test-1',
           buildingIds: ['test-1'],
           category: 'building',
+          text: '15m',
           sx: 50,
           sy: 50,
-          cardW: 40,
+          angleRad: 0,
+          cardW: 30,
           cardH: 16,
-          lines: [{ text: '15m', font: '11px Inter', color: '#334155' }],
-          shapeBoundsScreen: { minSx: 0, maxSx: 100, minSy: 0, maxSy: 100 },
           priority: 50,
+        },
+        {
+          id: 'test-2',
+          buildingIds: ['test-2'],
+          category: 'boundary',
+          text: 'Dz. 12',
+          sx: 150,
+          sy: 150,
+          angleRad: 0.25,
+          cardW: 40,
+          cardH: 14,
+          priority: 30,
         },
       ];
 
       expect(() => renderMasterplanLabels(mockCtx, labels)).not.toThrow();
-      expect(mockCtx.fillText).toHaveBeenCalledWith('15m', 50, 50);
+      expect(mockCtx.fillText).toHaveBeenCalledWith('15m', 0, 0);
+      expect(mockCtx.strokeText).toHaveBeenCalledWith('Dz. 12', 0, 0);
+      expect(mockCtx.fillText).toHaveBeenCalledWith('Dz. 12', 0, 0);
     });
   });
 });

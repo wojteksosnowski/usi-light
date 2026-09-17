@@ -245,6 +245,64 @@ describe('computePolygonDominantAngle', () => {
     const computedAngle = computePolygonDominantAngle(rotated);
     expect(computedAngle).toBeCloseTo(angleRad, 2);
   });
+
+  it('detects 30 degrees for polygon rotated by 30 degrees', () => {
+    const angleRad = Math.PI / 6; // 30 deg
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+    const base = [
+      { x: 0, y: 0 },
+      { x: 60, y: 0 },
+      { x: 60, y: 15 },
+      { x: 0, y: 15 },
+    ];
+    const rotated = base.map((p) => ({
+      x: p.x * cos - p.y * sin,
+      y: p.x * sin + p.y * cos,
+    }));
+
+    const computedAngle = computePolygonDominantAngle(rotated);
+    expect(computedAngle).toBeCloseTo(angleRad, 2);
+  });
+
+  it('filters out small corner chamfers (high-pass filter) and preserves 0 rad direction', () => {
+    // Prostokąt 50x15 ze ściętymi wszystkimi 4 narożnikami pod kątem 45 stopni (ścięcia po 0.5m)
+    const chamfered = [
+      { x: 0.5, y: 0 },
+      { x: 49.5, y: 0 },
+      { x: 50, y: 0.5 },
+      { x: 50, y: 14.5 },
+      { x: 49.5, y: 15 },
+      { x: 0.5, y: 15 },
+      { x: 0, y: 14.5 },
+      { x: 0, y: 0.5 },
+    ];
+
+    const angle = computePolygonDominantAngle(chamfered);
+    expect(Math.abs(angle)).toBeCloseTo(0, 2);
+  });
+
+  it('reinforces orthogonal direction in L-shaped building', () => {
+    // Kształt L: 60x15 i 15x40
+    const lShape = [
+      { x: 0, y: 0 },
+      { x: 60, y: 0 },
+      { x: 60, y: 15 },
+      { x: 15, y: 15 },
+      { x: 15, y: 40 },
+      { x: 0, y: 40 },
+    ];
+
+    const angle = computePolygonDominantAngle(lShape);
+    expect(Math.abs(angle)).toBeCloseTo(0, 2);
+  });
+
+  it('returns valid aligned angle for square footprint', () => {
+    const square = rect(0, 0, 25, 25);
+    const angle = computePolygonDominantAngle(square);
+    // Powinien być idealnie zorientowany wzdłuż osi (0 lub pi/2 znormalizowane)
+    expect(Math.abs(angle) === 0 || Math.abs(angle) === Math.PI / 2 || Math.abs(angle) < 0.01).toBe(true);
+  });
 });
 
 
