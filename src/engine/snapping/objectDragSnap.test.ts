@@ -121,6 +121,28 @@ describe('evaluateEdgeDragSnap', () => {
 
     expect(snap).toBeNull();
   });
+
+  it('ignores reference edges outside viewportBounds', () => {
+    const edgeP1 = { x: 5, y: 9.8 };
+    const edgeP2 = { x: 15, y: 9.8 };
+    const normal = { x: 0, y: 1 };
+
+    // Reference edge is at y = 10, x: 0..20
+    // Viewport bounds is located far away at x: 100..200, y: 100..200
+    const snap = evaluateEdgeDragSnap({
+      edgeP1,
+      edgeP2,
+      normal,
+      buildingId: 'bldg-moving',
+      edgeIndex: 0,
+      tentativeDelta: { dx: 0, dy: 0.1 },
+      referenceBuffer,
+      distanceThresholdMeters: 0.35,
+      viewportBounds: { minX: 100, maxX: 200, minY: 100, maxY: 200 },
+    });
+
+    expect(snap).toBeNull();
+  });
 });
 
 describe('evaluateBuildingDragMultiSnap', () => {
@@ -182,5 +204,28 @@ describe('evaluateBuildingDragMultiSnap', () => {
     expect(snap?.deltaX).toBeCloseTo(-0.1);
     expect(snap?.deltaY).toBeCloseTo(0.15);
     expect(snap?.secondGuideline).toBeDefined();
+  });
+
+  it('ignores reference edges outside viewportBounds when dragging building', () => {
+    const line1 = createCachedLineEquation('ref-v', 'bldg-1', 0, { x: 0, y: -100 }, { x: 0, y: 100 });
+    const line2 = createCachedLineEquation('ref-h', 'bldg-1', 1, { x: -100, y: 0 }, { x: 100, y: 0 });
+
+    const movingVertices = [
+      { x: 0.1, y: -0.15 },
+      { x: 10.1, y: -0.15 },
+      { x: 10.1, y: 9.85 },
+      { x: 0.1, y: 9.85 },
+    ];
+
+    // Viewport bounds far away at (500..600, 500..600)
+    const snap = evaluateBuildingDragMultiSnap({
+      movingVertices,
+      movingBuildingId: 'bldg-2',
+      referenceBuffer: [line1, line2],
+      distanceThresholdMeters: 0.35,
+      viewportBounds: { minX: 500, maxX: 600, minY: 500, maxY: 600 },
+    });
+
+    expect(snap).toBeNull();
   });
 });

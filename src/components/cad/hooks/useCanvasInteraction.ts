@@ -23,6 +23,7 @@ import {
 } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
 import { CadCanvasProps, ViewportState } from '../types';
+import { viewportWorldBounds } from '../masterplan/masterplanSpatial';
 import { EditingEdgeLengthState, getBuildingLabelHitAtPoint } from '../renderers/buildingsRenderer';
 import { getMasterplanLabelHitAtPoint } from '../masterplan/masterplanLabels';
 
@@ -422,11 +423,29 @@ export function useCanvasInteraction({
     return totalCount > 0 ? { x: cx / totalCount, y: cy / totalCount } : null;
   }, [selectedBuildingId, buildings]);
 
-  // Znormalizowany bufor linii Ax + By + C = 0 dla wszystkich widocznych obiektów
+  // Znormalizowany bufor linii Ax + By + C = 0 dla wszystkich widocznych warstwowo obiektów
   const lineBuffer = useMemo<CachedLineEquation[]>(() => {
     const map = buildLineBufferFromBuildings(buildings, layerSettings);
     return flattenLineBuffer(map);
   }, [buildings, layerSettings]);
+
+  // Bufor linii Ax + By + C = 0 ograniczony do obiektów widocznych w aktualnym viewportcie (z 10% marginesem)
+  const visibleLineBuffer = useMemo<CachedLineEquation[]>(() => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    const width = canvas?.width ?? container?.clientWidth ?? 1000;
+    const height = canvas?.height ?? container?.clientHeight ?? 800;
+
+    const vp = viewportWorldBounds({ width, height, screenToWorld }, 0.1);
+
+    return lineBuffer.filter((edge) => {
+      const eMinX = Math.min(edge.p1.x, edge.p2.x);
+      const eMaxX = Math.max(edge.p1.x, edge.p2.x);
+      const eMinY = Math.min(edge.p1.y, edge.p2.y);
+      const eMaxY = Math.max(edge.p1.y, edge.p2.y);
+      return eMaxX >= vp.minX && eMinX <= vp.maxX && eMaxY >= vp.minY && eMinY <= vp.maxY;
+    });
+  }, [lineBuffer, screenToWorld, containerRef, canvasRef, viewState]);
 
   const handleDeleteSelectedVertex = useCallback(() => {
     if (selectedVertexIndex === null || !selectedBuildingId) return;
@@ -1271,7 +1290,7 @@ export function useCanvasInteraction({
               if (isOsnapActive) {
                 osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
                   mouseWorld: targetPt,
-                  lineBuffer,
+                  lineBuffer: visibleLineBuffer,
                   worldToScreen,
                   screenSnapThresholdPx: snapRadiusPx,
                   excludeBuildingId: selBldg.id,
@@ -1307,10 +1326,10 @@ export function useCanvasInteraction({
               } else {
                 prevV = baseVerts[(draggedVertexIndex - 1 + n) % n];
                 nextV = baseVerts[(draggedVertexIndex + 1) % n];
+                const prevSegmentIdx = (draggedVertexIndex - 1 + n) % n;
 
                 for (let i = 0; i < n; i++) {
-                  const prevIdx = (draggedVertexIndex - 1 + n) % n;
-                  if (i !== prevIdx && i !== draggedVertexIndex) {
+                  if (i !== prevSegmentIdx && i !== draggedVertexIndex) {
                     staticSegments.push({
                       p1: baseVerts[i],
                       p2: baseVerts[(i + 1) % n],
@@ -1622,7 +1641,7 @@ export function useCanvasInteraction({
       if (isOsnapActive) {
         osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
           mouseWorld: mousePos,
-          lineBuffer,
+          lineBuffer: visibleLineBuffer,
           worldToScreen,
           screenSnapThresholdPx: snapRadiusPx,
           previousSnapResult: activeOsnapSnap,
@@ -1880,7 +1899,7 @@ export function useCanvasInteraction({
             buildingId: dragCtx.buildingId,
             edgeIndex: dragCtx.edgeIndex,
             tentativeDelta: { dx: totalDx, dy: totalDy },
-            referenceBuffer: lineBuffer,
+            referenceBuffer: visibleLineBuffer,
             distanceThresholdMeters: distToleranceMeters,
             angleToleranceRad: ((APP_CONFIG.osnap?.parallelAngleToleranceDeg || 1.5) * Math.PI) / 180,
             previousSnap: activeBuildingDragSnap as any,
@@ -1952,7 +1971,7 @@ export function useCanvasInteraction({
           const dragSnap = evaluateBuildingDragMultiSnap({
             movingVertices: tentVerts,
             movingBuildingId: primaryId,
-            referenceBuffer: lineBuffer,
+            referenceBuffer: visibleLineBuffer,
             dragAnchorVertex: dragAnchor,
             distanceThresholdMeters: distToleranceMeters,
             angleToleranceRad: ((APP_CONFIG.osnap?.parallelAngleToleranceDeg || 0.8) * Math.PI) / 180,

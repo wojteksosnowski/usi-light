@@ -92,6 +92,8 @@ export interface EvaluateBuildingDragSnapOptions {
   distanceThresholdMeters?: number;
   angleToleranceRad?: number;
   guidelineLengthMeters?: number;
+  dragAnchorVertex?: Point2D;
+  viewportBounds?: { minX: number; maxX: number; minY: number; maxY: number };
 }
 
 /**
@@ -111,12 +113,22 @@ export function evaluateBuildingDragMultiSnap(
     distanceThresholdMeters = 0.35,
     angleToleranceRad = (0.8 * Math.PI) / 180,
     guidelineLengthMeters = 100,
+    viewportBounds,
   } = options;
 
   const n = movingVertices.length;
   if (n < 2) return null;
 
-  const otherBuffer = referenceBuffer.filter((e) => e.objectId !== movingBuildingId);
+  let otherBuffer = referenceBuffer.filter((e) => e.objectId !== movingBuildingId);
+  if (viewportBounds) {
+    otherBuffer = otherBuffer.filter((e) => {
+      const eMinX = Math.min(e.p1.x, e.p2.x);
+      const eMaxX = Math.max(e.p1.x, e.p2.x);
+      const eMinY = Math.min(e.p1.y, e.p2.y);
+      const eMaxY = Math.max(e.p1.y, e.p2.y);
+      return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
+    });
+  }
   if (otherBuffer.length === 0) return null;
 
   // AABB Culling: Wyznacz bounding box przemieszczanej bryły rozszerzony o próg snapowania
@@ -451,6 +463,7 @@ export interface EvaluateEdgeDragSnapOptions {
   angleToleranceRad?: number;
   guidelineLengthMeters?: number;
   previousSnap?: EdgeDragSnapResult | null;
+  viewportBounds?: { minX: number; maxX: number; minY: number; maxY: number };
 }
 
 export interface EdgeDragSnapResult {
@@ -484,6 +497,7 @@ export function evaluateEdgeDragSnap(
     angleToleranceRad = (1.5 * Math.PI) / 180,
     guidelineLengthMeters = 100,
     previousSnap,
+    viewportBounds,
   } = options;
 
   const dx = edgeP2.x - edgeP1.x;
@@ -502,7 +516,16 @@ export function evaluateEdgeDragSnap(
   const tentP1 = { x: edgeP1.x + rawD * normal.x, y: edgeP1.y + rawD * normal.y };
   const tentP2 = { x: edgeP2.x + rawD * normal.x, y: edgeP2.y + rawD * normal.y };
 
-  const otherBuffer = referenceBuffer.filter((e) => e.objectId !== buildingId);
+  let otherBuffer = referenceBuffer.filter((e) => e.objectId !== buildingId);
+  if (viewportBounds) {
+    otherBuffer = otherBuffer.filter((e) => {
+      const eMinX = Math.min(e.p1.x, e.p2.x);
+      const eMaxX = Math.max(e.p1.x, e.p2.x);
+      const eMinY = Math.min(e.p1.y, e.p2.y);
+      const eMaxY = Math.max(e.p1.y, e.p2.y);
+      return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
+    });
+  }
   if (otherBuffer.length === 0) return null;
 
   const edgeAngle = normalizeAnglePi(Math.atan2(dy, dx));

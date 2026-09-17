@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calculateDirectionSnap } from './DirectionSnapStrategy';
-import { Point2D, BuildingLoop } from '../../types/geometry';
+import { Point2D, BuildingLoop } from '../../../types/geometry';
 
 describe('DirectionSnapStrategy - otrackModes filtering', () => {
   const originPoint: Point2D = { x: 0, y: 0 };
