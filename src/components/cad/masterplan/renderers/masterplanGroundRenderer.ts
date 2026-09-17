@@ -1,3 +1,4 @@
+import { CadRenderPipeline } from '@/components/cad/pipeline/CadRenderPipeline';
 import { CadRenderFrameContext } from '@/components/cad/pipeline/types';
 import { useWfsStore } from '@/modules/wfs-import/store/useWfsStore';
 import { Point2D, BuildingLoop } from '@/types/geometry';
@@ -60,84 +61,31 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   ctx.fillRect(0, 0, width, height);
   ctx.restore();
 
+  // 1.1 Renderowanie aktywnych warstw podkładowych (Satelita, Ortofotomapa, GESUT, BDOT, MPZP, NMT, Wektory, Drzewa)
+  const pipeline = CadRenderPipeline.getDefault();
+  const mainLayers = pipeline.getMainLayers();
+  for (const layer of mainLayers) {
+    if (layer.id === 'satellite_map' || layer.id.startsWith('wfs_')) {
+      if (layer.shouldRender(context)) {
+        try {
+          ctx.save();
+          layer.render(context);
+        } catch (err) {
+          console.error(`[Masterplan] Błąd podczas renderowania warstwy podkładowej [${layer.id}]:`, err);
+        } finally {
+          ctx.restore();
+        }
+      }
+    }
+  }
+
   // Ustawienie transformacji do współrzędnych świata CAD
   ctx.save();
   ctx.translate(viewState.panX, viewState.panY);
   ctx.rotate((-viewRotationDeg * Math.PI) / 180);
   ctx.scale(viewState.scale, -viewState.scale);
 
-  // 2. Warstwa wektorów geodezyjnych z useWfsStore
-  const wfsState = useWfsStore.getState();
-  const overturePolygons = wfsState.overtureGreenAreas || [];
-  const landCoverUnits = wfsState.landCoverUnits || [];
-
-  // 2.1 Rysowanie plam pokrycia terenu (Woda, Zieleń, Drogi itp.)
-  if (landCoverUnits.length > 0) {
-    for (const unit of landCoverUnits) {
-      if (!unit.outer || unit.outer.length < 3) continue;
-      const cls = unit.landCoverClass?.toLowerCase() || '';
-      let fill = MASTERPLAN_COLORS.grassFill;
-      let stroke = MASTERPLAN_COLORS.grassStroke;
-
-      if (cls.includes('water') || cls.includes('woda')) {
-        fill = MASTERPLAN_COLORS.waterFill;
-        stroke = MASTERPLAN_COLORS.waterStroke;
-      } else if (cls.includes('forest') || cls.includes('tree') || cls.includes('las')) {
-        fill = MASTERPLAN_COLORS.forestFill;
-        stroke = MASTERPLAN_COLORS.forestStroke;
-      }
-
-      ctx.beginPath();
-      unit.outer.forEach((p: Point2D, idx: number) => {
-        if (idx === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      });
-      ctx.closePath();
-
-      if (unit.holes) {
-        for (const hole of unit.holes) {
-          if (hole.length < 3) continue;
-          hole.forEach((p: Point2D, idx: number) => {
-            if (idx === 0) ctx.moveTo(p.x, p.y);
-            else ctx.lineTo(p.x, p.y);
-          });
-          ctx.closePath();
-        }
-      }
-
-      ctx.fillStyle = fill;
-      ctx.fill();
-      if (stroke) {
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = 0.5 / viewState.scale;
-        ctx.stroke();
-      }
-    }
-  }
-
-  // 2.2 Overture Green / Water Areas
-  if (overturePolygons.length > 0) {
-    for (const poly of overturePolygons) {
-      if (!poly.rings || poly.rings.length === 0) continue;
-      const isWater = poly.category === 'water' || poly.className?.includes('water');
-      ctx.fillStyle = isWater ? MASTERPLAN_COLORS.waterFill : MASTERPLAN_COLORS.forestFill;
-      ctx.strokeStyle = isWater ? MASTERPLAN_COLORS.waterStroke : MASTERPLAN_COLORS.forestStroke;
-      ctx.lineWidth = 0.5 / viewState.scale;
-
-      ctx.beginPath();
-      for (const ring of poly.rings) {
-        ring.forEach((p: Point2D, idx: number) => {
-          if (idx === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
-        });
-        ctx.closePath();
-      }
-      ctx.fill();
-      ctx.stroke();
-    }
-  }
-
-  // 2.3 Granice działek / obiekty boundary (z wirtualnym zlewaniem się działek projektowanych)
+  // 2. Granice działek / obiekty boundary (z wirtualnym zlewaniem się działek projektowanych)
   const isBuildingSelected = (id: string) => id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(id));
   const boundaryObjects = bldgs.filter((b: BuildingLoop) => b.category === 'boundary');
 

@@ -14,14 +14,10 @@ export const ProjectOverlaysCard: React.FC = () => {
   const setShowMpzpLayer = useWfsStore((s) => s.setShowMpzpLayer);
   const mpzpOpacity = useWfsStore((s) => s.mpzpOpacity);
   const setMpzpOpacity = useWfsStore((s) => s.setMpzpOpacity);
-  const mpzpInvertColors = useWfsStore((s) => s.mpzpInvertColors);
-  const setMpzpInvertColors = useWfsStore((s) => s.setMpzpInvertColors);
   const showBdotLayer = useWfsStore((s) => s.showBdotLayer);
   const setShowBdotLayer = useWfsStore((s) => s.setShowBdotLayer);
   const geoOverlayOpacity = useWfsStore((s) => s.geoOverlayOpacity);
   const setGeoOverlayOpacity = useWfsStore((s) => s.setGeoOverlayOpacity);
-  const geoOverlayInvertColors = useWfsStore((s) => s.geoOverlayInvertColors);
-  const setGeoOverlayInvertColors = useWfsStore((s) => s.setGeoOverlayInvertColors);
   const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
   const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
@@ -136,7 +132,7 @@ export const ProjectOverlaysCard: React.FC = () => {
               </button>
             </div>
 
-            {/* Wspólne kontrolki: Krycie i Odwróć kolory dla grupy Podkład */}
+            {/* Wspólna kontrolka: Krycie dla grupy Podkład */}
             {(showKiutLayer || showBdotLayer) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '6px', borderTop: '1px solid rgba(51, 65, 85, 0.4)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--text-secondary)' }}>
@@ -152,15 +148,6 @@ export const ProjectOverlaysCard: React.FC = () => {
                   onChange={(e) => setGeoOverlayOpacity(parseFloat(e.target.value))}
                   style={{ width: '100%', accentColor: 'var(--accent-indigo)', cursor: 'pointer' }}
                 />
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none', paddingTop: '2px' }}>
-                  <input
-                    type="checkbox"
-                    checked={geoOverlayInvertColors}
-                    onChange={(e) => setGeoOverlayInvertColors(e.target.checked)}
-                    style={{ accentColor: 'var(--accent-indigo)', cursor: 'pointer' }}
-                  />
-                  <span>Odwróć kolory (czytelność na ciemnym tle)</span>
-                </label>
               </div>
             )}
           </div>
@@ -238,15 +225,6 @@ export const ProjectOverlaysCard: React.FC = () => {
                     onChange={(e) => setMpzpOpacity(parseFloat(e.target.value))}
                     style={{ width: '100%', accentColor: 'var(--accent-indigo)', cursor: 'pointer' }}
                   />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none', paddingTop: '2px' }}>
-                    <input
-                      type="checkbox"
-                      checked={mpzpInvertColors}
-                      onChange={(e) => setMpzpInvertColors(e.target.checked)}
-                      style={{ accentColor: 'var(--accent-indigo)', cursor: 'pointer' }}
-                    />
-                    <span>Odwróć kolory (czytelność na ciemnym tle)</span>
-                  </label>
                 </div>
               )}
             </div>

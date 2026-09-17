@@ -277,7 +277,7 @@ export const useWfsStore = create<WfsState>()(
       kiutInvertColors: true,
       showMpzpLayer: false,
       mpzpOpacity: 0.5,
-      mpzpInvertColors: false,
+      mpzpInvertColors: true,
       showBdotLayer: false,
       bdotOpacity: 0.6,
       bdotInvertColors: true,

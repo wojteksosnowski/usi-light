@@ -106,10 +106,10 @@ describe('useWfsStore - shiftVectorLayers and group toggles', () => {
 
   it('obsługuje inwersję kolorów dla warstwy WMS MPZP', () => {
     const s = useWfsStore.getState();
-    expect(s.mpzpInvertColors).toBe(false);
-    s.setMpzpInvertColors(true);
-    expect(useWfsStore.getState().mpzpInvertColors).toBe(true);
+    expect(s.mpzpInvertColors).toBe(true);
     s.setMpzpInvertColors(false);
     expect(useWfsStore.getState().mpzpInvertColors).toBe(false);
+    s.setMpzpInvertColors(true);
+    expect(useWfsStore.getState().mpzpInvertColors).toBe(true);
   });
 });

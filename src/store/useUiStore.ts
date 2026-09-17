@@ -1,10 +1,18 @@
 import { create } from 'zustand';
+import { useWfsStore } from '../modules/wfs-import/store/useWfsStore';
 
 export type ActiveModalType = 'share' | 'pricing' | 'license' | 'paymentSuccess' | 'confirmDelete' | null;
 
 export type SidebarGroupType = 'project' | 'analyses' | 'layers' | 'tools';
 
 export type ViewportMode2D = 'cad' | 'masterplan_white';
+
+const syncInvertColorsWithViewMode = (mode: ViewportMode2D) => {
+  const isCad = mode === 'cad';
+  const wfs = useWfsStore.getState();
+  wfs.setGeoOverlayInvertColors(isCad);
+  wfs.setMpzpInvertColors(isCad);
+};
 
 interface UiState {
   isSidebarOpen: boolean;
@@ -58,11 +66,18 @@ export const useUiStore = create<UiState>((set) => ({
   viewMode2D: 'cad',
   expandedModifierId: null,
 
-  setViewMode2D: (mode) => set({ viewMode2D: mode }),
+  setViewMode2D: (mode) => {
+    set({ viewMode2D: mode });
+    syncInvertColorsWithViewMode(mode);
+  },
   toggleViewMode2D: () =>
-    set((state) => ({
-      viewMode2D: state.viewMode2D === 'cad' ? 'masterplan_white' : 'cad',
-    })),
+    set((state) => {
+      const nextMode = state.viewMode2D === 'cad' ? 'masterplan_white' : 'cad';
+      syncInvertColorsWithViewMode(nextMode);
+      return {
+        viewMode2D: nextMode,
+      };
+    }),
 
   setExpandedModifierId: (id) => set({ expandedModifierId: id }),
 
