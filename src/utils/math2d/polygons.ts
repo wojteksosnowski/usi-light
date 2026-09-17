@@ -774,19 +774,32 @@ export function differencePolygonLoops(
   const result: Point2D[][] = [];
   const fallbackPositives: Point2D[][] = [];
   const fallbackNegativesSet = new Set<Point2D[]>();
+  const negBoxes = overlappingNegatives.map(computePointsBoundingBox);
 
   for (const posLoop of positiveLoops) {
     const pb = computePointsBoundingBox(posLoop);
-    const relevant: Point2D[][] = [];
-    for (const neg of overlappingNegatives) {
-      const nb = computePointsBoundingBox(neg);
+    const relevant: Point2D[] = [];
+    for (let j = 0; j < overlappingNegatives.length; j++) {
+      const nb = negBoxes[j];
       if (!(nb.maxX < pb.minX || nb.minX > pb.maxX || nb.maxY < pb.minY || nb.minY > pb.maxY)) {
-        relevant.push(neg);
+        relevant.push(overlappingNegatives[j]);
       }
     }
     if (relevant.length === 0) {
       result.push(posLoop);
       continue;
+    }
+
+    // Direct single-negative fast path: avoid allocating intermediate piece arrays when only 1 negative overlaps
+    if (relevant.length === 1) {
+      const diffRes = fastDifferenceTwoSimpleLoops(posLoop, relevant[0]);
+      if (diffRes !== null) {
+        for (let k = 0; k < diffRes.length; k++) {
+          result.push(diffRes[k].outer);
+          if (diffRes[k].holes.length > 0) result.push(...diffRes[k].holes);
+        }
+        continue;
+      }
     }
 
     // Iterative peeling does O(relevant.length) separate graph-trace passes, each

@@ -327,6 +327,29 @@ export function fastUnionTwoSimpleLoops(
     const splitsA: number[][] = Array.from({ length: nA }, () => [0, 1]);
     const splitsB: number[][] = Array.from({ length: nB }, () => [0, 1]);
 
+    // Pre-extract loopB edge properties to avoid quadratic recomputation per edge of loopA
+    const bMinX = new Float64Array(nB);
+    const bMaxX = new Float64Array(nB);
+    const bMinY = new Float64Array(nB);
+    const bMaxY = new Float64Array(nB);
+    const bDx = new Float64Array(nB);
+    const bDy = new Float64Array(nB);
+    const bLenSq = new Float64Array(nB);
+
+    for (let j = 0; j < nB; j++) {
+      const b1 = loopB[j];
+      const b2 = loopB[(j + 1) % nB];
+      const dx2 = b2.x - b1.x;
+      const dy2 = b2.y - b1.y;
+      bDx[j] = dx2;
+      bDy[j] = dy2;
+      bLenSq[j] = dx2 * dx2 + dy2 * dy2;
+      bMinX[j] = dx2 > 0 ? b1.x : b2.x;
+      bMaxX[j] = dx2 > 0 ? b2.x : b1.x;
+      bMinY[j] = dy2 > 0 ? b1.y : b2.y;
+      bMaxY[j] = dy2 > 0 ? b2.y : b1.y;
+    }
+
     for (let i = 0; i < nA; i++) {
       const a1 = loopA[i];
       const a2 = loopA[(i + 1) % nA];
@@ -341,30 +364,26 @@ export function fastUnionTwoSimpleLoops(
       const aMaxY = dy1 > 0 ? a2.y : a1.y;
 
       for (let j = 0; j < nB; j++) {
-        const b1 = loopB[j];
-        const b2 = loopB[(j + 1) % nB];
-        const dx2 = b2.x - b1.x;
-        const dy2 = b2.y - b1.y;
-        const len2Sq = dx2 * dx2 + dy2 * dy2;
+        const len2Sq = bLenSq[j];
         if (len2Sq < DUP_VERTEX_LEN_TOL_SQ) continue;
 
-        const bMinX = dx2 > 0 ? b1.x : b2.x;
-        const bMaxX = dx2 > 0 ? b2.x : b1.x;
-        if (aMaxX < bMinX - AABB_SLOP || aMinX > bMaxX + AABB_SLOP) continue;
+        if (aMaxX < bMinX[j] - AABB_SLOP || aMinX > bMaxX[j] + AABB_SLOP) continue;
+        if (aMaxY < bMinY[j] - AABB_SLOP || aMinY > bMaxY[j] + AABB_SLOP) continue;
 
-        const bMinY = dy2 > 0 ? b1.y : b2.y;
-        const bMaxY = dy2 > 0 ? b2.y : b1.y;
-        if (aMaxY < bMinY - AABB_SLOP || aMinY > bMaxY + AABB_SLOP) continue;
+        const b1 = loopB[j];
+        const dx2 = bDx[j];
+        const dy2 = bDy[j];
 
         const denom = dx1 * dy2 - dy1 * dx2;
         if (Math.abs(denom) < PARALLEL_DENOM_TOL) {
           // Collinear test: check if b1 or b2 lie on segment a1->a2
           const cross1 = (b1.x - a1.x) * dy1 - (b1.y - a1.y) * dx1;
           if (Math.abs(cross1) / Math.sqrt(len1Sq) < SNAP_TOL) {
+            const b2 = loopB[(j + 1) % nB];
             const t_b1 = ((b1.x - a1.x) * dx1 + (b1.y - a1.y) * dy1) / len1Sq;
             const t_b2 = ((b2.x - a1.x) * dx1 + (b2.y - a1.y) * dy1) / len1Sq;
             if (t_b1 > PARAM_TOL && t_b1 < 1 - PARAM_TOL) splitsA[i].push(t_b1);
-            if (t_b2 > PARAM_TOL && t_b2 < 1 - PARAM_TOL) splitsA[i].push(t_b2);
+            if (t_b2 > PARAM_TOL && t_b2 < 1 - PARAM_TOL) splitsB[j].push(t_b2);
 
             const u_a1 = ((a1.x - b1.x) * dx2 + (a1.y - b1.y) * dy2) / len2Sq;
             const u_a2 = ((a2.x - b1.x) * dx2 + (a2.y - b1.y) * dy2) / len2Sq;
@@ -804,8 +823,32 @@ export function fastDifferenceTwoSimpleLoops(
       return id;
     };
 
+    // A. Collect split parameters for all edges of loopA and loopB
     const splitsA: number[][] = Array.from({ length: nA }, () => [0, 1]);
     const splitsB: number[][] = Array.from({ length: nB }, () => [0, 1]);
+
+    // Pre-extract loopB edge properties to avoid quadratic recomputation per edge of loopA
+    const bMinX = new Float64Array(nB);
+    const bMaxX = new Float64Array(nB);
+    const bMinY = new Float64Array(nB);
+    const bMaxY = new Float64Array(nB);
+    const bDx = new Float64Array(nB);
+    const bDy = new Float64Array(nB);
+    const bLenSq = new Float64Array(nB);
+
+    for (let j = 0; j < nB; j++) {
+      const b1 = loopB[j];
+      const b2 = loopB[(j + 1) % nB];
+      const dx2 = b2.x - b1.x;
+      const dy2 = b2.y - b1.y;
+      bDx[j] = dx2;
+      bDy[j] = dy2;
+      bLenSq[j] = dx2 * dx2 + dy2 * dy2;
+      bMinX[j] = dx2 > 0 ? b1.x : b2.x;
+      bMaxX[j] = dx2 > 0 ? b2.x : b1.x;
+      bMinY[j] = dy2 > 0 ? b1.y : b2.y;
+      bMaxY[j] = dy2 > 0 ? b2.y : b1.y;
+    }
 
     for (let i = 0; i < nA; i++) {
       const a1 = loopA[i];
@@ -821,29 +864,25 @@ export function fastDifferenceTwoSimpleLoops(
       const aMaxY = dy1 > 0 ? a2.y : a1.y;
 
       for (let j = 0; j < nB; j++) {
-        const b1 = loopB[j];
-        const b2 = loopB[(j + 1) % nB];
-        const dx2 = b2.x - b1.x;
-        const dy2 = b2.y - b1.y;
-        const len2Sq = dx2 * dx2 + dy2 * dy2;
+        const len2Sq = bLenSq[j];
         if (len2Sq < DUP_VERTEX_LEN_TOL_SQ) continue;
 
-        const bMinX = dx2 > 0 ? b1.x : b2.x;
-        const bMaxX = dx2 > 0 ? b2.x : b1.x;
-        if (aMaxX < bMinX - AABB_SLOP || aMinX > bMaxX + AABB_SLOP) continue;
+        if (aMaxX < bMinX[j] - AABB_SLOP || aMinX > bMaxX[j] + AABB_SLOP) continue;
+        if (aMaxY < bMinY[j] - AABB_SLOP || aMinY > bMaxY[j] + AABB_SLOP) continue;
 
-        const bMinY = dy2 > 0 ? b1.y : b2.y;
-        const bMaxY = dy2 > 0 ? b2.y : b1.y;
-        if (aMaxY < bMinY - AABB_SLOP || aMinY > bMaxY + AABB_SLOP) continue;
+        const b1 = loopB[j];
+        const dx2 = bDx[j];
+        const dy2 = bDy[j];
 
         const denom = dx1 * dy2 - dy1 * dx2;
         if (Math.abs(denom) < PARALLEL_DENOM_TOL) {
           const cross1 = (b1.x - a1.x) * dy1 - (b1.y - a1.y) * dx1;
           if (Math.abs(cross1) / Math.sqrt(len1Sq) < SNAP_TOL) {
+            const b2 = loopB[(j + 1) % nB];
             const t_b1 = ((b1.x - a1.x) * dx1 + (b1.y - a1.y) * dy1) / len1Sq;
             const t_b2 = ((b2.x - a1.x) * dx1 + (b2.y - a1.y) * dy1) / len1Sq;
             if (t_b1 > PARAM_TOL && t_b1 < 1 - PARAM_TOL) splitsA[i].push(t_b1);
-            if (t_b2 > PARAM_TOL && t_b2 < 1 - PARAM_TOL) splitsA[i].push(t_b2);
+            if (t_b2 > PARAM_TOL && t_b2 < 1 - PARAM_TOL) splitsB[j].push(t_b2);
 
             const u_a1 = ((a1.x - b1.x) * dx2 + (a1.y - b1.y) * dy2) / len2Sq;
             const u_a2 = ((a2.x - b1.x) * dx2 + (a2.y - b1.y) * dy2) / len2Sq;
