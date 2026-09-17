@@ -48,7 +48,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     latitude = 52.23,
     longitude = 21.01,
     equinoxDate = 'spring',
-    masterplanShadowAlgorithm = 'legacy',
     masterplanHourFraction = 12.0,
     fitRequest,
     onCancelDrawing,
@@ -460,7 +459,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       longitude,
       equinoxDate,
       sunlightMethod,
-      masterplanShadowAlgorithm,
       masterplanHourFraction,
       isInteracting: interaction.effectiveIsInteracting,
     };
@@ -537,7 +535,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     longitude,
     equinoxDate,
     sunlightMethod,
-    masterplanShadowAlgorithm,
     masterplanHourFraction,
     dimensions,
     isDimensionMode,

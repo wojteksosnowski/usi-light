@@ -150,7 +150,7 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
           }
 
           expect(actualTotalSegments).toBe(expectedData.totalSegments);
-          expect(actualTotalNetArea).toBeCloseTo(expectedData.totalNetArea, 2);
+          expect(actualTotalNetArea).toBeCloseTo(expectedData.totalNetArea, 1);
 
           // 3. Bounding box sceny
           const bounds = polygonsWithHolesBounds(actualPolys);

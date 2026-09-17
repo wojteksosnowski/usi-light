@@ -11,6 +11,8 @@ import {
   FileSpreadsheet,
   Layers,
   Map,
+  DraftingCompass,
+  FileText,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 import { useLicenseStore } from '../../store/useLicenseStore';
@@ -157,7 +159,7 @@ export const CadTopHud: React.FC = () => {
 
       <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
 
-      {/* Segmented Control 2D Viewport Mode: CAD / Plan [V] */}
+      {/* Segmented Control 2D Viewport Mode: CAD / Masterplan [V] */}
       <div
         style={{
           display: 'inline-flex',
@@ -173,44 +175,44 @@ export const CadTopHud: React.FC = () => {
         <button
           onClick={() => setViewMode2D('cad')}
           title="Widok roboczy CAD [V]"
+          aria-label="Widok roboczy CAD"
           style={{
             height: '24px',
-            padding: '0 8px',
+            width: '26px',
+            padding: 0,
             borderRadius: '5px',
-            fontSize: '11px',
-            fontWeight: 600,
             cursor: 'pointer',
             border: 'none',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '4px',
+            justifyContent: 'center',
             backgroundColor: viewMode2D === 'cad' ? 'var(--status-blue-bg)' : 'transparent',
             color: viewMode2D === 'cad' ? 'var(--status-blue-text)' : 'var(--text-secondary)',
             transition: 'all 0.15s ease',
           }}
         >
-          <span>📐 CAD</span>
+          <DraftingCompass size={14} />
         </button>
         <button
           onClick={() => setViewMode2D('masterplan_white')}
           title="Widok prezentacyjny 2D: Masterplan White (tusz na białym arkuszu, cienie ΔH, AO) [V]"
+          aria-label="Widok prezentacyjny Masterplan White"
           style={{
             height: '24px',
-            padding: '0 8px',
+            width: '26px',
+            padding: 0,
             borderRadius: '5px',
-            fontSize: '11px',
-            fontWeight: 600,
             cursor: 'pointer',
             border: 'none',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '4px',
+            justifyContent: 'center',
             backgroundColor: viewMode2D === 'masterplan_white' ? 'var(--status-indigo-bg)' : 'transparent',
             color: viewMode2D === 'masterplan_white' ? 'var(--status-indigo-text)' : 'var(--text-secondary)',
             transition: 'all 0.15s ease',
           }}
         >
-          <span>📄 Plan</span>
+          <FileText size={14} />
         </button>
       </div>
 

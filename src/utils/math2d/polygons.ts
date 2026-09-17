@@ -106,14 +106,14 @@ export function isPolygonCCW(points: Point2D[]): boolean {
 /**
  * Checks if a point is inside a polygon using ray casting algorithm.
  */
-export function isPointInPolygon(point: Point2D, vertices: Point2D[]): boolean {
+export function isPointInPolygon(point: Point2D, vertices: Point2D[], boundaryTol: number = 0): boolean {
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !vertices || vertices.length < 3) {
     return false;
   }
-  let inside = false;
   const { x, y } = point;
   const n = vertices.length;
 
+  let inside = false;
   for (let i = 0, j = n - 1; i < n; j = i++) {
     const vi = vertices[i];
     const vj = vertices[j];
@@ -135,7 +135,32 @@ export function isPointInPolygon(point: Point2D, vertices: Point2D[]): boolean {
     if (intersect) inside = !inside;
   }
 
-  return inside;
+  if (inside || boundaryTol <= 0) return inside;
+
+  // Ray-cast said outside: fall back to checking whether the point is within boundaryTol
+  // of an edge (perpendicular distance) — rare boundary case, so this loop only runs
+  // when the cheap ray-cast test above didn't already resolve it.
+  const tolSq = boundaryTol * boundaryTol;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const vi = vertices[i];
+    const vj = vertices[j];
+    if (!vi || !vj || !Number.isFinite(vi.x) || !Number.isFinite(vi.y) || !Number.isFinite(vj.x) || !Number.isFinite(vj.y)) {
+      continue;
+    }
+    const dx = vi.x - vj.x;
+    const dy = vi.y - vj.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-20) continue;
+    let t = ((x - vj.x) * dx + (y - vj.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const px = vj.x + t * dx;
+    const py = vj.y + t * dy;
+    const ddx = x - px;
+    const ddy = y - py;
+    if (ddx * ddx + ddy * ddy <= tolSq) return true;
+  }
+
+  return false;
 }
 
 /**

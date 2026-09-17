@@ -39,13 +39,10 @@ const algorithmButtonBaseStyle: React.CSSProperties = {
 
 /**
  * Kafelek widoku Masterplan White:
- * 1. Przełącznik algorytmu renderowania cieni (A123 vs A456).
- * 2. Suwak godziny słońca (metoda zegarowa Astro lub odchylenie ±HH:MM dla Linijki).
+ * Suwak godziny słońca (metoda zegarowa Astro lub odchylenie ±HH:MM dla Linijki).
  */
 export const MasterplanShadowAlgorithmCard: React.FC = () => {
   const viewMode2D = useUiStore((s) => s.viewMode2D);
-  const algorithm = useSolarAnalysisStore((s) => s.masterplanShadowAlgorithm);
-  const setAlgorithm = useSolarAnalysisStore((s) => s.setMasterplanShadowAlgorithm);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
   const hourFraction = useSolarAnalysisStore((s) => s.masterplanHourFraction);
   const setHourFraction = useSolarAnalysisStore((s) => s.setMasterplanHourFraction);
@@ -83,54 +80,7 @@ export const MasterplanShadowAlgorithmCard: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {/* 1. Przełącznik algorytmu cienia */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <span style={{ fontSize: '10.5px', color: 'var(--text-secondary)' }}>Algorytm cienia:</span>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '2px',
-              backgroundColor: 'rgba(15, 23, 42, 0.8)',
-              borderRadius: '7px',
-              padding: '2px',
-              border: '1px solid var(--border-light)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setAlgorithm('legacy')}
-              title="Algorytm A123 (Obecny) — 3 próbki penumbry (union poligonów)"
-              style={{
-                ...algorithmButtonBaseStyle,
-                backgroundColor: algorithm === 'legacy' ? 'rgba(245,158,11,0.25)' : 'transparent',
-                color: algorithm === 'legacy' ? 'var(--accent-lock)' : 'var(--text-muted)',
-              }}
-            >
-              A123
-            </button>
-            <button
-              type="button"
-              onClick={() => setAlgorithm('soft')}
-              title="Algorytm A456 — pojedynczy surowy obrys cienia podstawowego (umbra)"
-              style={{
-                ...algorithmButtonBaseStyle,
-                backgroundColor: algorithm === 'soft' ? 'rgba(99,102,241,0.25)' : 'transparent',
-                color: algorithm === 'soft' ? 'var(--accent-indigo)' : 'var(--text-muted)',
-              }}
-            >
-              A456
-            </button>
-          </div>
-        </div>
-
-        {/* 2. Suwak godziny słońca */}
+        {/* Suwak godziny słońca */}
         <div
           style={{
             display: 'flex',

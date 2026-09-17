@@ -10,7 +10,20 @@ import {
 } from './polygons';
 import polygonClipping from 'polygon-clipping';
 
-const EPSILON = 1e-6;
+// Canonical tolerance set. All stage-specific epsilons below are derived from LEN_TOL
+// so that segment-intersection, vertex-snapping, AABB pre-filtering and collinearity
+// checks agree on what counts as "the same point" — previously these were 8 independently
+// chosen literals spanning ~8 orders of magnitude, which could disagree on borderline
+// geometry (shared/near-touching edges, near-duplicate vertices) and break the
+// vertex-pool graph the traversal relies on, forcing a fallback to polygon-clipping.
+const LEN_TOL = 1e-6; // canonical linear distance tolerance
+const SNAP_TOL = 1e-3; // vertex pooling distance: must be >= AABB/param tolerances below
+const SNAP_TOL_SQ = SNAP_TOL * SNAP_TOL;
+const AABB_SLOP = SNAP_TOL; // bbox pre-filter must never reject what snapping would merge
+const PARAM_TOL = LEN_TOL; // t/u clamp + min-subsegment-length tolerance (unified)
+const PARALLEL_DENOM_TOL = 1e-9; // "are these two directions parallel" (dimensionally distinct from LEN_TOL)
+const TURN_TOL = 1e-9; // normalized (scale-invariant) turn tie-break tolerance
+const DUP_VERTEX_LEN_TOL_SQ = LEN_TOL * LEN_TOL; // squared-distance duplicate-vertex threshold
 
 export interface SegmentIntersection {
   point: Point2D;
@@ -32,7 +45,7 @@ export function findSegmentIntersection(
   const dy2 = q2.y - q1.y;
 
   const denom = dx1 * dy2 - dy1 * dx2;
-  if (Math.abs(denom) < 1e-11) {
+  if (Math.abs(denom) < PARALLEL_DENOM_TOL) {
     return null;
   }
 
@@ -102,22 +115,61 @@ function cleanDuplicateOrCollinearVertices(points: Point2D[]): Point2D[] {
     const dx1 = curr.x - prev.x;
     const dy1 = curr.y - prev.y;
     const len1Sq = dx1 * dx1 + dy1 * dy1;
-    if (len1Sq < 1e-12) continue; // duplicate vertex
+    if (len1Sq < DUP_VERTEX_LEN_TOL_SQ) continue; // duplicate vertex
 
     const dx2 = next.x - curr.x;
     const dy2 = next.y - curr.y;
     const len2Sq = dx2 * dx2 + dy2 * dy2;
-    if (len2Sq < 1e-12) continue;
+    if (len2Sq < DUP_VERTEX_LEN_TOL_SQ) continue;
 
     const cross = dx1 * dy2 - dy1 * dx2;
     const dot = dx1 * dx2 + dy1 * dy2;
-    // Strictly collinear and in the same forward direction
-    if (Math.abs(cross) < 1e-10 && dot > 0) {
+    // Strictly collinear and in the same forward direction. Normalized by edge
+    // length (same convention as the collinear-edge split test below) so this
+    // agrees with segment-splitting regardless of edge-length scale.
+    const normalizedCross = Math.abs(cross) / Math.sqrt(len1Sq);
+    if (normalizedCross < PARAM_TOL && dot > 0) {
       continue;
     }
     res.push(curr);
   }
   return res.length >= 3 ? res : points;
+}
+
+/**
+ * Porównuje dwa wektory wyjściowe (aDx, aDy) i (bDx, bDy) względem wektora wejściowego (inDx, inDy).
+ * Zwraca true, jeśli wektor A wykonuje zwrot bardziej w prawo (bardziej ujemny kąt w zakresie (-π, π]),
+ * deterministycznie w O(1) na podstawie iloczynu wektorowego (cross product Ax+By+C=0) bez Math.atan2.
+ */
+function isTurnMoreRight(
+  inDx: number,
+  inDy: number,
+  aDx: number,
+  aDy: number,
+  bDx: number,
+  bDy: number
+): boolean {
+  // Normalize cross products by vector magnitudes so the tie-break tolerance is
+  // scale-invariant instead of comparing raw coordinate-difference products (which,
+  // for typical plan-unit magnitudes of tens-hundreds, put a fixed 1e-11 near float64
+  // precision noise).
+  const inLen = Math.sqrt(inDx * inDx + inDy * inDy) || 1;
+  const aLen = Math.sqrt(aDx * aDx + aDy * aDy) || 1;
+  const bLen = Math.sqrt(bDx * bDx + bDy * bDy) || 1;
+
+  const cpA = (inDx * aDy - inDy * aDx) / (inLen * aLen);
+  const cpB = (inDx * bDy - inDy * bDx) / (inLen * bLen);
+
+  const isRightA = cpA < -TURN_TOL || (Math.abs(cpA) <= TURN_TOL && (inDx * aDx + inDy * aDy) > 0);
+  const isRightB = cpB < -TURN_TOL || (Math.abs(cpB) <= TURN_TOL && (inDx * bDx + inDy * bDy) > 0);
+
+  if (isRightA !== isRightB) {
+    return isRightA; // Prawa półpłaszczyzna (zwrot w prawo) ma mniejszy kąt niż lewa
+  }
+
+  // Obie leżą po tej samej stronie: iloczyn wektorowy A x B
+  const crossAB = aDx * bDy - aDy * bDx;
+  return crossAB > 0;
 }
 
 function createLinkedList(points: Point2D[]): Node[] {
@@ -164,24 +216,30 @@ export interface FastUnionTelemetry {
   containmentExits: number;
   fastPathSuccess: number;
   fallbackCalls: number;
+  // Per-reason breakdown of why the fast path fell back, for diagnosing which
+  // tolerance/edge-case is actually being hit on real data.
+  insufficientSegmentsExits: number;
+  multipleOuterComponentsExits: number;
+  emptyLoopsExits: number;
+  caughtExceptionExits: number;
 }
 
-let globalTelemetry: FastUnionTelemetry = {
+const EMPTY_TELEMETRY: FastUnionTelemetry = {
   totalCalls: 0,
   disjointExits: 0,
   containmentExits: 0,
   fastPathSuccess: 0,
   fallbackCalls: 0,
+  insufficientSegmentsExits: 0,
+  multipleOuterComponentsExits: 0,
+  emptyLoopsExits: 0,
+  caughtExceptionExits: 0,
 };
 
+let globalTelemetry: FastUnionTelemetry = { ...EMPTY_TELEMETRY };
+
 export function resetFastUnionTelemetry(): void {
-  globalTelemetry = {
-    totalCalls: 0,
-    disjointExits: 0,
-    containmentExits: 0,
-    fastPathSuccess: 0,
-    fallbackCalls: 0,
-  };
+  globalTelemetry = { ...EMPTY_TELEMETRY };
 }
 
 export function getFastUnionTelemetry(): FastUnionTelemetry {
@@ -205,10 +263,10 @@ export function fastUnionTwoSimpleLoops(
   const boxB = computePointsBoundingBox(polyB);
 
   const disjoint =
-    boxA.maxX < boxB.minX - EPSILON ||
-    boxA.minX > boxB.maxX + EPSILON ||
-    boxA.maxY < boxB.minY - EPSILON ||
-    boxA.minY > boxB.maxY + EPSILON;
+    boxA.maxX < boxB.minX - LEN_TOL ||
+    boxA.minX > boxB.maxX + LEN_TOL ||
+    boxA.maxY < boxB.minY - LEN_TOL ||
+    boxA.minY > boxB.maxY + LEN_TOL;
 
   if (disjoint) {
     globalTelemetry.disjointExits++;
@@ -223,7 +281,7 @@ export function fastUnionTwoSimpleLoops(
   // 2. Check full containment (fast early-exit)
   let aInB = true;
   for (let i = 0; i < nA; i++) {
-    if (!isPointInPolygon(loopA[i], loopB)) {
+    if (!isPointInPolygon(loopA[i], loopB, SNAP_TOL)) {
       aInB = false;
       break;
     }
@@ -235,7 +293,7 @@ export function fastUnionTwoSimpleLoops(
 
   let bInA = true;
   for (let j = 0; j < nB; j++) {
-    if (!isPointInPolygon(loopB[j], loopA)) {
+    if (!isPointInPolygon(loopB[j], loopA, SNAP_TOL)) {
       bInA = false;
       break;
     }
@@ -247,8 +305,6 @@ export function fastUnionTwoSimpleLoops(
 
   // 3. Robust Universal Segment-Subdivision & Shared Boundary Stitching with Integer-Keyed VertexPool
   try {
-    const SNAP_TOL_SQ = 1e-8; // 1e-4 distance
-
     const vertexPool: Point2D[] = [];
 
     const getVertexId = (pt: Point2D): number => {
@@ -277,7 +333,7 @@ export function fastUnionTwoSimpleLoops(
       const dx1 = a2.x - a1.x;
       const dy1 = a2.y - a1.y;
       const len1Sq = dx1 * dx1 + dy1 * dy1;
-      if (len1Sq < 1e-12) continue;
+      if (len1Sq < DUP_VERTEX_LEN_TOL_SQ) continue;
 
       const aMinX = dx1 > 0 ? a1.x : a2.x;
       const aMaxX = dx1 > 0 ? a2.x : a1.x;
@@ -290,30 +346,30 @@ export function fastUnionTwoSimpleLoops(
         const dx2 = b2.x - b1.x;
         const dy2 = b2.y - b1.y;
         const len2Sq = dx2 * dx2 + dy2 * dy2;
-        if (len2Sq < 1e-12) continue;
+        if (len2Sq < DUP_VERTEX_LEN_TOL_SQ) continue;
 
         const bMinX = dx2 > 0 ? b1.x : b2.x;
         const bMaxX = dx2 > 0 ? b2.x : b1.x;
-        if (aMaxX < bMinX - 1e-4 || aMinX > bMaxX + 1e-4) continue;
+        if (aMaxX < bMinX - AABB_SLOP || aMinX > bMaxX + AABB_SLOP) continue;
 
         const bMinY = dy2 > 0 ? b1.y : b2.y;
         const bMaxY = dy2 > 0 ? b2.y : b1.y;
-        if (aMaxY < bMinY - 1e-4 || aMinY > bMaxY + 1e-4) continue;
+        if (aMaxY < bMinY - AABB_SLOP || aMinY > bMaxY + AABB_SLOP) continue;
 
         const denom = dx1 * dy2 - dy1 * dx2;
-        if (Math.abs(denom) < 1e-10) {
+        if (Math.abs(denom) < PARALLEL_DENOM_TOL) {
           // Collinear test: check if b1 or b2 lie on segment a1->a2
           const cross1 = (b1.x - a1.x) * dy1 - (b1.y - a1.y) * dx1;
-          if (Math.abs(cross1) / Math.sqrt(len1Sq) < 1e-4) {
+          if (Math.abs(cross1) / Math.sqrt(len1Sq) < SNAP_TOL) {
             const t_b1 = ((b1.x - a1.x) * dx1 + (b1.y - a1.y) * dy1) / len1Sq;
             const t_b2 = ((b2.x - a1.x) * dx1 + (b2.y - a1.y) * dy1) / len1Sq;
-            if (t_b1 > 1e-5 && t_b1 < 1 - 1e-5) splitsA[i].push(t_b1);
-            if (t_b2 > 1e-5 && t_b2 < 1 - 1e-5) splitsA[i].push(t_b2);
+            if (t_b1 > PARAM_TOL && t_b1 < 1 - PARAM_TOL) splitsA[i].push(t_b1);
+            if (t_b2 > PARAM_TOL && t_b2 < 1 - PARAM_TOL) splitsA[i].push(t_b2);
 
             const u_a1 = ((a1.x - b1.x) * dx2 + (a1.y - b1.y) * dy2) / len2Sq;
             const u_a2 = ((a2.x - b1.x) * dx2 + (a2.y - b1.y) * dy2) / len2Sq;
-            if (u_a1 > 1e-5 && u_a1 < 1 - 1e-5) splitsB[j].push(u_a1);
-            if (u_a2 > 1e-5 && u_a2 < 1 - 1e-5) splitsB[j].push(u_a2);
+            if (u_a1 > PARAM_TOL && u_a1 < 1 - PARAM_TOL) splitsB[j].push(u_a1);
+            if (u_a2 > PARAM_TOL && u_a2 < 1 - PARAM_TOL) splitsB[j].push(u_a2);
           }
           continue;
         }
@@ -323,11 +379,11 @@ export function fastUnionTwoSimpleLoops(
         const t = (qx * dy2 - qy * dx2) / denom;
         const u = (qx * dy1 - qy * dx1) / denom;
 
-        if (t >= -1e-5 && t <= 1 + 1e-5 && u >= -1e-5 && u <= 1 + 1e-5) {
+        if (t >= -PARAM_TOL && t <= 1 + PARAM_TOL && u >= -PARAM_TOL && u <= 1 + PARAM_TOL) {
           const clampedT = Math.max(0, Math.min(1, t));
           const clampedU = Math.max(0, Math.min(1, u));
-          if (clampedT > 1e-5 && clampedT < 1 - 1e-5) splitsA[i].push(clampedT);
-          if (clampedU > 1e-5 && clampedU < 1 - 1e-5) splitsB[j].push(clampedU);
+          if (clampedT > PARAM_TOL && clampedT < 1 - PARAM_TOL) splitsA[i].push(clampedT);
+          if (clampedU > PARAM_TOL && clampedU < 1 - PARAM_TOL) splitsB[j].push(clampedU);
         }
       }
     }
@@ -351,7 +407,7 @@ export function fastUnionTwoSimpleLoops(
       for (let k = 0; k < ts.length - 1; k++) {
         const tStart = ts[k];
         const tEnd = ts[k + 1];
-        if (tEnd - tStart < 1e-6) continue;
+        if (tEnd - tStart < PARAM_TOL) continue;
         const pt1 = { x: a1.x + tStart * dx, y: a1.y + tStart * dy };
         const pt2 = { x: a1.x + tEnd * dx, y: a1.y + tEnd * dy };
         const u = getVertexId(pt1);
@@ -372,7 +428,7 @@ export function fastUnionTwoSimpleLoops(
       for (let k = 0; k < ts.length - 1; k++) {
         const tStart = ts[k];
         const tEnd = ts[k + 1];
-        if (tEnd - tStart < 1e-6) continue;
+        if (tEnd - tStart < PARAM_TOL) continue;
         const pt1 = { x: b1.x + tStart * dx, y: b1.y + tStart * dy };
         const pt2 = { x: b1.x + tEnd * dx, y: b1.y + tEnd * dy };
         const u = getVertexId(pt1);
@@ -443,10 +499,10 @@ export function fastUnionTwoSimpleLoops(
       } else {
         // Not a shared edge: keep if midpoint is strictly outside loopB
         if (
-          midA.x < boxB.minX - 1e-4 ||
-          midA.x > boxB.maxX + 1e-4 ||
-          midA.y < boxB.minY - 1e-4 ||
-          midA.y > boxB.maxY + 1e-4 ||
+          midA.x < boxB.minX - AABB_SLOP ||
+          midA.x > boxB.maxX + AABB_SLOP ||
+          midA.y < boxB.minY - AABB_SLOP ||
+          midA.y > boxB.maxY + AABB_SLOP ||
           !isPointInPolygon(midA, loopB)
         ) {
           keptSegments.push(segA);
@@ -459,10 +515,10 @@ export function fastUnionTwoSimpleLoops(
       const segB = subsegsB[j];
       const midB = { x: (segB.p1.x + segB.p2.x) / 2, y: (segB.p1.y + segB.p2.y) / 2 };
       if (
-        midB.x < boxA.minX - 1e-4 ||
-        midB.x > boxA.maxX + 1e-4 ||
-        midB.y < boxA.minY - 1e-4 ||
-        midB.y > boxA.maxY + 1e-4 ||
+        midB.x < boxA.minX - AABB_SLOP ||
+        midB.x > boxA.maxX + AABB_SLOP ||
+        midB.y < boxA.minY - AABB_SLOP ||
+        midB.y > boxA.maxY + AABB_SLOP ||
         !isPointInPolygon(midB, loopA)
       ) {
         keptSegments.push(segB);
@@ -470,92 +526,77 @@ export function fastUnionTwoSimpleLoops(
     }
 
     if (keptSegments.length < 3) {
+      globalTelemetry.insufficientSegmentsExits++;
       throw new Error('Insufficient kept segments');
     }
 
-    // D. Assemble closed loops from directed segments
-    interface GraphEdge {
-      u: number;
-      v: number;
-      p1: Point2D;
-      p2: Point2D;
-      visited: boolean;
-    }
+    // D. Assemble closed loops from directed segments using Forward-Star Flat Graph (Zero Allocations)
+    const numSegs = keptSegments.length;
+    const numVerts = vertexPool.length;
 
-    const graphEdges: GraphEdge[] = keptSegments.map((s) => ({
-      u: s.u,
-      v: s.v,
-      p1: s.p1,
-      p2: s.p2,
-      visited: false,
-    }));
+    const firstOutEdge = new Int32Array(numVerts).fill(-1);
+    const nextOutEdge = new Int32Array(numSegs);
+    const edgeVisited = new Uint8Array(numSegs);
 
-    const outMap = new Map<number, GraphEdge[]>();
-    for (const ge of graphEdges) {
-      let list = outMap.get(ge.u);
-      if (!list) {
-        list = [];
-        outMap.set(ge.u, list);
-      }
-      list.push(ge);
+    for (let i = 0; i < numSegs; i++) {
+      const u = keptSegments[i].u;
+      nextOutEdge[i] = firstOutEdge[u];
+      firstOutEdge[u] = i;
     }
 
     const loops: Point2D[][] = [];
     const loopAbsAreas: number[] = [];
-    const maxSteps = graphEdges.length * 4 + 10;
+    const maxSteps = numSegs * 4 + 10;
 
-    for (const startEdge of graphEdges) {
-      if (startEdge.visited) continue;
+    for (let startIdx = 0; startIdx < numSegs; startIdx++) {
+      if (edgeVisited[startIdx]) continue;
 
       const currentLoop: Point2D[] = [];
-      let currEdge: GraphEdge | null = startEdge;
-      const startU = startEdge.u;
+      let currEdgeIdx = startIdx;
+      const startU = keptSegments[startIdx].u;
       let steps = 0;
 
-      while (currEdge && !currEdge.visited && steps++ < maxSteps) {
-        currEdge.visited = true;
-        currentLoop.push(currEdge.p1);
+      while (currEdgeIdx >= 0 && !edgeVisited[currEdgeIdx] && steps++ < maxSteps) {
+        edgeVisited[currEdgeIdx] = 1;
+        const seg = keptSegments[currEdgeIdx];
+        currentLoop.push(seg.p1);
 
-        const nextU = currEdge.v;
+        const nextU = seg.v;
         if (nextU === startU) {
           break;
         }
 
-        const candidates = outMap.get(nextU)?.filter((e) => !e.visited);
-        if (!candidates || candidates.length === 0) {
-          currEdge = null;
-          break;
-        }
+        // Znajdź unikalne lub najlepsze wychodzące krawędzie z nextU
+        let bestEdge = -1;
+        let candCount = 0;
 
-        if (candidates.length === 1) {
-          currEdge = candidates[0];
-        } else {
-          // Multiple outgoing choices (touch point): pick outermost turn
-          const prevDir = {
-            x: currEdge.p2.x - currEdge.p1.x,
-            y: currEdge.p2.y - currEdge.p1.y,
-          };
-          const prevAngle = Math.atan2(prevDir.y, prevDir.x);
+        for (let e = firstOutEdge[nextU]; e !== -1; e = nextOutEdge[e]) {
+          if (edgeVisited[e] === 0) {
+            if (candCount === 0) {
+              bestEdge = e;
+              candCount = 1;
+            } else {
+              // Wybór najbardziej zewnętrznego zwrotu w prawo przez 2D cross product Ax+By+C=0 (bez Math.atan2)
+              const inDx = seg.p2.x - seg.p1.x;
+              const inDy = seg.p2.y - seg.p1.y;
 
-          let bestEdge = candidates[0];
-          let minAngleDiff = Infinity;
+              const bestSeg = keptSegments[bestEdge];
+              const bestDx = bestSeg.p2.x - bestSeg.p1.x;
+              const bestDy = bestSeg.p2.y - bestSeg.p1.y;
 
-          for (const cand of candidates) {
-            const nextDir = {
-              x: cand.p2.x - cand.p1.x,
-              y: cand.p2.y - cand.p1.y,
-            };
-            const nextAngle = Math.atan2(nextDir.y, nextDir.x);
-            let diff = nextAngle - prevAngle;
-            while (diff <= -Math.PI) diff += 2 * Math.PI;
-            while (diff > Math.PI) diff -= 2 * Math.PI;
-            if (diff < minAngleDiff) {
-              minAngleDiff = diff;
-              bestEdge = cand;
+              const candSeg = keptSegments[e];
+              const candDx = candSeg.p2.x - candSeg.p1.x;
+              const candDy = candSeg.p2.y - candSeg.p1.y;
+
+              if (isTurnMoreRight(inDx, inDy, candDx, candDy, bestDx, bestDy)) {
+                bestEdge = e;
+              }
+              candCount++;
             }
           }
-          currEdge = bestEdge;
         }
+
+        currEdgeIdx = bestEdge;
       }
 
       if (currentLoop.length >= 3) {
@@ -578,7 +619,16 @@ export function fastUnionTwoSimpleLoops(
 
       for (let i = 1; i < sortedLoops.length; i++) {
         const loop = sortedLoops[i];
-        if (isPointInPolygon(loop[0], outer)) {
+        // Robust 3-sample containment test instead of a single vertex:
+        // a hole loop's first vertex alone can sit within float error of the outer
+        // boundary and be misclassified as "outside", wrongly triggering the
+        // multiple-outer-components fallback for a legitimate hole.
+        const n = loop.length;
+        const samples = n >= 3 ? [loop[0], loop[Math.floor(n / 3)], loop[Math.floor((2 * n) / 3)]] : [loop[0]];
+        const insideVotes = samples.filter((pt) => isPointInPolygon(pt, outer, SNAP_TOL)).length;
+        const isHole = insideVotes > 0; // treat as hole unless every sample is outside
+
+        if (isHole) {
           holes.push(isPolygonCCW(loop) ? [...loop].reverse() : loop);
         } else {
           hasMultipleOuterComponents = true;
@@ -590,8 +640,12 @@ export function fastUnionTwoSimpleLoops(
         globalTelemetry.fastPathSuccess++;
         return { outer, holes };
       }
+      globalTelemetry.multipleOuterComponentsExits++;
+    } else {
+      globalTelemetry.emptyLoopsExits++;
     }
   } catch {
+    globalTelemetry.caughtExceptionExits++;
     // Proceed to fallback
   }
 
@@ -636,10 +690,10 @@ export function fastUnionTwoPolygonsWithHoles(
   const boxB = computePointsBoundingBox(polyB.outer);
 
   const disjoint =
-    boxA.maxX < boxB.minX - EPSILON ||
-    boxA.minX > boxB.maxX + EPSILON ||
-    boxA.maxY < boxB.minY - EPSILON ||
-    boxA.minY > boxB.maxY + EPSILON;
+    boxA.maxX < boxB.minX - LEN_TOL ||
+    boxA.minX > boxB.maxX + LEN_TOL ||
+    boxA.maxY < boxB.minY - LEN_TOL ||
+    boxA.minY > boxB.maxY + LEN_TOL;
 
   if (disjoint) {
     return { success: false, error: 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.' };

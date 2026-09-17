@@ -28,8 +28,7 @@ import {
  */
 export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds, hoveredBuildingId } = context;
-  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod, screenToWorld } = renderContext;
-  const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, sunlightMethod, screenToWorld } = renderContext;
   const method = sunlightMethod ?? 'raycasting';
 
   const bldgs = (visibleBuildings || buildings).filter(
@@ -43,7 +42,7 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
   // Viewport culling: odrzuca budynki, których bryła + szacowany zasięg cienia nie przecinają się
   // z widocznym obszarem, zanim w ogóle trafią do extractBuildingStoryTiers.
   const viewport = viewportWorldBounds({ width, height, screenToWorld });
-  const getCachedShadowBounds = getCachedShadowBoundsForCulling(shadowAlgorithm, method, latitude, longitude, equinoxDate, hourFraction);
+  const getCachedShadowBounds = getCachedShadowBoundsForCulling(method, latitude, longitude, equinoxDate, hourFraction);
   const culledBldgs = cullBuildingsByViewport(bldgs, viewport, angles, getCachedShadowBounds);
 
   // 1. Ekstrakcja wszystkich poziomów kondygnacji (w tym z modyfikatorów: uskoków/tarasów/sztycy)
@@ -118,10 +117,9 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     });
 
     if (higherTiers.length > 0) {
-      // Rysujemy 3 próbki cienia dachowego (t-1, t, t+1) z sumą boolowską (brak podwójnego nakładania się cieni)
+      // Rysujemy obrys cienia dachowego (A456 umbra) z sumą boolowską (brak podwójnego nakładania się cieni)
       const currentTierKey = `${tier.buildingId}:${tier.storyIndex}`;
       const shadowResult = getCachedRoofShadowSamples(
-        shadowAlgorithm,
         currentTierKey,
         currentH,
         higherTiers,

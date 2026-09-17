@@ -143,19 +143,34 @@ Zdefiniowane w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/s
    - Stan aktywny amber (`.active-amber`): tło `rgba(245, 158, 11, 0.15)`, ramka `rgba(245, 158, 11, 0.4)`, tekst `#fcd34d`
    - Stan aktywny indigo (`.active-indigo`): tło `rgba(99, 102, 241, 0.15)`, ramka `rgba(99, 102, 241, 0.4)`, tekst `#a5b4fc`
    - Stan aktywny cyan (`.active-cyan`) — akcent PRO / eksport CAD: tło `rgba(56, 189, 248, 0.15)`, ramka `rgba(56, 189, 248, 0.4)`, tekst `#7dd3fc`
-5. **Mały oprawiony przycisk ikony (`.modifier-card-icon-btn`)**:
+6. **Mały oprawiony przycisk ikony (`.modifier-card-icon-btn`)**:
    - Rozmiar: `20×20px`, `border-radius: 5px`, `padding: 0`
    - Obramowanie: `1px solid var(--border-light)`, tło `var(--bg-input)`, kolor ikony `var(--text-primary)`
    - Hover: obramowanie `var(--text-secondary)`, tło `var(--bg-card)`
    - Disabled: kolor `var(--border-light)`, `opacity: 0.6`
    - Używany w klastrze ikon sterujących karty modyfikatora (`ModifierCard.tsx`: toggle włącz/wyłącz, reorder góra/dół, usuń) — kolor/obramowanie nadpisywane inline per stan (np. `var(--accent-purple)` gdy aktywny toggle, `var(--accent-rose)` dla usuwania).
+7. **Przełączniki grupowe trybów widoku (Segmented Control - np. CAD / Masterplan White w HUD)**:
+   - Zgrupowany kontener: `display: inline-flex`, `padding: 2px`, `gap: 2px`, `border-radius: 7px`, tło `var(--bg-card)`, ramka `1px solid var(--border-light)`.
+   - Przyciski: format wyłącznie ikonowy (bez tekstu), wyśrodkowane `display: inline-flex, alignItems: center, justifyContent: center`, `height: 24px`, `width: 26px`, `padding: 0`, `border-radius: 5px`, `border: none`.
+   - Stan aktywny CAD: tło `var(--status-blue-bg)`, kolor `var(--status-blue-text)`.
+   - Stan aktywny Masterplan: tło `var(--status-indigo-bg)`, kolor `var(--status-indigo-text)`.
+   - Stan nieaktywny: tło `transparent`, kolor `var(--text-secondary)`.
+   - Wymagane: atrybuty `title` (pełna podpowiedź ze skrótem `[V]`) oraz `aria-label`.
 
-### 4.2. Podgląd Izometryczny Bryły (`.iso-preview-container`)
+### 4.2. Standard Ikonografii (Iconography System)
+- **Monochromatyczność i linearność**: Wszystkie ikony w aplikacji pochodzą z biblioteki `lucide-react` i są wektorami linearnymi (stroke-based, grubość linii domyślna 1.5 - 2px).
+- **BEZWZGLĘDNY ZAKAZ EMOJI**: Nie stosujemy kolorowych emotikonów unicode (np. 📐, 📄, 🏢, itp.) w kontrolkach, przyciskach, nagłówkach ani wskaźnikach statusu.
+- **Skala rozmiarów ikon**:
+  - Bardzo małe (inline / wskaźniki / etykiety): `11px` - `12px`
+  - Standardowe (HUD bar / przyciski narzędziowe / karty): `13px` - `14px`
+  - Główne (nagłówki sekcji / modalne akcje): `16px` - `20px`
+
+### 4.3. Podgląd Izometryczny Bryły (`.iso-preview-container`)
 - **Kontener podglądu (`.iso-preview-container`)**: `border-radius: 12px`, `aspect-ratio: 4 / 3`, `overflow: hidden`, tło `#eeeeee` (jasny viewport modelarski).
 - **Przycisk X-Ray (`.iso-preview-xray-btn`)**: `border-radius: 6px`, `font-size: 10.5px`, `font-weight: 600`, tło `rgba(11, 19, 41, 0.85)` z `backdrop-filter: blur(8px)`, stan aktywny: `var(--accent-indigo)`.
 - **Legenda X-Ray (`.iso-preview-legend`)**: `border-radius: 6px`, `font-size: 9.5px`, tło `rgba(11, 19, 41, 0.88)` z `backdrop-filter: blur(8px)`, obramowanie `var(--border-light)`.
 
-### 4.3. Promienie Zaokrągleń (Border Radius Scale)
+### 4.4. Promienie Zaokrągleń (Border Radius Scale)
 - **Tagi / Małe badge**: `border-radius: 4px` - `6px`
 - **Kafle / Przyciski narzędziowe / Wejścia**: `border-radius: 8px`
 - **Paski narzędziowe (Toolbar)**: `border-radius: 10px`

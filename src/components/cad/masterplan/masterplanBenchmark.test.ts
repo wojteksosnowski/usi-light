@@ -6,7 +6,7 @@ import { getCachedGroundShadowSamples, MasterplanColorSample } from './masterpla
 import { BuildingLoop } from '../../../types/geometry';
 
 describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
-  it('benchmarks legacy vs A456 (single raw umbra) on real-world large scene', () => {
+  it('benchmarks A456 (single raw umbra) on real-world large scene', () => {
     const filePath = path.resolve(__dirname, '../../../../reference/warszawa.json');
     if (!fs.existsSync(filePath)) {
       console.log('File reference/warszawa.json not found, skipping benchmark.');
@@ -27,35 +27,23 @@ describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
     console.log(`[BENCHMARK] Extracted ${allTiers.length} story tiers`);
 
     const samples: MasterplanColorSample[] = [
-      { color: 'rgba(30, 41, 59, 0.08)', offsetMin: -1 },
       { color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 },
-      { color: 'rgba(30, 41, 59, 0.08)', offsetMin: 1 },
     ];
 
     // Warm-up
-    getCachedGroundShadowSamples('legacy', allTiers, samples, 52.23, 21.01, 'spring', 12.0);
-    getCachedGroundShadowSamples('soft', allTiers, samples, 52.23, 21.01, 'spring', 12.0);
+    getCachedGroundShadowSamples(allTiers, samples, 52.23, 21.01, 'spring', 12.0);
 
     // Test different hour angles (sun moving) - cache miss scenario per frame
     const hours = [10.0, 11.0, 12.0, 13.0, 14.0];
 
-    // 1. Benchmark Legacy
-    const t0Legacy = performance.now();
-    for (const h of hours) {
-      getCachedGroundShadowSamples('legacy', allTiers, samples, 52.23, 21.01, 'spring', h);
-    }
-    const legacyTime = (performance.now() - t0Legacy) / hours.length;
-
-    // 2. Benchmark A456 (Single Raw Umbra)
+    // Benchmark A456 (Single Raw Umbra)
     const t0Soft = performance.now();
     for (const h of hours) {
-      getCachedGroundShadowSamples('soft', allTiers, samples, 52.23, 21.01, 'spring', h);
+      getCachedGroundShadowSamples(allTiers, samples, 52.23, 21.01, 'spring', h);
     }
     const softTime = (performance.now() - t0Soft) / hours.length;
 
     console.log(`[BENCHMARK_RESULT] Average computation time per sun position frame:`);
-    console.log(`  - A123 (Legacy):          ${legacyTime.toFixed(2)} ms`);
     console.log(`  - A456 (Raw Umbra):       ${softTime.toFixed(2)} ms`);
-    console.log(`  - Ratio (A456 / A123):    ${(softTime / legacyTime).toFixed(2)}x`);
   }, 30000);
 });

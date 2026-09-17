@@ -48,8 +48,7 @@ export const MASTERPLAN_COLORS = {
  */
 export function renderMasterplanGround(context: CadRenderFrameContext, hourFraction: number = 12.0): void {
   const { renderContext, buildings, visibleBuildings, selectedBuildingId, selectedBuildingIds } = context;
-  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, masterplanShadowAlgorithm, sunlightMethod, screenToWorld } = renderContext;
-  const shadowAlgorithm = masterplanShadowAlgorithm ?? 'legacy';
+  const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, sunlightMethod, screenToWorld } = renderContext;
   const method = sunlightMethod ?? 'raycasting';
 
   const bldgs = visibleBuildings || buildings;
@@ -197,7 +196,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   // z widocznym obszarem, zanim w ogóle trafią do extractBuildingStoryTiers/klastrowania.
   const solarAngles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
   const viewport = viewportWorldBounds({ width, height, screenToWorld });
-  const getCachedShadowBounds = getCachedShadowBoundsForCulling(shadowAlgorithm, method, latitude, longitude, equinoxDate, hourFraction);
+  const getCachedShadowBounds = getCachedShadowBoundsForCulling(method, latitude, longitude, equinoxDate, hourFraction);
   const culledBuildings = cullBuildingsByViewport(actualBuildings, viewport, solarAngles, getCachedShadowBounds);
 
   const allTiers: MasterplanStoryTier[] = [];
@@ -206,7 +205,6 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   }
 
   const shadowResult = getCachedGroundShadowSamples(
-    shadowAlgorithm,
     allTiers,
     MASTERPLAN_COLORS.shadowSamples,
     latitude,

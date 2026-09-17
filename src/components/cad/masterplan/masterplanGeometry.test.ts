@@ -7,6 +7,7 @@ import {
   extractBuildingStoryTiers,
   computeStoryShadowPolygon,
   computeStoryShadowPolygonWithHoles,
+  MasterplanStoryTier,
 } from './masterplanGeometry';
 import { getCachedGroundShadowSamples } from './masterplanShadowCache';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
@@ -200,8 +201,7 @@ describe('masterplanGeometry', () => {
       { color: 'rgba(30, 41, 59, 0.08)', offsetMin: 1 },
     ];
 
-    const res = getCachedGroundShadowSamples('soft', tiers, samples, 52.23, 21.01, 'spring', 12.0);
-    expect(res.algorithm).toBe('soft');
+    const res = getCachedGroundShadowSamples(tiers, samples, 52.23, 21.01, 'spring', 12.0);
     // A456 generates exactly 1 sample (single raw umbra contour)
     expect(res.samples.length).toBe(1);
     expect(res.samples[0].color).toBe('rgba(30, 41, 59, 0.14)');
@@ -384,7 +384,6 @@ describe('masterplanGeometry', () => {
       ];
 
       const shadowResult = getCachedGroundShadowSamples(
-        'legacy',
         tiers,
         samples,
         52.23,
@@ -393,31 +392,29 @@ describe('masterplanGeometry', () => {
         12.0
       );
 
-      expect(shadowResult.algorithm).toBe('legacy');
-      if (shadowResult.algorithm === 'legacy') {
-        const pwhList = shadowResult.samples[0].polys;
-        // Dziedziniec rozciąga się w x ∈ [-61.63, -29.66], y ∈ [8.48, 39.40].
-        const midX = (-61.63 - 29.66) / 2; // -45.65m
+      expect(shadowResult.samples.length).toBe(1);
+      const pwhList = shadowResult.samples[0].polys;
+      // Dziedziniec rozciąga się w x ∈ [-61.63, -29.66], y ∈ [8.48, 39.40].
+      const midX = (-61.63 - 29.66) / 2; // -45.65m
 
-        const isCoveredByShadow = (pt: Point2D): boolean => {
-          for (const pwh of pwhList) {
-            if (isPointInPolygon(pt, pwh.outer)) {
-              const inHole = pwh.holes?.some((h) => isPointInPolygon(pt, h)) ?? false;
-              if (!inHole) return true;
-            }
+      const isCoveredByShadow = (pt: Point2D): boolean => {
+        for (const pwh of pwhList) {
+          if (isPointInPolygon(pt, pwh.outer)) {
+            const inHole = pwh.holes?.some((h) => isPointInPolygon(pt, h)) ?? false;
+            if (!inHole) return true;
           }
-          return false;
-        };
+        }
+        return false;
+      };
 
-        // Ściana południowa dziedzińca (y=8.48) o wysokości 15m rzuca cień do y ≈ 27.2m.
-        // Południowa część dziedzińca (y=15 < 27.2m) leży w cieniu rzucanym przez ścianę południową:
-        const southCourtyardPt = { x: midX, y: 15.0 };
-        expect(isCoveredByShadow(southCourtyardPt)).toBe(true);
+      // Ściana południowa dziedzińca (y=8.48) o wysokości 15m rzuca cień do y ≈ 27.2m.
+      // Południowa część dziedzińca (y=15 < 27.2m) leży w cieniu rzucanym przez ścianę południową:
+      const southCourtyardPt = { x: midX, y: 15.0 };
+      expect(isCoveredByShadow(southCourtyardPt)).toBe(true);
 
-        // Północna część dziedzińca (y=34 > 27.2m) jest bezpośrednio oświetlona promieniami słońca:
-        const northCourtyardPt = { x: midX, y: 34.0 };
-        expect(isCoveredByShadow(northCourtyardPt)).toBe(false);
-      }
+      // Północna część dziedzińca (y=34 > 27.2m) jest bezpośrednio oświetlona promieniami słońca:
+      const northCourtyardPt = { x: midX, y: 34.0 };
+      expect(isCoveredByShadow(northCourtyardPt)).toBe(false);
     });
   });
 });

@@ -170,21 +170,51 @@ export function clusterTiersByShadowOverlap(
   return [...groups.values()];
 }
 
+import { fastUnionTwoSimpleLoops } from '@/utils/math2d/polygonBooleanTwo';
+
+function fastUnionPair(p1: PolygonWithHoles, p2: PolygonWithHoles): PolygonWithHoles[] {
+  if ((!p1.holes || p1.holes.length === 0) && (!p2.holes || p2.holes.length === 0)) {
+    const box1 = computePointsBoundingBox(p1.outer);
+    const box2 = computePointsBoundingBox(p2.outer);
+    if (!boundsOverlap(box1, box2)) {
+      return [p1, p2];
+    }
+    const fastRes = fastUnionTwoSimpleLoops(p1.outer, p2.outer);
+    if (fastRes) {
+      return [{ outer: fastRes.outer, holes: fastRes.holes }];
+    }
+  }
+  return unionPolygonsWithHoles([p1, p2]);
+}
+
 /**
  * Łączy wielokąty parami hierarchicznie poziom po poziomie (Hierarchical Pairwise Union),
  * drastycznie redukując złożoność obliczeniową i liczbę wierzchołków wchodzących do sweep-line.
+ * Wykorzystuje fast-path 2-poligonowy bez alokacji oraz O(1) disjoint AABB bypass.
  */
 export function unionPolygonsWithHolesHierarchical(polys: PolygonWithHoles[]): PolygonWithHoles[] {
   if (polys.length === 0) return [];
   if (polys.length === 1) return polys;
-  if (polys.length === 2) return unionPolygonsWithHoles(polys);
+  if (polys.length === 2) return fastUnionPair(polys[0], polys[1]);
 
   let current = polys.map((p) => [p]);
   while (current.length > 1) {
     const next: PolygonWithHoles[][] = [];
     for (let i = 0; i < current.length; i += 2) {
       if (i + 1 < current.length) {
-        next.push(unionPolygonsWithHoles([...current[i], ...current[i + 1]]));
+        const g1 = current[i];
+        const g2 = current[i + 1];
+        if (g1.length === 1 && g2.length === 1) {
+          next.push(fastUnionPair(g1[0], g2[0]));
+        } else {
+          const b1 = polygonsWithHolesBounds(g1);
+          const b2 = polygonsWithHolesBounds(g2);
+          if (b1 && b2 && !boundsOverlap(b1, b2)) {
+            next.push([...g1, ...g2]);
+          } else {
+            next.push(unionPolygonsWithHoles([...g1, ...g2]));
+          }
+        }
       } else {
         next.push(current[i]);
       }

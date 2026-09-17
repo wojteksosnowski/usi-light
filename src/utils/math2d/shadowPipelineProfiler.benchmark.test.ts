@@ -378,6 +378,7 @@ describe('Granular Step-by-Step Profiler for Shadow Extent Pipeline', () => {
         fastPath: `${t.fastPathSuccess} (${fastRate}%)`,
         earlyExits: `${earlyExits} (${earlyRate}%) [Disjoint: ${t.disjointExits}, Containment: ${t.containmentExits}]`,
         fallback: `${t.fallbackCalls} (${fbRate}%)`,
+        fallbackReasons: `[Insufficient segments: ${t.insufficientSegmentsExits}, Multiple outer components: ${t.multipleOuterComponentsExits}, Empty loops: ${t.emptyLoopsExits}, Caught exceptions: ${t.caughtExceptionExits}]`,
       };
     };
 
@@ -393,6 +394,7 @@ describe('Granular Step-by-Step Profiler for Shadow Extent Pipeline', () => {
     console.log(`  - Fast Path Success (Topological Tracer):  ${fU.fastPath}`);
     console.log(`  - Fast Early Exits:                        ${fU.earlyExits}`);
     console.log(`  - FALLBACK CALLS (polygon-clipping):       ${fU.fallback}`);
+    console.log(`  - Fallback reasons:                        ${fU.fallbackReasons}`);
 
     console.log('\n----------------------------------------------------------------------------------------\n');
 
@@ -401,7 +403,54 @@ describe('Granular Step-by-Step Profiler for Shadow Extent Pipeline', () => {
     console.log(`  - Fast Path Success (Topological Tracer):  ${fW.fastPath}`);
     console.log(`  - Fast Early Exits:                        ${fW.earlyExits}`);
     console.log(`  - FALLBACK CALLS (polygon-clipping):       ${fW.fallback}`);
+    console.log(`  - Fallback reasons:                        ${fW.fallbackReasons}`);
 
+    console.log('\n========================================================================================\n');
+  });
+
+  it('measures fastUnionTwoSimpleLoops fallback rate on adversarial (fallback-prone) geometry', () => {
+    // Geometries known to previously stress the tolerance stack: shared edges, near-duplicate
+    // vertices, near-collinear kinks, near-touching parallel edges, and a hole loop whose first
+    // vertex sits near the outer boundary. Mirrors polygonBooleanTwo.fastUnion.test.ts's cases.
+    resetFastUnionTelemetry();
+
+    const pairs: [{ x: number; y: number }[], { x: number; y: number }[]][] = [
+      [
+        [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        [{ x: 10, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 }],
+      ],
+      [
+        [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        [{ x: 10.0005, y: 9.9997 }, { x: 20, y: 5 }, { x: 20, y: 15 }, { x: 10, y: 15 }],
+      ],
+      [
+        [{ x: 0, y: 0 }, { x: 5, y: 1e-8 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        [{ x: 5, y: 0 }, { x: 15, y: 0 }, { x: 15, y: 10 }, { x: 5, y: 10 }],
+      ],
+      [
+        [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+        [{ x: 10.0000005, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10.0000005, y: 10 }],
+      ],
+      [
+        [{ x: 0, y: 10 }, { x: 10, y: 10 }, { x: 10, y: 20 }, { x: 20, y: 20 }, { x: 20, y: 10 }, { x: 30, y: 10 }, { x: 30, y: 30 }, { x: 0, y: 30 }],
+        [{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 20 }, { x: 20, y: 20 }, { x: 20, y: 10 }, { x: 10, y: 10 }, { x: 10, y: 20 }, { x: 0, y: 20 }],
+      ],
+    ];
+
+    for (const [a, b] of pairs) {
+      fastUnionTwoSimpleLoops(a, b);
+    }
+
+    const tel = getFastUnionTelemetry();
+    const fbRate = tel.totalCalls > 0 ? ((tel.fallbackCalls / tel.totalCalls) * 100).toFixed(1) : '0.0';
+
+    console.log('\n========================================================================================');
+    console.log('     ADVERSARIAL FALLBACK-TRIGGER GEOMETRY REPORT FOR fastUnionTwoSimpleLoops           ');
+    console.log('========================================================================================\n');
+    console.log(`  - Total calls:                              ${tel.totalCalls}`);
+    console.log(`  - Fast Path Success:                        ${tel.fastPathSuccess}`);
+    console.log(`  - FALLBACK CALLS:                           ${tel.fallbackCalls} (${fbRate}%)`);
+    console.log(`  - Fallback reasons: [Insufficient segments: ${tel.insufficientSegmentsExits}, Multiple outer components: ${tel.multipleOuterComponentsExits}, Empty loops: ${tel.emptyLoopsExits}, Caught exceptions: ${tel.caughtExceptionExits}]`);
     console.log('\n========================================================================================\n');
   });
 });

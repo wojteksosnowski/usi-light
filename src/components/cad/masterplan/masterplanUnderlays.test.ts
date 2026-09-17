@@ -66,7 +66,6 @@ describe('MasterplanRenderPipeline - Underlays Integration', () => {
         longitude: 21.01,
         equinoxDate: 'spring',
         sunlightMethod: 'raycasting',
-        masterplanShadowAlgorithm: 'legacy',
         masterplanHourFraction: 12.0,
         isInteracting: false,
         worldToScreen: (x, y) => ({ sx: x, sy: y }),
