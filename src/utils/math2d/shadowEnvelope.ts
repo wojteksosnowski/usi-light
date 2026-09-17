@@ -137,25 +137,27 @@ function getCachedFastShadowPolygonWithHoles(
  * @param sunElevationRad - kąt wzniesienia słońca nad horyzontem w radianach
  * @param height - wysokość budynku/ściany
  */
-/**
- * Dopisuje do `out` poligony cienia dla budynku: per-piętro (bryła 2.5D z modyfikatorami,
- * jeśli dostępna, cache: storyShadowPolyCache/storyShadowWithHolesCache) lub — w braku storyPolygons —
- * poligon rzutu z legacy cache (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
- * Współdzielone przez computeFullShadowAnalysis i computeHourlyShadowsLive.
- */
-function collectBuildingShadowPolys(
-  bldg: BuildingLoop,
-  azRad: number,
-  elevRad: number,
-  sunlightMethod: 'raycasting' | 'segments',
-  offsetKey: number,
-  out: Point2D[][]
-): void {
+export interface PreparedShadowBuilding {
+  bldg: BuildingLoop;
+  collapsedStories?: StoryFootprint[];
+  bMinX: number;
+  bMinY: number;
+  bMaxX: number;
+  bMaxY: number;
+  hBase: number;
+  hTop: number;
+  isConvex: boolean;
+}
+
+export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuilding | null {
+  if (!bldg.vertices || bldg.vertices.length < 3) return null;
+  const hBase = bldg.elevation ?? 0.0;
+
+  let collapsedStories: StoryFootprint[] | undefined = undefined;
+  let hTop = hBase + (bldg.defaultHeight ?? 0);
+
   if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
-    // Kolejne kondygnacje z identycznym obrysem (i dziurami) scalamy w jeden zakres wysokości —
-    // bezstratne dla cienia (patrz collapseIdenticalConsecutiveHeightRuns), mniej wywołań
-    // computeFastShadowPolygon per budynek per godzina.
-    const collapsed = collapseIdenticalConsecutiveHeightRuns<StoryFootprint>(
+    collapsedStories = collapseIdenticalConsecutiveHeightRuns<StoryFootprint>(
       bldg.storyPolygons,
       (sf) => sf.polygon,
       (sf) => sf.holes,
@@ -163,12 +165,63 @@ function collectBuildingShadowPolys(
       (sf) => sf.hTop,
       (last, hBottom, hTop) => ({ ...last, hBottom, hTop })
     );
-    for (const sf of collapsed) {
+    let maxTop = 0;
+    for (let i = 0; i < collapsedStories.length; i++) {
+      if (collapsedStories[i].hTop > maxTop) {
+        maxTop = collapsedStories[i].hTop;
+      }
+    }
+    hTop = Math.max(0, hBase + maxTop);
+  }
+
+  if (hTop <= 0) return null;
+
+  let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+  for (let i = 0; i < bldg.vertices.length; i++) {
+    const v = bldg.vertices[i];
+    if (v.x < bMinX) bMinX = v.x;
+    if (v.y < bMinY) bMinY = v.y;
+    if (v.x > bMaxX) bMaxX = v.x;
+    if (v.y > bMaxY) bMaxY = v.y;
+  }
+
+  const isConvex = isPolygonConvex(bldg.vertices);
+
+  return {
+    bldg,
+    collapsedStories,
+    bMinX,
+    bMinY,
+    bMaxX,
+    bMaxY,
+    hBase,
+    hTop,
+    isConvex,
+  };
+}
+
+/**
+ * Dopisuje do `out` poligony cienia dla przygotowanego budynku: per-piętro (z wcześniej scalonymi kondygnacjami
+ * z pre-collapsem, cache: storyShadowPolyCache/storyShadowWithHolesCache) lub — w braku storyPolygons —
+ * poligon rzutu z legacy cache (buildingFastShadowCache), keszowany po (id, wysokości, metodzie, offsecie godzinowym).
+ */
+export function collectBuildingShadowPolysPrepared(
+  prep: PreparedShadowBuilding,
+  azRad: number,
+  elevRad: number,
+  sunlightMethod: 'raycasting' | 'segments',
+  offsetKey: number,
+  out: Point2D[][]
+): void {
+  const { bldg, collapsedStories, hBase, hTop } = prep;
+  if (collapsedStories && collapsedStories.length > 0) {
+    for (let i = 0; i < collapsedStories.length; i++) {
+      const sf = collapsedStories[i];
       if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
         if (sf.holes && sf.holes.length > 0) {
           const polys = getCachedFastShadowPolygonWithHoles(sf.polygon, sf.holes, azRad, elevRad, sf.hTop, sf.hBottom || 0);
-          for (const p of polys) {
-            if (p.length >= 3) out.push(p);
+          for (let k = 0; k < polys.length; k++) {
+            if (polys[k].length >= 3) out.push(polys[k]);
           }
         } else {
           const p = getCachedFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
@@ -179,18 +232,31 @@ function collectBuildingShadowPolys(
     return;
   }
 
-  const bHBase = bldg.elevation ?? 0.0;
-  const bHTop = bHBase + bldg.defaultHeight;
-  if (bHTop <= 0) return;
-
-  const fastKey = `${bldg.id}|${bHTop}|${bHBase}|${sunlightMethod}|${offsetKey}|${polygonVerticesFingerprint(bldg.vertices)}`;
+  const fastKey = `${bldg.id}|${hTop}|${hBase}|${sunlightMethod}|${offsetKey}|${polygonVerticesFingerprint(bldg.vertices)}`;
   let poly = buildingFastShadowCache.get(fastKey);
   if (!poly) {
-    poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, bHTop, bHBase);
+    poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, hTop, hBase);
     if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
     if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
   }
   if (poly.length >= 3) out.push(poly);
+}
+
+/**
+ * Legacy wrapper dla pojedynczego budynku.
+ */
+function collectBuildingShadowPolys(
+  bldg: BuildingLoop,
+  azRad: number,
+  elevRad: number,
+  sunlightMethod: 'raycasting' | 'segments',
+  offsetKey: number,
+  out: Point2D[][]
+): void {
+  const prep = prepareShadowBuilding(bldg);
+  if (prep) {
+    collectBuildingShadowPolysPrepared(prep, azRad, elevRad, sunlightMethod, offsetKey, out);
+  }
 }
 
 export function getShadowOffsetVector(
@@ -452,6 +518,96 @@ export function computeBuildingShadowEnvelope(
   return result;
 }
 
+export interface CardinalAABB {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/**
+ * Oblicza absolutną maksymalną wysokość obiektu od płaszczyzny z=0 (uwzględniając ewentualne storyPolygons).
+ */
+export function getBuildingAbsoluteHmax(bldg: BuildingLoop): number {
+  const hBase = bldg.elevation ?? 0;
+  if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
+    let maxTop = 0;
+    for (let i = 0; i < bldg.storyPolygons.length; i++) {
+      if (bldg.storyPolygons[i].hTop > maxTop) {
+        maxTop = bldg.storyPolygons[i].hTop;
+      }
+    }
+    return Math.max(0, hBase + maxTop);
+  }
+  return Math.max(0, hBase + (bldg.defaultHeight ?? 0));
+}
+
+/**
+ * Wyznacza kardynalne AABB obejmujące bryłę rzucającą cień oraz cień przez nią rzucany:
+ * - Wschód-Zachód (X): rzut poranny (-5*Hmax) i popołudniowy (+5*Hmax) -> [minX - 5*Hmax, maxX + 5*Hmax]
+ * - Północ-Południe (Y): cień rzucany wyłącznie na północ (+Y) -> [minY, maxY + 1.5*Hmax]
+ */
+export function computeBuildingShadowReachAABB(bldg: BuildingLoop): CardinalAABB | null {
+  if (!bldg.vertices || bldg.vertices.length < 3) return null;
+  const hMax = getBuildingAbsoluteHmax(bldg);
+  if (hMax <= 0) return null;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < bldg.vertices.length; i++) {
+    const v = bldg.vertices[i];
+    if (v.x < minX) minX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y > maxY) maxY = v.y;
+  }
+
+  return {
+    minX: minX - hMax * 5.0,
+    maxX: maxX + hMax * 5.0,
+    minY: minY,
+    maxY: maxY + hMax * 1.5,
+  };
+}
+
+/**
+ * Wyznacza jedno zbiorcze AABB dla wszystkich obiektów badanych w projekcie
+ * wraz z ich maksymalnym zasięgiem cienia.
+ */
+export function computeProjectShadowReachAABB(testedBuildings: BuildingLoop[]): CardinalAABB | null {
+  if (testedBuildings.length === 0) return null;
+
+  let baseMinX = Infinity, baseMinY = Infinity, baseMaxX = -Infinity, baseMaxY = -Infinity;
+  let maxProjectH = 0;
+
+  for (const bldg of testedBuildings) {
+    const hMax = getBuildingAbsoluteHmax(bldg);
+    if (hMax > maxProjectH) maxProjectH = hMax;
+    for (let i = 0; i < bldg.vertices.length; i++) {
+      const v = bldg.vertices[i];
+      if (v.x < baseMinX) baseMinX = v.x;
+      if (v.y < baseMinY) baseMinY = v.y;
+      if (v.x > baseMaxX) baseMaxX = v.x;
+      if (v.y > baseMaxY) baseMaxY = v.y;
+    }
+  }
+
+  if (!Number.isFinite(baseMinX)) return null;
+
+  return {
+    minX: baseMinX - maxProjectH * 5.0,
+    maxX: baseMaxX + maxProjectH * 5.0,
+    minY: baseMinY,
+    maxY: baseMaxY + maxProjectH * 1.5,
+  };
+}
+
+/**
+ * Sprawdza przecięcie dwóch kardynalnych AABB.
+ */
+export function doAABBsOverlap(a: CardinalAABB, b: CardinalAABB): boolean {
+  return a.maxX >= b.minX && a.minX <= b.maxX && a.maxY >= b.minY && a.minY <= b.maxY;
+}
+
 /**
  * Wyznacza sumę boolowską (Boolean Union) zakresów cienia wszystkich obiektów badanych.
  * Zwraca tablicę pętli konturów (Point2D[][]), zachowując rozłączne obiekty, wcięcia i otwory.
@@ -501,23 +657,28 @@ export function computeFullShadowAnalysis(
     };
   }
 
-  // Budynki ograniczające ("negatywny cień")
-  const blockingBuildings = buildings.filter(
+  const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+
+  // Budynki ograniczające ("negatywny cień") odsiane wstępnie przez kardynalne AABB zasięgu cienia
+  const candidateBlocking = buildings.filter(
     (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
 
-  // Prekalkulacja bazowych AABB dla budynków blokujących (eliminuje tysiące iteracji po wierzchołkach w każdej godzinie)
-  const blockingWithAABB = blockingBuildings.map((bldg) => {
-    let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-    for (let i = 0; i < bldg.vertices.length; i++) {
-      const v = bldg.vertices[i];
-      if (v.x < bMinX) bMinX = v.x;
-      if (v.y < bMinY) bMinY = v.y;
-      if (v.x > bMaxX) bMaxX = v.x;
-      if (v.y > bMaxY) bMaxY = v.y;
-    }
-    return { bldg, bMinX, bMinY, bMaxX, bMaxY };
-  });
+  const blockingBuildings = projectAABB
+    ? candidateBlocking.filter((bldg) => {
+        const bAABB = computeBuildingShadowReachAABB(bldg);
+        return bAABB ? doAABBsOverlap(bAABB, projectAABB) : false;
+      })
+    : candidateBlocking;
+
+  // Pre-collapsing kondygnacji i pre-kalkulacja parametrów RAZ przed pętlą godzinową
+  const preparedTested = testedBuildings
+    .map((b) => prepareShadowBuilding(b))
+    .filter((p): p is PreparedShadowBuilding => p !== null);
+
+  const preparedBlocking = blockingBuildings
+    .map((b) => prepareShadowBuilding(b))
+    .filter((p): p is PreparedShadowBuilding => p !== null);
 
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);
   const noonHour = sunlightMethod === 'segments' ? 12.0 : solarLUT.astroSystem.solarNoonDecimal;
@@ -542,67 +703,61 @@ export function computeFullShadowAnalysis(
     const uShadow = sData.unitShadowVec;
 
     const hourPolys: Point2D[][] = [];
-    for (const bldg of testedBuildings) {
-      collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, offset, hourPolys);
+    for (let i = 0; i < preparedTested.length; i++) {
+      collectBuildingShadowPolysPrepared(preparedTested[i], azRad, elevRad, sunlightMethod, offset, hourPolys);
     }
 
     if (hourPolys.length > 0) {
-      let finalHourPolys: Point2D[][];
+      const mergedHourTested = unionPolygonLoops(hourPolys);
+      if (mergedHourTested.length > 0) {
+        let finalHourPolys = mergedHourTested;
 
-      if (blockingWithAABB.length > 0) {
-        // Oblicz AABB dla wszystkich cieni badanych w tej godzinie
-        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
-        for (const poly of hourPolys) {
-          for (let i = 0; i < poly.length; i++) {
-            const pt = poly[i];
-            if (pt.x < hMinX) hMinX = pt.x;
-            if (pt.y < hMinY) hMinY = pt.y;
-            if (pt.x > hMaxX) hMaxX = pt.x;
-            if (pt.y > hMaxY) hMaxY = pt.y;
+        if (preparedBlocking.length > 0) {
+          // Oblicz AABB dla scalonych cieni badanych w tej godzinie
+          let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+          for (const poly of mergedHourTested) {
+            for (let i = 0; i < poly.length; i++) {
+              const pt = poly[i];
+              if (pt.x < hMinX) hMinX = pt.x;
+              if (pt.y < hMinY) hMinY = pt.y;
+              if (pt.x > hMaxX) hMaxX = pt.x;
+              if (pt.y > hMaxY) hMaxY = pt.y;
+            }
+          }
+
+          const blockingHourPolys: Point2D[][] = [];
+          for (let i = 0; i < preparedBlocking.length; i++) {
+            const item = preparedBlocking[i];
+            const offX = item.hTop * uShadow.x;
+            const offY = item.hTop * uShadow.y;
+
+            const sMinX = Math.min(item.bMinX, item.bMinX + offX);
+            const sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
+            const sMinY = Math.min(item.bMinY, item.bMinY + offY);
+            const sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
+
+            // Jeśli AABB cienia blokującego nie nachodzi na AABB cieni badanych w tej godzinie, pomiń
+            if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
+              continue;
+            }
+
+            collectBuildingShadowPolysPrepared(item, azRad, elevRad, sunlightMethod, offset, blockingHourPolys);
+          }
+
+          if (blockingHourPolys.length > 0) {
+            finalHourPolys = differencePolygonLoops(mergedHourTested, blockingHourPolys);
           }
         }
 
-        const blockingHourPolys: Point2D[][] = [];
-        for (let i = 0; i < blockingWithAABB.length; i++) {
-          const item = blockingWithAABB[i];
-          const bldg = item.bldg;
-          const bHBase = bldg.elevation ?? 0.0;
-          const bHTop = bHBase + bldg.defaultHeight;
-          if (bHTop <= 0) continue;
-
-          const offX = bHTop * uShadow.x;
-          const offY = bHTop * uShadow.y;
-
-          const sMinX = Math.min(item.bMinX, item.bMinX + offX);
-          const sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
-          const sMinY = Math.min(item.bMinY, item.bMinY + offY);
-          const sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
-
-          // Jeśli AABB cienia blokującego nie nachodzi na AABB cieni badanych, pomiń
-          if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
-            continue;
-          }
-
-          collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, offset, blockingHourPolys);
+        if (finalHourPolys.length > 0) {
+          hourlyShadows.push({
+            hourOffset: offset,
+            hourDecimal: hour,
+            azimuthDeg: sData.azimuthDeg,
+            elevationDeg: sData.elevationDeg,
+            polygons: finalHourPolys,
+          });
         }
-
-        if (blockingHourPolys.length > 0) {
-          finalHourPolys = differencePolygonLoops(hourPolys, blockingHourPolys);
-        } else {
-          finalHourPolys = unionPolygonLoops(hourPolys);
-        }
-      } else {
-        finalHourPolys = unionPolygonLoops(hourPolys);
-      }
-
-      if (finalHourPolys.length > 0) {
-        hourlyShadows.push({
-          hourOffset: offset,
-          hourDecimal: hour,
-          azimuthDeg: sData.azimuthDeg,
-          elevationDeg: sData.elevationDeg,
-          polygons: finalHourPolys,
-        });
       }
     }
   }
@@ -644,27 +799,26 @@ export function computeHourlyShadowsLive(
   );
   if (testedBuildings.length === 0) return { hourlyShadows: [], envelopeLoops: [] };
 
-  const blockingBuildings = buildings.filter(
+  const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+
+  const candidateBlocking = buildings.filter(
     (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
   );
 
-  // Prekalkulacja AABB footprintu budynków blokujących RAZ (nie w każdej z ~20 iteracji pętli
-  // godzinowej poniżej) — footprint się nie zmienia między godzinami, tylko wektor przesunięcia
-  // cienia (uShadow) się zmienia. Wzorem `blockingWithAABB` w computeFullShadowAnalysis (powyżej).
-  const blockingWithAABB = blockingBuildings.map((bldg) => {
-    if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
-      // Kadrowanie AABB dotyczy wyłącznie legacy ścieżki (bez storyPolygons) — jak w oryginale.
-      return { bldg, bMinX: NaN, bMinY: NaN, bMaxX: NaN, bMaxY: NaN };
-    }
-    let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-    for (const v of bldg.vertices) {
-      if (v.x < bMinX) bMinX = v.x;
-      if (v.y < bMinY) bMinY = v.y;
-      if (v.x > bMaxX) bMaxX = v.x;
-      if (v.y > bMaxY) bMaxY = v.y;
-    }
-    return { bldg, bMinX, bMinY, bMaxX, bMaxY };
-  });
+  const blockingBuildings = projectAABB
+    ? candidateBlocking.filter((bldg) => {
+        const bAABB = computeBuildingShadowReachAABB(bldg);
+        return bAABB ? doAABBsOverlap(bAABB, projectAABB) : false;
+      })
+    : candidateBlocking;
+
+  const preparedTested = testedBuildings
+    .map((b) => prepareShadowBuilding(b))
+    .filter((p): p is PreparedShadowBuilding => p !== null);
+
+  const preparedBlocking = blockingBuildings
+    .map((b) => prepareShadowBuilding(b))
+    .filter((p): p is PreparedShadowBuilding => p !== null);
 
   const solarLUT = getGlobalSolarLUT(latitude, longitude, equinoxDate);
   const noonHour = sunlightMethod === 'segments' ? 12.0 : solarLUT.astroSystem.solarNoonDecimal;
@@ -684,32 +838,31 @@ export function computeHourlyShadowsLive(
     const uShadow = sData.unitShadowVec;
 
     const polys: Point2D[][] = [];
-    for (const bldg of testedBuildings) {
-      collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, o, polys);
+    for (let i = 0; i < preparedTested.length; i++) {
+      collectBuildingShadowPolysPrepared(preparedTested[i], azRad, elevRad, sunlightMethod, o, polys);
     }
 
     if (polys.length > 0) {
-      let finalPolys = polys;
-      if (blockingBuildings.length > 0) {
-        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
-        for (const poly of polys) {
-          for (const pt of poly) {
-            if (pt.x < hMinX) hMinX = pt.x;
-            if (pt.y < hMinY) hMinY = pt.y;
-            if (pt.x > hMaxX) hMaxX = pt.x;
-            if (pt.y > hMaxY) hMaxY = pt.y;
+      const mergedHourTested = unionPolygonLoops(polys);
+      if (mergedHourTested.length > 0) {
+        let finalPolys = mergedHourTested;
+
+        if (preparedBlocking.length > 0) {
+          let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+          for (const poly of mergedHourTested) {
+            for (let i = 0; i < poly.length; i++) {
+              const pt = poly[i];
+              if (pt.x < hMinX) hMinX = pt.x;
+              if (pt.y < hMinY) hMinY = pt.y;
+              if (pt.x > hMaxX) hMaxX = pt.x;
+              if (pt.y > hMaxY) hMaxY = pt.y;
+            }
           }
-        }
 
-        const blockingPolys: Point2D[][] = [];
-        for (const item of blockingWithAABB) {
-          const bldg = item.bldg;
-          if (!(bldg.storyPolygons && bldg.storyPolygons.length > 0)) {
-            const bHBase = bldg.elevation ?? 0.0;
-            const bHTop = bHBase + bldg.defaultHeight;
-            if (bHTop <= 0) continue;
-
-            const offsetVec = { x: bHTop * uShadow.x, y: bHTop * uShadow.y };
+          const blockingPolys: Point2D[][] = [];
+          for (let i = 0; i < preparedBlocking.length; i++) {
+            const item = preparedBlocking[i];
+            const offsetVec = { x: item.hTop * uShadow.x, y: item.hTop * uShadow.y };
             const sMinX = Math.min(item.bMinX, item.bMinX + offsetVec.x);
             const sMaxX = Math.max(item.bMaxX, item.bMaxX + offsetVec.x);
             const sMinY = Math.min(item.bMinY, item.bMinY + offsetVec.y);
@@ -718,23 +871,23 @@ export function computeHourlyShadowsLive(
             if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
               continue;
             }
+
+            collectBuildingShadowPolysPrepared(item, azRad, elevRad, sunlightMethod, o, blockingPolys);
           }
-
-          collectBuildingShadowPolys(bldg, azRad, elevRad, sunlightMethod, o, blockingPolys);
+          if (blockingPolys.length > 0) {
+            finalPolys = differencePolygonLoops(mergedHourTested, blockingPolys);
+          }
         }
-        if (blockingPolys.length > 0) {
-          finalPolys = differencePolygonLoops(polys, blockingPolys);
-        }
-      }
 
-      if (finalPolys.length > 0) {
-        result.push({
-          hourOffset: o,
-          hourDecimal: hour,
-          azimuthDeg: sData.azimuthDeg,
-          elevationDeg: sData.elevationDeg,
-          polygons: finalHourPolysSafe(finalPolys),
-        });
+        if (finalPolys.length > 0) {
+          result.push({
+            hourOffset: o,
+            hourDecimal: hour,
+            azimuthDeg: sData.azimuthDeg,
+            elevationDeg: sData.elevationDeg,
+            polygons: finalHourPolysSafe(finalPolys),
+          });
+        }
       }
     }
   }

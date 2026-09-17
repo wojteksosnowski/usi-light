@@ -1,11 +1,39 @@
 import { describe, it, expect } from 'vitest';
+import polygonClipping from 'polygon-clipping';
 import {
   fastUnionTwoSimpleLoops,
   fastUnionTwoPolygonsWithHoles,
+  fastDifferenceTwoSimpleLoops,
   findSegmentIntersection,
+  getFastDifferenceTelemetry,
+  resetFastDifferenceTelemetry,
 } from './polygonBooleanTwo';
 import { Point2D } from '../../types/geometry';
-import { calculateSignedArea } from './polygons';
+import { calculateSignedArea, toNormalizedClippingRing, clippingResultToPolygonsWithHoles } from './polygons';
+
+function totalAbsArea(pieces: { outer: Point2D[]; holes: Point2D[][] }[]): number {
+  let sum = 0;
+  for (const p of pieces) {
+    sum += Math.abs(calculateSignedArea(p.outer));
+    for (const h of p.holes) sum -= Math.abs(calculateSignedArea(h));
+  }
+  return sum;
+}
+
+/** Ground truth via polygon-clipping.difference, for cross-checking fastDifferenceTwoSimpleLoops. */
+function groundTruthDifferenceArea(polyA: Point2D[], polyB: Point2D[]): number {
+  const ringA = toNormalizedClippingRing(polyA, 1000);
+  const ringB = toNormalizedClippingRing(polyB, 1000);
+  if (!ringA || !ringB) return 0;
+  const diffRes = polygonClipping.difference([ringA], [ringB]);
+  const pwhList = clippingResultToPolygonsWithHoles(diffRes);
+  let sum = 0;
+  for (const p of pwhList) {
+    sum += Math.abs(calculateSignedArea(p.outer));
+    for (const h of p.holes || []) sum -= Math.abs(calculateSignedArea(h));
+  }
+  return sum;
+}
 
 describe('polygonBooleanTwo - Fast 2-Polygon Boolean Union', () => {
   describe('Segment Intersections', () => {
@@ -229,6 +257,140 @@ describe('polygonBooleanTwo - Fast 2-Polygon Boolean Union', () => {
       const res = fastUnionTwoPolygonsWithHoles(polyA, polyB);
       expect(res.success).toBe(true);
       expect(res.result![0].holes.length).toBe(1);
+    });
+  });
+
+  describe('fastDifferenceTwoSimpleLoops - A \\ B (difference analogue of fastUnionTwoSimpleLoops)', () => {
+    const squareA: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    it('returns A unchanged when B is AABB-disjoint from A', () => {
+      const polyB: Point2D[] = [
+        { x: 20, y: 20 },
+        { x: 30, y: 20 },
+        { x: 30, y: 30 },
+        { x: 20, y: 30 },
+      ];
+      const res = fastDifferenceTwoSimpleLoops(squareA, polyB);
+      expect(res).not.toBeNull();
+      expect(res!.length).toBe(1);
+      expect(res![0].holes.length).toBe(0);
+      expect(Math.abs(calculateSignedArea(res![0].outer))).toBeCloseTo(100, 6);
+    });
+
+    it('returns empty array when A is fully inside B', () => {
+      const bigB: Point2D[] = [
+        { x: -5, y: -5 },
+        { x: 15, y: -5 },
+        { x: 15, y: 15 },
+        { x: -5, y: 15 },
+      ];
+      const res = fastDifferenceTwoSimpleLoops(squareA, bigB);
+      expect(res).toEqual([]);
+    });
+
+    it('creates a donut hole when B is fully inside A without touching the boundary', () => {
+      const innerB: Point2D[] = [
+        { x: 3, y: 3 },
+        { x: 7, y: 3 },
+        { x: 7, y: 7 },
+        { x: 3, y: 7 },
+      ];
+      const res = fastDifferenceTwoSimpleLoops(squareA, innerB);
+      expect(res).not.toBeNull();
+      expect(res!.length).toBe(1);
+      expect(res![0].holes.length).toBe(1);
+      expect(Math.abs(calculateSignedArea(res![0].outer))).toBeCloseTo(100, 6);
+      expect(Math.abs(calculateSignedArea(res![0].holes[0]))).toBeCloseTo(16, 6);
+      expect(totalAbsArea(res!)).toBeCloseTo(84, 6);
+    });
+
+    it('bites a corner off A when B partially overlaps one edge', () => {
+      const cornerB: Point2D[] = [
+        { x: -2, y: -2 },
+        { x: 4, y: -2 },
+        { x: 4, y: 4 },
+        { x: -2, y: 4 },
+      ];
+      const res = fastDifferenceTwoSimpleLoops(squareA, cornerB);
+      expect(res).not.toBeNull();
+      expect(res!.length).toBe(1);
+      expect(res![0].holes.length).toBe(0);
+      expect(totalAbsArea(res!)).toBeCloseTo(100 - 16, 6); // 4x4 corner bite removed
+      expect(totalAbsArea(res!)).toBeCloseTo(groundTruthDifferenceArea(squareA, cornerB), 3);
+    });
+
+    it('splits A into two disjoint pieces when B cuts all the way through', () => {
+      const splittingB: Point2D[] = [
+        { x: 4, y: -2 },
+        { x: 6, y: -2 },
+        { x: 6, y: 12 },
+        { x: 4, y: 12 },
+      ];
+      const res = fastDifferenceTwoSimpleLoops(squareA, splittingB);
+      expect(res).not.toBeNull();
+      expect(res!.length).toBe(2);
+      for (const piece of res!) expect(piece.holes.length).toBe(0);
+      expect(totalAbsArea(res!)).toBeCloseTo(100 - 20, 6); // two 4x10 strips left after removing the 2x10 middle
+      expect(totalAbsArea(res!)).toBeCloseTo(groundTruthDifferenceArea(squareA, splittingB), 3);
+    });
+
+    it('handles a touching (flush, non-crossing) shared edge without spurious geometry', () => {
+      const flushB: Point2D[] = [
+        { x: 10, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 10 },
+        { x: 10, y: 10 },
+      ];
+      const res = fastDifferenceTwoSimpleLoops(squareA, flushB);
+      expect(res).not.toBeNull();
+      expect(totalAbsArea(res!)).toBeCloseTo(100, 3); // B only touches A's edge, doesn't remove any area
+    });
+
+    it('matches polygon-clipping ground truth area on a batch of randomized overlapping rectangles', () => {
+      resetFastDifferenceTelemetry();
+      let seed = 42;
+      const rand = () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x7fffffff;
+      };
+      for (let i = 0; i < 30; i++) {
+        const ax = rand() * 20, ay = rand() * 20;
+        const aw = 5 + rand() * 10, ah = 5 + rand() * 10;
+        const polyA: Point2D[] = [
+          { x: ax, y: ay }, { x: ax + aw, y: ay }, { x: ax + aw, y: ay + ah }, { x: ax, y: ay + ah },
+        ];
+        const bx = rand() * 20, by = rand() * 20;
+        const bw = 5 + rand() * 10, bh = 5 + rand() * 10;
+        const polyB: Point2D[] = [
+          { x: bx, y: by }, { x: bx + bw, y: by }, { x: bx + bw, y: by + bh }, { x: bx, y: by + bh },
+        ];
+
+        const res = fastDifferenceTwoSimpleLoops(polyA, polyB);
+        expect(res).not.toBeNull();
+        const fastArea = totalAbsArea(res!);
+        const truthArea = groundTruthDifferenceArea(polyA, polyB);
+        // Relative tolerance (0.1%, same convention as umbraA456's real-scene regression
+        // checks) rather than a fixed decimal-place check: randomized non-integer vertex
+        // coordinates legitimately hit last-bit floating differences between the two
+        // independent algorithms (graph-trace vs sweep-line) at this input scale.
+        const relTolerance = Math.max(0.01, truthArea * 0.001);
+        expect(Math.abs(fastArea - truthArea)).toBeLessThan(relTolerance);
+      }
+
+      const t = getFastDifferenceTelemetry();
+      console.log(
+        `\n[fastDifferenceTwoSimpleLoops telemetry, 30 randomized pairs] totalCalls=${t.totalCalls} ` +
+        `fastPathSuccess=${t.fastPathSuccess} fallbackCalls=${t.fallbackCalls} ` +
+        `disjointExits=${t.disjointExits} aFullyConsumedExits=${t.aFullyConsumedExits} holeExits=${t.holeExits}\n`
+      );
+      // Sanity: the graph-trace path must actually be exercised, not silently
+      // falling back to polygon-clipping on every call.
+      expect(t.fastPathSuccess).toBeGreaterThan(0);
     });
   });
 });

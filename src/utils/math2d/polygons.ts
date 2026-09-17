@@ -1,7 +1,7 @@
 import { Point2D, BuildingLoop } from '../../types/geometry';
 import polygonClipping from 'polygon-clipping';
 import { buildRingSegments } from '../ringSegments';
-import { fastUnionTwoPolygonsWithHoles, fastUnionTwoSimpleLoops } from './polygonBooleanTwo';
+import { fastUnionTwoPolygonsWithHoles, fastUnionTwoSimpleLoops, fastDifferenceTwoSimpleLoops } from './polygonBooleanTwo';
 
 /**
  * Calculates the signed area of a 2D polygon using the Shoelace formula / Green's theorem.
@@ -539,17 +539,21 @@ function batchUnionRings(rings: polygonClipping.Polygon[]): polygonClipping.Mult
 
   while (currentBatches.length > 1) {
     const nextBatches: polygonClipping.MultiPolygon[] = [];
+    let anyMerged = false;
+
     for (let i = 0; i < currentBatches.length; i += 2) {
       if (i + 1 < currentBatches.length) {
         try {
           const merged = polygonClipping.union(currentBatches[i], currentBatches[i + 1]);
           if (merged && merged.length > 0) {
             nextBatches.push(merged);
+            anyMerged = true;
           } else {
             nextBatches.push(currentBatches[i]);
             nextBatches.push(currentBatches[i + 1]);
           }
         } catch {
+          // Błąd numeryczny na pośrednich MultiPolygon: zachowaj obie partie
           nextBatches.push(currentBatches[i]);
           nextBatches.push(currentBatches[i + 1]);
         }
@@ -557,8 +561,18 @@ function batchUnionRings(rings: polygonClipping.Polygon[]): polygonClipping.Mult
         nextBatches.push(currentBatches[i]);
       }
     }
-    if (nextBatches.length === currentBatches.length) {
-      break;
+
+    if (!anyMerged || nextBatches.length === currentBatches.length) {
+      // Spróbuj bezpiecznego bezpośredniego scalenia wszystkich pierścieni naraz jako fallback
+      try {
+        const flatRes = polygonClipping.union(rings[0], ...rings.slice(1));
+        if (flatRes && flatRes.length > 0) {
+          return flatRes;
+        }
+      } catch {
+        // Fallback: zachowaj wszystkie niescalone zbiory (MultiPolygon[])
+      }
+      return currentBatches.flat(1);
     }
     currentBatches = nextBatches;
   }
@@ -652,15 +666,10 @@ export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
       continue;
     }
 
-    // 3. Hierarchiczna unia partii parami dla nachodzących poligonów
+    // 3. Unia partii dla nachodzących poligonów
     try {
-      if (clippingPolys.length <= 8) {
-        const unionRes = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
-        result.push(...clippingResultToLoops(unionRes));
-      } else {
-        const batchedResult = batchUnionRings(clippingPolys);
-        result.push(...clippingResultToLoops(batchedResult));
-      }
+      const unionRes = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
+      result.push(...clippingResultToLoops(unionRes));
     } catch {
       try {
         const batchedResult = batchUnionRings(clippingPolys);
@@ -676,17 +685,9 @@ export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
   return result;
 }
 
-/**
- * Pomocnicza funkcja odejmująca poligony negatywne od poligonów pozytywnych (A \ B)
- * za pomocą polygonClipping.difference. Używana m.in. do negatywnego cienia.
- */
-export function differencePolygonLoops(
-  positiveLoops: Point2D[][],
-  negativeLoops: Point2D[][]
-): Point2D[][] {
-  if (positiveLoops.length === 0) return [];
-  if (negativeLoops.length === 0) return positiveLoops;
+const MAX_FAST_DIFFERENCE_CHAIN_LENGTH = 6;
 
+function differencePolygonLoopsViaClipping(positiveLoops: Point2D[][], overlappingNegatives: Point2D[][]): Point2D[][] {
   const toClippingRings = (loops: Point2D[][]): polygonClipping.Polygon[] => {
     const list: polygonClipping.Polygon[] = [];
     for (const poly of loops) {
@@ -699,7 +700,7 @@ export function differencePolygonLoops(
   };
 
   const cPos = toClippingRings(positiveLoops);
-  const cNeg = toClippingRings(negativeLoops);
+  const cNeg = toClippingRings(overlappingNegatives);
   if (cPos.length === 0) return [];
   if (cNeg.length === 0) return positiveLoops;
 
@@ -717,6 +718,127 @@ export function differencePolygonLoops(
       return positiveLoops;
     }
   }
+}
+
+/**
+ * Pomocnicza funkcja odejmująca poligony negatywne od poligonów pozytywnych (A \ B)
+ * za pomocą polygonClipping.difference. Używana m.in. do negatywnego cienia.
+ *
+ * Dla każdej pętli dodatniej z osobna próbuje najpierw "obrać" relewantne pętle ujemne
+ * iteracyjnie przez fastDifferenceTwoSimpleLoops (analogon fastUnionTwoSimpleLoops dla
+ * A\B — trawersacja grafu krawędzi zamiast sweep-line polygon-clipping). Jeśli
+ * którekolwiek pojedyncze odjęcie w łańcuchu dla danej pętli zawiedzie (degenerat,
+ * niejednoznaczne zagnieżdżenie dziur), cały łańcuch tej jednej pętli wraca do starego,
+ * sprawdzonego polygon-clipping — więc fast-path jest tylko dodatkiem, nigdy nie zmienia
+ * wyniku względem starej implementacji dla przypadków, w których by zawiódł.
+ */
+export function differencePolygonLoops(
+  positiveLoops: Point2D[][],
+  negativeLoops: Point2D[][]
+): Point2D[][] {
+  if (positiveLoops.length === 0) return [];
+  if (negativeLoops.length === 0) return positiveLoops;
+
+  // 1. Oblicz AABB dla wszystkich pętli dodatnich
+  let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+  for (const poly of positiveLoops) {
+    for (let i = 0; i < poly.length; i++) {
+      const pt = poly[i];
+      if (pt.x < pMinX) pMinX = pt.x;
+      if (pt.y < pMinY) pMinY = pt.y;
+      if (pt.x > pMaxX) pMaxX = pt.x;
+      if (pt.y > pMaxY) pMaxY = pt.y;
+    }
+  }
+
+  // 2. Odsiej pętle ujemne, których AABB nie przecina AABB pętli dodatnich
+  const overlappingNegatives: Point2D[][] = [];
+  for (const negPoly of negativeLoops) {
+    let nMinX = Infinity, nMinY = Infinity, nMaxX = -Infinity, nMaxY = -Infinity;
+    for (let i = 0; i < negPoly.length; i++) {
+      const pt = negPoly[i];
+      if (pt.x < nMinX) nMinX = pt.x;
+      if (pt.y < nMinY) nMinY = pt.y;
+      if (pt.x > nMaxX) nMaxX = pt.x;
+      if (pt.y > nMaxY) nMaxY = pt.y;
+    }
+    if (!(nMaxX < pMinX || nMinX > pMaxX || nMaxY < pMinY || nMinY > pMaxY)) {
+      overlappingNegatives.push(negPoly);
+    }
+  }
+
+  if (overlappingNegatives.length === 0) {
+    return positiveLoops; // 100% Quick-Reject w O(V) bez wywoływania polygon-clipping
+  }
+
+  const result: Point2D[][] = [];
+  const fallbackPositives: Point2D[][] = [];
+  const fallbackNegativesSet = new Set<Point2D[]>();
+
+  for (const posLoop of positiveLoops) {
+    const pb = computePointsBoundingBox(posLoop);
+    const relevant: Point2D[][] = [];
+    for (const neg of overlappingNegatives) {
+      const nb = computePointsBoundingBox(neg);
+      if (!(nb.maxX < pb.minX || nb.minX > pb.maxX || nb.maxY < pb.minY || nb.minY > pb.maxY)) {
+        relevant.push(neg);
+      }
+    }
+    if (relevant.length === 0) {
+      result.push(posLoop);
+      continue;
+    }
+
+    // Iterative peeling does O(relevant.length) separate graph-trace passes, each
+    // O(|A|*|B|); with many relevant negatives that total cost can exceed a single
+    // batched polygon-clipping sweep over all of them at once, so past this size the
+    // batched sweep-line is the cheaper (and already proven-correct) option.
+    if (relevant.length > MAX_FAST_DIFFERENCE_CHAIN_LENGTH) {
+      fallbackPositives.push(posLoop);
+      for (const neg of relevant) fallbackNegativesSet.add(neg);
+      continue;
+    }
+
+    let currentPieces: { outer: Point2D[]; holes: Point2D[][] }[] = [{ outer: posLoop, holes: [] }];
+    let chainFailed = false;
+
+    for (const neg of relevant) {
+      if (currentPieces.length === 0) break;
+      const nextPieces: { outer: Point2D[]; holes: Point2D[][] }[] = [];
+      for (const piece of currentPieces) {
+        if (piece.holes.length > 0) {
+          // fastDifferenceTwoSimpleLoops odejmuje tylko od prostych pętli (bez dziur) —
+          // kawałek z dziurą (np. donut z wcześniejszego odjęcia) wraca do polygon-clipping.
+          chainFailed = true;
+          break;
+        }
+        const diffRes = fastDifferenceTwoSimpleLoops(piece.outer, neg);
+        if (diffRes === null) {
+          chainFailed = true;
+          break;
+        }
+        nextPieces.push(...diffRes);
+      }
+      if (chainFailed) break;
+      currentPieces = nextPieces;
+    }
+
+    if (chainFailed) {
+      fallbackPositives.push(posLoop);
+      for (const neg of relevant) fallbackNegativesSet.add(neg);
+    } else {
+      for (const piece of currentPieces) {
+        result.push(piece.outer);
+        if (piece.holes.length > 0) result.push(...piece.holes);
+      }
+    }
+  }
+
+  if (fallbackPositives.length > 0) {
+    result.push(...differencePolygonLoopsViaClipping(fallbackPositives, [...fallbackNegativesSet]));
+  }
+
+  return result;
 }
 
 /**

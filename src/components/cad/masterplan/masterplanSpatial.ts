@@ -222,5 +222,5 @@ export function unionPolygonsWithHolesHierarchical(polys: PolygonWithHoles[]): P
     if (next.length === current.length) break;
     current = next;
   }
-  return current[0] || [];
+  return current.flat(1);
 }

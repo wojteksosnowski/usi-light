@@ -370,6 +370,45 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
       expect(shadowBox.maxY).toBeGreaterThanOrEqual(baseBox.maxY - 0.1);
     });
 
+    it('guarantees unbroken ground contact and full ribbon connection for skyscraper WFS 146510_8.0502.164_BUD at hour -2:55 across all methods and offsets', () => {
+      const tallBldg = buildings.find((b) => b.id === '146510_8.0502.164_BUD');
+      expect(tallBldg).toBeDefined();
+
+      const hourFraction = 12 - (2 + 55 / 60); // 9.0833h (-2:55)
+      const baseArea = Math.abs(calculateSignedArea(tallBldg!.vertices));
+      const baseBox = computePointsBoundingBox(tallBldg!.vertices);
+
+      for (const method of ['raycasting', 'linijka'] as const) {
+        for (const offset of [-1, 0, 1]) {
+          const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', hourFraction, offset, method);
+          expect(angles.shadowScale).toBeGreaterThan(1.8);
+
+          const shadowPolys = computeStoryShadowPolygonWithHoles(
+            tallBldg!.vertices,
+            tallBldg!.holes,
+            angles,
+            tallBldg!.defaultHeight,
+            tallBldg!.elevation || 0
+          );
+
+          expect(shadowPolys.length).toBe(1);
+          const shadow = shadowPolys[0];
+          const shadowArea = Math.abs(calculateSignedArea(shadow.outer));
+          const shadowBox = computePointsBoundingBox(shadow.outer);
+
+          // Całkowita powierzchnia musi wynosić ~20 000 - ~21 500 m2 (podstawa + ściany + dach)
+          expect(shadowArea, `Method ${method} offset ${offset} area too small`).toBeGreaterThan(baseArea * 4.5);
+          expect(shadowArea).toBeGreaterThan(19000);
+
+          // Bounding box cienia musi obejmować podstawę budynku na gruncie
+          expect(shadowBox.minX).toBeLessThanOrEqual(baseBox.minX + 0.1);
+          expect(shadowBox.maxX).toBeGreaterThanOrEqual(baseBox.maxX - 0.1);
+          expect(shadowBox.minY).toBeLessThanOrEqual(baseBox.minY + 0.1);
+          expect(shadowBox.maxY).toBeGreaterThanOrEqual(baseBox.maxY - 0.1);
+        }
+      }
+    });
+
     it('generates fully connected umbra for the entire warszawa.json scene at hour -3:15 without orphan polygons', () => {
       const umbraPolys = computeUmbraPolygons(allTiers, 52.23, 21.01, 'spring', 8.75, 0, 'raycasting');
       expect(umbraPolys.length).toBeGreaterThan(0);
@@ -386,3 +425,4 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
     });
   });
 });
+

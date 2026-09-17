@@ -4,8 +4,13 @@ import * as path from 'path';
 import {
   computeHourlyShadowsLive,
   computeCombinedShadowEnvelope,
+  computeFullShadowAnalysis,
   computeFastShadowPolygon,
   computeFastShadowPolygonWithHoles,
+  getBuildingAbsoluteHmax,
+  computeBuildingShadowReachAABB,
+  computeProjectShadowReachAABB,
+  doAABBsOverlap,
 } from './shadowEnvelope';
 import { unionPolygonLoops, collapseIdenticalConsecutiveHeightRuns } from './polygons';
 import { BuildingLoop, Point2D } from '../../types/geometry';
@@ -294,5 +299,117 @@ describe('shadowEnvelope stabilization anchor (pre-optimization)', () => {
         expect(isCourtyardCenterShadedAtNoon).toBe(false);
       }
     );
+  });
+
+  describe('Cardinal AABB & Shadow Reach Culling', () => {
+    it('calculates building absolute Hmax correctly for flat and tiered buildings', () => {
+      const flatBldg = makeBuilding({ elevation: 10, defaultHeight: 15 });
+      expect(getBuildingAbsoluteHmax(flatBldg)).toBe(25);
+
+      const tieredBldg = makeBuilding({
+        elevation: 5,
+        defaultHeight: 10,
+        storyPolygons: [
+          { storyIndex: 0, hBottom: 0, hTop: 4, polygon: rect(0, 0, 10, 10), holes: [], edgeOrigins: [], holeOrigins: [], buildingType: 'residential' } as any,
+          { storyIndex: 1, hBottom: 4, hTop: 18, polygon: rect(0, 0, 10, 10), holes: [], edgeOrigins: [], holeOrigins: [], buildingType: 'residential' } as any,
+        ],
+      });
+      expect(getBuildingAbsoluteHmax(tieredBldg)).toBe(23); // 5 + 18
+    });
+
+    it('calculates shadow reach AABB strictly oriented to world cardinal directions with North-only Y extension', () => {
+      const bldg = makeBuilding({
+        vertices: rect(100, 200, 110, 220), // X: 100..110, Y: 200..220
+        elevation: 0,
+        defaultHeight: 10, // Hmax = 10 -> X margin = 50, Y north extension = 15
+      });
+
+      const aabb = computeBuildingShadowReachAABB(bldg);
+      expect(aabb).toBeDefined();
+      expect(aabb?.minX).toBe(100 - 50); // 50
+      expect(aabb?.maxX).toBe(110 + 50); // 160
+      expect(aabb?.minY).toBe(200);      // Southern base unchanged
+      expect(aabb?.maxY).toBe(220 + 15); // 235
+    });
+
+    it('calculates project shadow reach AABB for multiple tested buildings', () => {
+      const bldg1 = makeBuilding({
+        isTested: true,
+        vertices: rect(0, 0, 10, 10),
+        defaultHeight: 10,
+      });
+      const bldg2 = makeBuilding({
+        isTested: true,
+        vertices: rect(100, 50, 120, 70),
+        defaultHeight: 20, // maxProjectH = 20 -> marginX = 100, marginY_north = 30
+      });
+
+      const projAABB = computeProjectShadowReachAABB([bldg1, bldg2]);
+      expect(projAABB).toBeDefined();
+      expect(projAABB?.minX).toBe(0 - 100);    // -100
+      expect(projAABB?.maxX).toBe(120 + 100);  // 220
+      expect(projAABB?.minY).toBe(0);          // 0
+      expect(projAABB?.maxY).toBe(70 + 30);    // 100
+    });
+
+    it('culls distant blocking buildings while preserving 100% identical envelope and live shadow results', () => {
+      const tested = makeBuilding({
+        id: 'tested-proj',
+        isTested: true,
+        vertices: rect(0, 0, 20, 20),
+        defaultHeight: 10, // Hmax = 10 -> projAABB: X: [-50, 70], Y: [0, 35]
+      });
+
+      // Close blocking building (within shadow reach: directly north-east)
+      const closeBlocking = makeBuilding({
+        id: 'blocking-close',
+        isTested: false,
+        vertices: rect(25, 25, 35, 35),
+        defaultHeight: 10,
+      });
+
+      // Distant blocking buildings in all 4 cardinal directions (well outside shadow reach)
+      const farSouth = makeBuilding({
+        id: 'blocking-far-south',
+        isTested: false,
+        vertices: rect(0, -500, 20, -480),
+        defaultHeight: 20,
+      });
+      const farNorth = makeBuilding({
+        id: 'blocking-far-north',
+        isTested: false,
+        vertices: rect(0, 500, 20, 520),
+        defaultHeight: 20,
+      });
+      const farWest = makeBuilding({
+        id: 'blocking-far-west',
+        isTested: false,
+        vertices: rect(-600, 0, -580, 20),
+        defaultHeight: 20,
+      });
+      const farEast = makeBuilding({
+        id: 'blocking-far-east',
+        isTested: false,
+        vertices: rect(600, 0, 620, 20),
+        defaultHeight: 20,
+      });
+
+      // Scene with only relevant buildings
+      const cleanScene = [tested, closeBlocking];
+      // Scene polluted with distant background buildings
+      const pollutedScene = [tested, closeBlocking, farSouth, farNorth, farWest, farEast];
+
+      const resClean = computeFullShadowAnalysis(cleanScene, 52.23, 21.01, 'spring', 0.5, 'raycasting');
+      const resPolluted = computeFullShadowAnalysis(pollutedScene, 52.23, 21.01, 'spring', 0.5, 'raycasting');
+
+      expect(totalArea(resPolluted.envelopeLoops)).toBeCloseTo(totalArea(resClean.envelopeLoops), 4);
+      expect(resPolluted.hourlyShadows.length).toBe(resClean.hourlyShadows.length);
+
+      const liveClean = computeHourlyShadowsLive(cleanScene, 52.23, 21.01, 'spring', 0.5, 'raycasting');
+      const livePolluted = computeHourlyShadowsLive(pollutedScene, 52.23, 21.01, 'spring', 0.5, 'raycasting');
+
+      expect(totalArea(livePolluted.envelopeLoops)).toBeCloseTo(totalArea(liveClean.envelopeLoops), 4);
+      expect(livePolluted.hourlyShadows.length).toBe(liveClean.hourlyShadows.length);
+    });
   });
 });
