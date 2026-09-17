@@ -1,6 +1,5 @@
 import { Point2D, BuildingLoop } from '../../../types/geometry';
 import { calculateSolarPosition, LinijkaSolarSystem } from '../../../utils/solar';
-import polygonClipping from 'polygon-clipping';
 import {
   isPolygonCCW,
   isPolygonConvex,
@@ -13,6 +12,7 @@ import {
   unionPolygonsWithHoles,
   differencePolygonsWithHoles,
   intersectionPolygonsWithHoles,
+  calculateSignedArea,
 } from '../../../utils/math2d/polygons';
 
 export interface SolarAngles {
@@ -312,18 +312,13 @@ function computeStoryShadowPolygonUncached(
     return computeConvexHull(shadowPoints);
   }
 
-  // Dla wielokątów wklęsłych: suma boolowska rzutu podstawy, rzutu dachu i wstęg ściennych (Wall Ribbons)
-  const clippingPolys: [number, number][][][] = [];
+  const shadowLoops: Point2D[][] = [];
 
   // Podstawa
-  const baseRing: [number, number][] = polygon.map((p) => [p.x + baseOffset.dx, p.y + baseOffset.dy]);
-  baseRing.push([polygon[0].x + baseOffset.dx, polygon[0].y + baseOffset.dy]);
-  clippingPolys.push([baseRing]);
+  shadowLoops.push(polygon.map((p) => ({ x: p.x + baseOffset.dx, y: p.y + baseOffset.dy })));
 
   // Dach
-  const roofRing: [number, number][] = polygon.map((p) => [p.x + topOffset.dx, p.y + topOffset.dy]);
-  roofRing.push([polygon[0].x + topOffset.dx, polygon[0].y + topOffset.dy]);
-  clippingPolys.push([roofRing]);
+  shadowLoops.push(polygon.map((p) => ({ x: p.x + topOffset.dx, y: p.y + topOffset.dy })));
 
   // Wstęgi ścienne wzdłuż krawędzi sylwetkowych
   const isCCW = isPolygonCCW(polygon);
@@ -359,25 +354,30 @@ function computeStoryShadowPolygonUncached(
         chainVertices.push(ring[curr]);
       }
 
-      const ribbonRing: [number, number][] = chainVertices.map((v) => [v.x + baseOffset.dx, v.y + baseOffset.dy]);
+      const ribbonLoop: Point2D[] = chainVertices.map((v) => ({ x: v.x + baseOffset.dx, y: v.y + baseOffset.dy }));
       for (let c = chainVertices.length - 1; c >= 0; c--) {
-        ribbonRing.push([chainVertices[c].x + topOffset.dx, chainVertices[c].y + topOffset.dy]);
+        ribbonLoop.push({ x: chainVertices[c].x + topOffset.dx, y: chainVertices[c].y + topOffset.dy });
       }
-      ribbonRing.push([chainVertices[0].x + baseOffset.dx, chainVertices[0].y + baseOffset.dy]);
-      clippingPolys.push([ribbonRing]);
+      shadowLoops.push(ribbonLoop);
     }
   }
 
   try {
-    const polygonLoops: Point2D[][] = [];
-    for (const poly of clippingPolys) {
-      if (poly && poly.length > 0) {
-        polygonLoops.push(poly[0].slice(0, -1).map(([x, y]) => ({ x, y })));
+    const unionResult = unionPolygonLoops(shadowLoops);
+    if (unionResult.length > 0) {
+      // Wybieramy poligon o największym polu powierzchni
+      let bestLoop = unionResult[0];
+      let maxArea = Math.abs(calculateSignedArea(bestLoop));
+      for (const loop of unionResult) {
+        const area = Math.abs(calculateSignedArea(loop));
+        if (area > maxArea) {
+          maxArea = area;
+          bestLoop = loop;
+        }
       }
-    }
-    const unionResult = unionPolygonLoops(polygonLoops);
-    if (unionResult.length > 0 && unionResult[0].length >= 3) {
-      return unionResult[0];
+      if (bestLoop.length >= 3) {
+        return bestLoop;
+      }
     }
   } catch {
     // Fallback do otoczki wypukłej w razie błędu geometrii

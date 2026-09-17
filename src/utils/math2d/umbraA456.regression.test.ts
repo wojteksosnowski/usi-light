@@ -331,4 +331,58 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
       expect(areaNet).toBeGreaterThan(0);
     });
   });
+
+  describe('4. Low Elevation Shadow Continuity & Ground Contact Invariants (Hour -3:15 / 8.75h)', () => {
+    it('guarantees unbroken ground contact and full ribbon connection for skyscraper WFS 146510_8.0502.164_BUD (H=99.5m)', () => {
+      const tallBldg = buildings.find((b) => b.id === '146510_8.0502.164_BUD');
+      expect(tallBldg).toBeDefined();
+      expect(tallBldg!.defaultHeight).toBe(99.5);
+
+      const angles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 8.75, 0, 'raycasting');
+      // Elewacja słońca ~25.7 stopni -> shadowScale ~2.08, rzut cienia > 200m
+      expect(angles.shadowScale).toBeGreaterThan(2.0);
+
+      const shadowPolys = computeStoryShadowPolygonWithHoles(
+        tallBldg!.vertices,
+        tallBldg!.holes,
+        angles,
+        tallBldg!.defaultHeight,
+        tallBldg!.elevation || 0
+      );
+
+      expect(shadowPolys.length).toBe(1);
+      const shadow = shadowPolys[0];
+
+      // 1. Pole powierzchni musi być rzędu ~22 000 m2 (pełne wstęgi ścienne + dach + podstawa)
+      const shadowArea = Math.abs(calculateSignedArea(shadow.outer));
+      const baseArea = Math.abs(calculateSignedArea(tallBldg!.vertices));
+      expect(shadowArea).toBeGreaterThan(baseArea * 5.0);
+      expect(shadowArea).toBeCloseTo(22003.65, 0);
+
+      // 2. Bounding box cienia musi obejmować zarówno podstawę na gruncie jak i oddalony dach
+      const baseBox = computePointsBoundingBox(tallBldg!.vertices);
+      const shadowBox = computePointsBoundingBox(shadow.outer);
+
+      // Podstawa musi stykać się z cieniem (granice podstawy zawierają się w bounding box cienia)
+      expect(shadowBox.minX).toBeLessThanOrEqual(baseBox.minX + 0.1);
+      expect(shadowBox.maxX).toBeGreaterThanOrEqual(baseBox.maxX - 0.1);
+      expect(shadowBox.minY).toBeLessThanOrEqual(baseBox.minY + 0.1);
+      expect(shadowBox.maxY).toBeGreaterThanOrEqual(baseBox.maxY - 0.1);
+    });
+
+    it('generates fully connected umbra for the entire warszawa.json scene at hour -3:15 without orphan polygons', () => {
+      const umbraPolys = computeUmbraPolygons(allTiers, 52.23, 21.01, 'spring', 8.75, 0, 'raycasting');
+      expect(umbraPolys.length).toBeGreaterThan(0);
+
+      const totalArea = umbraPolys.reduce((acc, p) => {
+        let a = Math.abs(calculateSignedArea(p.outer));
+        for (const h of p.holes || []) a -= Math.abs(calculateSignedArea(h));
+        return acc + a;
+      }, 0);
+
+      // Sumaryczne pole cieni sceny przy godzinie -3:15 (226 141 m2) jest większe niż w południe (183 737 m2)
+      expect(totalArea).toBeGreaterThan(baseline.hours['12']['offset_0'].totalNetArea);
+      expect(totalArea).toBeCloseTo(226141, -1);
+    });
+  });
 });

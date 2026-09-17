@@ -3,13 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import polygonClipping from 'polygon-clipping';
 import {
-  Point2D,
   computePointsBoundingBox,
   isPolygonCCW,
   polygonsWithHolesToClipping,
   clippingResultToPolygonsWithHoles,
   calculateSignedArea,
 } from './polygons';
+import { Point2D } from '../../types/geometry';
 import { getGlobalSolarLUT } from '../solar';
 import { computeFastShadowPolygon } from './shadowEnvelope';
 import { fastUnionTwoSimpleLoops, getFastUnionTelemetry, resetFastUnionTelemetry } from './polygonBooleanTwo';

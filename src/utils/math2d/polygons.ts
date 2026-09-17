@@ -253,7 +253,7 @@ export function isPolygonConvex(polygon: Point2D[]): boolean {
  * Pomocnicza funkcja normalizująca i zamykająca pierścień wielokąta z zaokrągleniem do zadanej precyzji.
  * Eliminuje zdegenerowane odcinki o zerowej długości i duplikaty wierzchołków.
  */
-function toNormalizedClippingRing(poly: Point2D[], precision: number = 1000): [number, number][] | null {
+export function toNormalizedClippingRing(poly: Point2D[], precision: number = 1000): [number, number][] | null {
   if (!poly || poly.length < 3) return null;
   const ring: [number, number][] = [];
   for (const pt of poly) {
@@ -654,7 +654,7 @@ export function unionPolygonLoops(polygons: Point2D[][]): Point2D[][] {
 
     // 3. Hierarchiczna unia partii parami dla nachodzących poligonów
     try {
-      if (clippingPolys.length <= 4) {
+      if (clippingPolys.length <= 8) {
         const unionRes = polygonClipping.union(clippingPolys[0], ...clippingPolys.slice(1));
         result.push(...clippingResultToLoops(unionRes));
       } else {

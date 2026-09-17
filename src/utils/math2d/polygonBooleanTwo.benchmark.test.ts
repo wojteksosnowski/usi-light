@@ -6,14 +6,13 @@ import { fastUnionTwoSimpleLoops } from './polygonBooleanTwo';
 import {
   calculateSignedArea,
   computePointsBoundingBox,
-  Point2D,
   isPolygonCCW,
   polygonsWithHolesToClipping,
   clippingResultToPolygonsWithHoles,
 } from './polygons';
 import { extractBuildingStoryTiers, MasterplanStoryTier } from '../../components/cad/masterplan/masterplanGeometry';
 import { getCachedGroundShadowSamples, MasterplanColorSample } from '../../components/cad/masterplan/masterplanShadowCache';
-import { BuildingLoop } from '../../types/geometry';
+import { BuildingLoop, Point2D } from '../../types/geometry';
 import polygonClipping from 'polygon-clipping';
 
 function ensureCCW(points: Point2D[]): Point2D[] {
