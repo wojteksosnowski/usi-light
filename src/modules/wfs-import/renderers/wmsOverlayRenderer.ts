@@ -125,6 +125,10 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
   const checkRadius = radiusPx != null ? radiusPx + halfDiag : null;
   const checkRadiusSq = checkRadius != null ? checkRadius * checkRadius : 0;
 
+  const viewCenterSx = width * 0.5;
+  const viewCenterSy = height * 0.5;
+  const visibleTiles: { tx: number; ty: number; sTLx: number; sTLy: number; distCenterSq: number }[] = [];
+
   for (let tx = startTileX; tx <= effectiveEndX; tx++) {
     const dX = tx - startTileX;
     for (let ty = startTileY; ty <= effectiveEndY; ty++) {
@@ -149,46 +153,58 @@ export function renderWmsOverlay(options: RenderWmsOverlayOptions) {
         continue;
       }
 
+      const centerSx = sTLx + halfStepXx + halfStepYx;
+      const centerSy = sTLy + halfStepXy + halfStepYy;
+
       // 2. Szybki culling do okręgu projektu (odległość środka kafla od środka projektu na ekranie)
       if (checkRadius != null && APP_CONFIG.geo.wmsTileCullingEnabled && !skipRadiusClip) {
-        const centerSx = sTLx + halfStepXx + halfStepYx;
-        const centerSy = sTLy + halfStepXy + halfStepYy;
         const distSq = (centerSx - originSc.sx) ** 2 + (centerSy - originSc.sy) ** 2;
         if (distSq > checkRadiusSq) {
           continue;
         }
       }
 
-      // Kafelki inwertowane pobierane są bezpośrednio z pamięci podręcznej (OffscreenCanvas), przeliczone
-      // przy załadowaniu kafla, nie w tej pętli — bez użycia powolnego ctx.filter per-frame
-      const tileImg = tileManager.getTile(tx, ty, targetZoom);
+      const distCenterSq = (centerSx - viewCenterSx) ** 2 + (centerSy - viewCenterSy) ** 2;
+      visibleTiles.push({ tx, ty, sTLx, sTLy, distCenterSq });
+    }
+  }
 
-      if (tileImg) {
+  // Sortowanie od środka widoku na zewnątrz — kafle w centrum uwagi użytkownika ładują się pierwsze
+  if (visibleTiles.length > 1) {
+    visibleTiles.sort((a, b) => a.distCenterSq - b.distCenterSq);
+  }
+
+  for (let i = 0; i < visibleTiles.length; i++) {
+    const { tx, ty, sTLx, sTLy } = visibleTiles[i];
+    // Kafelki inwertowane pobierane są bezpośrednio z pamięci podręcznej (OffscreenCanvas), przeliczone
+    // przy załadowaniu kafla, nie w tej pętli — bez użycia powolnego ctx.filter per-frame
+    const tileImg = tileManager.getTile(tx, ty, targetZoom);
+
+    if (tileImg) {
+      ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
+      ctx.drawImage(tileImg, 0, 0, 256, 256);
+    } else if (targetZoom > 2) {
+      // Fallback do kafelka rodzica (zoom - 1) z pamięci RAM (zero żądań sieciowych w pętli renderowania)
+      const parentZoom = targetZoom - 1;
+      const pTx = Math.floor(tx / 2);
+      const pTy = Math.floor(ty / 2);
+      const parentImg = tileManager.getTileFromMemory(pTx, pTy, parentZoom);
+      if (parentImg) {
+        const subX = (tx % 2) * 128;
+        const subY = (ty % 2) * 128;
         ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
-        ctx.drawImage(tileImg, 0, 0, 256, 256);
-      } else if (targetZoom > 2) {
-        // Fallback do kafelka rodzica (zoom - 1) z pamięci RAM (zero żądań sieciowych w pętli renderowania)
-        const parentZoom = targetZoom - 1;
-        const pTx = Math.floor(tx / 2);
-        const pTy = Math.floor(ty / 2);
-        const parentImg = tileManager.getTileFromMemory(pTx, pTy, parentZoom);
-        if (parentImg) {
-          const subX = (tx % 2) * 128;
-          const subY = (ty % 2) * 128;
+        ctx.drawImage(parentImg, subX, subY, 128, 128, 0, 0, 256, 256);
+      } else if (targetZoom > 3) {
+        // Fallback do kafelka dziadka (zoom - 2) z pamięci RAM
+        const gpZoom = targetZoom - 2;
+        const gpTx = Math.floor(tx / 4);
+        const gpTy = Math.floor(ty / 4);
+        const gpImg = tileManager.getTileFromMemory(gpTx, gpTy, gpZoom);
+        if (gpImg) {
+          const subX = (tx % 4) * 64;
+          const subY = (ty % 4) * 64;
           ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
-          ctx.drawImage(parentImg, subX, subY, 128, 128, 0, 0, 256, 256);
-        } else if (targetZoom > 3) {
-          // Fallback do kafelka dziadka (zoom - 2) z pamięci RAM
-          const gpZoom = targetZoom - 2;
-          const gpTx = Math.floor(tx / 4);
-          const gpTy = Math.floor(ty / 4);
-          const gpImg = tileManager.getTileFromMemory(gpTx, gpTy, gpZoom);
-          if (gpImg) {
-            const subX = (tx % 4) * 64;
-            const subY = (ty % 4) * 64;
-            ctx.setTransform(vXx, vXy, vYx, vYy, sTLx, sTLy);
-            ctx.drawImage(gpImg, subX, subY, 64, 64, 0, 0, 256, 256);
-          }
+          ctx.drawImage(gpImg, subX, subY, 64, 64, 0, 0, 256, 256);
         }
       }
     }

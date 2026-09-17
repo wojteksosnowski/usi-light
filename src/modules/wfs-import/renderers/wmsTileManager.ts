@@ -28,7 +28,7 @@ const DEFAULT_CONFIG: Partial<WmsTileConfig> = {
   format: 'image/png',
   crs: 'EPSG:3857',
   tileSize: 256,
-  maxNativeZoom: 19,
+  maxNativeZoom: 21,
 };
 
 export class WmsTileManager {
@@ -225,6 +225,15 @@ export class WmsTileManager {
       // jest realnie potrzebny na ekranie — "odciszamy" go niezależnie od tego, czy nadal czeka
       // w kolejce, czy jest już "w locie" (dispatched, poza tablicą prefetchQueue).
       this.silentKeys.delete(key);
+      // Szybka promocja widoku: jeśli kafel czeka w dalszej części kolejki prefetchu,
+      // przesuń go na sam początek (indeks 0), aby został pobrany natychmiast na najbliższym slocie sieciowym.
+      const qIdx = this.prefetchQueue.findIndex((item) => item.key === key);
+      if (qIdx > 0) {
+        const [promoted] = this.prefetchQueue.splice(qIdx, 1);
+        if (promoted) {
+          this.prefetchQueue.unshift(promoted);
+        }
+      }
     }
 
     return null;
@@ -320,7 +329,7 @@ export class WmsTileManager {
    */
   public prefetchAllZoomsInRadius(lat: number, lon: number, radiusMeters: number, minZoom = 16, _currentZoom?: number) {
     const effectiveMinZoom = minZoom;
-    const effectiveMaxZoom = Math.min(this.maxNativeZoom, 20);
+    const effectiveMaxZoom = Math.min(this.maxNativeZoom, 22);
     const ranges = computeAllZoomTileRanges(lat, lon, radiusMeters, effectiveMinZoom, effectiveMaxZoom);
     this.cache.setProtectedKeys(allTileKeysInRanges(ranges));
 

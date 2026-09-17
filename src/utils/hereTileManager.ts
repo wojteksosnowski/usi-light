@@ -110,6 +110,13 @@ export class HereTileManager implements ISatelliteTileManager {
       // jest realnie potrzebny na ekranie — "odciszamy" go niezależnie od tego, czy nadal czeka
       // w kolejce, czy jest już "w locie".
       this.silentKeys.delete(key);
+      const qIdx = this.prefetchQueue.findIndex((item) => item.key === key);
+      if (qIdx > 0) {
+        const [promoted] = this.prefetchQueue.splice(qIdx, 1);
+        if (promoted) {
+          this.prefetchQueue.unshift(promoted);
+        }
+      }
     }
 
     return null;

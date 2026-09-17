@@ -135,7 +135,25 @@ describe('Tile Prefetch Math & Multi-Zoom Caching', () => {
     expect(here.maxNativeZoom).toBe(19);
 
     const wms = new WmsTileManager({ baseUrl: 'http://example.com', layers: 'test' });
-    expect(wms.maxNativeZoom).toBe(19);
+    expect(wms.maxNativeZoom).toBe(21);
+  });
+
+  it('promotes visible viewport tiles to the front of prefetchQueue', () => {
+    const wms = new WmsTileManager({ baseUrl: 'http://example.com', layers: 'test' });
+    // Prefetch some background tiles
+    wms.prefetchAllZoomsInRadius(52.23, 21.01, 100, 18);
+    const queue = (wms as any).prefetchQueue;
+    expect(queue.length).toBeGreaterThan(1);
+
+    // Pick a tile that is deeper in the queue
+    const deepTile = queue[queue.length - 1];
+    expect(deepTile).toBeDefined();
+
+    // Call getTile for the deep tile (visible in current viewport)
+    wms.getTile(deepTile.x, deepTile.y, deepTile.z);
+
+    // Deep tile should have been promoted to index 0 of the prefetchQueue
+    expect(queue[0].key).toBe(deepTile.key);
   });
 
   describe('Cold zoom-level transition (regression: zoom hysteresis cliff)', () => {

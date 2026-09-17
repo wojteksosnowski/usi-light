@@ -1142,7 +1142,7 @@ html, body, #root {
 .iso-compass-label.active {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: #000000;
 }
 
 .iso-compass-tick {
@@ -1154,7 +1154,7 @@ html, body, #root {
 
 .iso-compass-tick.active {
   height: 6px;
-  background-color: var(--text-primary);
+  background-color: #000000;
 }
 
 .building-preview-card {

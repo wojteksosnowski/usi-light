@@ -62,6 +62,7 @@ const orthophotoTileManager = new WmsTileManager({
   layers: 'Image',
   format: 'image/jpeg',
   crs: 'EPSG:3857',
+  maxNativeZoom: 22,
 }, 200, triggerRender);
 
 const kiutTileManager = new WmsTileManager({
@@ -69,6 +70,7 @@ const kiutTileManager = new WmsTileManager({
   layers: 'gesut,przewod_wodociagowy,przewod_kanalizacyjny,przewod_gazowy,przewod_elektroenergetyczny,przewod_cieplowniczy,przewod_telekomunikacyjny,przewod_urzadzenia',
   format: 'image/png',
   crs: 'EPSG:3857',
+  maxNativeZoom: 21,
 }, 200, triggerRender);
 
 const mpzpTileManager = new WmsTileManager({
@@ -76,6 +78,7 @@ const mpzpTileManager = new WmsTileManager({
   layers: 'plany,raster,wektor-str,wektor-pow,granice',
   format: 'image/png',
   crs: 'EPSG:3857',
+  maxNativeZoom: 21,
 }, 200, triggerRender);
 
 const bdotTileManager = new WmsTileManager({
@@ -83,6 +86,7 @@ const bdotTileManager = new WmsTileManager({
   layers: 'bdot',
   format: 'image/png',
   crs: 'EPSG:3857',
+  maxNativeZoom: 21,
 }, 200, triggerRender);
 
 const terrainTileManager = new WmsTileManager({
@@ -90,6 +94,7 @@ const terrainTileManager = new WmsTileManager({
   layers: 'Raster',
   format: 'image/png',
   crs: 'EPSG:3857',
+  maxNativeZoom: 20,
 }, 200, triggerRender);
 
 orthophotoLayer.setTileManager(orthophotoTileManager);
