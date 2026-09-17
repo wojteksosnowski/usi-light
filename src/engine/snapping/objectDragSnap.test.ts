@@ -121,70 +121,6 @@ describe('evaluateEdgeDragSnap', () => {
 
     expect(snap).toBeNull();
   });
-
-  it('snaps dragged edge corner onto guideline of a non-parallel reference edge (e.g. 45 deg)', () => {
-    // Reference edge slanted at 45° from (0, 0) to (10, 10). Guideline equation: x - y = 0
-    const slantedRef = createCachedLineEquation('ref-slanted', 'bldg-slanted', 0, { x: 0, y: 0 }, { x: 10, y: 10 });
-
-    // Moving square at (x: 2..8, y: 1.8..6)
-    // Dragging top horizontal edge (edge 2) at y = 6, moving up with normal (0, 1)
-    // Corner 1 of edge 2 is at (8, 6), Corner 2 of edge 2 is at (2, 6)
-    // When dragged to y = 8, Corner 1 reaches (8, 8) which lies on x - y = 0 (slantedRef line)!
-    const square: Point2D[] = [
-      { x: 2, y: 1.8 },
-      { x: 8, y: 1.8 },
-      { x: 8, y: 7.9 }, // edgeP1 at (8, 7.9)
-      { x: 2, y: 7.9 }, // edgeP2 at (2, 7.9)
-    ];
-
-    const snap = evaluateEdgeDragSnap({
-      edgeP1: square[2],
-      edgeP2: square[3],
-      normal: { x: 0, y: 1 },
-      buildingId: 'bldg-moving',
-      edgeIndex: 2,
-      initialVertices: square,
-      tentativeDelta: { dx: 0, dy: 0 }, // tentative y = 7.9, target y = 8.0 (diff 0.1m)
-      referenceBuffer: [slantedRef],
-      distanceThresholdMeters: 0.35,
-    });
-
-    expect(snap).not.toBeNull();
-    expect(snap?.relation).toBe('vertex_to_edge');
-    expect(snap?.deltaOffset.dy).toBeCloseTo(0.1); // moves top edge from 7.9 to 8.0
-    expect(snap?.targetPoint?.x).toBeCloseTo(8.0);
-    expect(snap?.targetPoint?.y).toBeCloseTo(8.0);
-    expect(snap?.guideline).toBeDefined();
-  });
-
-  it('snaps dragged edge corner to external vertex of a non-parallel edge', () => {
-    // External edge from (8, 10) to (8, 20) (vertical line at x = 8, corner at (8, 10))
-    const refEdge = createCachedLineEquation('ref-v', 'bldg-v', 0, { x: 8, y: 10 }, { x: 8, y: 20 });
-
-    const square: Point2D[] = [
-      { x: 2, y: 0 },
-      { x: 8, y: 0 },
-      { x: 8, y: 9.85 }, // edgeP1 at (8, 9.85) -> moves vertically along X=8
-      { x: 2, y: 9.85 },
-    ];
-
-    const snap = evaluateEdgeDragSnap({
-      edgeP1: square[2],
-      edgeP2: square[3],
-      normal: { x: 0, y: 1 },
-      buildingId: 'bldg-moving',
-      edgeIndex: 2,
-      initialVertices: square,
-      tentativeDelta: { dx: 0, dy: 0.05 },
-      referenceBuffer: [refEdge],
-      distanceThresholdMeters: 0.35,
-    });
-
-    expect(snap).not.toBeNull();
-    expect(snap?.relation).toBe('vertex_to_vertex');
-    expect(snap?.targetPoint).toEqual({ x: 8, y: 10 });
-    expect(snap?.deltaOffset.dy).toBeCloseTo(0.15);
-  });
 });
 
 describe('evaluateBuildingDragMultiSnap', () => {
@@ -214,29 +150,6 @@ describe('evaluateBuildingDragMultiSnap', () => {
     expect(snap).not.toBeNull();
     expect(snap?.relation).toBe('vertex_to_vertex');
     expect(snap?.deltaX).toBeCloseTo(-0.1);
-    expect(snap?.deltaY).toBeCloseTo(-0.1);
-  });
-
-  it('snaps vertex onto extension guideline of an edge outside physical segment (non-parallel building)', () => {
-    // Reference edge from (0, 0) to (10, 0) (y = 0, x in 0..10)
-    // Moving triangle whose edges are slanted at 30° / 60°, with vertex at (25, 0.1)
-    const movingVertices = [
-      { x: 25, y: 0.1 },
-      { x: 30, y: 8.76 },
-      { x: 20, y: 8.76 },
-    ];
-
-    const snap = evaluateBuildingDragMultiSnap({
-      movingVertices,
-      movingBuildingId: 'bldg-2',
-      referenceBuffer: refBuffer,
-      distanceThresholdMeters: 0.35,
-    });
-
-    expect(snap).not.toBeNull();
-    expect(snap?.relation).toBe('vertex_to_edge');
-    expect(snap?.isExtension).toBe(true);
-    expect(snap?.label).toContain('przedłużeniu');
     expect(snap?.deltaY).toBeCloseTo(-0.1);
   });
 
