@@ -13,6 +13,7 @@ import { LandCoverVectorLayer } from './layers/LandCoverVectorLayer';
 import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
+import { APP_CONFIG } from '../../config/appConfig';
 
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';
@@ -103,6 +104,15 @@ mpzpLayer.setTileManager(mpzpTileManager);
 bdotLayer.setTileManager(bdotTileManager);
 terrainLayer.setTileManager(terrainTileManager);
 
+/** Wszystkie serwisy WMS aplikacji. Kolejność wyznacza sekwencję startowego warm-upu bufora. */
+const WMS_TILE_MANAGERS: WmsTileManager[] = [
+  orthophotoTileManager,
+  kiutTileManager,
+  mpzpTileManager,
+  bdotTileManager,
+  terrainTileManager,
+];
+
 /**
  * Prefetchuje (i "przypina" w cache) kafle WMS w zasięgu projektu dla wszystkich aktualnie
  * włączonych warstw GEO (Ortofotomapa/KIUT/MPZP/BDOT/NMT). Wywoływane z `CadCanvas.tsx` przy
@@ -116,6 +126,27 @@ export function prefetchActiveGeoLayersInRadius(lat: number, lon: number, radius
   if (state.showMpzpLayer) mpzpTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
   if (state.showBdotLayer) bdotTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
   if (state.showTerrainLayer) terrainTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+}
+
+/**
+ * Cichy warm-up bufora kafli dla WSZYSTKICH serwisów WMS — CELOWO bez sprawdzania widoczności
+ * warstw (`show*Layer`), żeby kafle czekały w RAM zanim użytkownik włączy warstwę. Pobierane jest
+ * tylko pasmo Z16–Z18 (kilkadziesiąt kafli na serwis), a żądania są rozłożone w czasie, więc
+ * warm-up nie konkuruje z rozruchem aplikacji. Zwraca funkcję anulującą zaplanowane starty.
+ */
+export function prefetchAllGeoLayersWarmup(lat: number, lon: number, radiusMeters: number): () => void {
+  if (!useLicenseStore.getState().isPro) return () => {};
+
+  const { wmsWarmupZoomMin, wmsWarmupZoomMax, wmsWarmupStaggerMs } = APP_CONFIG.geo;
+  const timers: ReturnType<typeof setTimeout>[] = WMS_TILE_MANAGERS.map((manager, index) =>
+    setTimeout(() => {
+      manager.prefetchZoomBandInRadius(lat, lon, radiusMeters, wmsWarmupZoomMin, wmsWarmupZoomMax);
+    }, index * wmsWarmupStaggerMs)
+  );
+
+  return () => {
+    for (const timer of timers) clearTimeout(timer);
+  };
 }
 
 export function registerGeoLayers(): () => void {

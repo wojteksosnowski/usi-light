@@ -10,6 +10,7 @@ import {
 import { useAnalysisWorker } from '@/hooks/useAnalysisWorker';
 import { useSharedProjectLoader } from '@/hooks/useSharedProjectLoader';
 import { registerGeoLayers } from '@/modules/wfs-import/registerGeoLayers';
+import { useGeoTileWarmup } from '@/modules/wfs-import/hooks/useGeoTileWarmup';
 import { normalizeLegacyBuildingTypes } from '@/utils/legacyBuildingType';
 import { AnalysisAccuracyOptions } from '@/engine/analysisEngine';
 import { saveProjectToStorage, sanitizeBuildingForStorage } from '@/utils/projectStorage';
@@ -332,6 +333,12 @@ export function useAppBootstrap() {
       setAnalysisOutput(analysisOutput);
     }
   }, [analysisOutput, setAnalysisOutput]);
+
+  // Cichy warm-up bufora kafli WMS (Z16–Z18) dla wszystkich serwisów, także jeszcze niewłączonych.
+  // Wywołany na końcu hooka, za efektami hydratacji sceny. Pierwszy przebieg i tak widzi
+  // współrzędne sprzed hydratacji — to debounce (i zależności od lat/lon/promienia) sprawia,
+  // że warm-up startuje dopiero, gdy środek projektu się ustabilizuje.
+  useGeoTileWarmup();
 
   return {
     loadStatus,

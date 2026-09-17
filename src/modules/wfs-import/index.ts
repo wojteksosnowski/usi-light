@@ -37,4 +37,5 @@ export {
 } from './services/geoJsonImporter';
 export type { ImportResult } from './services/geoJsonImporter';
 
-export { registerGeoLayers } from './registerGeoLayers';
+export { registerGeoLayers, prefetchAllGeoLayersWarmup } from './registerGeoLayers';
+export { useGeoTileWarmup } from './hooks/useGeoTileWarmup';

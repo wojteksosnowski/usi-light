@@ -11,6 +11,7 @@ import {
   ProtectedLruCache,
   estimateProjectExtentTileSizes,
   ExtentSizeReport,
+  TileRange,
 } from '../../../utils/tilePrefetchMath';
 import { TileZoomHysteresis } from '../../../utils/tileGridProjection';
 
@@ -40,6 +41,12 @@ export class WmsTileManager {
   /** Klucze kafli dociąganych cicho w tle (prefetch) — patrz komentarz w googleTileManager.ts.
    * Trzymane osobno od kolejki, bo kolejka jest opróżniana (shift) w momencie startu pobierania. */
   private silentKeys: Set<string> = new Set();
+  /** Klucze przypięte w cache przez pełny prefetch zasięgu projektu (`extentKeys`) oraz przez
+   * startowy warm-up wąskiego pasma zoomów (`warmupKeys`). `ProtectedLruCache.setProtectedKeys`
+   * NADPISUJE cały zbiór, więc oba źródła muszą być łączone sumą (applyProtectedKeys) — inaczej
+   * warm-up odpiąłby kafle wysokich zoomów pobrane wcześniej dla już włączonej warstwy. */
+  private extentKeys: Set<string> = new Set();
+  private warmupKeys: Set<string> = new Set();
   private readonly maxConcurrentPrefetches = 4;
   private config: WmsTileConfig;
   private onTileLoaded?: () => void;
@@ -157,6 +164,8 @@ export class WmsTileManager {
     this.pending.clear();
     this.prefetchQueue = [];
     this.silentKeys.clear();
+    this.extentKeys.clear();
+    this.warmupKeys.clear();
     this.activePrefetches = 0;
     this.totalBytesLoaded = 0;
   }
@@ -322,17 +331,8 @@ export class WmsTileManager {
     return [minX, minY, maxX, maxY];
   }
 
-  /**
-   * Cichy prefetch kafli dla ustalonego zakresu poziomów zoom (16..20, niezależnie od bieżącego
-   * poziomu widoku) w zadanym promieniu projektu — "przypina" klucze w cache (chroni przed
-   * eviction) i pobiera je w tle za pośrednictwem kolejki z limitem współbieżności.
-   */
-  public prefetchAllZoomsInRadius(lat: number, lon: number, radiusMeters: number, minZoom = 16, _currentZoom?: number) {
-    const effectiveMinZoom = minZoom;
-    const effectiveMaxZoom = Math.min(this.maxNativeZoom, 22);
-    const ranges = computeAllZoomTileRanges(lat, lon, radiusMeters, effectiveMinZoom, effectiveMaxZoom);
-    this.cache.setProtectedKeys(allTileKeysInRanges(ranges));
-
+  /** Kolejkuje ciche pobranie kafli z zadanych zakresów zoomów (bez przerysowania po załadowaniu). */
+  private enqueueSilentTiles(ranges: TileRange[]) {
     for (const range of ranges) {
       for (let tx = range.startTileX; tx <= range.endTileX; tx++) {
         for (let ty = range.startTileY; ty <= range.endTileY; ty++) {
@@ -347,6 +347,45 @@ export class WmsTileManager {
     }
 
     this.processQueue();
+  }
+
+  /** Przypina w cache sumę kluczy zasięgu projektu i warm-upu (setProtectedKeys nadpisuje zbiór). */
+  private applyProtectedKeys() {
+    const merged = new Set<string>(this.extentKeys);
+    for (const key of this.warmupKeys) merged.add(key);
+    this.cache.setProtectedKeys(merged);
+  }
+
+  /**
+   * Cichy prefetch kafli dla ustalonego zakresu poziomów zoom (16..20, niezależnie od bieżącego
+   * poziomu widoku) w zadanym promieniu projektu — "przypina" klucze w cache (chroni przed
+   * eviction) i pobiera je w tle za pośrednictwem kolejki z limitem współbieżności.
+   */
+  public prefetchAllZoomsInRadius(lat: number, lon: number, radiusMeters: number, minZoom = 16, _currentZoom?: number) {
+    const effectiveMinZoom = minZoom;
+    const effectiveMaxZoom = Math.min(this.maxNativeZoom, 22);
+    const ranges = computeAllZoomTileRanges(lat, lon, radiusMeters, effectiveMinZoom, effectiveMaxZoom);
+    this.extentKeys = allTileKeysInRanges(ranges);
+    this.applyProtectedKeys();
+    this.enqueueSilentTiles(ranges);
+  }
+
+  /**
+   * Cichy warm-up WĄSKIEGO pasma poziomów zoom (pasmo startowe konfigurowane w
+   * `APP_CONFIG.geo.wmsWarmupZoomMin/Max`) w zasięgu projektu — napełnia bufor zanim warstwa
+   * zostanie włączona przez użytkownika, żeby pierwsze klatki po włączeniu korzystały z kafli
+   * obecnych w RAM. Dolne poziomy pasma są przydatne niezależnie od bieżącej skali: renderer sięga
+   * po kafel rodzica (zoom - 1) i dziadka (zoom - 2) jako fallback, gdy docelowy jeszcze nie dojechał.
+   */
+  public prefetchZoomBandInRadius(lat: number, lon: number, radiusMeters: number, minZoom: number, maxZoom: number) {
+    const effectiveMinZoom = Math.min(minZoom, this.maxNativeZoom);
+    const effectiveMaxZoom = Math.min(maxZoom, this.maxNativeZoom);
+    if (effectiveMaxZoom < effectiveMinZoom) return;
+
+    const ranges = computeAllZoomTileRanges(lat, lon, radiusMeters, effectiveMinZoom, effectiveMaxZoom);
+    this.warmupKeys = allTileKeysInRanges(ranges);
+    this.applyProtectedKeys();
+    this.enqueueSilentTiles(ranges);
   }
 
   public prefetchTilesInRadius(lat: number, lon: number, radiusMeters: number, currentZoom?: number) {
