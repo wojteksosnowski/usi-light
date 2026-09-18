@@ -48,19 +48,17 @@ export async function fetchDsmBbox(
   coverageId: 'DSM_PL-KRON86-NH' | 'DSM_PL-EVRF2007-NH' = 'DSM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
+  // Use serverless API proxy to avoid browser CORS restrictions on GUGiK WCS
   const params = new URLSearchParams({
-    service: 'WCS',
-    version: '2.0.1',
-    request: 'GetCoverage',
-    CoverageId: coverageId,
-    format: 'image/x-aaigrid',
-    subsettingCRS: 'http://www.opengis.net/def/crs/EPSG/0/2180',
+    coverageId,
+    xmin: String(Math.floor(minX)),
+    ymin: String(Math.floor(minY)),
+    xmax: String(Math.ceil(maxX)),
+    ymax: String(Math.ceil(maxY)),
   });
-  params.append('subset', `x(${Math.floor(minX)},${Math.ceil(maxX)})`);
-  params.append('subset', `y(${Math.floor(minY)},${Math.ceil(maxY)})`);
 
-  const res = await fetch(`${NMPT_WCS_URL}?${params}`, { signal });
-  if (!res.ok) throw new Error(`WCS NMPT (DSM): ${res.status}`);
+  const res = await fetch(`/api/nmt?${params}`, { signal });
+  if (!res.ok) throw new Error(`NMT/NMPT (DSM) proxy: ${res.status}`);
   const text = await res.text();
   return parseAaigrid(text);
 }
@@ -76,19 +74,17 @@ export async function fetchDtmBbox(
   coverageId: 'DTM_PL-KRON86-NH' | 'DTM_PL-EVRF2007-NH' = 'DTM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
+  // Use serverless API proxy to avoid browser CORS restrictions on GUGiK WCS
   const params = new URLSearchParams({
-    service: 'WCS',
-    version: '2.0.1',
-    request: 'GetCoverage',
-    CoverageId: coverageId,
-    format: 'image/x-aaigrid',
-    subsettingCRS: 'http://www.opengis.net/def/crs/EPSG/0/2180',
+    coverageId,
+    xmin: String(Math.floor(minX)),
+    ymin: String(Math.floor(minY)),
+    xmax: String(Math.ceil(maxX)),
+    ymax: String(Math.ceil(maxY)),
   });
-  params.append('subset', `x(${Math.floor(minX)},${Math.ceil(maxX)})`);
-  params.append('subset', `y(${Math.floor(minY)},${Math.ceil(maxY)})`);
 
-  const res = await fetch(`${NMT_WCS_URL}?${params}`, { signal });
-  if (!res.ok) throw new Error(`WCS NMT (DTM): ${res.status}`);
+  const res = await fetch(`/api/nmt?${params}`, { signal });
+  if (!res.ok) throw new Error(`NMT (DTM) proxy: ${res.status}`);
   const text = await res.text();
   return parseAaigrid(text);
 }
