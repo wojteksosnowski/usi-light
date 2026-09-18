@@ -22,17 +22,27 @@ export const ProjectTerrainCard: React.FC = () => {
   const setTerrainMeshOpacity = useWfsStore((s) => s.setTerrainMeshOpacity);
   const terrainMesh = useWfsStore((s) => s.terrainMesh);
 
+  // UI state for generation progress
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
   if (!isPro) return null;
 
   const handleGenerateMesh = async () => {
+    setBusy(true);
+    setError(null);
     try {
       await generateTerrainMesh();
+      // Success — store now has mesh data; hasMesh will be recalculated on next render
     } catch (err) {
-      console.error('Nie udało się wygenerować 3D mesh:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Nie udało się wygenerować mesha: ${msg}`);
+    } finally {
+      setBusy(false);
     }
   };
 
-  // Check if mesh has been generated yet
+  // Check if mesh has been generated yet (re-checked each render since store updates cause re-renders)
   const hasMesh = terrainMesh !== null && terrainMesh.totalVertices > 0;
 
   return (
@@ -107,8 +117,8 @@ export const ProjectTerrainCard: React.FC = () => {
         <button
           type="button"
           onClick={handleGenerateMesh}
-          disabled={!hasMesh ? undefined : true}
-          className={`btn-tile ${hasMesh ? 'inactive' : 'active-cyan'}`}
+          disabled={busy || hasMesh}
+          className={`btn-tile ${!hasMesh && !busy ? 'active-cyan' : 'inactive'}`}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -117,12 +127,34 @@ export const ProjectTerrainCard: React.FC = () => {
             padding: '8px 6px',
             fontSize: '11px',
             fontWeight: 600,
-            cursor: !hasMesh ? 'pointer' : 'default',
+            opacity: busy ? 0.7 : 1,
+            cursor: busy || hasMesh ? 'not-allowed' : 'pointer',
           }}
-          title={hasMesh ? 'Mesh został już wygenerowany' : 'Generuj siatkę 3D z danych NMT GUGiK'}
+          title={
+            busy ? 'Generowanie mesha z danych NMT GUGiK…'
+            : hasMesh ? 'Mesh został już wygenerowany — włacz Wireframe aby zobaczyć'
+            : 'Generuj siatkę 3D z danych NMT GUGiK'
+          }
         >
-          <span>{hasMesh ? 'Mesh wygenerowany ✓' : 'Generuj 3D mesh'}</span>
+          <span>{busy ? 'Generowanie… ⏳' : hasMesh ? 'Mesh wygenerowany ✓' : 'Generuj 3D mesh'}</span>
         </button>
+
+        {/* Error message */}
+        {error && (
+          <div style={{
+            padding: '6px 8px',
+            borderRadius: '6px',
+            backgroundColor: 'var(--status-rose-bg)',
+            border: '1px solid var(--status-rose-border)',
+            fontSize: '10px',
+            color: 'var(--status-rose-text)',
+            lineHeight: '1.3',
+          }}>
+            {error}
+            <br />
+            <em>Pozwól na CORS lub sprawdź połączenie internetowe.</em>
+          </div>
+        )}
       </div>
     </div>
   );

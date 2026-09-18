@@ -1,11 +1,22 @@
 /**
  * Generuje 3D mesh z NMT GUGiK i zapisuje w store.
  * Może być wywołana z dowolnego miejsca w aplikacji (np. onClick handler).
+ *
+ * Używa właściwego odwzorowania Gaussa-Kruegera do EPSG:2180 (POLNIT2000)
+ * dla zapytań do GUGiK WCS NMT DTM.
  */
 
 import { TerrainEngine } from '../../../engine/terrain/TerrainEngine';
 import { fetchDtmBbox, type AaigridData } from './wcsGugikClient';
 import { useWfsStore, type TerrainMeshData } from '../store/useWfsStore';
+import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
+
+const EPSG_2180: CrsDetectionResult = {
+  crs: 'EPSG:2180',
+  description: 'PL-1992',
+  geodeticLabel: 'ETRF2000-PL / CS1992',
+  isGeodetic: true,
+};
 
 export interface MeshGenerationParams {
   latitude?: number;
@@ -13,21 +24,35 @@ export interface MeshGenerationParams {
   radiusMeters?: number;
 }
 
+/**
+ * Pobiera settings z SolarAnalysisStore.
+ * Lazy-loaded aby uniknąć circular dependency.
+ */
+function getSolarSettings() {
+  try {
+    const { useSolarAnalysisStore } = require('../../../store');
+    return useSolarAnalysisStore.getState().settings;
+  } catch {
+    return { latitude: 52.237, longitude: 21.0122 }; // Warszawa default
+  }
+}
+
 export async function generateTerrainMesh(params?: MeshGenerationParams): Promise<TerrainMeshData> {
-  const lat = params?.latitude ?? 52.237;
-  const lon = params?.longitude ?? 21.0122;
+  const solar = getSolarSettings();
+  const lat = params?.latitude ?? solar.latitude;
+  const lon = params?.longitude ?? solar.longitude;
   const radius = params?.radiusMeters ?? 200;
 
-  // Convert to approximate CAD bounding box
-  const metersPerDegLat = 111320;
-  const metersPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
+  // Transform WGS84 lat/lon → EPSG:2180 (Gauss-Kruger)
+  const epsgCenter = wgs84ToCadPoint({ lat, lon }, EPSG_2180);
 
-  const minX = lon * metersPerDegLon - radius;
-  const minY = lat * metersPerDegLat - radius;
-  const maxX = lon * metersPerDegLon + radius;
-  const maxY = lat * metersPerDegLat + radius;
+  // Create bounding box in EPSG:2180 meters around project center
+  const minX = epsgCenter.x - radius;
+  const minY = epsgCenter.y - radius;
+  const maxX = epsgCenter.x + radius;
+  const maxY = epsgCenter.y + radius;
 
-  // Fetch NMT DTM grid from GUGiK WCS
+  // Fetch NMT DTM grid from GUGiK WCS (uses EPSG:2180 subsetting)
   const dtm: AaigridData = await fetchDtmBbox(minX, minY, maxX, maxY);
 
   // Convert Float32Array → Float64Array for TerrainEngine compatibility
@@ -36,18 +61,18 @@ export async function generateTerrainMesh(params?: MeshGenerationParams): Promis
     dataFloat64[i] = dtm.data[i];
   }
 
-  // Build TerrainEngine
+  // Build TerrainEngine — origin at bbox min corner (mesh coords = EPSG:2180 relative)
   const engine = TerrainEngine.fromGrid(
     dataFloat64,
     dtm.ncols,
     dtm.nrows,
-    minX,
-    minY,
+    minX, // XLLCORNER
+    minY, // YLLCORNER
     dtm.cellsize,
     dtm.nodata
   );
 
-  // Generate adaptive mesh
+  // Generate adaptive quadtree mesh
   engine.buildAdaptiveMesh();
 
   // Extract mesh info
