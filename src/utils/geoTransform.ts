@@ -105,6 +105,14 @@ function interpolateEpsg2180(lat: number, lon: number): [number, number] {
 }
 
 /**
+ * WGS84 lat/lon → EPSG:2180 metry (interpolacja na bazie referencyjnych punktów GUGiK).
+ */
+function wgs84ToPl1992(lat: number, lon: number): Point2D {
+  const [x, y] = interpolateEpsg2180(lat, lon);
+  return { x, y };
+}
+
+/**
  * Automatycznie wykrywa układ współrzędnych na podstawie analizy statystycznej wierzchołków.
  */
 export function detectCoordinateSystem(
