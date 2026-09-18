@@ -1,5 +1,8 @@
-const NMPT_WCS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMPT/GRID1/WCS/DigitalSurfaceModel';
+/** Determinuje czy działamy w środowisku browser (może użyć /api/proxy) vs Node/vitest (direct fetch). */
+const isBrowserEnv = typeof window !== 'undefined' && window.location?.origin;
+
 const NMT_WCS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WCS/DigitalTerrainModel';
+const NMPT_WCS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMPT/GRID1/WCS/DigitalSurfaceModel';
 
 export interface AaigridData {
   ncols: number;
@@ -48,7 +51,6 @@ export async function fetchDsmBbox(
   coverageId: 'DSM_PL-KRON86-NH' | 'DSM_PL-EVRF2007-NH' = 'DSM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
-  // Use serverless API proxy to avoid browser CORS restrictions on GUGiK WCS
   const params = new URLSearchParams({
     coverageId,
     xmin: String(Math.floor(minX)),
@@ -57,8 +59,16 @@ export async function fetchDsmBbox(
     ymax: String(Math.ceil(maxY)),
   });
 
-  const res = await fetch(`/api/nmt?${params}`, { signal });
-  if (!res.ok) throw new Error(`NMT/NMPT (DSM) proxy: ${res.status}`);
+  let res: Response;
+  if (isBrowserEnv) {
+    // Browser: use serverless API proxy to avoid CORS restrictions on GUGiK WCS
+    res = await fetch(`/api/nmt?${params}`, { signal });
+    if (!res.ok) throw new Error(`NMT/NMPT (DSM) proxy: ${res.status}`);
+  } else {
+    // Node/vitest: direct fetch (proxy not available in test environment)
+    res = await fetch(`${NMPT_WCS_URL}?${params}`, { signal });
+    if (!res.ok) throw new Error(`WCS NMPT (DSM): ${res.status}`);
+  }
   const text = await res.text();
   return parseAaigrid(text);
 }
@@ -74,7 +84,6 @@ export async function fetchDtmBbox(
   coverageId: 'DTM_PL-KRON86-NH' | 'DTM_PL-EVRF2007-NH' = 'DTM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
-  // Use serverless API proxy to avoid browser CORS restrictions on GUGiK WCS
   const params = new URLSearchParams({
     coverageId,
     xmin: String(Math.floor(minX)),
@@ -83,8 +92,16 @@ export async function fetchDtmBbox(
     ymax: String(Math.ceil(maxY)),
   });
 
-  const res = await fetch(`/api/nmt?${params}`, { signal });
-  if (!res.ok) throw new Error(`NMT (DTM) proxy: ${res.status}`);
+  let res: Response;
+  if (isBrowserEnv) {
+    // Browser: use serverless API proxy to avoid CORS restrictions on GUGiK WCS
+    res = await fetch(`/api/nmt?${params}`, { signal });
+    if (!res.ok) throw new Error(`NMT (DTM) proxy: ${res.status}`);
+  } else {
+    // Node/vitest: direct fetch (proxy not available in test environment)
+    res = await fetch(`${NMT_WCS_URL}?${params}`, { signal });
+    if (!res.ok) throw new Error(`WCS NMT (DTM): ${res.status}`);
+  }
   const text = await res.text();
   return parseAaigrid(text);
 }
