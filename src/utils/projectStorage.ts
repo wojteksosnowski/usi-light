@@ -79,6 +79,10 @@ export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
     areaType,
     buildingType,
     plotNumber,
+    plotId,
+    landUseClass,
+    landUseType,
+    cadastralDetails,
     transform,
     heightSource,
     groupId,
@@ -107,6 +111,10 @@ export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
     areaType,
     buildingType,
     plotNumber,
+    plotId,
+    landUseClass,
+    landUseType,
+    cadastralDetails,
     transform: transform
       ? { tx: transform.tx ?? 0, ty: transform.ty ?? 0, rotationDeg: transform.rotationDeg ?? 0 }
       : { tx: 0, ty: 0, rotationDeg: 0 },

@@ -118,6 +118,16 @@ export interface BuildingLoop {
   category?: ObjectCategory; // Domyślnie 'building' dla zachowania kompatybilności wstecznej
   areaType?: AreaType; // 'plot' (Działka, default) | 'playground' (Plac zabaw) gdy category === 'boundary'
   plotNumber?: string; // Numer działki (np. "124/2") dla kategorii 'boundary' / 'plot'
+  plotId?: string; // Pełny identyfikator TERYT działki ewidencyjnej (np. "146511_8.1007.57/5")
+  landUseClass?: string; // Oznaczenie klasoużytku EGiB (np. "dr", "B", "Bi", "RIVa", "Ls")
+  landUseType?: 'residential' | 'commercial' | 'road' | 'agricultural' | 'forest' | 'recreational' | 'other';
+  cadastralDetails?: {
+    voivodeship?: string;
+    county?: string;
+    commune?: string;
+    region?: string;
+    areaHa?: number;
+  };
   elevation?: number; // Posadowienie / rzędna dolnej krawędzi (m, default 0.0)
   firstFloorHeight?: number; // Wysokość 1. kondygnacji (m) dla kategorii 'building'
   typicalFloorHeight?: number; // Wysokość kondygnacji typowej (m) dla kategorii 'building'

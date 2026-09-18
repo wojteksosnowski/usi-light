@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from 'zustand';
-import { Ruler, Copy, Trash2, Undo2, Redo2, Link2 } from 'lucide-react';
+import { Ruler, Copy, Trash2, Undo2, Redo2, Link2, Paintbrush } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import type { DrawingMode } from '../../store/useCadToolStore';
 import { DRAWING_CREATION_TOOLS, ALIGN_DRAWING_TOOL } from '../toolbar/drawingToolDescriptors';
@@ -45,6 +45,9 @@ export const CadToolBar: React.FC = () => {
   const setIsDimensionToolActive = useCadToolStore((s) => s.setIsDimensionToolActive);
   const setDimensionPendingRef = useCadToolStore((s) => s.setDimensionPendingRef);
 
+  const isProjectBrushActive = useCadToolStore((s) => s.isProjectBrushActive);
+  const setIsProjectBrushActive = useCadToolStore((s) => s.setIsProjectBrushActive);
+
   const selectedBuilding = buildings.find((b) => b.id === selectedBuildingId);
 
   const hasSelection = selectedBuildingIds.length > 0 || selectedBuildingId !== null;
@@ -60,6 +63,7 @@ export const CadToolBar: React.FC = () => {
     }
     setDrawingVerticesCount(0);
     setIsDimensionToolActive(false);
+    setIsProjectBrushActive(false);
     setFacadePointMode(false);
     setIsEditMode(false);
   };
@@ -222,22 +226,42 @@ export const CadToolBar: React.FC = () => {
 
       {renderSeparator()}
 
-      {/* Grupa 4: Miarka / Wymiarowanie */}
-      <button
-        type="button"
-        style={buttonStyle(isDimensionToolActive, 'var(--accent-indigo, #818cf8)', 'rgba(99, 102, 241, 0.25)')}
-        onClick={() => {
-          setIsDimensionToolActive(!isDimensionToolActive);
-          setDimensionPendingRef(null);
-          setDrawingMode('none');
-          setDrawingVerticesCount(0);
-          setFacadePointMode(false);
-          setIsEditMode(false);
-        }}
-        title="Dodaj wymiar liniowy / kątowy"
-      >
-        <Ruler size={14} />
-      </button>
+      {/* Grupa 4: Miarka / Wymiarowanie & Pędzel 'W projekcie' */}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+        <button
+          type="button"
+          style={buttonStyle(isDimensionToolActive, 'var(--accent-indigo, #818cf8)', 'rgba(99, 102, 241, 0.25)')}
+          onClick={() => {
+            setIsDimensionToolActive(!isDimensionToolActive);
+            setIsProjectBrushActive(false);
+            setDimensionPendingRef(null);
+            setDrawingMode('none');
+            setDrawingVerticesCount(0);
+            setFacadePointMode(false);
+            setIsEditMode(false);
+          }}
+          title="Dodaj wymiar liniowy / kątowy"
+        >
+          <Ruler size={14} />
+        </button>
+
+        <button
+          type="button"
+          style={buttonStyle(isProjectBrushActive, 'var(--accent-indigo, #818cf8)', 'rgba(99, 102, 241, 0.25)')}
+          onClick={() => {
+            setIsProjectBrushActive(!isProjectBrushActive);
+            setIsDimensionToolActive(false);
+            setDimensionPendingRef(null);
+            setDrawingMode('none');
+            setDrawingVerticesCount(0);
+            setFacadePointMode(false);
+            setIsEditMode(false);
+          }}
+          title="Pędzel 'W projekcie' [P] — kliknij, aby przełączyć status; przeciągnij, aby dodać obiekty do projektu"
+        >
+          <Paintbrush size={14} />
+        </button>
+      </div>
 
       {renderSeparator()}
 
@@ -277,6 +301,7 @@ export const CadToolBar: React.FC = () => {
               setDrawingMode('none');
               setDrawingVerticesCount(0);
               setIsDimensionToolActive(false);
+              setIsProjectBrushActive(false);
               setFacadePointMode(false);
               setIsEditMode(false);
             }

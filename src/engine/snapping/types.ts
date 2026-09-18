@@ -13,6 +13,7 @@ export type SnapType =
   | 'direction'
   | 'otrack_intersection'
   | 'otrack_ray'
+  | 'nearest'
   | 'grid'
   | 'none';
 
@@ -33,24 +34,34 @@ export interface ToleranceBounds {
 export interface SnapGuideLine {
   p1: Point2D;
   p2: Point2D;
-  type: 'parallel' | 'perpendicular' | 'intersection' | 'extension' | 'dominant' | 'otrack';
+  type: 'parallel' | 'perpendicular' | 'intersection' | 'extension' | 'dominant' | 'otrack' | 'otrack_ray' | 'guide_intersection';
   label?: string;
   sourceOrigin?: Point2D;
   sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number };
+  isStatistical?: boolean;
 }
 
 export interface TrackingRay {
   origin: Point2D;
   angleRad: number;
-  type: 'ortho_h' | 'ortho_v' | 'edge_parallel' | 'edge_perp' | 'dominant';
-  sourceAnchor: AnchorPoint;
+  type?: 'ortho_h' | 'ortho_v' | 'edge_parallel' | 'edge_perp' | 'dominant' | 'horizontal' | 'vertical' | 'parallel' | 'perpendicular';
+  sourceAnchor?: AnchorPoint;
+  anchorId?: string;
   label: string;
+  A: number;
+  B: number;
+  C: number;
+  p1: Point2D;
+  p2: Point2D;
+  isStatistical?: boolean;
 }
 
 export interface AnchorPoint {
   id: string; // np. `anchor_${objectId}_${vertexIndex}`
   point: Point2D;
-  sourceObjectId: string;
+  sourceObjectId?: string;
+  sourceType?: string;
+  sourceBuildingId?: string;
   sourceCategory?: ObjectCategory;
   sourceName?: string;
   sourceVertexIndex?: number;

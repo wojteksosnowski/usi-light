@@ -12,6 +12,7 @@ import {
   Layers,
   Plus,
   Sliders,
+  Paintbrush,
 } from 'lucide-react';
 import { useSceneStore, useCadToolStore } from '../../store';
 import { computeLinearDimension, computeAngularDimension } from '@/utils/math2d';
@@ -85,6 +86,9 @@ export const ToolsGroup: React.FC = () => {
   const toggleDimensionType = useCadToolStore((s) => s.toggleDimensionType);
   const clearAllDimensions = useCadToolStore((s) => s.clearAllDimensions);
 
+  const isProjectBrushActive = useCadToolStore((s) => s.isProjectBrushActive);
+  const setIsProjectBrushActive = useCadToolStore((s) => s.setIsProjectBrushActive);
+
   const isInteracting = useCadToolStore((s) => s.isInteracting);
 
   // Selected building object
@@ -131,6 +135,7 @@ export const ToolsGroup: React.FC = () => {
                   setDrawingMode(drawingMode === tool.mode ? 'none' : tool.mode);
                   setDrawingVerticesCount(0);
                   setIsDimensionToolActive(false);
+                  setIsProjectBrushActive(false);
                   setFacadePointMode(false);
                   setIsEditMode(false);
                 }}
@@ -240,18 +245,20 @@ export const ToolsGroup: React.FC = () => {
             </div>
           )}
 
-          {/* Rząd 3: Wymiar, Punkt fasady */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
+          {/* Rząd 3: Wymiar, Pędzel, Punkt fasady */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '5px' }}>
             <button
               type="button"
               onClick={() => {
                 setIsDimensionToolActive(!isDimensionToolActive);
+                setIsProjectBrushActive(false);
                 setDrawingMode('none');
                 setDrawingVerticesCount(0);
                 setFacadePointMode(false);
+                setIsEditMode(false);
               }}
               className={`btn-tile ${isDimensionToolActive ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
               title="Dodaj wymiar: kliknij 1. i 2. krawędź"
             >
               <Ruler size={13} />
@@ -261,16 +268,36 @@ export const ToolsGroup: React.FC = () => {
             <button
               type="button"
               onClick={() => {
+                setIsProjectBrushActive(!isProjectBrushActive);
+                setIsDimensionToolActive(false);
+                setDrawingMode('none');
+                setDrawingVerticesCount(0);
+                setFacadePointMode(false);
+                setIsEditMode(false);
+              }}
+              className={`btn-tile ${isProjectBrushActive ? 'active-indigo' : 'inactive'}`}
+              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
+              title="Pędzel 'W projekcie': kliknij obiekt, aby przełączyć; przeciągnij, aby dodać"
+            >
+              <Paintbrush size={13} />
+              <span style={{ fontWeight: 600 }}>Pędzel</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
                 setFacadePointMode(!facadePointMode);
+                setIsProjectBrushActive(false);
                 setDrawingMode('none');
                 setIsDimensionToolActive(false);
+                setIsEditMode(false);
               }}
               className={`btn-tile ${facadePointMode ? 'active-indigo' : 'inactive'}`}
-              style={{ justifyContent: 'center', gap: '5px', padding: '8px 6px', fontSize: '11px' }}
+              style={{ justifyContent: 'center', gap: '4px', padding: '8px 4px', fontSize: '11px' }}
               title="Kliknij lub przeciągnij punkt fasady"
             >
               <MapPin size={13} />
-              <span style={{ fontWeight: 600 }}>Punkt fasady</span>
+              <span style={{ fontWeight: 600 }}>Fasada</span>
             </button>
           </div>
 

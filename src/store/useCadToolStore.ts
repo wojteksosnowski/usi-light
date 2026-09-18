@@ -51,6 +51,9 @@ interface CadToolState {
   dimensionType: DimensionType;
   dimensionPendingRef: DimensionReference | null;
 
+  // Project Brush tool ('W projekcie')
+  isProjectBrushActive: boolean;
+
   // Align tool (edge-to-edge)
   alignPendingRef: DimensionReference | null;
 
@@ -98,6 +101,10 @@ interface CadToolState {
   setDimensionPendingRef: (ref: DimensionReference | null) => void;
   handleDimensionClickEdge: (buildingId: string, segmentId: string) => void;
   cancelDimension: () => void;
+
+  // Project Brush actions
+  setIsProjectBrushActive: (active: boolean) => void;
+  toggleProjectBrush: () => void;
 
   // Align tool actions
   setAlignPendingRef: (ref: DimensionReference | null) => void;
@@ -153,6 +160,8 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   dimensionType: 'linear',
   dimensionPendingRef: null,
 
+  isProjectBrushActive: false,
+
   alignPendingRef: null,
 
   viewRotationMode: false,
@@ -162,13 +171,13 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   isInteracting: false,
 
-  setDrawingMode: (mode) => set({ drawingMode: mode }),
+  setDrawingMode: (mode) => set({ drawingMode: mode, isProjectBrushActive: false }),
   setDrawingCategory: (category) => set({ drawingCategory: category }),
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
   setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : DEFAULT_SWEEP_WIDTH) }),
   setSweepAlignment: (alignment) => set({ sweepAlignment: alignment }),
-  setIsEditMode: (active) => set({ isEditMode: active }),
-  setFacadePointMode: (active) => set({ facadePointMode: active }),
+  setIsEditMode: (active) => set({ isEditMode: active, ...(active ? { isProjectBrushActive: false } : {}) }),
+  setFacadePointMode: (active) => set({ facadePointMode: active, ...(active ? { isProjectBrushActive: false } : {}) }),
   setShowModifiersPanel: (show) =>
     set((state) => ({
       showModifiersPanel: typeof show === 'function' ? show(state.showModifiersPanel) : show,
@@ -238,9 +247,46 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
     }));
   },
 
-  setIsDimensionToolActive: (active) => set({ isDimensionToolActive: active, dimensionPendingRef: null }),
+  setIsDimensionToolActive: (active) =>
+    set({
+      isDimensionToolActive: active,
+      dimensionPendingRef: null,
+      ...(active ? { isProjectBrushActive: false } : {}),
+    }),
   setDimensionType: (type) => set({ dimensionType: type }),
   setDimensionPendingRef: (ref) => set({ dimensionPendingRef: ref }),
+
+  setIsProjectBrushActive: (active) =>
+    set({
+      isProjectBrushActive: active,
+      ...(active
+        ? {
+            isDimensionToolActive: false,
+            dimensionPendingRef: null,
+            drawingMode: 'none',
+            drawingVerticesCount: 0,
+            facadePointMode: false,
+            isEditMode: false,
+          }
+        : {}),
+    }),
+  toggleProjectBrush: () =>
+    set((state) => {
+      const nextActive = !state.isProjectBrushActive;
+      return {
+        isProjectBrushActive: nextActive,
+        ...(nextActive
+          ? {
+              isDimensionToolActive: false,
+              dimensionPendingRef: null,
+              drawingMode: 'none',
+              drawingVerticesCount: 0,
+              facadePointMode: false,
+              isEditMode: false,
+            }
+          : {}),
+      };
+    }),
 
   handleDimensionClickEdge: (buildingId, segmentId) => {
     const { dimensionPendingRef, dimensionType } = get();

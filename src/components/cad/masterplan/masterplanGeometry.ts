@@ -1,4 +1,4 @@
-import { Point2D, BuildingLoop } from '../../../types/geometry';
+import { Point2D, BuildingLoop, BuildingType } from '../../../types/geometry';
 import { calculateSolarPosition, LinijkaSolarSystem } from '../../../utils/solar';
 import {
   isPolygonCCW,
@@ -39,6 +39,7 @@ export interface MasterplanStoryTier {
    * żeby nie wymagać jej od miejsc konstruujących tiery ręcznie (np. w testach).
    */
   bldgRef?: BuildingLoop;
+  buildingType?: BuildingType;
 }
 
 /**
@@ -58,6 +59,7 @@ export function extractBuildingStoryTiers(
   const isHovered = bldg.id === hoveredBuildingId;
   const baseElevation = bldg.elevation ?? 0.0;
   const totalHeight = bldg.defaultHeight || 0.0;
+  const defaultBldgType = bldg.buildingType ?? 'residential';
 
   if (Array.isArray(bldg.storyPolygons) && bldg.storyPolygons.length > 0) {
     const tiers: MasterplanStoryTier[] = [];
@@ -76,10 +78,11 @@ export function extractBuildingStoryTiers(
         isSelected,
         isHovered,
         bldgRef: bldg,
+        buildingType: sf.buildingType ?? defaultBldgType,
       });
     }
     if (tiers.length > 0) {
-      // Kolejne kondygnacje z identycznym obrysem (i dziurami) scalamy w jeden tier obejmujący
+      // Kolejne kondygnacje z identycznym obrysem (i dziurami oraz buildingType) scalamy w jeden tier obejmujący
       // pełny zakres wysokości — bezstratne dla cienia (patrz collapseIdenticalConsecutiveHeightRuns),
       // a redukuje liczbę tierów u źródła dla ground/roof rendererów i cache'u.
       return collapseIdenticalConsecutiveHeightRuns(
@@ -88,7 +91,8 @@ export function extractBuildingStoryTiers(
         (t) => t.holes,
         (t) => t.hBottom,
         (t) => t.hTop,
-        (last, hBottom, hTop) => ({ ...last, hBottom, hTop })
+        (last, hBottom, hTop) => ({ ...last, hBottom, hTop }),
+        (t) => t.buildingType
       );
     }
   }
@@ -106,6 +110,7 @@ export function extractBuildingStoryTiers(
         isSelected,
         isHovered,
         bldgRef: bldg,
+        buildingType: defaultBldgType,
       },
     ];
   }

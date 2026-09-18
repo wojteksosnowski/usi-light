@@ -1,17 +1,25 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Point2D, BuildingLoop } from '../../../types/geometry';
+import { useOsmLanduseStore } from './useOsmLanduseStore';
 
 export interface WfsTreeFeature {
-  id: number;
+  id: number | string;
   position: Point2D;
-  inventoryNumber: string;
-  namePolish: string;
-  nameLatin: string;
-  height: number;
-  trunkCircumference: string;
-  managingUnit: string;
-  updatedAt: string;
+  inventoryNumber?: string;
+  namePolish?: string;
+  nameLatin?: string;
+  genus?: string;
+  height?: number;
+  trunkCircumference?: string;
+  crownDiameter?: number;
+  leafType?: string;
+  leafCycle?: string;
+  isMonument?: boolean;
+  source?: 'wfs-warsaw' | 'osm' | 'user';
+  tags?: Record<string, string>;
+  managingUnit?: string;
+  updatedAt?: string;
 }
 
 /** Cecha liniowa (drogi/koleje) z tematu Overture `transportation`, we współrzędnych CAD lokalnych. */
@@ -353,6 +361,9 @@ export const useWfsStore = create<WfsState>()(
         ...tree,
         position: { x: tree.position.x + delta.x, y: tree.position.y + delta.y },
       }));
+
+      // 5. OSM Landuse
+      useOsmLanduseStore.getState().shiftFeatures(delta);
 
       return {
         overtureGreenAreas,

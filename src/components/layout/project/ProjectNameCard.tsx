@@ -84,6 +84,9 @@ export const ProjectNameCard: React.FC = () => {
 
   useEffect(() => {
     refreshList();
+    const handleUpdated = () => refreshList();
+    window.addEventListener('usi-projects-updated', handleUpdated);
+    return () => window.removeEventListener('usi-projects-updated', handleUpdated);
   }, [refreshList]);
 
   const handleSaveCurrentProject = () => {

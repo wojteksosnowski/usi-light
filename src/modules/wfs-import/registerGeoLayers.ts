@@ -10,9 +10,12 @@ import { ParcelLoadingPreviewLayer } from './layers/ParcelLoadingPreviewLayer';
 import { OvertureContextLayer } from './layers/OvertureContextLayer';
 import { MpzpZonesVectorLayer } from './layers/MpzpZonesVectorLayer';
 import { LandCoverVectorLayer } from './layers/LandCoverVectorLayer';
+import { OsmLanduseVectorLayer } from './layers/OsmLanduseVectorLayer';
 import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
+import { useOsmLanduseStore } from './store/useOsmLanduseStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
+import { APP_CONFIG } from '../../config/appConfig';
 
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';
@@ -56,6 +59,7 @@ const parcelLoadingPreviewLayer = new ParcelLoadingPreviewLayer();
 const overtureContextLayer = new OvertureContextLayer();
 const mpzpZonesVectorLayer = new MpzpZonesVectorLayer();
 const landCoverVectorLayer = new LandCoverVectorLayer();
+const osmLanduseVectorLayer = new OsmLanduseVectorLayer();
 
 const orthophotoTileManager = new WmsTileManager({
   baseUrl: ORTO_WMS_URL,
@@ -103,6 +107,15 @@ mpzpLayer.setTileManager(mpzpTileManager);
 bdotLayer.setTileManager(bdotTileManager);
 terrainLayer.setTileManager(terrainTileManager);
 
+/** Wszystkie serwisy WMS aplikacji. Kolejność wyznacza sekwencję startowego warm-upu bufora. */
+const WMS_TILE_MANAGERS: WmsTileManager[] = [
+  orthophotoTileManager,
+  kiutTileManager,
+  mpzpTileManager,
+  bdotTileManager,
+  terrainTileManager,
+];
+
 /**
  * Prefetchuje (i "przypina" w cache) kafle WMS w zasięgu projektu dla wszystkich aktualnie
  * włączonych warstw GEO (Ortofotomapa/KIUT/MPZP/BDOT/NMT). Wywoływane z `CadCanvas.tsx` przy
@@ -116,6 +129,27 @@ export function prefetchActiveGeoLayersInRadius(lat: number, lon: number, radius
   if (state.showMpzpLayer) mpzpTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
   if (state.showBdotLayer) bdotTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
   if (state.showTerrainLayer) terrainTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
+}
+
+/**
+ * Cichy warm-up bufora kafli dla WSZYSTKICH serwisów WMS — CELOWO bez sprawdzania widoczności
+ * warstw (`show*Layer`), żeby kafle czekały w RAM zanim użytkownik włączy warstwę. Pobierane jest
+ * tylko pasmo Z16–Z18 (kilkadziesiąt kafli na serwis), a żądania są rozłożone w czasie, więc
+ * warm-up nie konkuruje z rozruchem aplikacji. Zwraca funkcję anulującą zaplanowane starty.
+ */
+export function prefetchAllGeoLayersWarmup(lat: number, lon: number, radiusMeters: number): () => void {
+  if (!useLicenseStore.getState().isPro) return () => {};
+
+  const { wmsWarmupZoomMin, wmsWarmupZoomMax, wmsWarmupStaggerMs } = APP_CONFIG.geo;
+  const timers: ReturnType<typeof setTimeout>[] = WMS_TILE_MANAGERS.map((manager, index) =>
+    setTimeout(() => {
+      manager.prefetchZoomBandInRadius(lat, lon, radiusMeters, wmsWarmupZoomMin, wmsWarmupZoomMax);
+    }, index * wmsWarmupStaggerMs)
+  );
+
+  return () => {
+    for (const timer of timers) clearTimeout(timer);
+  };
 }
 
 export function registerGeoLayers(): () => void {
@@ -277,14 +311,42 @@ export function registerGeoLayers(): () => void {
       changed = true;
     }
 
+    // 12. Zagospodarowanie terenu OSM (Landuse)
+    const osmState = useOsmLanduseStore.getState();
+    const osmFeaturesLen = osmState.features.length;
+    const layersSig = osmState.layers
+      .map((l) => `${l.id}:${l.isVisible ? 1 : 0}:${l.opacity}:${l.color}:${l.strokeColor}`)
+      .join('|');
+    const layersChanged = layersSig !== prevOsmLayersSig;
+    if (layersChanged) prevOsmLayersSig = layersSig;
+
+    osmLanduseVectorLayer.setData(osmState.features, osmState.layers);
+    osmLanduseVectorLayer.setVisibility(osmState.showOsmLanduseGroup);
+    const shouldShowOsmLanduse = osmState.showOsmLanduseGroup && osmFeaturesLen > 0;
+
+    if (shouldShowOsmLanduse !== prevShowOsmLanduse || osmFeaturesLen !== prevOsmLanduseLen) {
+      toggleMainLayer(pipeline, osmLanduseVectorLayer, 'wfs_osm_landuse_vector', shouldShowOsmLanduse, prevShowOsmLanduse);
+      prevShowOsmLanduse = shouldShowOsmLanduse;
+      prevOsmLanduseLen = osmFeaturesLen;
+      changed = true;
+    } else if (shouldShowOsmLanduse && layersChanged) {
+      changed = true;
+    }
+
     if (changed) triggerRender();
   };
 
+  let prevShowOsmLanduse = false;
+  let prevOsmLanduseLen = 0;
+  let prevOsmLayersSig = '';
+
   const unsubWfs = useWfsStore.subscribe(updateLayers);
+  const unsubOsm = useOsmLanduseStore.subscribe(updateLayers);
   const unsubLicense = useLicenseStore.subscribe(updateLayers);
 
   return () => {
     unsubWfs();
+    unsubOsm();
     unsubLicense();
     pipeline.unregisterMainLayer('wfs_orthophoto');
     pipeline.unregisterMainLayer('wfs_kiut_overlay');
@@ -296,6 +358,7 @@ export function registerGeoLayers(): () => void {
     pipeline.unregisterMainLayer('wfs_overture_context');
     pipeline.unregisterMainLayer('wfs_mpzp_zones_vector');
     pipeline.unregisterMainLayer('wfs_land_cover_vector');
+    pipeline.unregisterMainLayer('wfs_osm_landuse_vector');
     registered = false;
   };
 }

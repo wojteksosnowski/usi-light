@@ -9,6 +9,7 @@ import {
 import { GoogleTileManager } from '../src/utils/googleTileManager';
 import { HereTileManager } from '../src/utils/hereTileManager';
 import { WmsTileManager } from '../src/modules/wfs-import/renderers/wmsTileManager';
+import { APP_CONFIG } from '../src/config/appConfig';
 
 class MockImage {
   public crossOrigin = '';
@@ -261,5 +262,132 @@ describe('Tile Prefetch Math & Multi-Zoom Caching', () => {
         expect(wms.getTileFromMemory(t.x, t.y, t.z)).not.toBeNull();
       }
     });
+  });
+});
+
+/**
+ * Startowy warm-up bufora kafli WMS: pasmo Z16–Z18 pobierane dla wszystkich serwisów, zanim
+ * użytkownik włączy warstwę (patrz `registerGeoLayers.prefetchAllGeoLayersWarmup`).
+ * Pasmo jest czytane z `APP_CONFIG.geo`, żeby testy podążały za konfiguracją — produkcyjną
+ * wartość (16/18) pilnuje osobno `test/wms_warmup_all_services.test.ts`.
+ */
+describe('Startup WMS warmup (pasmo Z16–Z18)', () => {
+  const warsawLat = 52.2297;
+  const warsawLon = 21.0122;
+  const warsawRadius = 200;
+
+  const warmupMinZoom = APP_CONFIG.geo.wmsWarmupZoomMin;
+  const warmupMaxZoom = APP_CONFIG.geo.wmsWarmupZoomMax;
+  const warmupZooms = new Set(
+    Array.from({ length: warmupMaxZoom - warmupMinZoom + 1 }, (_, i) => warmupMinZoom + i)
+  );
+
+  /** Klucze kafli, które warm-up powinien objąć dla pasma z konfiguracji. */
+  function expectedWarmupKeys(lat: number, lon: number, radius: number) {
+    return allTileKeysInRanges(computeAllZoomTileRanges(lat, lon, radius, warmupMinZoom, warmupMaxZoom));
+  }
+
+  /** Aktualny zbiór kluczy przypiętych w cache (applyProtectedKeys podstawia nową instancję Set). */
+  function readProtectedKeys(wms: WmsTileManager): Set<string> {
+    return (wms as any).cache.protectedKeys as Set<string>;
+  }
+
+  function readQueue(wms: WmsTileManager): { x: number; y: number; z: number; key: string }[] {
+    return (wms as any).prefetchQueue;
+  }
+
+  /** Czeka aż mock Image rozładuje całą kolejkę prefetchu (onload idzie przez mikrozadania).
+   * Przy ~38 kaflach na serwis (pasmo Z16–Z18, promień 200 m) i współbieżności 4 potrzeba
+   * ~10 rund mikrozadań, więc zapas jest kilkukrotny. */
+  async function drainPrefetch(rounds = 32) {
+    for (let i = 0; i < rounds; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  it('kolejkuje wyłącznie pasmo warm-upu — bez poziomów powyżej (Z19..maxNativeZoom)', () => {
+    const wms = new WmsTileManager({ baseUrl: 'http://example.com/wms', layers: 'test' });
+    // Blokujemy dispatch (limit współbieżności), żeby cała kolejka została do inspekcji.
+    (wms as any).activePrefetches = 99;
+
+    wms.prefetchZoomBandInRadius(warsawLat, warsawLon, warsawRadius, warmupMinZoom, warmupMaxZoom);
+
+    const queue = readQueue(wms);
+    const expected = expectedWarmupKeys(warsawLat, warsawLon, warsawRadius);
+    expect(expected.size).toBeGreaterThan(0);
+    expect(queue.length).toBe(expected.size);
+    expect(new Set(queue.map((t) => t.z))).toEqual(warmupZooms);
+    expect(queue.every((t) => expected.has(t.key))).toBe(true);
+  });
+
+  it('przycina pasmo do maxNativeZoom serwisu (Z18 odpada przy limicie 17)', () => {
+    const wms = new WmsTileManager({
+      baseUrl: 'http://example.com/nmt',
+      layers: 'Raster',
+      maxNativeZoom: warmupMaxZoom - 1,
+    });
+    (wms as any).activePrefetches = 99;
+
+    wms.prefetchZoomBandInRadius(warsawLat, warsawLon, warsawRadius, warmupMinZoom, warmupMaxZoom + 3);
+
+    const clamped = new Set([...warmupZooms].filter((z) => z < warmupMaxZoom));
+    expect(new Set(readQueue(wms).map((t) => t.z))).toEqual(clamped);
+  });
+
+  it('napełnia bufor: kafle Z16–Z18 są czytelne z pamięci bez kolejnych żądań sieciowych', async () => {
+    const wms = new WmsTileManager({ baseUrl: 'http://example.com/wms', layers: 'test' }, 200);
+
+    wms.prefetchZoomBandInRadius(warsawLat, warsawLon, warsawRadius, warmupMinZoom, warmupMaxZoom);
+    await drainPrefetch();
+
+    const expected = expectedWarmupKeys(warsawLat, warsawLon, warsawRadius);
+    expect(expected.size).toBeGreaterThan(0);
+    for (const key of expected) {
+      const [z, x, y] = key.split('/').map(Number);
+      expect(wms.getTileFromMemory(x, y, z), `brak kafla ${key} w buforze`).not.toBeNull();
+    }
+  });
+
+  it('warm-up jest cichy: nie wywołuje onTileLoaded, więc nie przerysowuje pipeline', async () => {
+    const onTileLoaded = vi.fn();
+    const wms = new WmsTileManager({ baseUrl: 'http://example.com/wms', layers: 'test' }, 200, onTileLoaded);
+
+    wms.prefetchZoomBandInRadius(warsawLat, warsawLon, warsawRadius, warmupMinZoom, warmupMaxZoom);
+    await drainPrefetch();
+
+    expect(onTileLoaded).not.toHaveBeenCalled();
+  });
+
+  it('nie odpina kluczy pełnego zasięgu (Z19+) przypiętych wcześniej dla włączonej warstwy', () => {
+    const wms = new WmsTileManager({ baseUrl: 'http://example.com/wms', layers: 'test' });
+
+    // Pełny prefetch zasięgu projektu (tak jak dla już włączonej warstwy): przypina 16..maxNativeZoom
+    wms.prefetchAllZoomsInRadius(warsawLat, warsawLon, 100, 16);
+    const deepKey = [...readProtectedKeys(wms)].find((key) => key.startsWith('20/'));
+    expect(deepKey).toBeDefined();
+
+    // Warm-up wąskiego pasma NIE może zastąpić całego zbioru przypięć (setProtectedKeys nadpisuje)
+    wms.prefetchZoomBandInRadius(warsawLat, warsawLon, 100, warmupMinZoom, warmupMaxZoom);
+
+    const protectedKeys = readProtectedKeys(wms);
+    expect(protectedKeys.has(deepKey!)).toBe(true);
+    for (const key of expectedWarmupKeys(warsawLat, warsawLon, 100)) {
+      expect(protectedKeys.has(key), `warm-up powinien przypiąć ${key}`).toBe(true);
+    }
+  });
+
+  it('ponowny warm-up w nowej lokalizacji odpina stare klucze (brak wycieku pojemności cache)', () => {
+    const wms = new WmsTileManager({ baseUrl: 'http://example.com/wms', layers: 'test' });
+
+    wms.prefetchZoomBandInRadius(warsawLat, warsawLon, warsawRadius, warmupMinZoom, warmupMaxZoom);
+    const warsawKeys = [...readProtectedKeys(wms)];
+    expect(warsawKeys.length).toBeGreaterThan(0);
+
+    // Przeniesienie projektu do Krakowa — całkowicie inny zestaw kafli
+    wms.prefetchZoomBandInRadius(50.0647, 19.945, warsawRadius, warmupMinZoom, warmupMaxZoom);
+    const krakowKeys = readProtectedKeys(wms);
+
+    expect(krakowKeys.size).toBeGreaterThan(0);
+    expect(warsawKeys.every((key) => !krakowKeys.has(key))).toBe(true);
   });
 });

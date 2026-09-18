@@ -257,6 +257,61 @@ export const ObjectEditorSection: React.FC = () => {
                   />
                 </div>
 
+                {selectedBuilding.plotId && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                      Identyfikator działki
+                    </label>
+                    <div
+                      title="Kliknij, aby skopiować pełny identyfikator TERYT"
+                      onClick={() => {
+                        if (selectedBuilding.plotId) {
+                          navigator.clipboard?.writeText(selectedBuilding.plotId);
+                        }
+                      }}
+                      style={{
+                        maxWidth: '180px',
+                        backgroundColor: 'var(--bg-card-hover)',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: '6px',
+                        padding: '4px 8px',
+                        color: 'var(--text-primary)',
+                        fontSize: '11px',
+                        fontFamily: 'monospace',
+                        textAlign: 'right',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        cursor: 'copy',
+                        userSelect: 'all',
+                      }}
+                    >
+                      {selectedBuilding.plotId}
+                    </div>
+                  </div>
+                )}
+
+                {selectedBuilding.landUseClass && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                      Przeznaczenie / użytek
+                    </label>
+                    <div
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        backgroundColor: selectedBuilding.landUseType === 'road' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                        border: `1px solid ${selectedBuilding.landUseType === 'road' ? 'rgba(56, 189, 248, 0.35)' : 'rgba(234, 179, 8, 0.35)'}`,
+                        color: selectedBuilding.landUseType === 'road' ? 'var(--accent-cyan)' : 'var(--accent-amber)',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {selectedBuilding.landUseClass} {selectedBuilding.landUseType ? `(${selectedBuilding.landUseType === 'road' ? 'Drogowa' : selectedBuilding.landUseType === 'residential' ? 'Mieszkaniowa' : selectedBuilding.landUseType === 'commercial' ? 'Usługowa/Przemysłowa' : selectedBuilding.landUseType === 'agricultural' ? 'Rolna' : selectedBuilding.landUseType === 'forest' ? 'Leśna' : 'Inna'})` : ''}
+                    </div>
+                  </div>
+                )}
+
                 <div
                   style={{
                     padding: '8px 10px',

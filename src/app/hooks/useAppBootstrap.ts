@@ -9,7 +9,7 @@ import {
 } from '@/store';
 import { useAnalysisWorker } from '@/hooks/useAnalysisWorker';
 import { useSharedProjectLoader } from '@/hooks/useSharedProjectLoader';
-import { registerGeoLayers } from '@/modules/wfs-import/registerGeoLayers';
+import { registerGeoLayers, useGeoTileWarmup } from '@/modules/wfs-import';
 import { normalizeLegacyBuildingTypes } from '@/utils/legacyBuildingType';
 import { AnalysisAccuracyOptions } from '@/engine/analysisEngine';
 import { saveProjectToStorage, sanitizeBuildingForStorage } from '@/utils/projectStorage';
@@ -65,6 +65,9 @@ export function useAppBootstrap() {
   useEffect(() => {
     registerGeoLayers();
   }, []);
+
+  // Cichy warm-up bufora kafli WMS dla wszystkich serwisów (Z16-Z18)
+  useGeoTileWarmup();
 
   // Scene Store
   const buildings = useSceneStore((s) => s.buildings);
@@ -181,78 +184,88 @@ export function useAppBootstrap() {
     }
   }, [loadSceneData, setSettings, setPinnedPoints, setActivePinnedPointId]);
 
-  // LocalStorage Persistence (Save on update)
+  // LocalStorage Persistence (Debounced Save on update, skipping when isInteracting)
   useEffect(() => {
     if (!sceneHydratedRef.current) return;
     if (new URLSearchParams(window.location.search).get('perfScene')) return;
-    const scene: SavedSceneData = {
-      version: 1,
-      buildings: buildings.map(sanitizeBuildingForStorage),
-      selectedBuildingId,
-      pinnedPoints,
-      activePinnedPointId,
-      settings,
-      layerSettings,
-      dxfUnit,
-      dxfImportInfo,
-      viewRotationDeg,
-      savedViewRotationDeg,
-      sunlightMethod,
-      activePointMode,
-      selectedCity,
-      mapsInput,
-      mapsParseError,
-    };
+    if (isInteracting) return; // Nie zapisujemy podczas przeciągania myszą / animacji
 
-    try {
-      localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(scene));
-    } catch (err) {
-      console.warn('Nie udało się zapisać bieżącego stanu sceny (localStorage):', err);
-    }
+    const timer = setTimeout(() => {
+      const scene: SavedSceneData = {
+        version: 1,
+        buildings: buildings.map(sanitizeBuildingForStorage),
+        selectedBuildingId,
+        pinnedPoints,
+        activePinnedPointId,
+        settings,
+        layerSettings,
+        dxfUnit,
+        dxfImportInfo,
+        viewRotationDeg,
+        savedViewRotationDeg,
+        sunlightMethod,
+        activePointMode,
+        selectedCity,
+        mapsInput,
+        mapsParseError,
+      };
 
-    if (currentProjectId) {
       try {
-        saveProjectToStorage(
-          {
-            name: projectName.trim() || `Projekt ${selectedCity || 'Światło'}`,
-            version: 1,
-            scene: {
-              buildings,
-              selectedBuildingId,
-              layerSettings,
-              pinnedPoints,
-              activePinnedPointId,
-              dimensions,
-              dxfUnit,
-              dxfImportInfo,
-            },
-            solar: {
-              settings,
-              selectedCity,
-              mapsInput,
-              mapsParseError,
-              sunlightMethod,
-              showNormals,
-              showShadowingLines,
-              showSunlightLines,
-              showShadowRange,
-              showShadowFill,
-              showSatelliteLayer,
-              satelliteOpacity,
-              activePointMode,
-            },
-            viewport: {
-              viewRotationDeg,
-              savedViewRotationDeg,
-            },
-          },
-          currentProjectId
-        );
+        localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(scene));
       } catch (err) {
-        console.warn('Nie udało się zaktualizować projektu w tle:', err);
+        console.warn('Nie udało się zapisać bieżącego stanu sceny (localStorage):', err);
       }
-    }
+
+      if (currentProjectId) {
+        try {
+          saveProjectToStorage(
+            {
+              name: projectName.trim() || `Projekt ${selectedCity || 'Światło'}`,
+              version: 1,
+              scene: {
+                buildings,
+                selectedBuildingId,
+                layerSettings,
+                pinnedPoints,
+                activePinnedPointId,
+                dimensions,
+                dxfUnit,
+                dxfImportInfo,
+              },
+              solar: {
+                settings,
+                selectedCity,
+                mapsInput,
+                mapsParseError,
+                sunlightMethod,
+                showNormals,
+                showShadowingLines,
+                showSunlightLines,
+                showShadowRange,
+                showShadowFill,
+                showSatelliteLayer,
+                satelliteOpacity,
+                activePointMode,
+              },
+              viewport: {
+                viewRotationDeg,
+                savedViewRotationDeg,
+              },
+            },
+            currentProjectId
+          );
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('usi-projects-updated'));
+          }
+        } catch (err) {
+          console.warn('Nie udało się zaktualizować projektu w tle:', err);
+        }
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
   }, [
+    isInteracting,
     currentProjectId,
     projectName,
     buildings,

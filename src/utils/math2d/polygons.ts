@@ -778,7 +778,7 @@ export function differencePolygonLoops(
 
   for (const posLoop of positiveLoops) {
     const pb = computePointsBoundingBox(posLoop);
-    const relevant: Point2D[] = [];
+    const relevant: Point2D[][] = [];
     for (let j = 0; j < overlappingNegatives.length; j++) {
       const nb = negBoxes[j];
       if (!(nb.maxX < pb.minX || nb.minX > pb.maxX || nb.maxY < pb.minY || nb.minY > pb.maxY)) {
@@ -1243,18 +1243,27 @@ export function collapseIdenticalConsecutiveHeightRuns<T>(
   getHoles: (item: T) => Point2D[][] | undefined,
   getHBottom: (item: T) => number,
   getHTop: (item: T) => number,
-  withMergedRange: (last: T, hBottom: number, hTop: number) => T
+  withMergedRange: (last: T, hBottom: number, hTop: number) => T,
+  extraKey?: (item: T) => string | boolean | number | undefined
 ): T[] {
   if (items.length <= 1) return items;
 
   const result: T[] = [];
   let runStart = items[0];
-  let runStartFingerprint = ringFingerprint(getPolygon(runStart)) + '#' + holesFingerprint(getHoles(runStart));
+  let runStartFingerprint =
+    ringFingerprint(getPolygon(runStart)) +
+    '#' +
+    holesFingerprint(getHoles(runStart)) +
+    (extraKey ? '#' + String(extraKey(runStart)) : '');
   let runLast = runStart;
 
   for (let i = 1; i < items.length; i++) {
     const curr = items[i];
-    const currFingerprint = ringFingerprint(getPolygon(curr)) + '#' + holesFingerprint(getHoles(curr));
+    const currFingerprint =
+      ringFingerprint(getPolygon(curr)) +
+      '#' +
+      holesFingerprint(getHoles(curr)) +
+      (extraKey ? '#' + String(extraKey(curr)) : '');
     const contiguous = Math.abs(getHTop(runLast) - getHBottom(curr)) < 0.001;
 
     if (contiguous && currFingerprint === runStartFingerprint) {

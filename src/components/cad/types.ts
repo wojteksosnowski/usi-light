@@ -97,6 +97,8 @@ export interface CadCanvasProps {
   dimensionType?: DimensionType;
   dimensionPendingRef?: DimensionReference | null;
   onDimensionClickEdge?: (buildingId: string, segmentId: string) => void;
+  isProjectBrushActive?: boolean;
+  onUpdateBuilding?: (buildingId: string, patch: Partial<BuildingLoop>) => void;
   alignPendingRef?: DimensionReference | null;
   onAlignClickEdge?: (selectedBuildingId: string, buildingId: string, segmentId: string) => void;
   onDeleteDimension?: (id: string) => void;

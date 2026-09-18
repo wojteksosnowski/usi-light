@@ -1,6 +1,6 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
-import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
+import { SnapContext, SnapResult, SnapStrategy, SnapGuideLine, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
 
 /**
  * PerpendicularSnapStrategy - Wykrywa punkt rzutu prostopadłego z punktu bazowego
@@ -55,7 +55,7 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
         const displayName = edge.objectName || edge.objectId;
         const isOnSegment = proj.isOnSegment;
 
-        const guideLines: { p1: Point2D; p2: Point2D; type?: 'perpendicular' | 'extension' | 'parallel' | 'dominant' }[] = [
+        const guideLines: SnapGuideLine[] = [
           { p1: origin, p2: perpPt, type: 'perpendicular' },
           { p1: edge.p1, p2: edge.p2, type: 'perpendicular' },
         ];

@@ -80,6 +80,16 @@ export interface SharedBuildingV2 {
   category?: ObjectCategory; // default 'building'
   areaType?: AreaType;
   plotNumber?: string;
+  plotId?: string;
+  landUseClass?: string;
+  landUseType?: 'residential' | 'commercial' | 'road' | 'agricultural' | 'forest' | 'recreational' | 'other';
+  cadastralDetails?: {
+    voivodeship?: string;
+    county?: string;
+    commune?: string;
+    region?: string;
+    areaHa?: number;
+  };
   elevation?: number; // default 0.0
   firstFloorHeight?: number; // default 3.5
   typicalFloorHeight?: number; // default 3.0

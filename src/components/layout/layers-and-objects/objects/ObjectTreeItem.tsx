@@ -55,8 +55,8 @@ export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
   };
 
   const vStyles = getVariantStyles();
-  const displayName = variant === 'plot' && item.plotNumber
-    ? `Działka ${item.plotNumber}`
+  const displayName = (variant === 'plot' && item.plotNumber)
+    ? item.plotNumber
     : item.name;
 
   return (

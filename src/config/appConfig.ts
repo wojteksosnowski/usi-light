@@ -175,6 +175,16 @@ export const APP_CONFIG = {
     wmsClipToProjectRadius: true,
     // Pomiń kafelki WMS całkowicie poza okręgiem zasięgu (oszczędność sieci)
     wmsTileCullingEnabled: true,
+    // Ciche rozgrzanie bufora kafli WMS przy starcie: Z18 to poziom roboczy widoku po dopasowaniu
+    // do promienia projektu (dla 200 m exactZoom ≈ 18,1), a Z17/Z16 to fallbacki rodzica i dziadka,
+    // po które sięga renderer (renderWmsOverlay), gdy docelowy kafel jeszcze nie dojechał.
+    wmsWarmupZoomMin: 16,
+    wmsWarmupZoomMax: 18,
+    // Odstęp między startem pobierania kolejnych serwisów WMS — rozkłada w czasie ~190 żądań
+    // (promień 200 m) zamiast jednego zrywu sieciowego przy rozruchu aplikacji.
+    wmsWarmupStaggerMs: 250,
+    // Debounce warm-upu: od ostatniej zmiany środka/promienia projektu (i hydratacji sceny).
+    wmsWarmupDelayMs: 1200,
     // Liczba równoległych zapytań do NMT REST API (GUGiK) przy pobieraniu rzędnych terenu
     nmtConcurrency: 8,
     // Fallback NMT: użyj Open-Elevation SRTM jeśli GUGiK niedostępny

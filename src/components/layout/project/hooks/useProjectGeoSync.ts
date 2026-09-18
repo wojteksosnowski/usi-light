@@ -32,6 +32,9 @@ import { latLonToBbox } from '../../../../modules/wfs-import/services/geocoding'
 import { detectCoordinateSystem, CrsDetectionResult, LatLon, wgs84ToCadPoint } from '../../../../utils/geoTransform';
 import { parseGoogleMapsCoordinates } from '../../../../utils/geoParser';
 import { BuildingLoop } from '../../../../types/geometry';
+import { fetchOsmBuildings } from '../../../../modules/wfs-import/services/osmBuildingsClient';
+
+import { useOsmLanduseStore } from '../../../../modules/wfs-import/store/useOsmLanduseStore';
 
 export const useProjectGeoSync = () => {
   const buildings = useSceneStore((s) => s.buildings);
@@ -63,9 +66,15 @@ export const useProjectGeoSync = () => {
   const status = useWfsStore((s) => s.status);
   const setStatus = useWfsStore((s) => s.setStatus);
 
+  const showOsmLanduseGroup = useOsmLanduseStore((s) => s.showOsmLanduseGroup);
+  const setShowOsmLanduseGroup = useOsmLanduseStore((s) => s.setShowOsmLanduseGroup);
+  const osmFeatures = useOsmLanduseStore((s) => s.features);
+  const fetchOsmLanduseAction = useOsmLanduseStore((s) => s.fetchLanduse);
+
   const [overtureLoading, setOvertureLoading] = React.useState(false);
   const [mpzpZonesLoading, setMpzpZonesLoading] = React.useState(false);
   const [landCoverLoading, setLandCoverLoading] = React.useState(false);
+  const [osmLanduseLoading, setOsmLanduseLoading] = React.useState(false);
   const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
 
   /**
@@ -80,6 +89,7 @@ export const useProjectGeoSync = () => {
     const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
     const delta = wgs84ToCadPoint({ lat: oldLat, lon: oldLon }, projectCrs, { lat: newLat, lon: newLon });
     useWfsStore.getState().shiftVectorLayers(delta);
+    useOsmLanduseStore.getState().shiftFeatures(delta);
 
     setSettings((prev) => ({
       ...prev,
@@ -145,9 +155,10 @@ export const useProjectGeoSync = () => {
         );
       }
 
-      // 2. Budynki wektorowe
+      // 2. Budynki wektorowe (WFS z automatycznym fallbackiem do OpenStreetMap)
       let importedBuildings: BuildingLoop[] = [];
       let buildingsFetchError: string | null = null;
+      let buildingsSourceLabel = citySource?.name || 'WFS';
 
       setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0 });
       if (citySource) {
@@ -155,38 +166,62 @@ export const useProjectGeoSync = () => {
           const bldGeoJson = await citySource.fetchBuildings(bbox);
           const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter, radius);
           importedBuildings = res.buildings;
-
-          if (citySource.hasStoreyHeights === false && importedBuildings.length > 0) {
-            try {
-              const terrainResults = await analyzeBuildingHeights(importedBuildings, projectCrs, undefined, projectCenter);
-              const resultById: Record<string, typeof terrainResults[number]> = {};
-              terrainResults.forEach((r) => { resultById[r.buildingId] = r; });
-              importedBuildings = importedBuildings.map((b) => {
-                const result = resultById[b.id];
-                if (result == null) return b;
-                const realHeight = result.estimatedHeight;
-                const groundElevation = result.relativeElevation ?? 0;
-                return {
-                  ...b,
-                  defaultHeight: realHeight,
-                  heightSource: 'lidar-nmt',
-                  elevation: groundElevation,
-                  segments: b.segments.map((s) => ({ ...s, hTop: realHeight, hBase: groundElevation })),
-                };
-              });
-            } catch (terrainErr) {
-              console.warn('Nie udało się dobrać wysokości budynków z NMT/NMPT — pozostawiono wartość domyślną:', terrainErr);
-            }
-          }
         } catch (err) {
-          buildingsFetchError = err instanceof Error ? err.message : 'Nieznany błąd pobierania budynków';
-          console.error(`Nie udało się pobrać budynków (${citySource.name}):`, err);
+          console.warn(`Nie udało się pobrać budynków z WFS (${citySource.name}):`, err);
         }
       }
 
-      // 3. Synchronizacja do sceny
-      const existingUserBuildings = buildings.filter((b) => !b.id.startsWith('uldk-') && !b.id.startsWith('wfs-'));
-      const combined = [...existingUserBuildings, ...parcels, ...importedBuildings];
+      // 2b. Fallback do OpenStreetMap (Overpass API) gdy WFS zwrócił 0 budynków lub rzucił błąd
+      if (importedBuildings.length === 0) {
+        try {
+          setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0, info: 'Pobieranie budynków z OpenStreetMap (fallback)...' });
+          const osmBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
+          if (osmBuildings.length > 0) {
+            importedBuildings = osmBuildings;
+            buildingsSourceLabel = 'OpenStreetMap';
+            buildingsFetchError = null;
+          }
+        } catch (osmErr) {
+          console.warn('Nie udało się pobrać budynków z OSM fallback:', osmErr);
+          buildingsFetchError = osmErr instanceof Error ? osmErr.message : 'Błąd pobierania budynków';
+        }
+      }
+
+      // 2c. Wzbogacenie o wysokości LiDAR NMT/NMPT dla budynków bez precyzyjnych kondygnacji
+      if (importedBuildings.length > 0) {
+        const needsLidarHeights = importedBuildings.some((b) => b.heightSource === 'default');
+        if (needsLidarHeights || citySource?.hasStoreyHeights === false) {
+          try {
+            const terrainResults = await analyzeBuildingHeights(importedBuildings, projectCrs, undefined, projectCenter);
+            const resultById: Record<string, typeof terrainResults[number]> = {};
+            terrainResults.forEach((r) => { resultById[r.buildingId] = r; });
+            importedBuildings = importedBuildings.map((b) => {
+              const result = resultById[b.id];
+              if (result == null) return b;
+              const realHeight = result.estimatedHeight;
+              const groundElevation = result.relativeElevation ?? 0;
+              return {
+                ...b,
+                defaultHeight: realHeight,
+                heightSource: 'lidar-nmt',
+                elevation: groundElevation,
+                segments: b.segments.map((s) => ({ ...s, hTop: realHeight, hBase: groundElevation })),
+              };
+            });
+          } catch (terrainErr) {
+            console.warn('Nie udało się dobrać wysokości budynków z NMT/NMPT — pozostawiono wartości domyślne/OSM:', terrainErr);
+          }
+        }
+      }
+
+      // 3. Inteligentna synchronizacja do sceny (Smart Updater)
+      // Zachowujemy:
+      // - Wszystkie obiekty oznaczone jako projektowane (isTested: true)
+      // - Wszystkie obiekty stworzone / zmodyfikowane przez użytkownika (niebędące starymi uldk-*, wfs-*, osm-bld-*)
+      const existingUserAndTestedBuildings = buildings.filter(
+        (b) => b.isTested || (!b.id.startsWith('uldk-') && !b.id.startsWith('wfs-') && !b.id.startsWith('osm-'))
+      );
+      const combined = [...existingUserAndTestedBuildings, ...parcels, ...importedBuildings];
       setBuildings(combined);
 
       setStatus({
@@ -198,11 +233,15 @@ export const useProjectGeoSync = () => {
         buildingsCount: importedBuildings.length,
       });
       setSyncFeedback(
-        `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków` +
+        `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków (${buildingsSourceLabel})` +
         (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '')
       );
 
-      // 5. Prefetch kafelków satelitarnych
+      // 4. Prefetch kafelków satelitarnych oraz automatyczne wczytanie kontekstu drogowego/zagospodarowania OSM
+      if (showOsmLanduseGroup) {
+        ensureOsmLanduseLoaded().catch(() => {});
+      }
+
       window.dispatchEvent(new CustomEvent('geo-prefetch-satellite', {
         detail: { lat: centerLat, lon: centerLon, radius },
       }));
@@ -306,6 +345,43 @@ export const useProjectGeoSync = () => {
     setShowLandCoverLayer(!showLandCoverLayer);
   };
 
+  const ensureOsmLanduseLoaded = () => {
+    const isBuffered = useOsmLanduseStore.getState().isBufferValid(
+      { lat: settings.latitude, lon: settings.longitude },
+      projectRadius
+    );
+    return ensureGeoContextLoaded(
+      isBuffered,
+      setOsmLanduseLoading,
+      async (projectCrs, projectCenter) => {
+        const bbox = latLonToBbox(settings.latitude, settings.longitude, projectRadius);
+        await fetchOsmLanduseAction(bbox, projectCenter, projectCrs, projectRadius);
+        return {
+          features: useOsmLanduseStore.getState().features,
+          trees: useOsmLanduseStore.getState().trees,
+        };
+      },
+      ({ features, trees }) => {
+        useOsmLanduseStore.getState().setFeatures(features);
+        useOsmLanduseStore.getState().setTrees(trees);
+      },
+      'Nie udało się pobrać danych OSM:'
+    );
+  };
+
+  const toggleOsmLanduseLayer = () => {
+    const isBuffered = useOsmLanduseStore.getState().isBufferValid(
+      { lat: settings.latitude, lon: settings.longitude },
+      projectRadius
+    );
+    if (!showOsmLanduseGroup || !isBuffered) {
+      ensureOsmLanduseLoaded();
+      setShowOsmLanduseGroup(true);
+    } else {
+      setShowOsmLanduseGroup(false);
+    }
+  };
+
   return {
     settings,
     selectedCity,
@@ -322,9 +398,12 @@ export const useProjectGeoSync = () => {
     overtureLoading,
     mpzpZonesLoading,
     landCoverLoading,
+    osmLanduseLoading,
     showOvertureGreenAreas,
     showMpzpZonesLayer,
     showLandCoverLayer,
+    showOsmLanduseGroup,
+    osmFeaturesCount: osmFeatures.length,
     isMpzpZonesAvailableHere,
     mpzpCityName,
     formatWfsProgress,
@@ -335,6 +414,8 @@ export const useProjectGeoSync = () => {
     toggleOvertureGreenAreas,
     toggleMpzpZonesLayer,
     toggleLandCoverLayer,
+    toggleOsmLanduseLayer,
+    ensureOsmLanduseLoaded,
     triggerFit,
   };
 };

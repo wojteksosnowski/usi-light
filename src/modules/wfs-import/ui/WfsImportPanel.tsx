@@ -15,6 +15,8 @@ import {
 } from '../services/geoJsonImporter';
 import { detectCoordinateSystem } from '../../../utils/geoTransform';
 
+import { useOsmLanduseStore } from '../store/useOsmLanduseStore';
+
 const RADIUS_OPTIONS = [100, 200, 300, 500];
 
 export const WfsImportPanel: React.FC = () => {
@@ -32,8 +34,14 @@ export const WfsImportPanel: React.FC = () => {
   const setOptions = useWfsStore((s) => s.setOptions);
   const setLastImportBbox = useWfsStore((s) => s.setLastImportBbox);
 
+  const fetchOsmLanduseAction = useOsmLanduseStore((s) => s.fetchLanduse);
+  const osmFeatures = useOsmLanduseStore((s) => s.features);
+  const showOsmLanduseGroup = useOsmLanduseStore((s) => s.showOsmLanduseGroup);
+  const setShowOsmLanduseGroup = useOsmLanduseStore((s) => s.setShowOsmLanduseGroup);
+
   const [radius, setRadius] = useState(200);
   const [selectedLocation, setSelectedLocation] = useState<GeocodingResult | null>(null);
+  const [fetchOsmLanduseOption, setFetchOsmLanduseOption] = useState(true);
 
   const handleLocationSelect = useCallback((result: GeocodingResult) => {
     setSelectedLocation(result);
@@ -85,6 +93,15 @@ export const WfsImportPanel: React.FC = () => {
         treesCount = trees.length;
       }
 
+      if (fetchOsmLanduseOption) {
+        try {
+          await fetchOsmLanduseAction(bbox, projectCenter, projectCrs);
+          setShowOsmLanduseGroup(true);
+        } catch (osmErr) {
+          console.warn('[WFS Import] Błąd pobierania OSM Landuse:', osmErr);
+        }
+      }
+
       setLastImportBbox(bbox);
 
       if (!citySource) {
@@ -112,7 +129,7 @@ export const WfsImportPanel: React.FC = () => {
         treesCount: 0,
       });
     }
-  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox]);
+  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -150,6 +167,8 @@ export const WfsImportPanel: React.FC = () => {
           onChange={(v) => setOptions({ parcels: v })} />
         <Checkbox label="Drzewa (WFS)" checked={options.trees}
           onChange={(v) => setOptions({ trees: v })} />
+        <Checkbox label="Zagospodarowanie (OSM Landuse)" checked={fetchOsmLanduseOption}
+          onChange={(v) => setFetchOsmLanduseOption(v)} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
@@ -158,6 +177,10 @@ export const WfsImportPanel: React.FC = () => {
           onToggle={() => setShowTerrainLayer(!showTerrainLayer)} />
         <ToggleRow label="Drzewa (wizualizacja)" active={showTreesLayer}
           onToggle={() => setShowTreesLayer(!showTreesLayer)} />
+        {osmFeatures.length > 0 && (
+          <ToggleRow label={`Zagospodarowanie OSM (${osmFeatures.length})`} active={showOsmLanduseGroup}
+            onToggle={() => setShowOsmLanduseGroup(!showOsmLanduseGroup)} />
+        )}
       </div>
 
       <button

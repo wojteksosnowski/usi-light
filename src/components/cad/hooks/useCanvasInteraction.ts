@@ -308,6 +308,8 @@ export function useCanvasInteraction({
   onDimensionClickEdge,
   onAlignClickEdge,
   onDeleteDimension,
+  isProjectBrushActive = false,
+  onUpdateBuilding,
   layerSettings = {},
   viewRotationMode = false,
   viewRotationDeg = 0,
@@ -349,6 +351,14 @@ export function useCanvasInteraction({
   const [dragVertexPreviewPt, setDragVertexPreviewPt] = useState<Point2D | null>(null);
   const dragVertexContextRef = useRef<DragVertexContext | null>(null);
   const labelClickStartRef = useRef<{ buildingId: string; sx: number; sy: number } | null>(null);
+
+  // Project brush state ('W projekcie')
+  const brushStateRef = useRef<{
+    isBrushing: boolean;
+    startPos: { x: number; y: number } | null;
+    brushedBuildingIds: Set<string>;
+    initialClickedBuildingId: string | null;
+  }>({ isBrushing: false, startPos: null, brushedBuildingIds: new Set(), initialClickedBuildingId: null });
 
   // Per-object rotate handle (shown on plain selection, drags the object around its own centroid)
   const [isRotateHandleHovered, setIsRotateHandleHovered] = useState<boolean>(false);
@@ -668,7 +678,16 @@ export function useCanvasInteraction({
     setHoveredEdge(null);
     setDraggingEdge(null);
     dragEdgeContextRef.current = null;
-  }, [isDimensionMode, facadePointMode, isLinkingMode]);
+  }, [isDimensionMode, facadePointMode, isLinkingMode, isProjectBrushActive]);
+
+  useEffect(() => {
+    if (!isProjectBrushActive && brushStateRef.current.isBrushing) {
+      brushStateRef.current.isBrushing = false;
+      brushStateRef.current.initialClickedBuildingId = null;
+      brushStateRef.current.brushedBuildingIds.clear();
+      onInteractionChange?.(false);
+    }
+  }, [isProjectBrushActive, onInteractionChange]);
 
   useEffect(() => {
     if (!viewRotationMode) setRotationHover(null);
@@ -735,6 +754,17 @@ export function useCanvasInteraction({
           onViewRotationChange?.(rotationHover.previewDeg);
           onEndViewRotationMode?.();
         }
+        return;
+      }
+
+      if (isProjectBrushActive) {
+        const candidates = getHoverCandidates({ x: world.wx, y: world.wy });
+        const hitBldgId = candidates.length > 0 ? candidates[0] : null;
+        brushStateRef.current.isBrushing = true;
+        brushStateRef.current.startPos = { x: sx, y: sy };
+        brushStateRef.current.brushedBuildingIds.clear();
+        brushStateRef.current.initialClickedBuildingId = hitBldgId;
+        onInteractionChange?.(true);
         return;
       }
 
@@ -1099,7 +1129,7 @@ export function useCanvasInteraction({
   };
 
   const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0 || facadePointMode || isDimensionMode || viewRotationMode) return;
+    if (e.button !== 0 || facadePointMode || isDimensionMode || viewRotationMode || isProjectBrushActive) return;
     if (drawingMode !== 'none' && drawingMode !== 'vertexEdit') return;
 
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -1124,6 +1154,37 @@ export function useCanvasInteraction({
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const world = screenToWorld(sx, sy);
+
+    if (isProjectBrushActive) {
+      if (brushStateRef.current.isBrushing) {
+        const dist = brushStateRef.current.startPos
+          ? Math.hypot(sx - brushStateRef.current.startPos.x, sy - brushStateRef.current.startPos.y)
+          : 0;
+        if (dist > 3) {
+          const candidates = getHoverCandidates({ x: world.wx, y: world.wy });
+          if (
+            brushStateRef.current.initialClickedBuildingId &&
+            !brushStateRef.current.brushedBuildingIds.has(brushStateRef.current.initialClickedBuildingId)
+          ) {
+            brushStateRef.current.brushedBuildingIds.add(brushStateRef.current.initialClickedBuildingId);
+            const initBldg = buildings.find((b) => b.id === brushStateRef.current.initialClickedBuildingId);
+            if (initBldg && !initBldg.isTested) {
+              onUpdateBuilding?.(initBldg.id, { isTested: true });
+            }
+          }
+          for (const bldgId of candidates) {
+            if (!brushStateRef.current.brushedBuildingIds.has(bldgId)) {
+              brushStateRef.current.brushedBuildingIds.add(bldgId);
+              const bldg = buildings.find((b) => b.id === bldgId);
+              if (bldg && !bldg.isTested) {
+                onUpdateBuilding?.(bldg.id, { isTested: true });
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
 
     if (viewRotationMode) {
       let closest: any = null;
@@ -1999,6 +2060,19 @@ export function useCanvasInteraction({
   };
 
   const handleMouseUp = useCallback((e?: { clientX: number; clientY: number }) => {
+    if (brushStateRef.current.isBrushing) {
+      brushStateRef.current.isBrushing = false;
+      if (brushStateRef.current.brushedBuildingIds.size === 0 && brushStateRef.current.initialClickedBuildingId) {
+        const clickedBldg = buildings.find((b) => b.id === brushStateRef.current.initialClickedBuildingId);
+        if (clickedBldg) {
+          onUpdateBuilding?.(clickedBldg.id, { isTested: !clickedBldg.isTested });
+        }
+      }
+      brushStateRef.current.initialClickedBuildingId = null;
+      brushStateRef.current.brushedBuildingIds.clear();
+      onInteractionChange?.(false);
+    }
+
     if (labelClickStartRef.current) {
       const start = labelClickStartRef.current;
       labelClickStartRef.current = null;
@@ -2069,6 +2143,8 @@ export function useCanvasInteraction({
     setLastMouseAngleWorld(null);
     setDragStart(null);
   }, [
+    buildings,
+    onUpdateBuilding,
     isDraggingBuilding,
     draggingEdge,
     draggingFacadePoint,
@@ -2150,6 +2226,7 @@ export function useCanvasInteraction({
   };
 
   const cursorStyle = useMemo(() => {
+    if (isProjectBrushActive) return 'crosshair';
     if (isDimensionMode) return 'crosshair';
     if (facadePointMode) {
       if (draggingPinnedPointId) return 'grabbing';
@@ -2168,6 +2245,7 @@ export function useCanvasInteraction({
     if (isPanning || isDraggingBuilding) return 'grabbing';
     return 'grab';
   }, [
+    isProjectBrushActive,
     isDimensionMode,
     facadePointMode,
     draggingPinnedPointId,

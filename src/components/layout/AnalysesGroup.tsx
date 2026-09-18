@@ -1,15 +1,22 @@
 import React from 'react';
-import { ProjectAnalysisTogglesCard, MasterplanShadowAlgorithmCard } from './project';
+import {
+  ProjectAnalysisTogglesCard,
+  ProjectTerrainCard,
+  MasterplanShadowAlgorithmCard,
+} from './project';
 
 /**
  * Kontener widoku grupy Analizy w panelu bocznym.
- * Gromadzi wszystkie przełączniki analiz: § 12 (przesłanianie), § 56 (nasłonecznienie),
- * punkty pomiarowe, wektory normalne, zakres cienia, podkłady satelitarne oraz plany/podkłady.
+ * Gromadzi:
+ * 1. Przełączniki analiz nasłonecznienia (§12, §56), punktów, wektorów i podkładów satelitarnych oraz planów.
+ * 2. Kafel 'Teren' (OpenStreetMap) — zagospodarowanie, drogi, zieleń i drzewa z automatycznym buforem.
+ * 3. Sterowanie cieniem i algorytmem widoku białego (Masterplan).
  */
 export const AnalysesGroup: React.FC = () => {
   return (
     <div className="sidebar-group-content">
       <ProjectAnalysisTogglesCard />
+      <ProjectTerrainCard />
       <MasterplanShadowAlgorithmCard />
     </div>
   );

@@ -56,6 +56,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const moveBuildings = useSceneStore((s) => s.moveBuildings);
   const moveBuildingEdge = useSceneStore((s) => s.moveBuildingEdge);
   const rotateBuilding = useSceneStore((s) => s.rotateBuilding);
+  const updateBuilding = useSceneStore((s) => s.updateBuilding);
   const updateBuildingVertices = useSceneStore((s) => s.updateBuildingVertices);
   const updateBuildingSweepPath = useSceneStore((s) => s.updateBuildingSweepPath);
   const booleanUnion = useSceneStore((s) => s.booleanUnion);
@@ -76,6 +77,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
   const dimensions = useCadToolStore((s) => s.dimensions);
   const isDimensionToolActive = useCadToolStore((s) => s.isDimensionToolActive);
+  const isProjectBrushActive = useCadToolStore((s) => s.isProjectBrushActive);
   const dimensionType = useCadToolStore((s) => s.dimensionType);
   const dimensionPendingRef = useCadToolStore((s) => s.dimensionPendingRef);
   const handleDimensionClickEdge = useCadToolStore((s) => s.handleDimensionClickEdge);
@@ -404,6 +406,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             dimensionPendingRef={dimensionPendingRef}
             onDimensionClickEdge={handleDimensionClickEdge}
             onDeleteDimension={deleteDimension}
+            isProjectBrushActive={isProjectBrushActive}
+            onUpdateBuilding={updateBuilding}
             alignPendingRef={alignPendingRef}
             onAlignClickEdge={handleAlignClickEdge}
             layerSettings={layerSettings}

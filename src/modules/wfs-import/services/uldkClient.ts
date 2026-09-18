@@ -15,10 +15,11 @@ import {
   LatLon,
 } from '../../../utils/geoTransform';
 import { wgs84ToEpsg2180 } from '../utils/wgs84ToEpsg2180';
-import { polygonCircleIntersectionRatio, isPolygonCCW, isPointInPolygon, computePointsBoundingBox } from '../../../utils/math2d/polygons';
+import { polygonCircleIntersectionRatio, isPolygonCCW, isPointInPolygon, computePointsBoundingBox, getPolygonCentroid } from '../../../utils/math2d/polygons';
 import { calculateOutwardNormal } from '../../../utils/math2d/vec2';
 import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
 import { ensureOppositeWinding } from '../../../utils/ringSegments';
+import { fetchKiegParcelDetails } from './kiegEnricherService';
 
 
 const ULDK_BASE_URL = 'https://uldk.gugik.gov.pl/';
@@ -255,15 +256,16 @@ function rawParcelToLoops(
       holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
     }
 
+    const parcelName = raw.plotNumber ? raw.plotNumber.trim() : id;
+
     const parcelBase: BuildingLoop = {
       id: loopId,
-      name: raw.plotNumber
-        ? `Działka nr ${raw.plotNumber}${holes.length > 0 ? ' (z otworem)' : ''}`
-        : `Działka ${id}`,
+      name: parcelName,
       layer: 'WFS_DZIALKI',
       category: 'boundary' as ObjectCategory,
       areaType: 'plot',
       plotNumber: raw.plotNumber || undefined,
+      plotId: id,
       isTested: false,
       isIncluded: true,
       isLocked: true,
@@ -484,6 +486,48 @@ export async function fetchParcelsInRadius(
         onProgress?.(samplePoints.length + totalProbesIssued, samplePoints.length + totalProbesIssued + estimatedRemaining);
       });
     }
+  }
+
+  // ===== Faza 3: Nasycenie działek informacjami o klasoużytkach i przeznaczeniu z KIEG =====
+  const ENRICH_CONCURRENCY = 10;
+  const enrichTasks: Array<() => Promise<void>> = [];
+
+  for (const loop of loops) {
+    if (!loop.vertices || loop.vertices.length < 3) continue;
+    enrichTasks.push(async () => {
+      try {
+        const centroidCad = getPolygonCentroid(loop.vertices);
+        const centroidWgs84 = cadPointToWgs84(centroidCad, projectCrs, projectCenter);
+        const centroid2180 = wgs84ToEpsg2180(centroidWgs84.lat, centroidWgs84.lon);
+        const details = await fetchKiegParcelDetails(centroid2180.x, centroid2180.y, signal);
+        if (details) {
+          if (details.landUseClass) loop.landUseClass = details.landUseClass;
+          if (details.landUseType) loop.landUseType = details.landUseType;
+          if (details.plotNumber && !loop.plotNumber) {
+            loop.plotNumber = details.plotNumber;
+            loop.name = details.plotNumber;
+          }
+          if (details.id && !loop.plotId) {
+            loop.plotId = details.id;
+          }
+          loop.cadastralDetails = {
+            voivodeship: details.voivodeship,
+            county: details.county,
+            commune: details.commune,
+            region: details.region,
+            areaHa: details.areaHa,
+          };
+        }
+      } catch {
+        // Cichy fallback - działka zachowuje geometrię i podstawowy ID
+      }
+    });
+  }
+
+  for (let i = 0; i < enrichTasks.length; i += ENRICH_CONCURRENCY) {
+    if (signal?.aborted) break;
+    const chunk = enrichTasks.slice(i, i + ENRICH_CONCURRENCY);
+    await Promise.allSettled(chunk.map((fn) => fn()));
   }
 
   return loops;

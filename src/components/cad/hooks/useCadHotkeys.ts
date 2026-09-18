@@ -140,14 +140,21 @@ export function useCadHotkeys({
         return;
       }
 
-      if ((e.key === 'v' || e.key === 'V') && !isModifier && drawingMode === 'none') {
+      if ((e.key === 'v' || e.key === 'V') && !isModifier && drawingMode === 'none' && !isEditingEdgeLength) {
         e.preventDefault();
         useUiStore.getState().toggleViewMode2D();
         return;
       }
 
+      if ((e.key === 'p' || e.key === 'P') && !isModifier && !isEditingEdgeLength) {
+        e.preventDefault();
+        useCadToolStore.getState().toggleProjectBrush();
+        return;
+      }
+
       if (e.key === 'Escape') {
         useCadToolStore.getState().setShowModifiersPanel(false);
+        useCadToolStore.getState().setIsProjectBrushActive(false);
         if (drawingMode !== 'none' || drawingVertices.length > 0) {
           setDrawingVertices([]);
           setCurrentMouseWorld(null);

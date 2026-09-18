@@ -38,3 +38,4 @@ export {
 export type { ImportResult } from './services/geoJsonImporter';
 
 export { registerGeoLayers } from './registerGeoLayers';
+export { useGeoTileWarmup } from './hooks/useGeoTileWarmup';

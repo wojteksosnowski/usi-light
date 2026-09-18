@@ -21,6 +21,10 @@ import {
   resolveMasterplanLabelCollisions,
   renderMasterplanLabels,
 } from '../masterplanLabels';
+import {
+  getDominantBuildingType,
+  renderMasterplanFunctionOverlays,
+} from '../masterplanBuildingTypes';
 
 /**
  * Renderuje dachy budynków, rzutowanie cieni ΔH od wyższych kondygnacji/budynków (zacienianie wzajemne i własne)
@@ -36,6 +40,8 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
   );
 
   if (bldgs.length === 0) return;
+
+  const dominantBuildingType = getDominantBuildingType(buildings || visibleBuildings || []);
 
   const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
 
@@ -177,6 +183,10 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     }
     ctx.restore();
   }
+
+  // 3. Wizualizacja stref i kondygnacji funkcyjnych (w tym parterów i stref krawędziowych modyfikatora zone_function)
+  // Rysowane w przestrzeni świata CAD z zachowaniem hierarchii zakrycia (blur + opacity)
+  renderMasterplanFunctionOverlays(ctx, culledBldgs, viewState.scale, dominantBuildingType);
 
   ctx.restore(); // Przywrócenie transformacji sprzed pętli dachów
 

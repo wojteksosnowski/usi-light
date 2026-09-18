@@ -85,3 +85,55 @@ describe('useCadToolStore - Snapping & HPF Filter', () => {
     expect(useCadToolStore.getState().noisePercentileCutoff).toBe(80);
   });
 });
+
+describe('useCadToolStore - Project Brush Tool', () => {
+  beforeEach(() => {
+    useCadToolStore.setState({
+      drawingMode: 'none',
+      isDimensionToolActive: false,
+      isProjectBrushActive: false,
+      facadePointMode: false,
+      isEditMode: false,
+    });
+  });
+
+  it('activates and deactivates isProjectBrushActive properly', () => {
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(false);
+
+    useCadToolStore.getState().setIsProjectBrushActive(true);
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(true);
+
+    useCadToolStore.getState().setIsProjectBrushActive(false);
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(false);
+  });
+
+  it('toggles isProjectBrushActive and clears other active tool modes', () => {
+    useCadToolStore.getState().setIsDimensionToolActive(true);
+    expect(useCadToolStore.getState().isDimensionToolActive).toBe(true);
+
+    useCadToolStore.getState().toggleProjectBrush();
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(true);
+    expect(useCadToolStore.getState().isDimensionToolActive).toBe(false);
+
+    useCadToolStore.getState().toggleProjectBrush();
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(false);
+  });
+
+  it('resets isProjectBrushActive when another tool mode is activated', () => {
+    useCadToolStore.getState().setIsProjectBrushActive(true);
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(true);
+
+    useCadToolStore.getState().setDrawingMode('rectangle');
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(false);
+    expect(useCadToolStore.getState().drawingMode).toBe('rectangle');
+
+    useCadToolStore.getState().setIsProjectBrushActive(true);
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(true);
+    expect(useCadToolStore.getState().drawingMode).toBe('none');
+
+    useCadToolStore.getState().setIsDimensionToolActive(true);
+    expect(useCadToolStore.getState().isProjectBrushActive).toBe(false);
+    expect(useCadToolStore.getState().isDimensionToolActive).toBe(true);
+  });
+});
+

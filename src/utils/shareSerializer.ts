@@ -142,6 +142,10 @@ function toSharedBuildingV2(b: BuildingLoop): SharedBuildingV2 {
   omitIfDefault(out, 'isIncluded', b.isIncluded, SHARE_V2_BUILDING_DEFAULTS.isIncluded);
   if (b.areaType !== undefined) out.areaType = b.areaType;
   if (b.plotNumber !== undefined) out.plotNumber = b.plotNumber;
+  if (b.plotId !== undefined) out.plotId = b.plotId;
+  if (b.landUseClass !== undefined) out.landUseClass = b.landUseClass;
+  if (b.landUseType !== undefined) out.landUseType = b.landUseType;
+  if (b.cadastralDetails !== undefined) out.cadastralDetails = b.cadastralDetails;
   if (b.storeysCount !== undefined) out.storeysCount = b.storeysCount;
   if (b.isLocked !== undefined) out.isLocked = b.isLocked;
   if (b.isGhosted !== undefined) out.isGhosted = b.isGhosted;

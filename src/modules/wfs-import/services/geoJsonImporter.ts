@@ -263,13 +263,17 @@ export function importParcelsFromGeoJson(
         holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
       }
 
+      const cleanPlotNumber = strOrUndefined(props.NUMER_DZIALKI);
+      const parcelName = cleanPlotNumber || parcelId;
+
       const parcelBase: BuildingLoop = {
         id,
-        name: `Działka ${plotNumber || `#${fi + 1}`}`,
+        name: parcelName,
         layer: 'WFS_DZIALKI',
         category: 'boundary' as ObjectCategory,
         areaType: 'plot',
-        plotNumber: strOrUndefined(props.NUMER_DZIALKI),
+        plotNumber: cleanPlotNumber,
+        plotId: strOrNullIfMissing(props.ID_DZIALKI) || undefined,
         isTested: false,
         isIncluded: true,
         isLocked: true,
