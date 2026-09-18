@@ -10,6 +10,7 @@ import { ParcelLoadingPreviewLayer } from './layers/ParcelLoadingPreviewLayer';
 import { OvertureContextLayer } from './layers/OvertureContextLayer';
 import { MpzpZonesVectorLayer } from './layers/MpzpZonesVectorLayer';
 import { LandCoverVectorLayer } from './layers/LandCoverVectorLayer';
+import { TerrainMeshRenderLayer } from './layers/TerrainMeshRenderLayer';
 import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
@@ -57,6 +58,7 @@ const parcelLoadingPreviewLayer = new ParcelLoadingPreviewLayer();
 const overtureContextLayer = new OvertureContextLayer();
 const mpzpZonesVectorLayer = new MpzpZonesVectorLayer();
 const landCoverVectorLayer = new LandCoverVectorLayer();
+const terrainMeshLayer = new TerrainMeshRenderLayer();
 
 const orthophotoTileManager = new WmsTileManager({
   baseUrl: ORTO_WMS_URL,
@@ -168,6 +170,7 @@ export function registerGeoLayers(): () => void {
   let prevBdotInvert = true;
   let prevShowTerrain = false;
   let prevTerrainOpacity = 0.35;
+  let prevShowTerrainMesh = false;
   let prevShowTrees = false;
   let prevTreesLen = 0;
   let prevLoadingParcelsLen = 0;
@@ -195,6 +198,9 @@ export function registerGeoLayers(): () => void {
       bdotInvertColors,
       showTerrainLayer,
       terrainOpacity,
+      showTerrainMesh,
+      terrainMeshOpacity,
+      terrainMesh,
       showTreesLayer,
       trees,
       loadingParcels,
@@ -251,6 +257,25 @@ export function registerGeoLayers(): () => void {
     const activeTerrain = isPro && showTerrainLayer;
     if (toggleMainLayer(pipeline, terrainLayer, 'wfs_terrain_shading', activeTerrain, prevShowTerrain)) changed = true;
     prevShowTerrain = activeTerrain;
+
+    // 6. Wireframe 3D mesh terenu (PRO)
+    if (isPro && showTerrainMesh && terrainMesh) {
+      terrainMeshLayer.setData({ triangles: terrainMesh.triangles });
+      terrainMeshLayer.setOpacity(terrainMeshOpacity);
+      terrainMeshLayer.setVisibility(true);
+      const hadTerrainMesh = prevShowTerrainMesh;
+      if (hadTerrainMesh !== true) {
+        pipeline.registerMainLayer(terrainMeshLayer);
+        changed = true;
+      }
+      prevShowTerrainMesh = true;
+    } else {
+      if (prevShowTerrainMesh) {
+        pipeline.unregisterMainLayer('wfs_terrain_mesh');
+        changed = true;
+        prevShowTerrainMesh = false;
+      }
+    }
 
     // 7. Drzewa
     treesLayer.setTrees(trees);
@@ -322,6 +347,7 @@ export function registerGeoLayers(): () => void {
     pipeline.unregisterMainLayer('wfs_mpzp_overlay');
     pipeline.unregisterMainLayer('wfs_bdot_overlay');
     pipeline.unregisterMainLayer('wfs_terrain_shading');
+    pipeline.unregisterMainLayer('wfs_terrain_mesh');
     pipeline.unregisterMainLayer('wfs_trees');
     pipeline.unregisterMainLayer('wfs_parcels_loading');
     pipeline.unregisterMainLayer('wfs_overture_context');

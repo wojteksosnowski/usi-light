@@ -39,3 +39,5 @@ export type { ImportResult } from './services/geoJsonImporter';
 
 export { registerGeoLayers, prefetchAllGeoLayersWarmup } from './registerGeoLayers';
 export { useGeoTileWarmup } from './hooks/useGeoTileWarmup';
+export { TerrainMeshRenderLayer } from './layers/TerrainMeshRenderLayer';
+export { generateTerrainMesh } from './services/generateTerrainMesh';

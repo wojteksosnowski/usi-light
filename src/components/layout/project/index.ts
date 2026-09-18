@@ -5,6 +5,7 @@ export { ProjectAnalysisTogglesCard } from './ProjectAnalysisTogglesCard';
 export { MasterplanShadowAlgorithmCard } from './MasterplanShadowAlgorithmCard';
 export { ProjectOverlaysCard } from './ProjectOverlaysCard';
 export { ProjectDevToolsCard } from './ProjectDevToolsCard';
+export { ProjectTerrainCard } from './ProjectTerrainCard';
 export { SimpleLayerToggle } from './SimpleLayerToggle';
 export { useProjectIO } from './hooks/useProjectIO';
 export { useProjectExport } from './hooks/useProjectExport';

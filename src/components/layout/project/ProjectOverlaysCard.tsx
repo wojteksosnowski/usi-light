@@ -20,6 +20,8 @@ export const ProjectOverlaysCard: React.FC = () => {
   const setGeoOverlayOpacity = useWfsStore((s) => s.setGeoOverlayOpacity);
   const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
+  const showTerrainMesh = useWfsStore((s) => s.showTerrainMesh);
+  const setShowTerrainMesh = useWfsStore((s) => s.setShowTerrainMesh);
   const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
   const setShowGeoOverlayGroup = useWfsStore((s) => s.setShowGeoOverlayGroup);
   const showPlansOverlayGroup = useWfsStore((s) => s.showPlansOverlayGroup);
@@ -245,6 +247,22 @@ export const ProjectOverlaysCard: React.FC = () => {
                 onToggle={isMpzpZonesAvailableHere ? toggleMpzpZonesLayer : () => {}}
               />
             </div>
+
+            {/* C. Cieniowanie NMT */}
+            <SimpleLayerToggle
+              label="Cieniowanie NMT (GUGiK WMS)"
+              active={showTerrainLayer}
+              dotColorVar="var(--accent-amber)"
+              onToggle={() => setShowTerrainLayer(!showTerrainLayer)}
+            />
+
+            {/* D. Wireframe 3D mesh */}
+            <SimpleLayerToggle
+              label="Wireframe 3D mesh"
+              active={showTerrainMesh}
+              dotColorVar="var(--accent-cyan)"
+              onToggle={() => setShowTerrainMesh(!showTerrainMesh)}
+            />
           </div>
         )}
       </div>

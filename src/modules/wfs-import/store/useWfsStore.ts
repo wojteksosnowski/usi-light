@@ -115,6 +115,17 @@ export interface WfsImportOptions {
 
 export type ProjectRadius = 50 | 100 | 200 | 300;
 
+/** Siatka NMT zbudowana w TerrainEngine (do renderowania mesh i eksportu DXF). */
+export interface TerrainMeshData {
+  /** Vertexy trójkątów [x,y,z,x,y,z,...] Float64Array. */
+  triangles: Float64Array;
+  /** Liczba vertexów. */
+  totalVertices: number;
+  /** Minimalna i maksymalna wysokość terenu. */
+  minElevation: number;
+  maxElevation: number;
+}
+
 interface WfsState {
   trees: WfsTreeFeature[];
   status: WfsImportStatus;
@@ -145,7 +156,12 @@ interface WfsState {
   mpzpInvertColors: boolean;
   showTerrainLayer: boolean;
   terrainOpacity: number;
+  showTerrainMesh: boolean;
+  terrainMeshOpacity: number;
   showTreesLayer: boolean;
+
+  // Terrain mesh data (built from NMT grid via TerrainEngine)
+  terrainMesh: TerrainMeshData | null;
 
   // Warstwa kontekstowa Overture Maps (zieleń / zagospodarowanie)
   overtureGreenAreas: OverturePolygonFeature[];
@@ -193,6 +209,9 @@ interface WfsState {
   setMpzpInvertColors: (invert: boolean) => void;
   setShowTerrainLayer: (show: boolean) => void;
   setTerrainOpacity: (val: number) => void;
+  setShowTerrainMesh: (show: boolean) => void;
+  setTerrainMeshOpacity: (val: number) => void;
+  setTerrainMesh: (mesh: TerrainMeshData | null) => void;
   setShowTreesLayer: (show: boolean) => void;
 
   setOvertureGreenAreas: (features: OverturePolygonFeature[]) => void;
@@ -248,6 +267,7 @@ let geoLayersSnapshot: { kiut: boolean; bdot: boolean } | null = null;
 let plansLayersSnapshot: {
   mpzp: boolean;
   terrain: boolean;
+  terrainMesh: boolean;
   overture: boolean;
   mpzpZones: boolean;
   landCover: boolean;
@@ -285,6 +305,8 @@ export const useWfsStore = create<WfsState>()(
       geoOverlayInvertColors: true,
       showTerrainLayer: false,
       terrainOpacity: 0.35,
+      showTerrainMesh: false,
+      terrainMeshOpacity: 0.3,
       showTreesLayer: false,
 
   overtureGreenAreas: [],
@@ -296,6 +318,8 @@ export const useWfsStore = create<WfsState>()(
 
   landCoverUnits: [],
   showLandCoverLayer: false,
+
+  terrainMesh: null,
 
   lastImportBbox: null,
 
@@ -395,8 +419,9 @@ export const useWfsStore = create<WfsState>()(
       plansLayersSnapshot = null;
       set({
         showPlansOverlayGroup: true,
-        showMpzpLayer: snapshot?.mpzp ?? (state.showMpzpLayer || (!state.showTerrainLayer && !state.showOvertureGreenAreas && !state.showMpzpZonesLayer && !state.showLandCoverLayer)),
+        showMpzpLayer: snapshot?.mpzp ?? (state.showMpzpLayer || (!state.showTerrainLayer && !state.showTerrainMesh && !state.showOvertureGreenAreas && !state.showMpzpZonesLayer && !state.showLandCoverLayer)),
         showTerrainLayer: snapshot?.terrain ?? state.showTerrainLayer,
+        showTerrainMesh: snapshot?.terrainMesh ?? state.showTerrainMesh,
         showOvertureGreenAreas: snapshot?.overture ?? state.showOvertureGreenAreas,
         showMpzpZonesLayer: snapshot?.mpzpZones ?? state.showMpzpZonesLayer,
         showLandCoverLayer: snapshot?.landCover ?? state.showLandCoverLayer,
@@ -405,6 +430,7 @@ export const useWfsStore = create<WfsState>()(
       plansLayersSnapshot = {
         mpzp: state.showMpzpLayer,
         terrain: state.showTerrainLayer,
+        terrainMesh: state.showTerrainMesh,
         overture: state.showOvertureGreenAreas,
         mpzpZones: state.showMpzpZonesLayer,
         landCover: state.showLandCoverLayer,
@@ -435,6 +461,9 @@ export const useWfsStore = create<WfsState>()(
   setMpzpInvertColors: (invert) => set({ mpzpInvertColors: invert }),
   setShowTerrainLayer: (show) => set({ showTerrainLayer: show }),
   setTerrainOpacity: (val) => set({ terrainOpacity: val }),
+  setShowTerrainMesh: (show) => set({ showTerrainMesh: show }),
+  setTerrainMeshOpacity: (val) => set({ terrainMeshOpacity: val }),
+  setTerrainMesh: (mesh) => set({ terrainMesh: mesh }),
   setShowTreesLayer: (show) => set({ showTreesLayer: show }),
 
   setOvertureGreenAreas: (features) => set({ overtureGreenAreas: features }),
@@ -464,6 +493,7 @@ export const useWfsStore = create<WfsState>()(
         mpzpOpacity: state.mpzpOpacity,
         mpzpInvertColors: state.mpzpInvertColors,
         terrainOpacity: state.terrainOpacity,
+        terrainMeshOpacity: state.terrainMeshOpacity,
         projectRadius: state.projectRadius,
       }),
     }

@@ -4,6 +4,7 @@ import {
   ProjectLocationCard,
   ProjectCadCard,
   ProjectDevToolsCard,
+  ProjectTerrainCard,
 } from './project';
 
 /**
@@ -21,6 +22,9 @@ export const ProjectGroup: React.FC = () => {
 
       {/* 1.2 Pliki CAD (Import / Eksport DXF) */}
       <ProjectCadCard />
+
+      {/* 1.3 Rzeźba terenu (NMT mesh + cieniowanie) */}
+      <ProjectTerrainCard />
 
       {/* Narzędzia deweloperskie (Localhost) */}
       <ProjectDevToolsCard />
