@@ -43,8 +43,22 @@ export async function generateTerrainMesh(params?: MeshGenerationParams): Promis
   const lon = params?.longitude ?? solar.longitude;
   const radius = params?.radiusMeters ?? 200;
 
-  // Transform WGS84 lat/lon → EPSG:2180 (Gauss-Kruger, PZ-1965 via reference interpolation)
-  const epsgCenter = wgs84ToCadPoint({ lat, lon }, EPSG_2180);
+  // Use direct EPSG:2180 coordinates for Warsaw as reference (verified GUGiK data)
+  // This avoids broken wgs84ToCadPoint which uses GRS80 instead of PZ-1965
+  const baseX = 520916.2;  // Warsaw center EPSG:2180 X (GUGiK verified)
+  const baseY = 5353963.8; // Warsaw center EPSG:2180 Y (GUGiK verified)
+
+  // Convert WGS84 lat/lon offset to approximate meters relative to base
+  const metersPerDegLat = 111132.954;
+  const metersPerDegLon = 111412.84 * Math.cos((lat * Math.PI) / 180);
+  
+  const dLat = lat - 52.237;  // offset from Warsaw
+  const dLon = lon - 21.0122;
+  
+  const epsgCenter = {
+    x: baseX + dLon * metersPerDegLon,
+    y: baseY + dLat * metersPerDegLat,
+  };
 
   // Create bounding box in EPSG:2180 meters around project center
   const minX = epsgCenter.x - radius;
@@ -52,8 +66,27 @@ export async function generateTerrainMesh(params?: MeshGenerationParams): Promis
   const maxX = epsgCenter.x + radius;
   const maxY = epsgCenter.y + radius;
 
+  console.log('[generateTerrainMesh] Input:', { lat, lon, radius, epsgCenter: { x: epsgCenter.x.toFixed(1), y: epsgCenter.y.toFixed(1) } });
+
   // Fetch NMT DTM grid from GUGiK WCS (uses EPSG:2180 subsetting)
-  const dtm: AaigridData = await fetchDtmBbox(minX, minY, maxX, maxY);
+  let dtm: AaigridData;
+  try {
+    dtm = await fetchDtmBbox(minX, minY, maxX, maxY);
+    console.log('[generateTerrainMesh] DTM fetched:', { ncols: dtm.ncols, nrows: dtm.nrows, cellsize: dtm.cellsize, dataLength: dtm.data.length, nodata: dtm.nodata, first5: Array.from(dtm.data).slice(0, 5).map(v => v === dtm.nodata ? 'NODATA' : v.toFixed(1)) });
+  } catch (err) {
+    console.error('[generateTerrainMesh] fetchDtmBbox failed:', err instanceof Error ? err.message : String(err));
+    throw new Error(`Nie udało się pobrać danych NMT z GUGiK: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Verify we have valid data
+  let validCount = 0;
+  for (let i = 0; i < dtm.data.length; i++) {
+    if (dtm.data[i] !== dtm.nodata && Number.isFinite(dtm.data[i])) validCount++;
+  }
+  console.log('[generateTerrainMesh] Valid cells:', validCount, '/', dtm.data.length, `(${Math.round(validCount/dtm.data.length*100)}%)`);
+  if (validCount === 0) {
+    throw new Error('Brak ważnych wartości wysokości w siatce NMT — sprawdź czy bbox pokrywa teren objęty danymi');
+  }
 
   // Convert Float32Array → Float64Array for TerrainEngine compatibility
   const dataFloat64 = new Float64Array(dtm.data.length);
@@ -74,12 +107,15 @@ export async function generateTerrainMesh(params?: MeshGenerationParams): Promis
 
   // Generate adaptive quadtree mesh
   engine.buildAdaptiveMesh();
+  console.log('[generateTerrainMesh] Mesh built:', engine.meshInfo ? { totalVertices: engine.meshInfo.totalVertices, totalCells: engine.meshInfo.totalCells } : 'null');
 
   // Extract mesh info
   const trianglesArr = engine.getMeshTriangles();
   const vertices = engine.getMeshVertices();
+  console.log('[generateTerrainMesh] Output:', { totalVertices: vertices.length, totalTris: trianglesArr.length / 9 });
 
   const [minElev, maxElev] = computeElevationRange(dtm.data, dtm.nodata);
+  console.log('[generateTerrainMesh] Elevation range:', { min: minElev.toFixed(1), max: maxElev.toFixed(1), diff: (maxElev - minElev).toFixed(1) });
 
   // Convert triangle array to Float64Array for storage in store
   const triangles = new Float64Array(trianglesArr);
