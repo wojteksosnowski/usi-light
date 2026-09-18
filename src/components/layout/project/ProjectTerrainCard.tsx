@@ -1,14 +1,15 @@
 /**
- * Karta "Rzeźba terenu" — steruje warstwami NMT i generowaniem 3D mesh.
- * Zgodna z Design System (klasy .ui-card, .btn-tile, tokeny var(--...)).
+ * Karta "Rzeźba terenu" — steruje warstwami NMT, warstwicami (izohipsami), generowaniem 3D mesh i eksportem DXF.
+ * W pełni zgodna z Design Systemem (tokeny var(--...), brak hardcodowanych kolorów).
  */
 
 import React from 'react';
-import { Mountain } from 'lucide-react';
+import { Mountain, Loader2, Download } from 'lucide-react';
 import { SimpleLayerToggle } from './SimpleLayerToggle';
 import { useWfsStore } from '../../../modules/wfs-import/store/useWfsStore';
 import { generateTerrainMesh } from '../../../modules/wfs-import/services/generateTerrainMesh';
 import { useLicenseStore } from '../../../store';
+import { useProjectExport } from './hooks/useProjectExport';
 
 export const ProjectTerrainCard: React.FC = () => {
   const isPro = useLicenseStore((s) => s.isPro);
@@ -16,11 +17,24 @@ export const ProjectTerrainCard: React.FC = () => {
   const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
   const terrainOpacity = useWfsStore((s) => s.terrainOpacity);
   const setTerrainOpacity = useWfsStore((s) => s.setTerrainOpacity);
+
+  const showTerrainContours = useWfsStore((s) => s.showTerrainContours);
+  const setShowTerrainContours = useWfsStore((s) => s.setShowTerrainContours);
+  const terrainContoursOpacity = useWfsStore((s) => s.terrainContoursOpacity);
+  const setTerrainContoursOpacity = useWfsStore((s) => s.setTerrainContoursOpacity);
+
   const showTerrainMesh = useWfsStore((s) => s.showTerrainMesh);
   const setShowTerrainMesh = useWfsStore((s) => s.setShowTerrainMesh);
   const terrainMeshOpacity = useWfsStore((s) => s.terrainMeshOpacity);
   const setTerrainMeshOpacity = useWfsStore((s) => s.setTerrainMeshOpacity);
   const terrainMesh = useWfsStore((s) => s.terrainMesh);
+
+  // Bufor NMT pobierany w tle
+  const isTerrainDtmBuffering = useWfsStore((s) => s.isTerrainDtmBuffering);
+  const terrainDtmCache = useWfsStore((s) => s.terrainDtmCache);
+  const terrainDtmProgress = useWfsStore((s) => s.terrainDtmProgress);
+
+  const { handleExportDxf, terrainExportBusy } = useProjectExport();
 
   // UI state for generation progress
   const [busy, setBusy] = React.useState(false);
@@ -33,7 +47,6 @@ export const ProjectTerrainCard: React.FC = () => {
     setError(null);
     try {
       await generateTerrainMesh();
-      // Success — store now has mesh data; hasMesh will be recalculated on next render
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Nie udało się wygenerować mesha: ${msg}`);
@@ -42,8 +55,10 @@ export const ProjectTerrainCard: React.FC = () => {
     }
   };
 
-  // Check if mesh has been generated yet (re-checked each render since store updates cause re-renders)
   const hasMesh = terrainMesh !== null && terrainMesh.totalVertices > 0;
+  const isBufferReady = terrainDtmCache !== null;
+  const isButtonDisabled = busy || hasMesh || isTerrainDtmBuffering;
+  const contoursCount = terrainMesh?.contours?.length ?? 0;
 
   return (
     <div className="ui-card">
@@ -80,11 +95,45 @@ export const ProjectTerrainCard: React.FC = () => {
         )}
 
         {/* Separator */}
-        <div style={{ borderTop: '1px solid rgba(51, 65, 85, 0.4)', paddingTop: '6px' }} />
+        <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '6px' }} />
+
+        {/* Toggle warstwice / izohipsy */}
+        <SimpleLayerToggle
+          label="Warstwice / Izohipsy (co 1m)"
+          active={showTerrainContours}
+          dotColorVar="var(--accent-cyan)"
+          onToggle={() => setShowTerrainContours(!showTerrainContours)}
+        />
+
+        {showTerrainContours && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '15px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--text-secondary)' }}>
+              <span>Krycie warstwic:</span>
+              <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(terrainContoursOpacity * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.1"
+              max="1.0"
+              step="0.05"
+              value={terrainContoursOpacity}
+              onChange={(e) => setTerrainContoursOpacity(parseFloat(e.target.value))}
+              style={{ width: '100%', accentColor: 'var(--accent-cyan)', cursor: 'pointer' }}
+            />
+            {hasMesh && (
+              <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {contoursCount} poziomów warstwic · {Math.round(terrainMesh!.maxElevation - terrainMesh!.minElevation)} m deniwelacji
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Separator */}
+        <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '6px' }} />
 
         {/* Toggle wireframe mesh */}
         <SimpleLayerToggle
-          label="Wireframe 3D mesh"
+          label="Siatka 3D Mesh (Wireframe)"
           active={showTerrainMesh}
           dotColorVar="var(--accent-cyan)"
           onToggle={() => setShowTerrainMesh(!showTerrainMesh)}
@@ -107,9 +156,46 @@ export const ProjectTerrainCard: React.FC = () => {
             />
             {hasMesh && (
               <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {terrainMesh!.totalVertices} wierzchołków · {Math.round(terrainMesh!.maxElevation - terrainMesh!.minElevation)} m różnica wysokości
+                {terrainMesh!.totalVertices} wierzchołków · {Math.round(terrainMesh!.triangles.length / 9)} trójkątów (adaptacyjna siatka ⚡)
               </div>
             )}
+          </div>
+        )}
+
+        {/* Pasek postępu buforowania w tle */}
+        {isTerrainDtmBuffering && !hasMesh && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            padding: '6px 8px',
+            borderRadius: '6px',
+            backgroundColor: 'var(--bg-secondary)',
+            border: '1px solid var(--border-subtle)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--text-secondary)' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Loader2 size={10} className="animate-spin" color="var(--accent-cyan)" />
+                Buforowanie NMT w tle…
+              </span>
+              <span style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>
+                {terrainDtmProgress > 0 ? `${terrainDtmProgress}%` : 'Pobieranie'}
+              </span>
+            </div>
+            <div style={{
+              width: '100%',
+              height: '3px',
+              borderRadius: '2px',
+              backgroundColor: 'var(--border-subtle)',
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%',
+                width: terrainDtmProgress > 0 ? `${terrainDtmProgress}%` : '60%',
+                backgroundColor: 'var(--accent-cyan)',
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
           </div>
         )}
 
@@ -117,8 +203,8 @@ export const ProjectTerrainCard: React.FC = () => {
         <button
           type="button"
           onClick={handleGenerateMesh}
-          disabled={busy || hasMesh}
-          className={`btn-tile ${!hasMesh && !busy ? 'active-cyan' : 'inactive'}`}
+          disabled={isButtonDisabled}
+          className={`btn-tile ${!hasMesh && !isButtonDisabled ? 'active-cyan' : 'inactive'}`}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -127,17 +213,49 @@ export const ProjectTerrainCard: React.FC = () => {
             padding: '8px 6px',
             fontSize: '11px',
             fontWeight: 600,
-            opacity: busy ? 0.7 : 1,
-            cursor: busy || hasMesh ? 'not-allowed' : 'pointer',
+            opacity: isButtonDisabled && !hasMesh ? 0.65 : 1,
+            cursor: isButtonDisabled ? 'not-allowed' : 'pointer',
           }}
           title={
-            busy ? 'Generowanie mesha z danych NMT GUGiK…'
-            : hasMesh ? 'Mesh został już wygenerowany — włacz Wireframe aby zobaczyć'
-            : 'Generuj siatkę 3D z danych NMT GUGiK'
+            busy ? 'Generowanie siatki 3D i warstwic…'
+            : hasMesh ? 'Siatka 3D i warstwice zostały już wygenerowane'
+            : isTerrainDtmBuffering ? 'Trwa ciche pobieranie danych NMT w tle… Poczekaj chwilę na zakończenie buforowania'
+            : isBufferReady ? 'Dane NMT są już w pamięci — kliknij aby natychmiast wygenerować mesh 3D i warstwice'
+            : 'Generuj siatkę 3D i warstwice z danych NMT GUGiK'
           }
         >
-          <span>{busy ? 'Generowanie… ⏳' : hasMesh ? 'Mesh wygenerowany ✓' : 'Generuj 3D mesh'}</span>
+          <span>
+            {busy ? 'Generowanie siatki 3D i warstwic… ⏳'
+              : hasMesh ? 'Mesh i warstwice gotowe ✓'
+              : isTerrainDtmBuffering ? 'Pobieranie NMT w tle… ⏳'
+              : isBufferReady ? 'Generuj 3D mesh (z bufora ⚡)'
+              : 'Generuj 3D mesh'}
+          </span>
         </button>
+
+        {/* Eksport terenu do DXF */}
+        {hasMesh && (
+          <button
+            type="button"
+            onClick={() => handleExportDxf({ forceIncludeTerrain: true })}
+            disabled={terrainExportBusy}
+            className="btn-tile active-indigo"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '7px 6px',
+              fontSize: '10.5px',
+              fontWeight: 600,
+              cursor: terrainExportBusy ? 'not-allowed' : 'pointer',
+            }}
+            title="Eksportuj scenę wraz z rzeźbą terenu 3D i warstwicami do pliku DXF"
+          >
+            <Download size={12} />
+            <span>{terrainExportBusy ? 'Eksportowanie DXF… ⏳' : 'Eksportuj z terenem (.DXF)'}</span>
+          </button>
+        )}
 
         {/* Error message */}
         {error && (

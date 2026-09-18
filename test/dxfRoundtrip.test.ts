@@ -183,6 +183,7 @@ describe('DXF Roundtrip — exportMeshAsDxf struktura i parsowanie', () => {
       float64Grid(GRID.LARGE, GRID.LARGE, (c, r) => 50 + c * 5 + r * 5),
       GRID.LARGE, GRID.LARGE, 0, 0, 1, -9999
     );
+    engine.buildAdaptiveMesh();
 
     const result = engine.exportContoursAsDxf({ interval: 10.0 });
     expect(result.type).toBe('dxf');
@@ -201,6 +202,7 @@ describe('DXF Roundtrip — exportMeshAsDxf struktura i parsowanie', () => {
       float64Grid(GRID.MED, GRID.MED, (c, r) => 30 + c * 8 + r * 8),
       GRID.MED, GRID.MED, 0, 0, 1, -9999
     );
+    engine.buildAdaptiveMesh();
 
     const dxf = engine.exportContoursAsDxf({ interval: 5.0 }).content as string;
 

@@ -778,7 +778,7 @@ export function differencePolygonLoops(
 
   for (const posLoop of positiveLoops) {
     const pb = computePointsBoundingBox(posLoop);
-    const relevant: Point2D[] = [];
+    const relevant: Point2D[][] = [];
     for (let j = 0; j < overlappingNegatives.length; j++) {
       const nb = negBoxes[j];
       if (!(nb.maxX < pb.minX || nb.minX > pb.maxX || nb.maxY < pb.minY || nb.minY > pb.maxY)) {

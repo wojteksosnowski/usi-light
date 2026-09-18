@@ -16,16 +16,20 @@ export const useProjectExport = () => {
   const isPro = useLicenseStore((s) => s.isPro);
   const openModal = useUiStore((s) => s.openModal);
 
-  const [includeTerrainMesh, setIncludeTerrainMesh] = React.useState(false);
+  const [includeTerrainMesh, setIncludeTerrainMesh] = React.useState(true);
   const [terrainExportBusy, setTerrainExportBusy] = React.useState(false);
   const [exportWarning, setExportWarning] = React.useState<string | null>(null);
 
-  const handleExportDxf = async () => {
+  const handleExportDxf = async (options?: { forceIncludeTerrain?: boolean }) => {
     if (!isPro) {
       openModal('pricing');
       return;
     }
-    const terrain = includeTerrainMesh
+
+    const currentTerrainMesh = useWfsStore.getState().terrainMesh;
+    const shouldExportTerrain = options?.forceIncludeTerrain ?? (includeTerrainMesh || currentTerrainMesh !== null);
+
+    const terrain = shouldExportTerrain && !currentTerrainMesh
       ? {
           projectCenter: { lat: settings.latitude, lon: settings.longitude },
           radiusMeters: useWfsStore.getState().projectRadius,
@@ -36,10 +40,18 @@ export const useProjectExport = () => {
     setTerrainExportBusy(true);
     setExportWarning(null);
     try {
-      const { terrainWarning } = await exportSceneToDxf({ buildings, pinnedPoints, terrain });
+      const { terrainWarning } = await exportSceneToDxf({
+        buildings,
+        pinnedPoints,
+        terrainMeshData: shouldExportTerrain ? currentTerrainMesh : null,
+        terrain,
+      });
       if (terrainWarning) {
         setExportWarning(`⚠️ Eksport DXF: ${terrainWarning}`);
       }
+    } catch (err: any) {
+      console.error('[useProjectExport] Błąd eksportu DXF:', err);
+      setExportWarning(`Błąd eksportu DXF: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setTerrainExportBusy(false);
     }

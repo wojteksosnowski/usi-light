@@ -43,74 +43,10 @@ export interface TileCoordinate {
   z: number;
 }
 
-// Parametry elipsoidy GRS80 (ETRF89 / PL-2000 strefy EPSG:217x)
+// Parametry elipsoidy GRS80 (zgodne z ETRF89 / PL-1992 / PL-2000)
 const GRS80_A = 6378137.0; // półoś wielka w metrach
 const GRS80_F = 1 / 298.257222101; // spłaszczenie
 const GRS80_E2 = 2 * GRS80_F - GRS80_F * GRS80_F; // pierwszy mimośród podniesiony do kwadratu
-
-// ---------------------------------------------------------------------------
-// Referencyjne punkty: WGS84 lat/lon → EPSG:2180 metry (pobrane z epsg.io, guggik.gov.pl)
-// Używane do interpolacji odwzorowania WGS84 → PL-1992 (PZ-1965 ellipsoid)
-// ---------------------------------------------------------------------------
-interface RefPoint {
-  wgs84: [number, number]; // [lat, lon]
-  epsg2180: [number, number]; // [x, y]
-}
-const REF_POINTS: RefPoint[] = [
-  // Południowa Polska
-  { wgs84: [49.0, 19.0], epsg2180: [520886.4, 5143330.5] },  // Kraków południe
-  { wgs84: [50.0, 19.0], epsg2180: [520828.9, 5254722.3] },  // Kraków północ
-  { wgs84: [49.0, 21.0], epsg2180: [523758.6, 5143366.7] },  // Rzeszów zachód
-  { wgs84: [50.0, 21.0], epsg2180: [523701.1, 5254758.5] },  // Przemyśl zachód
-  // Centralna Polska
-  { wgs84: [52.237, 21.012], epsg2180: [520916.2, 5353963.8] }, // Warszawa centrum (guggik)
-  { wgs84: [51.759, 19.456], epsg2180: [522549.4, 5293054.6] }, // Łódź
-  { wgs84: [52.406, 16.925], epsg2180: [519646.6, 5364920.1] }, // Poznań
-  { wgs84: [54.352, 18.646], epsg2180: [524654.3, 6025579.2] }, // Gdańsk
-  // Północna wschodnia
-  { wgs84: [53.133, 23.164], epsg2180: [526546.7, 5757520.3] }, // Białystok
-  { wgs84: [52.097, 23.681], epsg2180: [527223.4, 5303696.7] }, // Lublin
-];
-
-/**
- * Interpoluje EPSG:2180 współrzędne z WGS84 lat/lon używając 4 najbliższych punktów referencyjnych.
- * Daje < 5m dokładności dla całego terytorium Polski.
- */
-function interpolateEpsg2180(lat: number, lon: number): [number, number] {
-  // Find 4 nearest reference points (bounding box approach)
-  const sorted = [...REF_POINTS].sort((a, b) => {
-    const da = Math.hypot(a.wgs84[0] - lat, a.wgs84[1] - lon);
-    const db = Math.hypot(b.wgs84[0] - lat, b.wgs84[1] - lon);
-    return da - db;
-  });
-  const p1 = sorted[0], p2 = sorted[1], p3 = sorted[2], p4 = sorted[3];
-
-  // Use bilinear interpolation between the 2 closest pairs
-  // Find which rectangle best contains our point
-  const lats = [Math.min(p1.wgs84[0], p2.wgs84[0]), Math.max(p3.wgs84[0], p4.wgs84[0])];
-  const lons = [Math.min(p1.wgs84[1], p2.wgs84[1]), Math.max(p3.wgs84[1], p4.wgs84[1])];
-
-  // Simple inverse distance weighting with 4 nearest neighbors
-  const weights: number[] = [];
-  for (let i = 0; i < 4; i++) {
-    const d = Math.hypot(REF_POINTS[i].wgs84[0] - lat, REF_POINTS[i].wgs84[1] - lon);
-    weights.push(d === 0 ? 1e10 : 1 / (d * d));
-  }
-  const wSum = weights.reduce((a, b) => a + b, 0);
-
-  const x = weights.reduce((a, w, i) => a + w * REF_POINTS[i].epsg2180[0], 0) / wSum;
-  const y = weights.reduce((a, w, i) => a + w * REF_POINTS[i].epsg2180[1], 0) / wSum;
-
-  return [x, y];
-}
-
-/**
- * WGS84 lat/lon → EPSG:2180 metry (interpolacja na bazie referencyjnych punktów GUGiK).
- */
-function wgs84ToPl1992(lat: number, lon: number): Point2D {
-  const [x, y] = interpolateEpsg2180(lat, lon);
-  return { x, y };
-}
 
 /**
  * Automatycznie wykrywa układ współrzędnych na podstawie analizy statystycznej wierzchołków.
@@ -362,9 +298,35 @@ export function wgs84ToCadPoint(
     };
   }
 
-  // 2. Bezwzględne współrzędne PL-1992 (EPSG:2180) — pełna transformacja Helmert + Gauss-Krueger PZ-1965
+  // 2. Bezwzględne współrzędne PL-1992 lub PL-2000
   if (crsInfo.crs === 'EPSG:2180' || crsInfo.crs.startsWith('EPSG:217')) {
-    return wgs84ToPl1992(latLon.lat, latLon.lon);
+    // Forward Gauss-Kruger
+    const lon0 = crsInfo.crs === 'EPSG:2180' ? 19.0 : (crsInfo.zone || 7) * 3;
+    const k0 = crsInfo.crs === 'EPSG:2180' ? 0.9993 : 0.999923;
+    const falseEast = crsInfo.crs === 'EPSG:2180' ? 500000 : (crsInfo.zone || 7) * 1_000_000 + 500_000;
+    const falseNorth = crsInfo.crs === 'EPSG:2180' ? -5300000 : 0;
+
+    const latRad = (latLon.lat * Math.PI) / 180;
+    const lonRad = (latLon.lon * Math.PI) / 180;
+    const lon0Rad = (lon0 * Math.PI) / 180;
+
+    const e2 = GRS80_E2;
+    const N = GRS80_A / Math.sqrt(1 - e2 * Math.pow(Math.sin(latRad), 2));
+    const T = Math.pow(Math.tan(latRad), 2);
+    const C = (e2 / (1 - e2)) * Math.pow(Math.cos(latRad), 2);
+    const A = (lonRad - lon0Rad) * Math.cos(latRad);
+
+    const M = GRS80_A * (
+      (1 - e2/4 - 3*e2*e2/64 - 5*Math.pow(e2, 3)/256) * latRad
+      - (3*e2/8 + 3*e2*e2/32 + 45*Math.pow(e2, 3)/1024) * Math.sin(2*latRad)
+      + (15*e2*e2/256 + 45*Math.pow(e2, 3)/1024) * Math.sin(4*latRad)
+      - (35*Math.pow(e2, 3)/3072) * Math.sin(6*latRad)
+    );
+
+    const x = falseEast + k0 * N * (A + (1 - T + C) * Math.pow(A, 3) / 6 + (5 - 18 * T + T * T + 72 * C - 58 * (e2 / (1 - e2))) * Math.pow(A, 5) / 120);
+    const y = falseNorth + k0 * (M + N * Math.tan(latRad) * (A * A / 2 + (5 - T + 9 * C + 4 * C * C) * Math.pow(A, 4) / 24 + (61 - 58 * T + T * T + 600 * C - 330 * (e2 / (1 - e2))) * Math.pow(A, 6) / 720));
+
+    return { x, y };
   }
 
   // Lokalny CAD ze stałym środkiem (0, 0)

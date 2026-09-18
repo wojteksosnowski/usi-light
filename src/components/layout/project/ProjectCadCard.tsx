@@ -16,6 +16,8 @@ export const ProjectCadCard: React.FC = () => {
   const { dxfUnit, dxfImportInfo, handleFileUpload, handleDxfUnitChange } = useProjectIO();
   const {
     isPro,
+    includeTerrainMesh,
+    setIncludeTerrainMesh,
     terrainExportBusy,
     exportWarning,
     handleExportDxf,
@@ -57,7 +59,7 @@ export const ProjectCadCard: React.FC = () => {
           {isPro && (
             <button
               type="button"
-              onClick={handleExportDxf}
+              onClick={() => handleExportDxf()}
               disabled={terrainExportBusy}
               className="btn-tile active-cyan"
               style={{
@@ -69,13 +71,35 @@ export const ProjectCadCard: React.FC = () => {
                 opacity: terrainExportBusy ? 0.6 : 1,
                 cursor: terrainExportBusy ? 'not-allowed' : 'pointer',
               }}
-              title="Eksportuj geometrię i punkty pomiarowe do formatu CAD DXF"
+              title="Eksportuj geometrię, punkty pomiarowe oraz rzeźbę terenu i warstwice do DXF"
             >
               <FileCode size={13} />
               <span>{terrainExportBusy ? 'Eksportowanie…' : 'Eksport DXF'}</span>
             </button>
           )}
         </div>
+
+        {isPro && (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '10px',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              marginTop: '-2px',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={includeTerrainMesh}
+              onChange={(e) => setIncludeTerrainMesh(e.target.checked)}
+              style={{ accentColor: 'var(--accent-cyan)', cursor: 'pointer' }}
+            />
+            <span>Dołącz rzeźbę terenu i warstwice do DXF</span>
+          </label>
+        )}
 
         {exportWarning && (
           <div style={{ fontSize: '10.5px', color: 'var(--accent-amber)', textAlign: 'center', fontWeight: 600 }}>

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Point2D, BuildingLoop } from '../../../types/geometry';
+import type { AaigridData } from '../services/wcsGugikClient';
 
 export interface WfsTreeFeature {
   id: number;
@@ -115,6 +116,11 @@ export interface WfsImportOptions {
 
 export type ProjectRadius = 50 | 100 | 200 | 300;
 
+export interface TerrainContourData {
+  elevation: number;
+  loops: Array<Array<{ x: number; y: number }>>;
+}
+
 /** Siatka NMT zbudowana w TerrainEngine (do renderowania mesh i eksportu DXF). */
 export interface TerrainMeshData {
   /** Vertexy trójkątów [x,y,z,x,y,z,...] Float64Array. */
@@ -124,6 +130,10 @@ export interface TerrainMeshData {
   /** Minimalna i maksymalna wysokość terenu. */
   minElevation: number;
   maxElevation: number;
+  /** Izolinie / warstwice wyznaczone przez TerrainEngine. */
+  contours?: TerrainContourData[];
+  /** Płaski bufor krawędzi wireframe [x0, y0, x1, y1, ...] dla szybkiego renderu Canvas 2D. */
+  wireframeEdges?: Float64Array;
 }
 
 interface WfsState {
@@ -158,10 +168,18 @@ interface WfsState {
   terrainOpacity: number;
   showTerrainMesh: boolean;
   terrainMeshOpacity: number;
+  showTerrainContours: boolean;
+  terrainContoursOpacity: number;
   showTreesLayer: boolean;
 
   // Terrain mesh data (built from NMT grid via TerrainEngine)
   terrainMesh: TerrainMeshData | null;
+  // Bufor NMT DTM pobrany w tle (do natychmiastowego generowania 3D mesh)
+  isTerrainDtmBuffering: boolean;
+  terrainDtmProgress: number; // 0 - 100%
+  terrainDtmCache: AaigridData | null;
+  setIsTerrainDtmBuffering: (buffering: boolean, progress?: number) => void;
+  setTerrainDtmCache: (cache: AaigridData | null) => void;
 
   // Warstwa kontekstowa Overture Maps (zieleń / zagospodarowanie)
   overtureGreenAreas: OverturePolygonFeature[];
@@ -211,6 +229,8 @@ interface WfsState {
   setTerrainOpacity: (val: number) => void;
   setShowTerrainMesh: (show: boolean) => void;
   setTerrainMeshOpacity: (val: number) => void;
+  setShowTerrainContours: (show: boolean) => void;
+  setTerrainContoursOpacity: (val: number) => void;
   setTerrainMesh: (mesh: TerrainMeshData | null) => void;
   setShowTreesLayer: (show: boolean) => void;
 
@@ -307,6 +327,8 @@ export const useWfsStore = create<WfsState>()(
       terrainOpacity: 0.35,
       showTerrainMesh: false,
       terrainMeshOpacity: 0.3,
+      showTerrainContours: true,
+      terrainContoursOpacity: 0.6,
       showTreesLayer: false,
 
   overtureGreenAreas: [],
@@ -320,6 +342,13 @@ export const useWfsStore = create<WfsState>()(
   showLandCoverLayer: false,
 
   terrainMesh: null,
+  isTerrainDtmBuffering: false,
+  terrainDtmProgress: 0,
+  terrainDtmCache: null,
+  setIsTerrainDtmBuffering: (buffering, progress = 0) =>
+    set({ isTerrainDtmBuffering: buffering, terrainDtmProgress: progress }),
+  setTerrainDtmCache: (cache) =>
+    set({ terrainDtmCache: cache, isTerrainDtmBuffering: false, terrainDtmProgress: cache ? 100 : 0 }),
 
   lastImportBbox: null,
 
@@ -463,6 +492,8 @@ export const useWfsStore = create<WfsState>()(
   setTerrainOpacity: (val) => set({ terrainOpacity: val }),
   setShowTerrainMesh: (show) => set({ showTerrainMesh: show }),
   setTerrainMeshOpacity: (val) => set({ terrainMeshOpacity: val }),
+  setShowTerrainContours: (show) => set({ showTerrainContours: show }),
+  setTerrainContoursOpacity: (val) => set({ terrainContoursOpacity: val }),
   setTerrainMesh: (mesh) => set({ terrainMesh: mesh }),
   setShowTreesLayer: (show) => set({ showTreesLayer: show }),
 

@@ -37,7 +37,86 @@ export function parseAaigrid(text: string): AaigridData {
     values.push(...row);
   }
 
+  if (ncols === 0 || nrows === 0 || values.length === 0) {
+    throw new Error(`Invalid AAIGRID response: missing header or empty data (ncols=${ncols}, nrows=${nrows}, received ${lines.length} lines)`);
+  }
+
   return { ncols, nrows, xllcorner, yllcorner, cellsize, nodata, data: new Float32Array(values) };
+}
+
+function buildWcsParams(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  coverageId: string,
+  resolutionMeters: number = 1.0
+): URLSearchParams {
+  return new URLSearchParams({
+    SERVICE: 'WCS',
+    VERSION: '1.0.0',
+    REQUEST: 'GetCoverage',
+    COVERAGE: coverageId,
+    coverageId,
+    FORMAT: 'AAIGRID',
+    CRS: 'EPSG:2180',
+    RESPONSE_CRS: 'EPSG:2180',
+    BBOX: `${Math.floor(minX)},${Math.floor(minY)},${Math.ceil(maxX)},${Math.ceil(maxY)}`,
+    RESX: String(resolutionMeters),
+    RESY: String(resolutionMeters),
+    resx: String(resolutionMeters),
+    resy: String(resolutionMeters),
+    xmin: String(Math.floor(minX)),
+    ymin: String(Math.floor(minY)),
+    xmax: String(Math.ceil(maxX)),
+    ymax: String(Math.ceil(maxY)),
+  });
+}
+
+/**
+ * Pomocnicza funkcja wykonująca zapytanie HTTP z ponawianiem próby i czytelną obsługą błędów.
+ */
+async function fetchWcsWithClientRetry(
+  url: string,
+  serviceName: string,
+  signal?: AbortSignal,
+  maxRetries: number = 2
+): Promise<string> {
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, { signal });
+      if (res.ok) {
+        return await res.text();
+      }
+
+      let errorDetail = '';
+      try {
+        const json = await res.json();
+        errorDetail = json.details || json.error || '';
+      } catch {
+        errorDetail = await res.text().catch(() => '');
+      }
+
+      const msg = errorDetail ? `${res.status} (${errorDetail})` : `${res.status}`;
+      if (res.status >= 500 && attempt < maxRetries) {
+        console.warn(`[wcsGugikClient] ${serviceName} returned ${res.status} on attempt ${attempt}, retrying...`);
+        await new Promise((r) => setTimeout(r, attempt * 800));
+        continue;
+      }
+      throw new Error(`${serviceName}: ${msg}`);
+    } catch (err: any) {
+      lastError = err;
+      if (signal?.aborted) throw err;
+      if (attempt < maxRetries) {
+        console.warn(`[wcsGugikClient] ${serviceName} attempt ${attempt} failed, retrying...`, err?.message);
+        await new Promise((r) => setTimeout(r, attempt * 800));
+      }
+    }
+  }
+
+  throw lastError || new Error(`Nie udało się pobrać danych z ${serviceName}`);
 }
 
 /**
@@ -51,25 +130,9 @@ export async function fetchDsmBbox(
   coverageId: 'DSM_PL-KRON86-NH' | 'DSM_PL-EVRF2007-NH' = 'DSM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
-  const params = new URLSearchParams({
-    coverageId,
-    xmin: String(Math.floor(minX)),
-    ymin: String(Math.floor(minY)),
-    xmax: String(Math.ceil(maxX)),
-    ymax: String(Math.ceil(maxY)),
-  });
-
-  let res: Response;
-  if (isBrowserEnv) {
-    // Browser: use serverless API proxy to avoid CORS restrictions on GUGiK WCS
-    res = await fetch(`/api/nmt?${params}`, { signal });
-    if (!res.ok) throw new Error(`NMT/NMPT (DSM) proxy: ${res.status}`);
-  } else {
-    // Node/vitest: direct fetch (proxy not available in test environment)
-    res = await fetch(`${NMPT_WCS_URL}?${params}`, { signal });
-    if (!res.ok) throw new Error(`WCS NMPT (DSM): ${res.status}`);
-  }
-  const text = await res.text();
+  const params = buildWcsParams(minX, minY, maxX, maxY, coverageId);
+  const targetUrl = isBrowserEnv ? `/api/nmt?${params.toString()}` : `${NMPT_WCS_URL}?${params.toString()}`;
+  const text = await fetchWcsWithClientRetry(targetUrl, 'NMPT (DSM)', signal);
   return parseAaigrid(text);
 }
 
@@ -84,24 +147,8 @@ export async function fetchDtmBbox(
   coverageId: 'DTM_PL-KRON86-NH' | 'DTM_PL-EVRF2007-NH' = 'DTM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
-  const params = new URLSearchParams({
-    coverageId,
-    xmin: String(Math.floor(minX)),
-    ymin: String(Math.floor(minY)),
-    xmax: String(Math.ceil(maxX)),
-    ymax: String(Math.ceil(maxY)),
-  });
-
-  let res: Response;
-  if (isBrowserEnv) {
-    // Browser: use serverless API proxy to avoid CORS restrictions on GUGiK WCS
-    res = await fetch(`/api/nmt?${params}`, { signal });
-    if (!res.ok) throw new Error(`NMT (DTM) proxy: ${res.status}`);
-  } else {
-    // Node/vitest: direct fetch (proxy not available in test environment)
-    res = await fetch(`${NMT_WCS_URL}?${params}`, { signal });
-    if (!res.ok) throw new Error(`WCS NMT (DTM): ${res.status}`);
-  }
-  const text = await res.text();
+  const params = buildWcsParams(minX, minY, maxX, maxY, coverageId);
+  const targetUrl = isBrowserEnv ? `/api/nmt?${params.toString()}` : `${NMT_WCS_URL}?${params.toString()}`;
+  const text = await fetchWcsWithClientRetry(targetUrl, 'NMT (DTM)', signal);
   return parseAaigrid(text);
 }

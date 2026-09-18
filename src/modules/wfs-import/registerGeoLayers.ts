@@ -95,7 +95,7 @@ const bdotTileManager = new WmsTileManager({
 const terrainTileManager = new WmsTileManager({
   baseUrl: NMT_WMS_URL,
   layers: 'Raster',
-  format: 'image/png',
+  format: 'image/jpeg',
   crs: 'EPSG:3857',
   maxNativeZoom: 20,
 }, 200, triggerRender);
@@ -200,6 +200,8 @@ export function registerGeoLayers(): () => void {
       terrainOpacity,
       showTerrainMesh,
       terrainMeshOpacity,
+      showTerrainContours,
+      terrainContoursOpacity,
       terrainMesh,
       showTreesLayer,
       trees,
@@ -258,13 +260,20 @@ export function registerGeoLayers(): () => void {
     if (toggleMainLayer(pipeline, terrainLayer, 'wfs_terrain_shading', activeTerrain, prevShowTerrain)) changed = true;
     prevShowTerrain = activeTerrain;
 
-    // 6. Wireframe 3D mesh terenu (PRO)
-    if (isPro && showTerrainMesh && terrainMesh) {
-      terrainMeshLayer.setData({ triangles: terrainMesh.triangles });
-      terrainMeshLayer.setOpacity(terrainMeshOpacity);
-      terrainMeshLayer.setVisibility(true);
-      const hadTerrainMesh = prevShowTerrainMesh;
-      if (hadTerrainMesh !== true) {
+    // 6. Rzeźba terenu: Siatka 3D Wireframe oraz Warstwice / Izohipsy (PRO)
+    const shouldShowTerrain = Boolean(isPro && terrainMesh && (showTerrainMesh || showTerrainContours));
+    if (shouldShowTerrain && terrainMesh) {
+      terrainMeshLayer.setData({
+        triangles: terrainMesh.triangles,
+        wireframeEdges: terrainMesh.wireframeEdges,
+        contours: terrainMesh.contours,
+        showMesh: showTerrainMesh,
+        meshOpacity: terrainMeshOpacity,
+        showContours: showTerrainContours,
+        contoursOpacity: terrainContoursOpacity,
+      });
+      const hadTerrain = prevShowTerrainMesh;
+      if (!hadTerrain) {
         pipeline.registerMainLayer(terrainMeshLayer);
         changed = true;
       }

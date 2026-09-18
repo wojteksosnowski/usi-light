@@ -174,4 +174,31 @@ describe('Marching Squares — walidacja geometryczna konturów', () => {
       expect(totalLenFiltered).toBeLessThanOrEqual(totalLenNoFilter);
     }
   });
+
+  it('obsługuje transformację afiniczną 2D (obrót siatki o kąt zbieżności południków)', () => {
+    // Siatka obrócona o np. 45 stopni
+    const cos = Math.SQRT1_2;
+    const sin = Math.SQRT1_2;
+    const transform2D = {
+      ux: cos,
+      uy: sin,
+      vx: -sin,
+      vy: cos,
+    };
+
+    const d = float64Grid(5, 5, (c, r) => c * 5 + r * 5);
+    const engine = TerrainEngine.fromGrid(d, 5, 5, 100, 200, 1, -9999, undefined, transform2D);
+    engine.buildAdaptiveMesh();
+
+    const contours = engine.generateContours({ interval: 5.0 });
+    expect(contours.length).toBeGreaterThan(0);
+
+    const edges = engine.getWireframeEdges();
+    expect(edges.length).toBeGreaterThan(0);
+    expect(edges.length % 4).toBe(0);
+
+    const tris = engine.getMeshTriangles();
+    expect(tris.length).toBeGreaterThan(0);
+    expect(tris.length % 9).toBe(0);
+  });
 });

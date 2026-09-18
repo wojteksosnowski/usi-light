@@ -48,6 +48,7 @@ export class WmsTileManager {
   private extentKeys: Set<string> = new Set();
   private warmupKeys: Set<string> = new Set();
   private readonly maxConcurrentPrefetches = 4;
+  private retryCounts: Map<string, number> = new Map();
   private config: WmsTileConfig;
   private onTileLoaded?: () => void;
   private totalBytesLoaded = 0;
@@ -281,6 +282,7 @@ export class WmsTileManager {
 
     img.onload = () => {
       this.pending.delete(key);
+      this.retryCounts.delete(key);
       this.cache.set(key, img);
       // Inwersja NIE liczy się tutaj — większość kafli ładowanych w tle (prefetch w promieniu
       // projektu na wielu poziomach zoomu) nigdy nie trafia na ekran. Liczymy ją leniwie, tylko
@@ -298,8 +300,26 @@ export class WmsTileManager {
 
     img.onerror = () => {
       this.pending.delete(key);
-      this.silentKeys.delete(key);
+      const isSilent = this.silentKeys.has(key);
       this.activePrefetches--;
+
+      const attempts = (this.retryCounts.get(key) || 0) + 1;
+      if (attempts <= 2) {
+        this.retryCounts.set(key, attempts);
+        const backoffMs = attempts * 350;
+        setTimeout(() => {
+          if (!this.cache.has(key) && !this.pending.has(key)) {
+            this.pending.add(key);
+            if (isSilent) this.silentKeys.add(key);
+            this.activePrefetches++;
+            this.loadTile(x, y, z, key);
+          }
+        }, backoffMs);
+      } else {
+        this.retryCounts.delete(key);
+        this.silentKeys.delete(key);
+      }
+
       this.processQueue();
     };
 

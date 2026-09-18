@@ -14,6 +14,7 @@ import { getIsoCameraOffset, getSunDirection3D, type IsoOrientation } from './is
 import { getPolygonCentroid, getPolygonInteriorPoint, computePointsBoundingBox, computePolygonArea } from '@/utils/math2d/polygons';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
 import { useSolarAnalysisStore } from '@/store';
+import { useWfsStore } from '@/modules/wfs-import/store/useWfsStore';
 import { calculateSolarPosition } from '@/utils/solar';
 
 /** Clockwise cycle used for the left/right compass arrows, 45° per step. */
@@ -682,6 +683,10 @@ const IsoScene: React.FC<{
           shadow-mapSize-height={1024}
         />
         <primitive object={group} />
+        {(() => {
+          const activeBldg = buildings.find((b) => b.id === activeBuildingId) || buildings[0];
+          return <TerrainMesh3D baseElevation={activeBldg?.elevation || 0} isXRay={isXRay} />;
+        })()}
 
         {frameData && (
           <mesh
@@ -706,6 +711,56 @@ const IsoScene: React.FC<{
       </>
     );
   };
+
+const TerrainMesh3D: React.FC<{ baseElevation?: number; isXRay?: boolean }> = ({ baseElevation = 0, isXRay = false }) => {
+  const terrainMesh = useWfsStore((s) => s.terrainMesh);
+  const showTerrainMesh = useWfsStore((s) => s.showTerrainMesh);
+  const terrainMeshOpacity = useWfsStore((s) => s.terrainMeshOpacity);
+
+  const geometry = useMemo(() => {
+    if (!terrainMesh || terrainMesh.triangles.length < 9) return null;
+    const tris = terrainMesh.triangles;
+    const positions = new Float32Array(tris.length);
+
+    // Map CAD (x, y, z) to Three.js (worldX = cadX, worldY = cadZ - baseElevation, worldZ = -cadY)
+    for (let i = 0; i < tris.length; i += 3) {
+      positions[i] = tris[i];
+      positions[i + 1] = tris[i + 2] - baseElevation;
+      positions[i + 2] = -tris[i + 1];
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }, [terrainMesh, baseElevation]);
+
+  if (!showTerrainMesh || !geometry) return null;
+
+  return (
+    <group>
+      <mesh geometry={geometry} receiveShadow>
+        <meshStandardMaterial
+          color="#38bdf8"
+          roughness={0.8}
+          metalness={0.05}
+          transparent={true}
+          opacity={isXRay ? 0.2 : terrainMeshOpacity * 0.7}
+          depthWrite={!isXRay}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <mesh geometry={geometry}>
+        <meshBasicMaterial
+          color="#0284c7"
+          wireframe={true}
+          transparent={true}
+          opacity={isXRay ? 0.25 : terrainMeshOpacity}
+        />
+      </mesh>
+    </group>
+  );
+};
 
 const CompassStrip: React.FC<{ orientation: IsoOrientation }> = ({ orientation }) => {
   const currentIndex = ORIENTATION_CYCLE.indexOf(orientation);

@@ -130,8 +130,45 @@ describe('buildAdaptiveMesh', () => {
 
     // Bumpy terrain should have at least as many triangles as flat
     if (bumpEngine.meshInfo && flatEngine.meshInfo) {
-      expect(bumpEngine.meshInfo.totalCells).toBeGreaterThanOrEqual(flatEngine.meshInfo.totalCells);
+      expect(bumpEngine.meshInfo.totalCells).toBeGreaterThan(flatEngine.meshInfo.totalCells);
     }
+  });
+
+  it('drastically reduces cell count for large flat 64x64 terrain (>95% reduction)', () => {
+    const cols = 64;
+    const rows = 64;
+    const flatData = makeGrid(cols, rows, () => 120.0);
+    const engine = TerrainEngine.fromGrid(flatData, cols, rows, 0, 0, 1, -9999);
+    engine.buildAdaptiveMesh({ heightSplitThreshold: 0.20 });
+
+    const totalTris = engine.getMeshTriangles().length / 9;
+    const uncompressedTris = 2 * (cols - 1) * (rows - 1); // 7938 triangles
+
+    // Powinno być co najmniej 95% mniej trójkątów niż w pełnej siatce 1x1
+    expect(totalTris).toBeLessThan(uncompressedTris * 0.05);
+    expect(engine.meshInfo!.totalVertices).toBeLessThan(100);
+  });
+
+  it('buildTinMesh generuje organiczną triangulację Delaunaya wzdłuż warstwic', () => {
+    const cols = 20;
+    const rows = 20;
+    // Teren w kształcie stożka / wzgórza
+    const hillData = makeGrid(cols, rows, (c, r) => {
+      const dx = c - 10;
+      const dy = r - 10;
+      return 150 - Math.sqrt(dx * dx + dy * dy) * 4;
+    });
+
+    const engine = TerrainEngine.fromGrid(hillData, cols, rows, 0, 0, 1, -9999);
+    engine.buildTinMesh({ heightSplitThreshold: 1.0 });
+
+    expect(engine.meshInfo).not.toBeNull();
+    expect(engine.meshInfo!.totalVertices).toBeGreaterThan(10);
+    expect(engine.meshInfo!.totalCells).toBeGreaterThan(10);
+
+    const edges = engine.getWireframeEdges();
+    expect(edges.length).toBeGreaterThan(0);
+    expect(edges.length % 4).toBe(0);
   });
 });
 
