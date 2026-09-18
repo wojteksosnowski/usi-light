@@ -43,33 +43,17 @@ export async function generateTerrainMesh(params?: MeshGenerationParams): Promis
   const lon = params?.longitude ?? solar.longitude;
   const radius = params?.radiusMeters ?? 200;
 
-  // Debug logging
-  console.log('[generateTerrainMesh] Input:', { lat, lon, radius });
-
-  // Transform WGS84 lat/lon → EPSG:2180 (Gauss-Kruger)
+  // Transform WGS84 lat/lon → EPSG:2180 (Gauss-Kruger, PZ-1965 via reference interpolation)
   const epsgCenter = wgs84ToCadPoint({ lat, lon }, EPSG_2180);
-  console.log('[generateTerrainMesh] EPSG:2180 center:', epsgCenter);
 
   // Create bounding box in EPSG:2180 meters around project center
   const minX = epsgCenter.x - radius;
   const minY = epsgCenter.y - radius;
   const maxX = epsgCenter.x + radius;
   const maxY = epsgCenter.y + radius;
-  console.log('[generateTerrainMesh] Bbox:', { minX, minY, maxX, maxY });
 
   // Fetch NMT DTM grid from GUGiK WCS (uses EPSG:2180 subsetting)
   const dtm: AaigridData = await fetchDtmBbox(minX, minY, maxX, maxY);
-
-  console.log('[generateTerrainMesh] DTM result:', {
-    ncols: dtm.ncols,
-    nrows: dtm.nrows,
-    cellsize: dtm.cellsize,
-    xllcorner: dtm.xllcorner,
-    yllcorner: dtm.yllcorner,
-    nodata: dtm.nodata,
-    dataLength: dtm.data.length,
-    first5DataPoints: Array.from(dtm.data).slice(0, 5),
-  });
 
   // Convert Float32Array → Float64Array for TerrainEngine compatibility
   const dataFloat64 = new Float64Array(dtm.data.length);

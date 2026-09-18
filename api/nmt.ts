@@ -47,18 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   params.append('subset', `y(${ymin},${ymax})`);
 
   try {
-    // Debug logging w dev/production
-    const requestUrl = `${baseUrl}?${params}`;
-    console.log('[NMT proxy] Request URL:', requestUrl);
-
-    const upstreamRes = await fetch(requestUrl);
-
-    if (!upstreamRes.ok) {
-      // Log response status and first 500 chars of body for debugging
-      const preview = await upstreamRes.text();
-      console.error(`[NMT proxy] Error ${upstreamRes.status}:`, preview.substring(0, 300));
-      return res.status(upstreamRes.status).send(preview);
-    }
+    const upstreamRes = await fetch(`${baseUrl}?${params}`);
     
     // Przekaz nagłówki i body bez modyfikacji
     const contentType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
