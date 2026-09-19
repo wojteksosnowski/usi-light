@@ -171,7 +171,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   isInteracting: false,
 
-  setDrawingMode: (mode) => set({ drawingMode: mode, isProjectBrushActive: false }),
+  setDrawingMode: (mode) => set({ drawingMode: mode, ...(mode !== 'none' ? { isProjectBrushActive: false } : {}) }),
   setDrawingCategory: (category) => set({ drawingCategory: category }),
   setDrawingVerticesCount: (count) => set({ drawingVerticesCount: count }),
   setSweepWidth: (width) => set({ sweepWidth: Math.max(0.1, Number.isFinite(width) ? width : DEFAULT_SWEEP_WIDTH) }),

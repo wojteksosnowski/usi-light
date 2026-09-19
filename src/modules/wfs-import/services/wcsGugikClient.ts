@@ -37,6 +37,31 @@ export function parseAaigrid(text: string): AaigridData {
   return { ncols, nrows, xllcorner, yllcorner, cellsize, nodata, data: new Float32Array(values) };
 }
 
+const WCS_DEFAULT_TIMEOUT_MS = 10000;
+
+function createCombinedSignal(userSignal?: AbortSignal, timeoutMs = WCS_DEFAULT_TIMEOUT_MS): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const onUserAbort = () => controller.abort();
+  if (userSignal) {
+    if (userSignal.aborted) {
+      controller.abort();
+    } else {
+      userSignal.addEventListener('abort', onUserAbort);
+    }
+  }
+
+  const cleanup = () => {
+    clearTimeout(timer);
+    if (userSignal) {
+      userSignal.removeEventListener('abort', onUserAbort);
+    }
+  };
+
+  return { signal: controller.signal, cleanup };
+}
+
 /**
  * Pobiera siatkę NMPT (Digital Surface Model - powierzchnia z dachami i koronami) w formacie Arc/Info ASCII Grid.
  */
@@ -59,10 +84,15 @@ export async function fetchDsmBbox(
   params.append('subset', `x(${Math.floor(minX)},${Math.ceil(maxX)})`);
   params.append('subset', `y(${Math.floor(minY)},${Math.ceil(maxY)})`);
 
-  const res = await fetch(`${NMPT_WCS_URL}?${params}`, { signal });
-  if (!res.ok) throw new Error(`WCS NMPT (DSM): ${res.status}`);
-  const text = await res.text();
-  return parseAaigrid(text);
+  const { signal: effectiveSignal, cleanup } = createCombinedSignal(signal);
+  try {
+    const res = await fetch(`${NMPT_WCS_URL}?${params}`, { signal: effectiveSignal });
+    if (!res.ok) throw new Error(`WCS NMPT (DSM): ${res.status}`);
+    const text = await res.text();
+    return parseAaigrid(text);
+  } finally {
+    cleanup();
+  }
 }
 
 /**
@@ -87,8 +117,14 @@ export async function fetchDtmBbox(
   params.append('subset', `x(${Math.floor(minX)},${Math.ceil(maxX)})`);
   params.append('subset', `y(${Math.floor(minY)},${Math.ceil(maxY)})`);
 
-  const res = await fetch(`${NMT_WCS_URL}?${params}`, { signal });
-  if (!res.ok) throw new Error(`WCS NMT (DTM): ${res.status}`);
-  const text = await res.text();
-  return parseAaigrid(text);
+  const { signal: effectiveSignal, cleanup } = createCombinedSignal(signal);
+  try {
+    const res = await fetch(`${NMT_WCS_URL}?${params}`, { signal: effectiveSignal });
+    if (!res.ok) throw new Error(`WCS NMT (DTM): ${res.status}`);
+    const text = await res.text();
+    return parseAaigrid(text);
+  } finally {
+    cleanup();
+  }
 }
+

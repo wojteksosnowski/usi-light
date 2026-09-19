@@ -47,6 +47,8 @@ function wgs84BboxToUrnLatLon(bbox: WfsBbox): string {
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 10;
 
+const WFS_REQUEST_TIMEOUT_MS = 10000;
+
 async function fetchAllPages(
   typeNames: 'ms:budynki' | 'ms:dzialki',
   featureTagName: string,
@@ -66,9 +68,16 @@ async function fetchAllPages(
       startIndex: String(page * PAGE_SIZE),
     });
 
-    const res = await fetch(`${EGIB_WFS_URL}?${params}`);
-    if (!res.ok) throw new Error(`WFS EGiB ${typeNames}: ${res.status}`);
-    const gml = await res.text();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
+    let gml = '';
+    try {
+      const res = await fetch(`${EGIB_WFS_URL}?${params}`, { signal: controller.signal });
+      if (!res.ok) throw new Error(`WFS EGiB ${typeNames}: ${res.status}`);
+      gml = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
     const parsed = parseWfsPolygonGml(gml, 'member', featureTagName, textProperties, numericProperties);
     pages.push(parsed.features);
 

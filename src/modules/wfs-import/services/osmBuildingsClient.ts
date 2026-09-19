@@ -16,13 +16,15 @@ import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../utils/mat
 import { parseOsmHeight } from './osmLanduseClient';
 import { WfsBbox } from './wfsWarsawClient';
 
-const OVERPASS_ENDPOINTS = [
+export const OVERPASS_ENDPOINTS = [
+  'http://overpass-api.de/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+  'http://lz4.overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass-api.de/api/interpreter',
-  'https://z.overpass-api.de/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
+
+const OVERPASS_REQUEST_TIMEOUT_MS = 8000;
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
@@ -423,6 +425,69 @@ export function parseOverpassBuildingsResponse(
     buildings.push(rebuildBuildingSegments(loop, sanitized.vertices));
   }
 
+  // 3. Przetwarzanie pojedynczych dróg (ways) oznaczonych jako building:part (bryły składowe)
+  for (const [wayId, way] of ways.entries()) {
+    if (processedWayIds.has(wayId)) continue;
+    const tags = way.tags || {};
+    if (!tags['building:part'] || tags['building:part'] === 'no') continue;
+    if (!way.nodes || way.nodes.length < 4) continue;
+
+    const latLons: LatLon[] = [];
+    for (const nodeId of way.nodes) {
+      const coord = nodeCoords.get(nodeId);
+      if (coord) latLons.push(coord);
+    }
+    if (latLons.length < 3) continue;
+
+    const rawCadPoints: Point2D[] = latLons.map((coord) =>
+      wgs84ToCadPoint(coord, projectCrs, projectCenter)
+    );
+
+    const { defaultHeight, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
+    const buildingType = resolveBuildingType(tags);
+    const buildingName = formatOsmBuildingName(wayId, tags);
+    const bldgId = `osm-part-${wayId}`;
+
+    const sanitized = sanitizePolygon(rawCadPoints, {
+      buildingId: bldgId,
+      defaultHeight,
+      buildingType,
+      isCityCentre: false,
+    });
+
+    if (!sanitized.valid || sanitized.vertices.length < 3) continue;
+
+    if (radiusMeters != null && radiusMeters > 0) {
+      const ratio = polygonCircleIntersectionRatio(sanitized.vertices, centerCad.x, centerCad.y, radiusMeters);
+      if (ratio < 0.1) continue;
+    }
+
+    const loop: BuildingLoop = {
+      id: bldgId,
+      name: buildingName,
+      layer: 'WFS_BUDYNKI',
+      category: 'building',
+      isTested: false,
+      isIncluded: true,
+      isLocked: true,
+      isCityCentre: false,
+      buildingType,
+      defaultHeight,
+      heightSource,
+      hWindowBottom: 0.85,
+      elevation: 0.0,
+      firstFloorHeight: FIRST_FLOOR_HEIGHT,
+      typicalFloorHeight: DEFAULT_FLOOR_HEIGHT,
+      storeysCount,
+      vertices: sanitized.vertices,
+      segments: sanitized.segments,
+      isClockwise: !sanitized.isCCW,
+      transform: { tx: 0, ty: 0, rotationDeg: 0 },
+    };
+
+    buildings.push(rebuildBuildingSegments(loop, sanitized.vertices));
+  }
+
   return buildings;
 }
 
@@ -441,7 +506,10 @@ export async function fetchOsmBuildings(
     [out:json][timeout:25];
     (
       way["building"](${south},${west},${north},${east});
+      way["building:part"](${south},${west},${north},${east});
       relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
+      relation["building:part"]["type"="multipolygon"](${south},${west},${north},${east});
+      relation["type"="building"](${south},${west},${north},${east});
     );
     out body;
     >;
@@ -452,14 +520,18 @@ export async function fetchOsmBuildings(
   let lastError: Error | null = null;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'Accept': 'application/json',
           'User-Agent': 'USILightCAD/2.5D (https://github.com/usi-light)',
         },
         body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
       });
 
       if (res.ok) {
@@ -471,6 +543,8 @@ export async function fetchOsmBuildings(
       }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+    } finally {
+      clearTimeout(timer);
     }
   }
 

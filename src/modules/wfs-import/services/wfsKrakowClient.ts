@@ -32,6 +32,8 @@ function wgs84BboxToEpsg2178EN(bbox: WfsBbox): string {
   return `${minE},${minN},${maxE},${maxN}`;
 }
 
+const WFS_REQUEST_TIMEOUT_MS = 10000;
+
 export async function fetchKrakowBuildings(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
   const params = new URLSearchParams({
     SERVICE: 'WFS',
@@ -41,10 +43,16 @@ export async function fetchKrakowBuildings(bbox: WfsBbox): Promise<GeoJsonFeatur
     BBOX: wgs84BboxToEpsg2178EN(bbox),
   });
 
-  const res = await fetch(`${KRAKOW_WFS_URL}?${params}`);
-  if (!res.ok) throw new Error(`WFS Kraków budynki: ${res.status}`);
-  const gml = await res.text();
-  return parseWfsPolygonGml(gml, 'featureMember', 'budynki', ['ID_BUDYNKU'], ['KONDYGNACJE_NADZIEMNE']);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${KRAKOW_WFS_URL}?${params}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`WFS Kraków budynki: ${res.status}`);
+    const gml = await res.text();
+    return parseWfsPolygonGml(gml, 'featureMember', 'budynki', ['ID_BUDYNKU'], ['KONDYGNACJE_NADZIEMNE']);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function fetchKrakowParcels(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
@@ -56,8 +64,15 @@ export async function fetchKrakowParcels(bbox: WfsBbox): Promise<GeoJsonFeatureC
     BBOX: wgs84BboxToEpsg2178EN(bbox),
   });
 
-  const res = await fetch(`${KRAKOW_WFS_URL}?${params}`);
-  if (!res.ok) throw new Error(`WFS Kraków działki: ${res.status}`);
-  const gml = await res.text();
-  return parseWfsPolygonGml(gml, 'featureMember', 'dzialki', ['ID_DZIALKI', 'NUMER_DZIALKI']);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${KRAKOW_WFS_URL}?${params}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`WFS Kraków działki: ${res.status}`);
+    const gml = await res.text();
+    return parseWfsPolygonGml(gml, 'featureMember', 'dzialki', ['ID_DZIALKI', 'NUMER_DZIALKI']);
+  } finally {
+    clearTimeout(timer);
+  }
 }
+

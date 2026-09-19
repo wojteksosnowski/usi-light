@@ -102,6 +102,8 @@ export interface GeoJsonFeatureCollection {
   }>;
 }
 
+const WFS_REQUEST_TIMEOUT_MS = 10000;
+
 export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
   const params = new URLSearchParams({
     service: 'WFS',
@@ -112,9 +114,15 @@ export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJsonFeatur
     outputFormat: 'application/json',
   });
 
-  const res = await fetch(`${WARSAW_WFS_URL}?${params}`);
-  if (!res.ok) throw new Error(`WFS buildings: ${res.status}`);
-  return res.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${WARSAW_WFS_URL}?${params}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`WFS buildings: ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function fetchWarsawParcels(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
@@ -127,9 +135,15 @@ export async function fetchWarsawParcels(bbox: WfsBbox): Promise<GeoJsonFeatureC
     outputFormat: 'application/json',
   });
 
-  const res = await fetch(`${WARSAW_WFS_URL}?${params}`);
-  if (!res.ok) throw new Error(`WFS parcels: ${res.status}`);
-  return res.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${WARSAW_WFS_URL}?${params}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`WFS parcels: ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -147,10 +161,16 @@ export async function fetchWarsawTrees(
     bbox: `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]},EPSG:4326`,
   });
 
-  const res = await fetch(`${TREES_WFS_URL}?${params}`);
-  if (!res.ok) throw new Error(`WFS trees: ${res.status}`);
-  const gmlText = await res.text();
-  return parseTreesGml(gmlText);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${TREES_WFS_URL}?${params}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`WFS trees: ${res.status}`);
+    const gmlText = await res.text();
+    return parseTreesGml(gmlText);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface RawTreeFeature {

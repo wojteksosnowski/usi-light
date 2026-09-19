@@ -19,11 +19,15 @@ export interface OsmFetchResult {
   trees: WfsTreeFeature[];
 }
 
-const OVERPASS_ENDPOINTS = [
+export const OVERPASS_ENDPOINTS = [
+  'http://overpass-api.de/api/interpreter',
   'https://overpass-api.de/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'http://lz4.overpass-api.de/api/interpreter',
+  'https://lz4.overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ];
+
+const OVERPASS_REQUEST_TIMEOUT_MS = 8000;
 
 interface OverpassNode {
   type: 'node';
@@ -575,21 +579,31 @@ export async function fetchOsmLanduse(
   let lastError: Error | null = null;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'Accept': 'application/json',
+          'User-Agent': 'USILightCAD/2.5D (https://github.com/usi-light)',
         },
         body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
       });
 
       if (res.ok) {
-        responseData = (await res.json()) as OverpassResponse;
-        break;
+        const text = await res.text();
+        if (text.startsWith('{')) {
+          responseData = JSON.parse(text) as OverpassResponse;
+          break;
+        }
       }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+    } finally {
+      clearTimeout(timer);
     }
   }
 

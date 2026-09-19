@@ -13,7 +13,10 @@ import {
   importParcelsFromGeoJson,
   importTrees,
 } from '../services/geoJsonImporter';
+import { fetchOsmBuildings } from '../services/osmBuildingsClient';
+import { reconcileBuildingsWithOsm } from '../services/buildingGeometryMatcher';
 import { detectCoordinateSystem } from '../../../utils/geoTransform';
+import { BuildingLoop } from '../../../types/geometry';
 
 import { useOsmLanduseStore } from '../store/useOsmLanduseStore';
 
@@ -64,14 +67,44 @@ export const WfsImportPanel: React.FC = () => {
       let parcelsCount = 0;
       let treesCount = 0;
 
-      if (options.buildings && citySource) {
+      if (options.buildings) {
         setStatus({ stage: 'buildings' });
-        const buildingsGeoJson = await citySource.fetchBuildings(bbox);
-        const result = importBuildingsFromGeoJson(buildingsGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
-        for (const bld of result.buildings) {
+        let wfsBuildings: BuildingLoop[] = [];
+        let osmBuildings: BuildingLoop[] = [];
+
+        const fetchWfsPromise = citySource
+          ? citySource.fetchBuildings(bbox).then((bldGeoJson) => {
+              const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
+              return res.buildings;
+            }).catch((err) => {
+              console.warn(`[WFS Import] Nie udało się pobrać budynków z WFS:`, err);
+              return [] as BuildingLoop[];
+            })
+          : Promise.resolve([] as BuildingLoop[]);
+
+        const fetchOsmPromise = fetchOsmBuildings(bbox, projectCenter, projectCrs, radius).catch((osmErr) => {
+          console.warn('[WFS Import] Nie udało się pobrać budynków z OSM:', osmErr);
+          return [] as BuildingLoop[];
+        });
+
+        const [wfsRes, osmRes] = await Promise.all([fetchWfsPromise, fetchOsmPromise]);
+        wfsBuildings = wfsRes;
+        osmBuildings = osmRes;
+
+        let finalBuildings: BuildingLoop[] = [];
+        if (wfsBuildings.length > 0 && osmBuildings.length > 0) {
+          const reconciled = reconcileBuildingsWithOsm(wfsBuildings, osmBuildings);
+          finalBuildings = reconciled.buildings;
+        } else if (wfsBuildings.length > 0) {
+          finalBuildings = wfsBuildings;
+        } else if (osmBuildings.length > 0) {
+          finalBuildings = osmBuildings;
+        }
+
+        for (const bld of finalBuildings) {
           addBuilding(bld);
         }
-        buildingsCount = result.buildings.length;
+        buildingsCount = finalBuildings.length;
       }
 
       if (options.parcels && citySource?.fetchParcels) {

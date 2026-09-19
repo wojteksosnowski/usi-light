@@ -360,23 +360,9 @@ export async function fetchParcelsInRadius(
   const center2180 = wgs84ToEpsg2180(centerLat, centerLon);
   const parcelsMap = new Map<string, UldkParcelRaw>();
 
-  // ULDK nie oferuje zapytania obszarowego (tylko point-lookup GetParcelByXY),
-  // więc kompletność pokrycia zależy wyłącznie od gęstości siatki próbkowania.
-  // Siatka kwadratowa pokrywająca cały okrąg zasięgu, z krokiem poniżej typowej
-  // szerokości najwęższej działki miejskiej — żeby nie przeoczyć wąskich/małych działek
-  // leżących między punktami próbkowania.
-  const GRID_STEP_METERS = radiusMeters <= 100 ? 10 : radiusMeters <= 200 ? 14 : 18;
-  const samplePoints: Array<{ x: number; y: number }> = [];
-  for (let dx = -radiusMeters; dx <= radiusMeters; dx += GRID_STEP_METERS) {
-    for (let dy = -radiusMeters; dy <= radiusMeters; dy += GRID_STEP_METERS) {
-      if (dx * dx + dy * dy <= radiusMeters * radiusMeters) {
-        samplePoints.push({ x: center2180.x + dx, y: center2180.y + dy });
-      }
-    }
-  }
-
-  // Zapytania w batchach równoległych (ULDK jest szybki, ale siatka może liczyć
-  // setki punktów dla większych promieni — unikamy jednorazowego zalewu tysiącami fetchy).
+  // Zapytania w batchach równoległych (ULDK jest szybki, ale ekspansja graniczna może
+  // wygenerować dziesiątki próbek naraz dla gęstej zabudowy — unikamy jednorazowego zalewu
+  // tysiącami fetchy).
   const sourceCrs: CrsDetectionResult = {
     crs: 'EPSG:2180',
     description: 'PL-1992 (EPSG:2180)',
@@ -391,7 +377,7 @@ export async function fetchParcelsInRadius(
   // tuż za jej krawędziami/wierzchołkami, żeby wykryć sąsiadów niezależnie od ich
   // rozmiaru (siatka regularna sama w sobie przeoczy wąskie/małe działki między punktami).
   const expansionQueue: Ring[] = [];
-  const EXPANSION_MARGIN = Math.max(GRID_STEP_METERS, UldkExpansionLimits.MIN_EXPANSION_MARGIN_METERS);
+  const EXPANSION_MARGIN = UldkExpansionLimits.MIN_EXPANSION_MARGIN_METERS;
   const MAX_PROBE_COUNT = UldkExpansionLimits.MAX_PROBE_COUNT;
   const MAX_PARCEL_COUNT = UldkExpansionLimits.MAX_PARCEL_COUNT;
   let totalProbesIssued = 0;
@@ -458,16 +444,32 @@ export async function fetchParcelsInRadius(
     }
   };
 
-  // ===== Faza 1: siatka-seed =====
-  for (let i = 0; i < samplePoints.length; i += SAMPLE_CONCURRENCY) {
-    if (signal?.aborted) break;
-    const batch = samplePoints.slice(i, i + SAMPLE_CONCURRENCY);
-    await fetchAndRegisterBatch(batch, () => {
-      onProgress?.(Math.min(i + SAMPLE_CONCURRENCY, samplePoints.length), samplePoints.length);
-    });
+  // ===== Faza 1: pojedynczy seed w środku projektu =====
+  // Jeśli środek trafi dokładnie w drogę/szczelinę bez własnej działki, próbujemy kilku
+  // pobliskich punktów w rosnącym promieniu (mała "gwiazda"), zanim uznamy, że w tym miejscu
+  // nie ma nic do znalezienia — flood-fill w Fazie 2 rusza od pierwszego trafienia.
+  totalProbesIssued += 1;
+  await fetchAndRegisterBatch([{ x: center2180.x, y: center2180.y }], () => {
+    onProgress?.(totalProbesIssued, totalProbesIssued + 1);
+  });
+
+  if (parcelsMap.size === 0) {
+    const SEED_FALLBACK_RADII = [5, 10, 20, 35, 50];
+    for (const r of SEED_FALLBACK_RADII) {
+      if (signal?.aborted || parcelsMap.size > 0) break;
+      const ring: Array<{ x: number; y: number }> = [];
+      for (let angleDeg = 0; angleDeg < 360; angleDeg += 45) {
+        const rad = (angleDeg * Math.PI) / 180;
+        ring.push({ x: center2180.x + r * Math.cos(rad), y: center2180.y + r * Math.sin(rad) });
+      }
+      totalProbesIssued += ring.length;
+      await fetchAndRegisterBatch(ring, () => {
+        onProgress?.(totalProbesIssued, totalProbesIssued + 1);
+      });
+    }
   }
 
-  // ===== Faza 2: rekurencyjna ekspansja wzdłuż granic znalezionych działek =====
+  // ===== Faza 2: rekurencyjna ekspansja wzdłuż granic znalezionych działek (flood-fill) =====
   while (
     expansionQueue.length > 0 &&
     totalProbesIssued < MAX_PROBE_COUNT &&
@@ -483,7 +485,7 @@ export async function fetchParcelsInRadius(
       totalProbesIssued += batch.length;
       await fetchAndRegisterBatch(batch, () => {
         const estimatedRemaining = expansionQueue.length * 8;
-        onProgress?.(samplePoints.length + totalProbesIssued, samplePoints.length + totalProbesIssued + estimatedRemaining);
+        onProgress?.(totalProbesIssued, totalProbesIssued + estimatedRemaining);
       });
     }
   }
