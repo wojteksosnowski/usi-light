@@ -314,7 +314,12 @@ export function generateBayWindowPolygon(
   return result;
 }
 
-export function cleanPolygonRing(pts: Point2D[], enforceCCW = true, dupTol = 1e-4): Point2D[] {
+export function cleanPolygonRing(
+  pts: Point2D[],
+  enforceCCW = true,
+  dupTol = 1e-4,
+  stripCollinear = true
+): Point2D[] {
   if (!pts || pts.length < 3) return [];
 
   // 1. Usuń duplikaty bezpośrednich sąsiadów
@@ -339,33 +344,39 @@ export function cleanPolygonRing(pts: Point2D[], enforceCCW = true, dupTol = 1e-
 
   if (noDups.length < 3) return [];
 
-  // 2. Usuń punkty współliniowe
-  const noCollinear: Point2D[] = [];
-  const m = noDups.length;
-  for (let i = 0; i < m; i++) {
-    const prev = noDups[(i - 1 + m) % m];
-    const curr = noDups[i];
-    const next = noDups[(i + 1) % m];
+  // 2. Usuń punkty współliniowe (opcjonalnie - pomijane gdy wierzchołki mają znaczenie
+  // strukturalne, np. narożniki obrysu zachowywane przez modyfikator Piła)
+  let noCollinear: Point2D[];
+  if (stripCollinear) {
+    noCollinear = [];
+    const m = noDups.length;
+    for (let i = 0; i < m; i++) {
+      const prev = noDups[(i - 1 + m) % m];
+      const curr = noDups[i];
+      const next = noDups[(i + 1) % m];
 
-    const v1x = curr.x - prev.x;
-    const v1y = curr.y - prev.y;
-    const v2x = next.x - curr.x;
-    const v2y = next.y - curr.y;
+      const v1x = curr.x - prev.x;
+      const v1y = curr.y - prev.y;
+      const v2x = next.x - curr.x;
+      const v2y = next.y - curr.y;
 
-    const cross = v1x * v2y - v1y * v2x;
-    const dot = v1x * v2x + v1y * v2y;
-    const len1 = Math.hypot(v1x, v1y);
-    const len2 = Math.hypot(v2x, v2y);
+      const cross = v1x * v2y - v1y * v2x;
+      const dot = v1x * v2x + v1y * v2y;
+      const len1 = Math.hypot(v1x, v1y);
+      const len2 = Math.hypot(v2x, v2y);
 
-    // Jeśli wektory są współliniowe w tym samym kierunku (kąt 180° między krawędziami = prosta linia)
-    if (len1 > 1e-4 && len2 > 1e-4) {
-      const normalizedCross = Math.abs(cross) / (len1 * len2);
-      if (normalizedCross < 1e-4 && dot > 0) {
-        // Punkt leży na prostej między prev a next i nie zmienia kierunku - pomijamy go
-        continue;
+      // Jeśli wektory są współliniowe w tym samym kierunku (kąt 180° między krawędziami = prosta linia)
+      if (len1 > 1e-4 && len2 > 1e-4) {
+        const normalizedCross = Math.abs(cross) / (len1 * len2);
+        if (normalizedCross < 1e-4 && dot > 0) {
+          // Punkt leży na prostej między prev a next i nie zmienia kierunku - pomijamy go
+          continue;
+        }
       }
+      noCollinear.push(curr);
     }
-    noCollinear.push(curr);
+  } else {
+    noCollinear = noDups;
   }
 
   if (noCollinear.length < 3) return [];
@@ -885,6 +896,7 @@ export function computeStepVectors(
     const vPrev = { x: p1.x - pPrev.x, y: p1.y - pPrev.y };
     const lenPrev = Math.hypot(vPrev.x, vPrev.y);
     const baseUB = lenPrev > 1e-4 ? { x: vPrev.x / lenPrev, y: vPrev.y / lenPrev } : { x: normIn.x, y: normIn.y };
+    const perpUB = { x: -baseUB.y, y: baseUB.x };
 
     const turnAngle = Math.PI - thetaRad;
     const cosT = Math.cos(turnAngle);
@@ -893,10 +905,11 @@ export function computeStepVectors(
     const targetX = edgeDx / kSteps;
     const targetY = edgeDy / kSteps;
 
-    // Przetestuj warianty uB (+baseUB, -baseUB) i obrotu (rotCW, rotCCW)
+    // Przetestuj warianty uB (+baseUB, -baseUB, oraz prostopadłe ±perpUB - ząb czasem
+    // odchodzi prostopadle od sąsiedniej ściany, nie tylko jako jej przedłużenie) i obrotu (rotCW, rotCCW)
     const candidates: { uB: Point2D; uA: Point2D; lenB: number; lenA: number; score: number }[] = [];
 
-    for (const candUB of [baseUB, { x: -baseUB.x, y: -baseUB.y }]) {
+    for (const candUB of [baseUB, { x: -baseUB.x, y: -baseUB.y }, perpUB, { x: -perpUB.x, y: -perpUB.y }]) {
       const rotCW = { x: candUB.x * cosT + candUB.y * sinT, y: -candUB.x * sinT + candUB.y * cosT };
       const rotCCW = { x: candUB.x * cosT - candUB.y * sinT, y: candUB.x * sinT + candUB.y * cosT };
 
@@ -910,7 +923,10 @@ export function computeStepVectors(
             candidates.push(makeParallelEdgeCandidate(candUB, candUA, lenPrev, lA, normIn, tan));
             continue;
           }
-          if (lB >= -1e-4 && lA >= -1e-4) {
+          // Wymagamy obu długości sensownie dodatnich - kandydat z zerowym lenA/lenB (może
+          // się zdarzyć dla candUB=perpUB, gdy przypadkowo pokrywa się z kierunkiem krawędzi
+          // docelowej) nie reprezentuje prawdziwego dwuodcinkowego zęba i musi zostać odrzucony.
+          if (lB >= 1e-4 && lA >= 1e-4) {
             const inScore = (candUB.x + candUA.x) * normIn.x + (candUB.y + candUA.y) * normIn.y;
             const tanScore = candUA.x * tan.x + candUA.y * tan.y;
             candidates.push({
@@ -944,6 +960,7 @@ export function computeStepVectors(
     const vNext = { x: pNext.x - p2.x, y: pNext.y - p2.y };
     const lenNext = Math.hypot(vNext.x, vNext.y);
     const baseUB = lenNext > 1e-4 ? { x: -vNext.x / lenNext, y: -vNext.y / lenNext } : { x: normIn.x, y: normIn.y };
+    const perpUB = { x: -baseUB.y, y: baseUB.x };
 
     const turnAngle = Math.PI - thetaRad;
     const cosT = Math.cos(turnAngle);
@@ -954,7 +971,7 @@ export function computeStepVectors(
 
     const candidates: { uB: Point2D; uA: Point2D; lenB: number; lenA: number; score: number }[] = [];
 
-    for (const candUB of [baseUB, { x: -baseUB.x, y: -baseUB.y }]) {
+    for (const candUB of [baseUB, { x: -baseUB.x, y: -baseUB.y }, perpUB, { x: -perpUB.x, y: -perpUB.y }]) {
       const rotCW = { x: candUB.x * cosT + candUB.y * sinT, y: -candUB.x * sinT + candUB.y * cosT };
       const rotCCW = { x: candUB.x * cosT - candUB.y * sinT, y: candUB.x * sinT + candUB.y * cosT };
 
@@ -968,7 +985,10 @@ export function computeStepVectors(
             candidates.push(makeParallelEdgeCandidate(candUB, candUA, lenNext, lA, normIn, tan));
             continue;
           }
-          if (lA >= -1e-4 && lB >= -1e-4) {
+          // Wymagamy obu długości sensownie dodatnich - kandydat z zerowym lenA/lenB (może
+          // się zdarzyć dla candUB=perpUB, gdy przypadkowo pokrywa się z kierunkiem krawędzi
+          // docelowej) nie reprezentuje prawdziwego dwuodcinkowego zęba i musi zostać odrzucony.
+          if (lA >= 1e-4 && lB >= 1e-4) {
             const inScore = (candUB.x + candUA.x) * normIn.x + (candUB.y + candUA.y) * normIn.y;
             const tanScore = candUA.x * tan.x + candUA.y * tan.y;
             candidates.push({
@@ -1175,7 +1195,10 @@ export function generatePilaPolygon(
     }
   }
 
-  return cleanPolygonRing(result, isCCW);
+  // stripCollinear=false: wierzchołki oryginalnego obrysu sąsiadujące z zębem piły
+  // muszą zostać zachowane nawet jeśli geometrycznie leżą na jednej prostej z zębem -
+  // reprezentują granicę segmentu fasady.
+  return cleanPolygonRing(result, isCCW, 1e-4, false);
 }
 
 /**
