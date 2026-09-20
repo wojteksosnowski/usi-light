@@ -562,6 +562,48 @@ describe('osmBuildingsClient', () => {
       expect(farPart).toBeDefined();
       expect(farPart!.groupId).toBeUndefined();
     });
+
+    it('keeps a large building=yes envelope when only a small building:part fraction of it is covered (regression for disappearing complex outline)', () => {
+      const mockResponse: OverpassResponse = {
+        elements: [
+          // Large envelope: a big multi-part complex footprint
+          { type: 'node', id: 1, lat: 52.3990, lon: 16.9200 },
+          { type: 'node', id: 2, lat: 52.3990, lon: 16.9300 },
+          { type: 'node', id: 3, lat: 52.4000, lon: 16.9300 },
+          { type: 'node', id: 4, lat: 52.4000, lon: 16.9200 },
+          {
+            type: 'way',
+            id: 7000,
+            nodes: [1, 2, 3, 4, 1],
+            tags: { building: 'commercial', name: 'Duzy Kompleks', height: '24' },
+          },
+
+          // Small building:part covering only a sliver of the envelope's own area,
+          // but >50% of its own (tiny) area is inside the envelope.
+          { type: 'node', id: 11, lat: 52.3990, lon: 16.9200 },
+          { type: 'node', id: 12, lat: 52.3990, lon: 16.9205 },
+          { type: 'node', id: 13, lat: 52.3995, lon: 16.9205 },
+          { type: 'node', id: 14, lat: 52.3995, lon: 16.9200 },
+          {
+            type: 'way',
+            id: 7001,
+            nodes: [11, 12, 13, 14, 11],
+            tags: { 'building:part': 'yes', height: '8' },
+          },
+        ],
+      };
+
+      const buildings = parseOverpassBuildingsResponse(mockResponse, mockProjectCenter, EPSG_2180, 5000);
+
+      // The envelope must survive: the small part only accounts for a fraction of its area,
+      // so the rest of the real building volume must not disappear.
+      const envelope = buildings.find((b) => b.id === 'osm-bld-7000');
+      expect(envelope).toBeDefined();
+
+      const part = buildings.find((b) => b.id === 'osm-part-7001')!;
+      expect(part).toBeDefined();
+      expect(part.groupId).toBeDefined();
+    });
   });
 
   describe('Rotunda PKO (real Overpass fixture, way 743253236 + relations 13114286/13114287)', () => {

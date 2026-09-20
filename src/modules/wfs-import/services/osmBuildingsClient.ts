@@ -363,13 +363,25 @@ export function parseOverpassBuildingsResponse(
   }
 
   // Dla danego poligonu envelope zwraca listę wayId `building:part`, które są przez niego
-  // pokryte w >50% własnej powierzchni (envelope traktujemy wtedy jako zbędny duplikat).
+  // pokryte w >50% własnej powierzchni (kandydaci na "część envelope'u"), oraz sumaryczne
+  // pokrycie WŁASNEJ powierzchni envelope'u przez te części. Envelope traktujemy jako zbędny
+  // duplikat TYLKO gdy ta suma pokrywa niemal cały jego obszar (patrz `isEnvelopeFullyCovered`
+  // niżej) — w złożonych bryłach (np. duży kompleks z 8 building:part o różnych wysokościach)
+  // pojedyncza mała część pokrywająca się w >50% ze sobą samą nie może kasować całego envelope'u,
+  // bo reszta jego powierzchni (nieopisana żadną częścią) to prawdziwa, wciąż widoczna bryła —
+  // jej zniknięcie wygląda jak "dziura" tam, gdzie budynek powinien zostać.
   // Tani wstępny test bounding-box pomija pary bez nakładających się prostokątów otaczających,
   // zanim wywoła kosztowny `intersectionPolygonLoops` — w gęstych centrach miast (np. Poznań,
   // dużo relacji building:part) redukuje to O(n²) niepotrzebnej pracy bez zmiany wyniku.
-  const findCoveredPartIds = (envelopePoly: Point2D[], excludeWayId?: number): number[] => {
+  const ENVELOPE_FULL_COVERAGE_RATIO = 0.85;
+  const findCoveredPartIds = (
+    envelopePoly: Point2D[],
+    excludeWayId?: number
+  ): { coveredPartIds: number[]; isEnvelopeFullyCovered: boolean } => {
     const coveredPartIds: number[] = [];
     const envelopeBBox = computeBBox(envelopePoly);
+    const envelopeArea = computePolygonArea(envelopePoly);
+    let envelopeAreaCovered = 0;
     for (const [partWayId, partPoly] of partPolygons.entries()) {
       if (partWayId === excludeWayId) continue;
       const partBBox = partBBoxes.get(partWayId);
@@ -380,9 +392,12 @@ export function parseOverpassBuildingsResponse(
       const overlapArea = intersections.reduce((sum, loop) => sum + computePolygonArea(loop), 0);
       if (overlapArea / partArea > 0.5) {
         coveredPartIds.push(partWayId);
+        envelopeAreaCovered += overlapArea;
       }
     }
-    return coveredPartIds;
+    const isEnvelopeFullyCovered =
+      envelopeArea > 0 && envelopeAreaCovered / envelopeArea > ENVELOPE_FULL_COVERAGE_RATIO;
+    return { coveredPartIds, isEnvelopeFullyCovered };
   };
 
   if (partPolygons.size > 0) {
@@ -394,12 +409,17 @@ export function parseOverpassBuildingsResponse(
       const envelopePoly = wayToCadPolygon(wayId);
       if (!envelopePoly) continue;
 
-      const coveredPartIds = findCoveredPartIds(envelopePoly, wayId);
+      const { coveredPartIds, isEnvelopeFullyCovered } = findCoveredPartIds(envelopePoly, wayId);
       if (coveredPartIds.length > 0) {
-        processedWayIds.add(wayId);
         const groupId = `group-osm-geo-${wayId}`;
         for (const partWayId of coveredPartIds) {
           geometricEnvelopeGroupByPartWayId.set(partWayId, groupId);
+        }
+        // Envelope kasujemy jako duplikat TYLKO, gdy jego części opisują niemal całą jego
+        // powierzchnię — w przeciwnym razie zostaje jako osobna bryła (patrz komentarz przy
+        // `findCoveredPartIds`), żeby nieopisana częściami reszta budynku nie znikała.
+        if (isEnvelopeFullyCovered) {
+          processedWayIds.add(wayId);
         }
       }
     }
@@ -484,13 +504,20 @@ export function parseOverpassBuildingsResponse(
       // Uwaga: sprawdzamy TYLKO gdy relacja nie ma otworów (innerRings) - obrys zewnętrzny przed
       // odjęciem dziedzińca niemal zawsze "pokrywa" geometrycznie wszystko, co leży w tym dziedzińcu
       // (np. kolejny pierścień budynku), więc dla brył z dziedzińcem test dawałby fałszywe trafienia.
-      const relCoveredPartIds = innerRings.length === 0 ? findCoveredPartIds(sanitized.vertices) : [];
+      const { coveredPartIds: relCoveredPartIds, isEnvelopeFullyCovered: isRelEnvelopeFullyCovered } =
+        innerRings.length === 0
+          ? findCoveredPartIds(sanitized.vertices)
+          : { coveredPartIds: [] as number[], isEnvelopeFullyCovered: false };
       if (relCoveredPartIds.length > 0) {
         const groupId = `group-osm-geo-rel-${rel.id}${ri > 0 ? `-p${ri}` : ''}`;
         for (const partWayId of relCoveredPartIds) {
           geometricEnvelopeGroupByPartWayId.set(partWayId, groupId);
         }
-        continue;
+        // Envelope relacji kasujemy jako duplikat TYLKO, gdy jego części opisują niemal całą
+        // jego powierzchnię (patrz komentarz przy `findCoveredPartIds` powyżej).
+        if (isRelEnvelopeFullyCovered) {
+          continue;
+        }
       }
 
       // Filtr zasięgu promienia
