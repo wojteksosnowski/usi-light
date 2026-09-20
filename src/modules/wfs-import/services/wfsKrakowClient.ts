@@ -2,8 +2,8 @@
  * Klient WFS dla krakowskiego serwisu EGiB (MapServer):
  * https://geodezja.eco.um.krakow.pl/krakow-egib
  *
- * Serwer nie wysyła nagłówków CORS, więc zapytania idą przez własny proxy
- * serverless `/api/krakow-wfs` (api/krakow-wfs.ts) zamiast bezpośrednio z przeglądarki.
+ * Serwer nie wysyła nagłówków CORS, więc zapytania idą przez skonsolidowany proxy
+ * serverless `/api/wfs?target=krakow-wfs` (api/wfs.ts) zamiast bezpośrednio z przeglądarki.
  *
  * Warstwy ms:budynki / ms:dzialki mają te same nazwy atrybutów co warszawski
  * GeoServer (ID_BUDYNKU, KONDYGNACJE_NADZIEMNE, ID_DZIALKI, NUMER_DZIALKI),
@@ -24,7 +24,7 @@
 import { GeoJsonFeatureCollection, WfsBbox, wgs84BboxToEpsg2178Bounds } from './wfsWarsawClient';
 import { parseWfsPolygonGml } from './wfsGmlUtils';
 
-const KRAKOW_WFS_URL = '/api/krakow-wfs';
+const KRAKOW_WFS_URL = '/api/wfs?target=krakow-wfs';
 
 /** Bbox WGS84 -> EPSG:2178 w kolejności easting,northing (wymaganej przez ten serwer). */
 function wgs84BboxToEpsg2178EN(bbox: WfsBbox): string {
@@ -46,7 +46,7 @@ export async function fetchKrakowBuildings(bbox: WfsBbox): Promise<GeoJsonFeatur
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${KRAKOW_WFS_URL}?${params}`, { signal: controller.signal });
+    const res = await fetch(`${KRAKOW_WFS_URL}&${params}`, { signal: controller.signal });
     if (!res.ok) throw new Error(`WFS Kraków budynki: ${res.status}`);
     const gml = await res.text();
     return parseWfsPolygonGml(gml, 'featureMember', 'budynki', ['ID_BUDYNKU'], ['KONDYGNACJE_NADZIEMNE']);
@@ -67,7 +67,7 @@ export async function fetchKrakowParcels(bbox: WfsBbox): Promise<GeoJsonFeatureC
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(`${KRAKOW_WFS_URL}?${params}`, { signal: controller.signal });
+    const res = await fetch(`${KRAKOW_WFS_URL}&${params}`, { signal: controller.signal });
     if (!res.ok) throw new Error(`WFS Kraków działki: ${res.status}`);
     const gml = await res.text();
     return parseWfsPolygonGml(gml, 'featureMember', 'dzialki', ['ID_DZIALKI', 'NUMER_DZIALKI']);

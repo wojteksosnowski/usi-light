@@ -8,7 +8,7 @@ import { WfsBbox, wgs84BboxToEpsg2178 } from './wfsWarsawClient';
 import { parseWfsPolygonGml } from './wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
-const KRAKOW_WFS_URL = '/api/krakow-mpzp-wfs';
+const KRAKOW_WFS_URL = '/api/wfs?target=krakow-mpzp-wfs';
 
 export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
   zones: MpzpZoneRawFeature[];
@@ -26,7 +26,7 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
       TYPENAME: 'BP_MPZP_POBIERANIE:Przeznaczenia_MPZP',
       BBOX: bboxStr,
     });
-    const res = await fetch(`${KRAKOW_WFS_URL}?${paramsZones}`);
+    const res = await fetch(`${KRAKOW_WFS_URL}&${paramsZones}`);
     if (res.ok) {
       const gml = await res.text();
       const parsed = parseWfsPolygonGml(

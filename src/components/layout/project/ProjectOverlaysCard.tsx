@@ -1,6 +1,8 @@
 import React from 'react';
 import { Layers, Map } from 'lucide-react';
 import { useWfsStore } from '../../../modules/wfs-import/store/useWfsStore';
+import { useWmsStatusStore } from '../../../modules/wfs-import/store/useWmsStatusStore';
+import { WmsStatusIcon } from '../../../modules/wfs-import/ui/WmsStatusIcon';
 import { APP_CONFIG } from '../../../config/appConfig';
 import { useLicenseStore } from '../../../store';
 import { useProjectGeoSync } from './hooks/useProjectGeoSync';
@@ -8,6 +10,9 @@ import { SimpleLayerToggle } from './SimpleLayerToggle';
 
 export const ProjectOverlaysCard: React.FC = () => {
   const isPro = useLicenseStore((s) => s.isPro);
+  const kiutStatus = useWmsStatusStore((s) => s.statuses.kiut);
+  const bdotStatus = useWmsStatusStore((s) => s.statuses.bdot);
+  const mpzpStatus = useWmsStatusStore((s) => s.statuses.mpzp);
   const showKiutLayer = useWfsStore((s) => s.showKiutLayer);
   const setShowKiutLayer = useWfsStore((s) => s.setShowKiutLayer);
   const showMpzpLayer = useWfsStore((s) => s.showMpzpLayer);
@@ -90,6 +95,7 @@ export const ProjectOverlaysCard: React.FC = () => {
                     }}
                   />
                   <span style={{ fontSize: '11px', fontWeight: 500 }}>Uzbrojenie GESUT (KIUT)</span>
+                  <WmsStatusIcon status={kiutStatus} />
                 </div>
                 <div className={`project-toggle-switch ${showKiutLayer ? 'active active-amber' : ''}`}>
                   <div className="project-toggle-dot" />
@@ -125,6 +131,7 @@ export const ProjectOverlaysCard: React.FC = () => {
                     }}
                   />
                   <span style={{ fontSize: '11px', fontWeight: 500 }}>Topografia BDOT10k</span>
+                  <WmsStatusIcon status={bdotStatus} />
                 </div>
                 <div className={`project-toggle-switch ${showBdotLayer ? 'active active-emerald' : ''}`}>
                   <div className="project-toggle-dot" />
@@ -205,6 +212,7 @@ export const ProjectOverlaysCard: React.FC = () => {
                     }}
                   />
                   <span style={{ fontSize: '11px', fontWeight: 500 }}>Plany miejscowe (MPZP)</span>
+                  <WmsStatusIcon status={mpzpStatus} />
                 </div>
                 <div className={`project-toggle-switch ${showMpzpLayer ? 'active active-indigo' : ''}`}>
                   <div className="project-toggle-dot" />

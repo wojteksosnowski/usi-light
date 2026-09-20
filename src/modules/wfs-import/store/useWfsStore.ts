@@ -1,7 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Point2D, BuildingLoop } from '../../../types/geometry';
+import { LatLon } from '../../../utils/geoTransform';
 import { useOsmLanduseStore } from './useOsmLanduseStore';
+
+/** Migawka ostatniego udanego pobrania działek/budynków dla danego źródła — pozwala pominąć
+ * ponowne zapytania do Geoportalu/OSM, gdy żądany obszar mieści się w już pobranym. */
+export interface GeoFetchCoverage {
+  center: LatLon;
+  radius: number;
+  /** Identyfikator źródła danych (np. nazwa miasta WFS, 'uldk', 'osm'), bo pokrycie jednego
+   * źródła nie oznacza pokrycia innego dla tego samego obszaru. */
+  sourceKey: string;
+}
 
 export interface WfsTreeFeature {
   id: number | string;
@@ -184,6 +195,15 @@ interface WfsState {
 
   lastImportBbox: [number, number, number, number] | null;
 
+  // Pokrycie ostatnio pobranych działek/budynków — używane do pominięcia zbędnych zapytań
+  // do Geoportalu/OSM, gdy ten sam obszar był już pobrany dla danego źródła.
+  parcelsFetchCoverage: GeoFetchCoverage | null;
+  buildingsFetchCoverage: GeoFetchCoverage | null;
+  setParcelsFetchCoverage: (coverage: GeoFetchCoverage | null) => void;
+  setBuildingsFetchCoverage: (coverage: GeoFetchCoverage | null) => void;
+  isParcelsFetchCovered: (center: LatLon, radius: number, sourceKey: string) => boolean;
+  isBuildingsFetchCovered: (center: LatLon, radius: number, sourceKey: string) => boolean;
+
   loadingParcels: BuildingLoop[];
   addLoadingParcels: (loops: BuildingLoop[]) => void;
   clearLoadingParcels: () => void;
@@ -256,6 +276,21 @@ const STAGE_LABELS: Record<WfsImportStage, string> = {
 
 export const WFS_IMPORT_CONTINUE_HINT = 'Możesz kontynuować pracę — dane zostaną dodane po zakończeniu.';
 
+/** Ten sam próg bliskości środka co `useOsmLanduseStore.isBufferValid` — poniżej tej odległości
+ * traktujemy obszar jako "to samo miejsce" i nie odpytujemy ponownie serwera. */
+function isGeoFetchCovered(
+  coverage: GeoFetchCoverage | null,
+  center: LatLon,
+  radius: number,
+  sourceKey: string
+): boolean {
+  if (!coverage || coverage.sourceKey !== sourceKey) return false;
+  const dLat = Math.abs(coverage.center.lat - center.lat);
+  const dLon = Math.abs(coverage.center.lon - center.lon);
+  const isClose = dLat < 0.0003 && dLon < 0.0004;
+  return isClose && coverage.radius >= radius;
+}
+
 export function formatWfsProgress(status: WfsImportStatus): string {
   const label = STAGE_LABELS[status.stage] || 'Pobieranie danych…';
   if (status.progressTotal > 0) {
@@ -324,6 +359,15 @@ export const useWfsStore = create<WfsState>()(
   showLandCoverLayer: false,
 
   lastImportBbox: null,
+
+  parcelsFetchCoverage: null,
+  buildingsFetchCoverage: null,
+  setParcelsFetchCoverage: (coverage) => set({ parcelsFetchCoverage: coverage }),
+  setBuildingsFetchCoverage: (coverage) => set({ buildingsFetchCoverage: coverage }),
+  isParcelsFetchCovered: (center, radius, sourceKey) =>
+    isGeoFetchCovered(get().parcelsFetchCoverage, center, radius, sourceKey),
+  isBuildingsFetchCovered: (center, radius, sourceKey) =>
+    isGeoFetchCovered(get().buildingsFetchCoverage, center, radius, sourceKey),
 
   loadingParcels: [],
   addLoadingParcels: (loops) =>

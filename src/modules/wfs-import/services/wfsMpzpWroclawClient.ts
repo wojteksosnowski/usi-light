@@ -8,7 +8,7 @@ import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
 import { parseWfsPolygonGml, parseWfsLineStringGml } from './wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
-const WROCLAW_WFS_URL = '/api/wroclaw-mpzp-wfs';
+const WROCLAW_WFS_URL = '/api/wfs?target=wroclaw-mpzp-wfs';
 
 export async function fetchWroclawMpzp(bbox: WfsBbox): Promise<{
   zones: MpzpZoneRawFeature[];
@@ -26,7 +26,7 @@ export async function fetchWroclawMpzp(bbox: WfsBbox): Promise<{
       TYPENAME: 'OGC_mpzp:tereny',
       BBOX: bboxStr,
     });
-    const res = await fetch(`${WROCLAW_WFS_URL}?${paramsZones}`);
+    const res = await fetch(`${WROCLAW_WFS_URL}&${paramsZones}`);
     if (res.ok) {
       const gml = await res.text();
       const parsed = parseWfsPolygonGml(
@@ -60,7 +60,7 @@ export async function fetchWroclawMpzp(bbox: WfsBbox): Promise<{
       TYPENAME: 'OGC_mpzp:linie_zabudowy',
       BBOX: bboxStr,
     });
-    const res = await fetch(`${WROCLAW_WFS_URL}?${paramsLines}`);
+    const res = await fetch(`${WROCLAW_WFS_URL}&${paramsLines}`);
     if (res.ok) {
       const gml = await res.text();
       const parsed = parseWfsLineStringGml(gml, 'linie_zabudowy', [

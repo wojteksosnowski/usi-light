@@ -15,12 +15,17 @@ import { WmsTileManager } from './renderers/wmsTileManager';
 import { useWfsStore } from './store/useWfsStore';
 import { useOsmLanduseStore } from './store/useOsmLanduseStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
+import { useSolarAnalysisStore } from '../../store/useSolarAnalysisStore';
+import { useWmsStatusStore } from './store/useWmsStatusStore';
 import { APP_CONFIG } from '../../config/appConfig';
+import { GESUT_CITY_SOURCES, BDOT_CITY_SOURCES, findWmsCityOverride } from './services/wmsCitySources';
 
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';
+const KIUT_LAYERS = 'gesut,przewod_wodociagowy,przewod_kanalizacyjny,przewod_gazowy,przewod_elektroenergetyczny,przewod_cieplowniczy,przewod_telekomunikacyjny,przewod_urzadzenia';
 const MPZP_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego';
 const BDOT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaBazDanychObiektowTopograficznych';
+const BDOT_LAYERS = 'bdot';
 const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
 
 let renderRafPending = false;
@@ -67,15 +72,15 @@ const orthophotoTileManager = new WmsTileManager({
   format: 'image/jpeg',
   crs: 'EPSG:3857',
   maxNativeZoom: 22,
-}, 200, triggerRender);
+}, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('orthophoto', status));
 
 const kiutTileManager = new WmsTileManager({
   baseUrl: KIUT_WMS_URL,
-  layers: 'gesut,przewod_wodociagowy,przewod_kanalizacyjny,przewod_gazowy,przewod_elektroenergetyczny,przewod_cieplowniczy,przewod_telekomunikacyjny,przewod_urzadzenia',
+  layers: KIUT_LAYERS,
   format: 'image/png',
   crs: 'EPSG:3857',
   maxNativeZoom: 21,
-}, 200, triggerRender);
+}, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('kiut', status));
 
 const mpzpTileManager = new WmsTileManager({
   baseUrl: MPZP_WMS_URL,
@@ -83,15 +88,15 @@ const mpzpTileManager = new WmsTileManager({
   format: 'image/png',
   crs: 'EPSG:3857',
   maxNativeZoom: 21,
-}, 200, triggerRender);
+}, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('mpzp', status));
 
 const bdotTileManager = new WmsTileManager({
   baseUrl: BDOT_WMS_URL,
-  layers: 'bdot',
+  layers: BDOT_LAYERS,
   format: 'image/png',
   crs: 'EPSG:3857',
   maxNativeZoom: 21,
-}, 200, triggerRender);
+}, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('bdot', status));
 
 const terrainTileManager = new WmsTileManager({
   baseUrl: NMT_WMS_URL,
@@ -99,7 +104,7 @@ const terrainTileManager = new WmsTileManager({
   format: 'image/png',
   crs: 'EPSG:3857',
   maxNativeZoom: 20,
-}, 200, triggerRender);
+}, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('terrain', status));
 
 orthophotoLayer.setTileManager(orthophotoTileManager);
 kiutLayer.setTileManager(kiutTileManager);
@@ -180,10 +185,34 @@ export function registerGeoLayers(): () => void {
   let prevMpzpZonesLen = 0;
   let prevShowLandCover = false;
   let prevLandCoverLen = 0;
+  let prevGesutSourceName: string | null = null;
+  let prevBdotSourceName: string | null = null;
 
   const updateLayers = () => {
     const isPro = useLicenseStore.getState().isPro;
     const state = useWfsStore.getState();
+
+    // 0. Miejskie nadpisania serwisów WMS GESUT/BDOT (np. Poznań) — wybór po lokalizacji projektu,
+    // z fallbackiem na serwis krajowy poza granicami miasta ze zweryfikowanym serwisem lokalnym.
+    const { latitude, longitude } = useSolarAnalysisStore.getState().settings;
+    const gesutOverride = findWmsCityOverride(GESUT_CITY_SOURCES, latitude, longitude);
+    const gesutSourceName = gesutOverride?.name ?? null;
+    if (gesutSourceName !== prevGesutSourceName) {
+      kiutTileManager.setConfig({
+        baseUrl: gesutOverride?.baseUrl ?? KIUT_WMS_URL,
+        layers: gesutOverride?.layers ?? KIUT_LAYERS,
+      });
+      prevGesutSourceName = gesutSourceName;
+    }
+    const bdotOverride = findWmsCityOverride(BDOT_CITY_SOURCES, latitude, longitude);
+    const bdotSourceName = bdotOverride?.name ?? null;
+    if (bdotSourceName !== prevBdotSourceName) {
+      bdotTileManager.setConfig({
+        baseUrl: bdotOverride?.baseUrl ?? BDOT_WMS_URL,
+        layers: bdotOverride?.layers ?? BDOT_LAYERS,
+      });
+      prevBdotSourceName = bdotSourceName;
+    }
     const {
       showOrthophotoLayer,
       orthophotoOpacity,
@@ -343,11 +372,13 @@ export function registerGeoLayers(): () => void {
   const unsubWfs = useWfsStore.subscribe(updateLayers);
   const unsubOsm = useOsmLanduseStore.subscribe(updateLayers);
   const unsubLicense = useLicenseStore.subscribe(updateLayers);
+  const unsubSolar = useSolarAnalysisStore.subscribe(updateLayers);
 
   return () => {
     unsubWfs();
     unsubOsm();
     unsubLicense();
+    unsubSolar();
     pipeline.unregisterMainLayer('wfs_orthophoto');
     pipeline.unregisterMainLayer('wfs_kiut_overlay');
     pipeline.unregisterMainLayer('wfs_mpzp_overlay');

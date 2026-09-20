@@ -1,6 +1,7 @@
 import { CrsDetectionResult } from '../../../utils/geoTransform';
-import { GeoJsonFeatureCollection, WfsBbox, fetchWarsawBuildings, EPSG_2178 } from './wfsWarsawClient';
+import { GeoJsonFeatureCollection, WfsBbox, fetchWarsawBuildings, EPSG_2177, EPSG_2178 } from './wfsWarsawClient';
 import { fetchKrakowBuildings, fetchKrakowParcels } from './wfsKrakowClient';
+import { fetchPoznanBuildings, fetchPoznanParcels } from './wfsPoznanClient';
 import { fetchEgibBuildings, EPSG_2180 } from './wfsEgibClient';
 
 export interface CitySource {
@@ -37,8 +38,19 @@ export const CITY_SOURCES: CitySource[] = [
     // zamiast liczby (patrz komentarz w wfsKrakowClient.ts) — ten sam problem co EGiB.
     hasStoreyHeights: false,
   },
+  {
+    name: 'Poznań',
+    bbox: [16.70, 52.30, 17.15, 52.50],
+    sourceCrs: EPSG_2177,
+    fetchBuildings: fetchPoznanBuildings,
+    fetchParcels: fetchPoznanParcels,
+    // Nazwy/wypełnienie atrybutu wysokości nie zostały jeszcze zweryfikowane na żywym
+    // serwerze (patrz komentarz w wfsPoznanClient.ts) — traktujemy jak Kraków/EGiB dopóki
+    // nie zostanie to potwierdzone.
+    hasStoreyHeights: false,
+  },
   // Ogólnopolski fallback: krajowa zbiorcza usługa WFS EGiB (GUGiK) dla budynków,
-  // dla miast/gmin bez własnego dedykowanego serwisu (np. Wrocław, Gdańsk, Poznań).
+  // dla miast/gmin bez własnego dedykowanego serwisu (np. Wrocław, Gdańsk).
   // Bez `fetchParcels` — działki nadal idą przez ogólnopolski ULDK (`fetchParcelsInRadius`
   // w uldkClient.ts), który ma lepsze pokrycie/dokładność dla granic działek.
   // Musi być ostatnim wpisem: dopasowuje się dopiero gdy żadne dedykowane miasto nie pasuje
@@ -52,10 +64,34 @@ export const CITY_SOURCES: CitySource[] = [
   },
 ];
 
+/** Ostatni wpis w CITY_SOURCES jest zawsze krajowym fallbackiem EGiB (patrz komentarz wyżej). */
+const NATIONAL_EGIB = CITY_SOURCES[CITY_SOURCES.length - 1];
+
 export function findCitySource(lat: number, lon: number): CitySource | null {
   for (const city of CITY_SOURCES) {
     const [west, south, east, north] = city.bbox;
     if (lon >= west && lon <= east && lat >= south && lat <= north) return city;
   }
   return null;
+}
+
+/**
+ * Pobiera budynki z dedykowanego serwisu miejskiego; jeśli ten padnie (błąd sieci/serwera),
+ * automatycznie próbuje krajowego fallbacku EGiB zamiast po cichu zwracać pustkę — realizuje
+ * zasadę "obowiązuje w granicach miasta, jeśli nie ładuje się -> fallback krajowy".
+ * Zwraca `null` gdy `citySource` jest `null` (poza obszarem `CITY_SOURCES`, wywołujący powinien
+ * wtedy w ogóle nie korzystać z WFS budynków miejskich).
+ */
+export async function fetchBuildingsWithFallback(
+  citySource: CitySource | null,
+  bbox: WfsBbox
+): Promise<{ geojson: GeoJsonFeatureCollection; source: CitySource } | null> {
+  if (!citySource) return null;
+  try {
+    return { geojson: await citySource.fetchBuildings(bbox), source: citySource };
+  } catch (err) {
+    if (citySource === NATIONAL_EGIB) throw err; // już jesteśmy na fallbacku, nie ma gdzie dalej
+    console.warn(`[WFS] ${citySource.name} budynki niedostępne, fallback krajowy (EGiB):`, err);
+    return { geojson: await NATIONAL_EGIB.fetchBuildings(bbox), source: NATIONAL_EGIB };
+  }
 }

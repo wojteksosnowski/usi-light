@@ -2,6 +2,8 @@ import React from 'react';
 import { Sliders, Globe, FileSpreadsheet } from 'lucide-react';
 import { useSolarAnalysisStore, useUiStore, useLicenseStore } from '../../../store';
 import { ProjectOverlaysCard } from './ProjectOverlaysCard';
+import { useWmsStatusStore } from '../../../modules/wfs-import/store/useWmsStatusStore';
+import { WmsStatusIcon } from '../../../modules/wfs-import/ui/WmsStatusIcon';
 
 const SATELLITE_PROVIDERS: { key: 'google' | 'here' | 'orthophoto'; label: string; title: string; pro?: boolean }[] = [
   { key: 'google', label: 'Google', title: 'Google Maps Satellite' },
@@ -35,6 +37,7 @@ export const ProjectAnalysisTogglesCard: React.FC = () => {
 
   const openModal = useUiStore((s) => s.openModal);
   const isPro = useLicenseStore((s) => s.isPro);
+  const orthophotoStatus = useWmsStatusStore((s) => s.statuses.orthophoto);
 
   return (
     <div className="ui-card">
@@ -387,6 +390,7 @@ export const ProjectAnalysisTogglesCard: React.FC = () => {
                       }}
                     >
                       {provider.label}
+                      {provider.key === 'orthophoto' && <WmsStatusIcon status={orthophotoStatus} />}
                       {provider.pro && !isPro && <span style={{ fontSize: '8px', fontWeight: 800, opacity: 0.8 }}>PRO</span>}
                     </button>
                   ))}

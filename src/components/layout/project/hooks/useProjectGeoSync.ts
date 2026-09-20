@@ -14,7 +14,7 @@ import {
   WFS_IMPORT_CONTINUE_HINT,
 } from '../../../../modules/wfs-import/store/useWfsStore';
 import { fetchParcelsInRadius } from '../../../../modules/wfs-import/services/uldkClient';
-import { findCitySource } from '../../../../modules/wfs-import/services/citySources';
+import { findCitySource, fetchBuildingsWithFallback } from '../../../../modules/wfs-import/services/citySources';
 import {
   importBuildingsFromGeoJson,
   importParcelsFromGeoJson,
@@ -137,14 +137,15 @@ export const useProjectGeoSync = () => {
       const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
       const bbox = latLonToBbox(centerLat, centerLon, radius);
       const citySource = findCitySource(centerLat, centerLon);
+      const wfsStoreState = useWfsStore.getState();
 
-      // 1. Działki
+      // 1. Działki — pomiń ponowne pobranie, jeśli ten sam obszar i źródło były już zsynchronizowane
+      // (unika powtarzania kosztownego sondowania ULDK / zapytań WFS przy wielokrotnym kliknięciu "Synchronizuj").
+      let parcelsSourceKey = citySource?.fetchParcels ? `wfs:${citySource.name}` : 'uldk';
       let parcels: BuildingLoop[];
-      if (citySource?.fetchParcels) {
-        const parcelsGeoJson = await citySource.fetchParcels(bbox);
-        parcels = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter).parcels;
-      } else {
-        parcels = await fetchParcelsInRadius(
+      const existingParcels = buildings.filter((b) => b.category === 'boundary' || b.id.startsWith('uldk-') || b.id.startsWith('wfs-'));
+      const fetchUldkParcels = () =>
+        fetchParcelsInRadius(
           centerLat,
           centerLon,
           radius,
@@ -157,25 +158,51 @@ export const useProjectGeoSync = () => {
             window.dispatchEvent(new Event('geo-render-needed'));
           }
         );
+
+      if (wfsStoreState.isParcelsFetchCovered(projectCenter, radius, parcelsSourceKey) && existingParcels.length > 0) {
+        parcels = existingParcels;
+      } else if (citySource?.fetchParcels) {
+        try {
+          const parcelsGeoJson = await citySource.fetchParcels(bbox);
+          parcels = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter).parcels;
+        } catch (err) {
+          console.warn(`Nie udało się pobrać działek z ${citySource.name}, fallback krajowy (ULDK):`, err);
+          parcelsSourceKey = 'uldk';
+          parcels = await fetchUldkParcels();
+        }
+        wfsStoreState.setParcelsFetchCoverage({ center: projectCenter, radius, sourceKey: parcelsSourceKey });
+      } else {
+        parcels = await fetchUldkParcels();
+        wfsStoreState.setParcelsFetchCoverage({ center: projectCenter, radius, sourceKey: parcelsSourceKey });
       }
 
       // 2. Budynki wektorowe — z jednego, wybranego przez użytkownika źródła (Geoportal lub OSM)
       let importedBuildings: BuildingLoop[] = [];
       let buildingsFetchError: string | null = null;
       let buildingsSourceLabel = citySource?.name || 'WFS';
+      // Faktyczne źródło po ewentualnym fallbacku krajowym (patrz fetchBuildingsWithFallback) —
+      // używane m.in. do decyzji o dogrzaniu wysokości z LiDAR (`hasStoreyHeights`).
+      let effectiveBuildingsSource = citySource;
 
       setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0 });
 
-      if (buildingSource === 'geoportal') {
-        if (citySource) {
-          try {
-            const bldGeoJson = await citySource.fetchBuildings(bbox);
-            const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter, radius);
+      const buildingsSourceKeyGuess = buildingSource === 'geoportal' ? `wfs:${citySource?.name || 'egib'}` : 'osm';
+      const existingImportedBuildings = buildings.filter((b) => b.category !== 'boundary' && (b.id.startsWith('wfs-') || b.id.startsWith('osm-')));
+      if (wfsStoreState.isBuildingsFetchCovered(projectCenter, radius, buildingsSourceKeyGuess) && existingImportedBuildings.length > 0) {
+        importedBuildings = existingImportedBuildings;
+        buildingsSourceLabel = buildingSource === 'geoportal' ? (citySource?.name || 'Geoportal') : 'OpenStreetMap';
+      } else if (buildingSource === 'geoportal') {
+        try {
+          const fetched = await fetchBuildingsWithFallback(citySource, bbox);
+          if (fetched) {
+            const res = importBuildingsFromGeoJson(fetched.geojson, fetched.source.sourceCrs, projectCrs, projectCenter, radius);
             importedBuildings = res.buildings;
-            buildingsSourceLabel = citySource.name;
-          } catch (err) {
-            console.warn(`Nie udało się pobrać budynków z Geoportalu (${citySource.name}):`, err);
+            buildingsSourceLabel = fetched.source.name;
+            effectiveBuildingsSource = fetched.source;
+            wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: `wfs:${fetched.source.name}` });
           }
+        } catch (err) {
+          console.warn(`Nie udało się pobrać budynków z Geoportalu (${citySource?.name}), w tym z fallbacku krajowego:`, err);
         }
         if (importedBuildings.length === 0) {
           buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
@@ -184,10 +211,15 @@ export const useProjectGeoSync = () => {
         try {
           importedBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
           buildingsSourceLabel = 'OpenStreetMap';
+          wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: buildingsSourceKeyGuess });
         } catch (osmErr) {
           console.warn('Nie udało się pobrać budynków z OSM:', osmErr);
+          // Komunikat zawiera treść błędu (np. timeout wszystkich mirrorów Overpass), zamiast
+          // generycznego "brak danych" — to rozróżnia realną awarię sieci od faktycznie pustego
+          // obszaru, co wcześniej było nie do odróżnienia dla użytkownika.
+          buildingsFetchError = `Nie udało się pobrać budynków z OpenStreetMap: ${osmErr instanceof Error ? osmErr.message : String(osmErr)}`;
         }
-        if (importedBuildings.length === 0) {
+        if (importedBuildings.length === 0 && !buildingsFetchError) {
           buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
         }
       }
@@ -195,7 +227,7 @@ export const useProjectGeoSync = () => {
       // 2c. Wzbogacenie o wysokości LiDAR NMT/NMPT dla budynków bez precyzyjnych kondygnacji
       if (importedBuildings.length > 0) {
         const needsLidarHeights = importedBuildings.some((b) => b.heightSource === 'default');
-        if (needsLidarHeights || citySource?.hasStoreyHeights === false) {
+        if (needsLidarHeights || effectiveBuildingsSource?.hasStoreyHeights === false) {
           try {
             const terrainResults = await analyzeBuildingHeights(importedBuildings, projectCrs, undefined, projectCenter);
             const resultById: Record<string, typeof terrainResults[number]> = {};

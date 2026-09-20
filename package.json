@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:live": "RUN_LIVE_WFS_TESTS=1 vitest run src/modules/wfs-import/services/liveWfsServers.live.test.ts"
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.32.0",

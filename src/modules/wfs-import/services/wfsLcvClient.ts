@@ -6,14 +6,14 @@
  * WFS 2.0.0 na tym serwisie bywa zawodny (timeouty) przy większych bbox z powodu złożoności
  * geometrii — używamy WFS 1.1.0 (`gml:featureMember`), tak jak `wfsKrakowClient.ts`.
  * Serwer nie wysyła nagłówków CORS (ten sam host co krajowy EGiB) i nie wspiera
- * `outputFormat=application/json` z pełnymi atrybutami — zapytanie idzie przez proxy
- * `/api/lcv-wfs` (patrz `api/lcv-wfs.ts`), odpowiedź to GML parsowany ręcznie.
+ * `outputFormat=application/json` z pełnymi atrybutami — zapytanie idzie przez skonsolidowany
+ * proxy `/api/wfs?target=lcv-wfs` (patrz `api/wfs.ts`), odpowiedź to GML parsowany ręcznie.
  */
 
 import { GeoJsonFeatureCollection, WfsBbox } from './wfsWarsawClient';
 import { parseWfsPolygonGmlWithHoles } from './wfsGmlUtils';
 
-const LCV_WFS_URL = '/api/lcv-wfs';
+const LCV_WFS_URL = '/api/wfs?target=lcv-wfs';
 
 /** Limit cech na żądanie — geometrie pokrycia terenu bywają bardzo złożone (obserwowano >3000 wierzchołków/obiekt). */
 const MAX_FEATURES = 500;
@@ -41,7 +41,7 @@ export async function fetchLandCoverUnits(bbox: WfsBbox): Promise<GeoJsonFeature
     maxFeatures: String(MAX_FEATURES),
   });
 
-  const res = await fetch(`${LCV_WFS_URL}?${params}`);
+  const res = await fetch(`${LCV_WFS_URL}&${params}`);
   if (!res.ok) throw new Error(`WFS LCV: ${res.status}`);
   const gml = await res.text();
   return parseWfsPolygonGmlWithHoles(gml, 'LandCoverUnit', [], ['class']);

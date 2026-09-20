@@ -7,7 +7,7 @@ import { AddressSearch } from './AddressSearch';
 import { ImportStatus } from './ImportStatus';
 import { GeocodingResult, latLonToBbox } from '../services/geocoding';
 import { fetchWarsawTrees, EPSG_2178 } from '../services/wfsWarsawClient';
-import { findCitySource } from '../services/citySources';
+import { findCitySource, fetchBuildingsWithFallback } from '../services/citySources';
 import {
   importBuildingsFromGeoJson,
   importParcelsFromGeoJson,
@@ -18,6 +18,8 @@ import { detectCoordinateSystem } from '../../../utils/geoTransform';
 import { BuildingLoop } from '../../../types/geometry';
 
 import { useOsmLanduseStore } from '../store/useOsmLanduseStore';
+import { useWmsStatusStore } from '../store/useWmsStatusStore';
+import { WmsStatusIcon } from './WmsStatusIcon';
 
 const RADIUS_OPTIONS = [100, 200, 300, 500];
 
@@ -37,11 +39,16 @@ export const WfsImportPanel: React.FC = () => {
   const setLastImportBbox = useWfsStore((s) => s.setLastImportBbox);
   const buildingSource = useWfsStore((s) => s.buildingSource);
   const setBuildingSource = useWfsStore((s) => s.setBuildingSource);
+  const isParcelsFetchCovered = useWfsStore((s) => s.isParcelsFetchCovered);
+  const isBuildingsFetchCovered = useWfsStore((s) => s.isBuildingsFetchCovered);
+  const setParcelsFetchCoverage = useWfsStore((s) => s.setParcelsFetchCoverage);
+  const setBuildingsFetchCoverage = useWfsStore((s) => s.setBuildingsFetchCoverage);
 
   const fetchOsmLanduseAction = useOsmLanduseStore((s) => s.fetchLanduse);
   const osmFeatures = useOsmLanduseStore((s) => s.features);
   const showOsmLanduseGroup = useOsmLanduseStore((s) => s.showOsmLanduseGroup);
   const setShowOsmLanduseGroup = useOsmLanduseStore((s) => s.setShowOsmLanduseGroup);
+  const terrainStatus = useWmsStatusStore((s) => s.statuses.terrain);
 
   const [radius, setRadius] = useState(200);
   const [selectedLocation, setSelectedLocation] = useState<GeocodingResult | null>(null);
@@ -68,42 +75,68 @@ export const WfsImportPanel: React.FC = () => {
       let parcelsCount = 0;
       let treesCount = 0;
 
+      const buildingsSourceKeyGuess = buildingSource === 'geoportal' ? `wfs:${citySource?.name || 'egib'}` : 'osm';
       if (options.buildings) {
-        setStatus({ stage: 'buildings' });
-        let finalBuildings: BuildingLoop[] = [];
+        if (isBuildingsFetchCovered(projectCenter, radius, buildingsSourceKeyGuess)) {
+          // Ten sam obszar i źródło zostały już pobrane — budynki są już w scenie, pomijamy zapytanie.
+          buildingsCount = 0;
+        } else {
+          setStatus({ stage: 'buildings' });
+          let finalBuildings: BuildingLoop[] = [];
+          let buildingsSourceKey = buildingsSourceKeyGuess;
 
-        if (buildingSource === 'geoportal') {
-          if (citySource) {
+          if (buildingSource === 'geoportal') {
             try {
-              const bldGeoJson = await citySource.fetchBuildings(bbox);
-              const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
-              finalBuildings = res.buildings;
+              const fetched = await fetchBuildingsWithFallback(citySource, bbox);
+              if (fetched) {
+                const res = importBuildingsFromGeoJson(fetched.geojson, fetched.source.sourceCrs, projectCrs, projectCenter);
+                finalBuildings = res.buildings;
+                buildingsSourceKey = `wfs:${fetched.source.name}`;
+              }
             } catch (err) {
-              console.warn('[WFS Import] Nie udało się pobrać budynków z Geoportalu:', err);
+              console.warn('[WFS Import] Nie udało się pobrać budynków z Geoportalu (w tym z fallbacku krajowego):', err);
+            }
+          } else {
+            try {
+              finalBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
+            } catch (osmErr) {
+              console.warn('[WFS Import] Nie udało się pobrać budynków z OSM:', osmErr);
             }
           }
-        } else {
-          try {
-            finalBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
-          } catch (osmErr) {
-            console.warn('[WFS Import] Nie udało się pobrać budynków z OSM:', osmErr);
-          }
-        }
 
-        for (const bld of finalBuildings) {
-          addBuilding(bld);
+          // Odrzuć obiekty, które już są w scenie (ten sam stabilny `id` z WFS/OSM) — bez tego
+          // dwie zachodzące się przestrzennie synchronizacje (przesunięty środek) dublowałyby
+          // te same realne budynki, bo `addBuilding` tylko dokleja do tablicy bez deduplikacji.
+          const existingBuildingIds = new Set(useSceneStore.getState().buildings.map((b) => b.id));
+          const newBuildings = finalBuildings.filter((b) => !existingBuildingIds.has(b.id));
+          for (const bld of newBuildings) {
+            addBuilding(bld);
+          }
+          buildingsCount = newBuildings.length;
+          setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: buildingsSourceKey });
         }
-        buildingsCount = finalBuildings.length;
       }
 
+      const parcelsSourceKey = citySource ? `wfs:${citySource.name}` : 'uldk';
       if (options.parcels && citySource?.fetchParcels) {
-        setStatus({ stage: 'parcels' });
-        const parcelsGeoJson = await citySource.fetchParcels(bbox);
-        const result = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
-        for (const parcel of result.parcels) {
-          addBuilding(parcel);
+        if (isParcelsFetchCovered(projectCenter, radius, parcelsSourceKey)) {
+          parcelsCount = 0;
+        } else {
+          setStatus({ stage: 'parcels' });
+          try {
+            const parcelsGeoJson = await citySource.fetchParcels(bbox);
+            const result = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
+            const existingParcelIds = new Set(useSceneStore.getState().buildings.map((b) => b.id));
+            const newParcels = result.parcels.filter((p) => !existingParcelIds.has(p.id));
+            for (const parcel of newParcels) {
+              addBuilding(parcel);
+            }
+            parcelsCount = newParcels.length;
+            setParcelsFetchCoverage({ center: projectCenter, radius, sourceKey: parcelsSourceKey });
+          } catch (err) {
+            console.warn(`[WFS Import] Nie udało się pobrać działek z ${citySource.name}:`, err);
+          }
         }
-        parcelsCount = result.parcels.length;
       }
 
       if (options.trees && citySource?.name === 'Warszawa') {
@@ -151,7 +184,7 @@ export const WfsImportPanel: React.FC = () => {
         treesCount: 0,
       });
     }
-  }, [selectedLocation, radius, options, settings, buildingSource, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup]);
+  }, [selectedLocation, radius, options, settings, buildingSource, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup, isParcelsFetchCovered, isBuildingsFetchCovered, setParcelsFetchCoverage, setBuildingsFetchCoverage]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -216,7 +249,8 @@ export const WfsImportPanel: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Podkłady mapowe:</span>
         <ToggleRow label="Cieniowanie terenu (NMT)" active={showTerrainLayer}
-          onToggle={() => setShowTerrainLayer(!showTerrainLayer)} />
+          onToggle={() => setShowTerrainLayer(!showTerrainLayer)}
+          icon={<WmsStatusIcon status={terrainStatus} />} />
         <ToggleRow label="Drzewa (wizualizacja)" active={showTreesLayer}
           onToggle={() => setShowTreesLayer(!showTreesLayer)} />
         {osmFeatures.length > 0 && (
@@ -283,7 +317,8 @@ const ToggleRow: React.FC<{
   label: string;
   active: boolean;
   onToggle: () => void;
-}> = ({ label, active, onToggle }) => (
+  icon?: React.ReactNode;
+}> = ({ label, active, onToggle, icon }) => (
   <button
     onClick={onToggle}
     style={{
@@ -301,5 +336,6 @@ const ToggleRow: React.FC<{
   >
     {active ? <Eye size={12} /> : <EyeOff size={12} />}
     {label}
+    {icon}
   </button>
 );

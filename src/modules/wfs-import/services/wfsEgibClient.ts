@@ -6,8 +6,8 @@
  * własnego dedykowanego serwisu WFS (np. Wrocław, Gdańsk, Poznań) — analogicznie
  * do tego jak `uldkClient.ts` jest ogólnopolskim fallbackiem dla działek.
  *
- * Serwer nie wysyła nagłówków CORS, więc zapytania idą przez własny proxy
- * serverless `/api/egib-wfs` (api/egib-wfs.ts) zamiast bezpośrednio z przeglądarki.
+ * Serwer nie wysyła nagłówków CORS, więc zapytania idą przez skonsolidowany proxy
+ * serverless `/api/wfs?target=egib-wfs` (api/wfs.ts) zamiast bezpośrednio z przeglądarki.
  *
  * Pułapka z kolejnością osi: to WFS 2.0.0 i zapytania/geometrie używają referencji
  * `urn:ogc:def:crs:EPSG::XXXX`, co wymusza OFICJALNĄ kolejność osi EPSG — dla 4326
@@ -29,7 +29,7 @@ import { GeoJsonFeatureCollection, WfsBbox } from './wfsWarsawClient';
 import { parseWfsPolygonGml } from './wfsGmlUtils';
 import { CrsDetectionResult } from '../../../utils/geoTransform';
 
-const EGIB_WFS_URL = '/api/egib-wfs';
+const EGIB_WFS_URL = '/api/wfs?target=egib-wfs';
 
 export const EPSG_2180: CrsDetectionResult = {
   crs: 'EPSG:2180',
@@ -72,7 +72,7 @@ async function fetchAllPages(
     const timer = setTimeout(() => controller.abort(), WFS_REQUEST_TIMEOUT_MS);
     let gml = '';
     try {
-      const res = await fetch(`${EGIB_WFS_URL}?${params}`, { signal: controller.signal });
+      const res = await fetch(`${EGIB_WFS_URL}&${params}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`WFS EGiB ${typeNames}: ${res.status}`);
       gml = await res.text();
     } finally {

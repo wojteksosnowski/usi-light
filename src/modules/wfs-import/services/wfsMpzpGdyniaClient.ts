@@ -8,7 +8,7 @@ import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
 import { parseWfsPolygonGml } from './wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
-const GDYNIA_WFS_URL = '/api/gdynia-mpzp-wfs';
+const GDYNIA_WFS_URL = '/api/wfs?target=gdynia-mpzp-wfs';
 
 export async function fetchGdyniaMpzp(bbox: WfsBbox): Promise<{
   zones: MpzpZoneRawFeature[];
@@ -26,7 +26,7 @@ export async function fetchGdyniaMpzp(bbox: WfsBbox): Promise<{
       TYPENAME: 'MPZP_ZbiorDanychPrzestrzennychMPZP:AktPlanowaniaPrzestrzennego.MPZP',
       BBOX: bboxStr,
     });
-    const res = await fetch(`${GDYNIA_WFS_URL}?${paramsZones}`);
+    const res = await fetch(`${GDYNIA_WFS_URL}&${paramsZones}`);
     if (res.ok) {
       const gml = await res.text();
       const parsed = parseWfsPolygonGml(

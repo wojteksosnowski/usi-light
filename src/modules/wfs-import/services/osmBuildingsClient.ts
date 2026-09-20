@@ -12,7 +12,13 @@ import { LatLon, wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoT
 import { sanitizePolygon } from '../../../utils/importers/geometrySanitizer';
 import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
 import { ensureOppositeWinding } from '../../../utils/ringSegments';
-import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../utils/math2d/polygons';
+import {
+  polygonCircleIntersectionRatio,
+  isPolygonCCW,
+  computePolygonArea,
+  intersectionPolygonLoops,
+  isPointInPolygon,
+} from '../../../utils/math2d/polygons';
 import { parseOsmHeight } from './osmLanduseClient';
 import { WfsBbox } from './wfsWarsawClient';
 
@@ -24,7 +30,10 @@ export const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
 ];
 
-const OVERPASS_REQUEST_TIMEOUT_MS = 8000;
+// 8s było za mało dla gęstych centrów miast (np. Poznań — dużo relacji building:part
+// fasada/dach) — mirrory Overpass potrafią potrzebować bliżej deklarowanego serwerowi
+// [timeout:25] (patrz zapytanie niżej), więc timeout klienta musi mieć na to margines.
+const OVERPASS_REQUEST_TIMEOUT_MS = 20000;
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
@@ -310,6 +319,92 @@ export function parseOverpassBuildingsResponse(
     }
   }
 
+  // 0.5. Geometryczne wykrywanie brył obejmujących (envelope) bez jawnej relacji OSM:
+  // way LUB poligon relacji `building=yes`, którego footprint pokrywa jeden lub więcej
+  // way'ów `building:part`, jest odrzucany (jak duplikat), a pokrywane części dostają wspólny groupId.
+  const geometricEnvelopeGroupByPartWayId = new Map<number, string>();
+
+  const wayToCadPolygon = (wayId: number): Point2D[] | null => {
+    const way = ways.get(wayId);
+    if (!way || !way.nodes) return null;
+    const pts: Point2D[] = [];
+    for (const nodeId of way.nodes) {
+      const coord = nodeCoords.get(nodeId);
+      if (coord) pts.push(wgs84ToCadPoint(coord, projectCrs, projectCenter));
+    }
+    return pts.length >= 3 ? pts : null;
+  };
+
+  interface PolyBBox { minX: number; minY: number; maxX: number; maxY: number }
+  const computeBBox = (poly: Point2D[]): PolyBBox => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of poly) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, minY, maxX, maxY };
+  };
+  const bboxesOverlap = (a: PolyBBox, b: PolyBBox): boolean =>
+    a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+
+  const partPolygons = new Map<number, Point2D[]>();
+  const partBBoxes = new Map<number, PolyBBox>();
+  for (const [wayId, way] of ways.entries()) {
+    const tags = way.tags || {};
+    if (!tags['building:part'] || tags['building:part'] === 'no') continue;
+    if (!way.nodes || way.nodes.length < 4) continue;
+    const poly = wayToCadPolygon(wayId);
+    if (poly) {
+      partPolygons.set(wayId, poly);
+      partBBoxes.set(wayId, computeBBox(poly));
+    }
+  }
+
+  // Dla danego poligonu envelope zwraca listę wayId `building:part`, które są przez niego
+  // pokryte w >50% własnej powierzchni (envelope traktujemy wtedy jako zbędny duplikat).
+  // Tani wstępny test bounding-box pomija pary bez nakładających się prostokątów otaczających,
+  // zanim wywoła kosztowny `intersectionPolygonLoops` — w gęstych centrach miast (np. Poznań,
+  // dużo relacji building:part) redukuje to O(n²) niepotrzebnej pracy bez zmiany wyniku.
+  const findCoveredPartIds = (envelopePoly: Point2D[], excludeWayId?: number): number[] => {
+    const coveredPartIds: number[] = [];
+    const envelopeBBox = computeBBox(envelopePoly);
+    for (const [partWayId, partPoly] of partPolygons.entries()) {
+      if (partWayId === excludeWayId) continue;
+      const partBBox = partBBoxes.get(partWayId);
+      if (partBBox && !bboxesOverlap(envelopeBBox, partBBox)) continue;
+      const partArea = computePolygonArea(partPoly);
+      if (partArea <= 0) continue;
+      const intersections = intersectionPolygonLoops([envelopePoly], [partPoly]);
+      const overlapArea = intersections.reduce((sum, loop) => sum + computePolygonArea(loop), 0);
+      if (overlapArea / partArea > 0.5) {
+        coveredPartIds.push(partWayId);
+      }
+    }
+    return coveredPartIds;
+  };
+
+  if (partPolygons.size > 0) {
+    for (const [wayId, way] of ways.entries()) {
+      if (processedWayIds.has(wayId)) continue;
+      const tags = way.tags || {};
+      if (!tags.building || !way.nodes || way.nodes.length < 4) continue;
+
+      const envelopePoly = wayToCadPolygon(wayId);
+      if (!envelopePoly) continue;
+
+      const coveredPartIds = findCoveredPartIds(envelopePoly, wayId);
+      if (coveredPartIds.length > 0) {
+        processedWayIds.add(wayId);
+        const groupId = `group-osm-geo-${wayId}`;
+        for (const partWayId of coveredPartIds) {
+          geometricEnvelopeGroupByPartWayId.set(partWayId, groupId);
+        }
+      }
+    }
+  }
+
   // 1. Przetwarzanie relacji multipolygon (budynki z dziedzińcami / złożone bryły)
   for (const rel of relations) {
     const tags = rel.tags || {};
@@ -317,6 +412,7 @@ export function parseOverpassBuildingsResponse(
 
     const outerWays: number[][] = [];
     const innerWays: number[][] = [];
+    let outerWayTagsWithName: Record<string, string> | undefined;
 
     for (const member of rel.members) {
       if (member.type === 'way') {
@@ -327,6 +423,12 @@ export function parseOverpassBuildingsResponse(
             innerWays.push(way.nodes);
           } else {
             outerWays.push(way.nodes);
+            // Relacje multipolygon (zwłaszcza building:part) często same nie mają tagu `name` -
+            // gdy dokładnie jeden way outer niesie nazwę/adres (np. pełny obrys budynku z osobnymi
+            // otworami dachowymi jako części), przejmujemy ją zamiast generycznej nazwy "Budynek OSM #".
+            if (way.tags && (way.tags.name || way.tags['addr:housenumber'])) {
+              outerWayTagsWithName = way.tags;
+            }
           }
         }
       }
@@ -338,10 +440,27 @@ export function parseOverpassBuildingsResponse(
 
     const { defaultHeight, elevation, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
     const buildingType = resolveBuildingType(tags);
-    const buildingName = formatOsmBuildingName(rel.id, tags);
+    const hasOwnName = !!(tags.name || tags['addr:housenumber']);
+    const buildingName = !hasOwnName && outerWayTagsWithName
+      ? formatOsmBuildingName(rel.id, outerWayTagsWithName)
+      : formatOsmBuildingName(rel.id, tags);
+
+    // Relacja bez tagu `building` (tylko `building:part`) to CZĘŚĆ budynku, nie pełny envelope -
+    // zgodnie z tym samym rozróżnieniem, co dla pojedynczych way'ów w krokach 2/3.
+    const isPartOnlyRelation = !tags.building && !!tags['building:part'] && tags['building:part'] !== 'no';
+    const idPrefix = isPartOnlyRelation ? 'osm-part-rel' : 'osm-bld-rel';
 
     const hasMultipleOuterRings = outerRings.length > 1;
     const relGroupId = hasMultipleOuterRings ? `group-osm-rel-${rel.id}` : undefined;
+
+    // Współrzędne CAD otworów liczone raz dla całej relacji — punkt reprezentatywny (pierwszy
+    // wierzchołek) każdego otworu decyduje, do KTÓREGO pierścienia zewnętrznego trafi (patrz niżej),
+    // zamiast (jak wcześniej) doklejać wszystkie otwory relacji do każdego outer ringa niezależnie
+    // od tego, czy geometrycznie w nim leżą — to psuło budynki z >1 outer ringiem (np. rozdzielony
+    // kształt zszyty z kilku way'ów), gdzie dziedziniec trafiał do niewłaściwej części budynku.
+    const innerRingsCad: Point2D[][] = innerRings.map((innerLatLons) =>
+      innerLatLons.map((coord) => wgs84ToCadPoint(coord, projectCrs, projectCenter))
+    );
 
     for (let ri = 0; ri < outerRings.length; ri++) {
       const outerLatLons = outerRings[ri];
@@ -349,7 +468,7 @@ export function parseOverpassBuildingsResponse(
         wgs84ToCadPoint(coord, projectCrs, projectCenter)
       );
 
-      const bldgId = ri === 0 ? `osm-bld-rel-${rel.id}` : `osm-bld-rel-${rel.id}-p${ri}`;
+      const bldgId = ri === 0 ? `${idPrefix}-${rel.id}` : `${idPrefix}-${rel.id}-p${ri}`;
       const sanitized = sanitizePolygon(rawOuterCad, {
         buildingId: bldgId,
         defaultHeight,
@@ -358,6 +477,21 @@ export function parseOverpassBuildingsResponse(
       });
 
       if (!sanitized.valid || sanitized.vertices.length < 3) continue;
+
+      // Geometryczne wykrywanie envelope: poligon relacji pokrywający building:part way'e
+      // jest odrzucany jako duplikat (patrz blok "0.5" powyżej — ta sama logika, ale dla
+      // poligonów wynikających z relacji multipolygon zamiast pojedynczych way'ów).
+      // Uwaga: sprawdzamy TYLKO gdy relacja nie ma otworów (innerRings) - obrys zewnętrzny przed
+      // odjęciem dziedzińca niemal zawsze "pokrywa" geometrycznie wszystko, co leży w tym dziedzińcu
+      // (np. kolejny pierścień budynku), więc dla brył z dziedzińcem test dawałby fałszywe trafienia.
+      const relCoveredPartIds = innerRings.length === 0 ? findCoveredPartIds(sanitized.vertices) : [];
+      if (relCoveredPartIds.length > 0) {
+        const groupId = `group-osm-geo-rel-${rel.id}${ri > 0 ? `-p${ri}` : ''}`;
+        for (const partWayId of relCoveredPartIds) {
+          geometricEnvelopeGroupByPartWayId.set(partWayId, groupId);
+        }
+        continue;
+      }
 
       // Filtr zasięgu promienia
       if (radiusMeters != null && radiusMeters > 0) {
@@ -368,10 +502,11 @@ export function parseOverpassBuildingsResponse(
       const outerIsCCW = isPolygonCCW(sanitized.vertices);
       const holes: Point2D[][] = [];
 
-      for (const innerLatLons of innerRings) {
-        const rawInnerCad: Point2D[] = innerLatLons.map((coord) =>
-          wgs84ToCadPoint(coord, projectCrs, projectCenter)
-        );
+      for (const rawInnerCad of innerRingsCad) {
+        // Przypisz otwór do tego outer ringa TYLKO gdy geometrycznie w nim leży — przy jednym
+        // outer ringu (typowy przypadek) to zawsze prawda, przy kilku (hasMultipleOuterRings)
+        // zapobiega przyklejeniu cudzej dziury do złej części budynku.
+        if (rawInnerCad.length === 0 || !isPointInPolygon(rawInnerCad[0], sanitized.vertices)) continue;
         const sanitizedHole = sanitizePolygon(rawInnerCad, {
           buildingId: `${bldgId}-hole`,
           defaultHeight,
@@ -519,7 +654,9 @@ export function parseOverpassBuildingsResponse(
       if (ratio < 0.1) continue;
     }
 
-    const partGroupId = relInfo ? `group-osm-bld-${relInfo.relId}` : undefined;
+    const partGroupId = relInfo
+      ? `group-osm-bld-${relInfo.relId}`
+      : geometricEnvelopeGroupByPartWayId.get(wayId);
 
     const loop: BuildingLoop = {
       id: bldgId,

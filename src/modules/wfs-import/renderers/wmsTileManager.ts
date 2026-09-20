@@ -16,6 +16,8 @@ import {
 import { TileZoomHysteresis } from '../../../utils/tileGridProjection';
 import { getCachedTile, putCachedTile } from './wmsTileDb';
 
+export type WmsLayerStatus = 'idle' | 'loading' | 'error' | 'ready';
+
 export interface WmsTileConfig {
   baseUrl: string;
   mirrors?: string[];
@@ -55,8 +57,12 @@ export class WmsTileManager {
   private invertColors = false;
   private zoomHysteresis = new TileZoomHysteresis();
   private requestIndex = 0;
+  private onStatusChange?: (status: WmsLayerStatus) => void;
+  private status: WmsLayerStatus = 'idle';
+  private hasLoadedAny = false;
+  private hasErrorSinceLastLoad = false;
 
-  constructor(config: WmsTileConfig, maxCacheSize = 1200, onTileLoaded?: () => void) {
+  constructor(config: WmsTileConfig, maxCacheSize = 1200, onTileLoaded?: () => void, onStatusChange?: (status: WmsLayerStatus) => void) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.maxNativeZoom = this.config.maxNativeZoom ?? 19;
     this.cache = new ProtectedLruCache<HTMLImageElement>(maxCacheSize, (key) => {
@@ -64,6 +70,30 @@ export class WmsTileManager {
       this.invertPending.delete(key);
     });
     this.onTileLoaded = onTileLoaded;
+    this.onStatusChange = onStatusChange;
+  }
+
+  /** Przelicza status usługi (idle/loading/error/ready) na podstawie kolejki i historii ładowań;
+   * wywołuje `onStatusChange` wyłącznie przy faktycznej zmianie wartości (np. do sterowania ikoną w sidebarze). */
+  private updateStatus() {
+    let next: WmsLayerStatus;
+    if (this.pending.size > 0) {
+      next = 'loading';
+    } else if (this.hasErrorSinceLastLoad && !this.hasLoadedAny) {
+      next = 'error';
+    } else if (this.hasLoadedAny) {
+      next = 'ready';
+    } else {
+      next = 'idle';
+    }
+    if (next !== this.status) {
+      this.status = next;
+      this.onStatusChange?.(next);
+    }
+  }
+
+  public getStatus(): WmsLayerStatus {
+    return this.status;
   }
 
   private invertedCache = new Map<string, CanvasImageSource>();
@@ -77,6 +107,17 @@ export class WmsTileManager {
 
   setOnTileLoaded(callback: () => void) {
     this.onTileLoaded = callback;
+  }
+
+  /**
+   * Podmienia serwis/warstwę WMS tej instancji w locie (np. przełączenie GESUT/BDOT z serwisu
+   * krajowego na miejski override gdy projekt wjeżdża w granice miasta z dedykowanym serwisem —
+   * patrz `wmsCitySources.ts`). Czyści cache, bo kafle poprzedniego serwisu/warstwy są niekompatybilne.
+   */
+  setConfig(partial: Pick<WmsTileConfig, 'baseUrl' | 'layers' | 'format' | 'crs'>) {
+    if (this.config.baseUrl === partial.baseUrl && this.config.layers === partial.layers) return;
+    this.config = { ...this.config, ...partial };
+    this.clearCache();
   }
 
   /**
@@ -169,6 +210,9 @@ export class WmsTileManager {
     this.warmupKeys.clear();
     this.activePrefetches = 0;
     this.totalBytesLoaded = 0;
+    this.hasLoadedAny = false;
+    this.hasErrorSinceLastLoad = false;
+    this.updateStatus();
   }
 
   public getCacheSizeMb(): number {
@@ -230,6 +274,7 @@ export class WmsTileManager {
       this.pending.add(key);
       this.prefetchQueue.unshift({ x: normX, y: normY, z, key });
       this.processQueue();
+      this.updateStatus();
     } else {
       // Kafel jest już w kolejce lub w trakcie pobierania jako cichy prefetch w tle, ale teraz
       // jest realnie potrzebny na ekranie — "odciszamy" go niezależnie od tego, czy nadal czeka
@@ -271,6 +316,9 @@ export class WmsTileManager {
     const wasSilent = this.silentKeys.delete(key);
     if (!wasSilent) this.onTileLoaded?.();
     this.processQueue();
+    this.hasLoadedAny = true;
+    this.hasErrorSinceLastLoad = false;
+    this.updateStatus();
   }
 
   /** Best-effort: zapisuje pomyślnie załadowany kafel do trwałego cache'u IndexedDB, żeby przetrwał
@@ -341,20 +389,42 @@ export class WmsTileManager {
     const img = new Image();
     img.crossOrigin = 'anonymous';
 
+    // Serwery WMS bez wsparcia dla żądanego CRS/warstw potrafią "wisieć" bez odpowiedzi
+    // zamiast zwrócić błąd (np. portal.geopoz.poznan.pl) — bez timeoutu taki kafel zajmowałby
+    // slot współbieżności na stałe, blokując resztę kolejki tej warstwy.
+    let settled = false;
+    const handleFailure = () => {
+      clearTimeout(timeoutId);
+      this.pending.delete(key);
+      this.silentKeys.delete(key);
+      this.activePrefetches--;
+      this.processQueue();
+      this.hasErrorSinceLastLoad = true;
+      this.updateStatus();
+    };
+    const timeoutId = setTimeout(() => {
+      settled = true;
+      handleFailure();
+    }, WmsTileManager.TILE_TIMEOUT_MS);
+
     img.onload = () => {
+      if (settled) return; // timeout już zwolnił slot — spóźniona odpowiedź trafia tylko do RAM cache poniżej
+      settled = true;
+      clearTimeout(timeoutId);
       this.persistTileToDb(key, img);
       this.finishTileLoad(key, img);
     };
 
     img.onerror = () => {
-      this.pending.delete(key);
-      this.silentKeys.delete(key);
-      this.activePrefetches--;
-      this.processQueue();
+      if (settled) return;
+      settled = true;
+      handleFailure();
     };
 
     img.src = `${effectiveBaseUrl}?${params}`;
   }
+
+  private static readonly TILE_TIMEOUT_MS = 8000;
 
   private processQueue() {
     while (this.activePrefetches < this.maxConcurrentPrefetches && this.prefetchQueue.length > 0) {
@@ -395,6 +465,7 @@ export class WmsTileManager {
         }
       }
     }
+    this.updateStatus();
     this.processQueue();
   }
 

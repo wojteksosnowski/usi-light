@@ -6,7 +6,7 @@ interface WfsTargetConfig {
   typeNameParam: string;
 }
 
-const WFS_TARGETS: Record<string, WfsTargetConfig> = {
+export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   // GUGiK EGiB
   egib: {
     upstreamUrl: 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/EGIB/WFS/UslugaZbiorcza',
@@ -109,6 +109,13 @@ const WFS_TARGETS: Record<string, WfsTargetConfig> = {
       'ZbiorDanychPrzestrzennychMPZP:app.AktPlanowaniaPrzestrzennego.MPZP',
     ]),
     typeNameParam: 'TYPENAME',
+  },
+
+  // Poznań EGiB (budynki/działki z wierzchołkami)
+  'poznan-egib': {
+    upstreamUrl: 'https://sipuslugiogc1.geopoz.poznan.pl/WFS_SIP_EWIDENCJA/service.svc/get',
+    allowedTypeNames: new Set(['gmgml:Budynki_ewidencyjne', 'gmgml:Działki_ewidencyjne']),
+    typeNameParam: 'typeNames',
   },
 
   // Wrocław MPZP

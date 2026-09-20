@@ -117,3 +117,32 @@ describe('useWfsStore - shiftVectorLayers and group toggles', () => {
     expect(useWfsStore.getState().mpzpInvertColors).toBe(true);
   });
 });
+
+describe('useWfsStore - pokrycie zapytań o działki/budynki (dedup)', () => {
+  beforeEach(() => {
+    useWfsStore.setState({ parcelsFetchCoverage: null, buildingsFetchCoverage: null });
+  });
+
+  it('nie uznaje obszaru za pokryty, dopóki nic nie zostało zapisane', () => {
+    const s = useWfsStore.getState();
+    expect(s.isParcelsFetchCovered({ lat: 52.0, lon: 21.0 }, 200, 'uldk')).toBe(false);
+    expect(s.isBuildingsFetchCovered({ lat: 52.0, lon: 21.0 }, 200, 'osm')).toBe(false);
+  });
+
+  it('uznaje ten sam obszar i to samo źródło za pokryte po zapisaniu', () => {
+    const s = useWfsStore.getState();
+    s.setParcelsFetchCoverage({ center: { lat: 52.0, lon: 21.0 }, radius: 200, sourceKey: 'uldk' });
+    expect(useWfsStore.getState().isParcelsFetchCovered({ lat: 52.0, lon: 21.0 }, 200, 'uldk')).toBe(true);
+    // Mniejszy promień żądania w ramach już pobranego obszaru też jest pokryty.
+    expect(useWfsStore.getState().isParcelsFetchCovered({ lat: 52.0, lon: 21.0 }, 100, 'uldk')).toBe(true);
+  });
+
+  it('nie uznaje obszaru za pokryty przy innym źródle, promieniu spoza zasięgu lub odległym środku', () => {
+    const s = useWfsStore.getState();
+    s.setBuildingsFetchCoverage({ center: { lat: 52.0, lon: 21.0 }, radius: 200, sourceKey: 'wfs:Warszawa' });
+    const state = useWfsStore.getState();
+    expect(state.isBuildingsFetchCovered({ lat: 52.0, lon: 21.0 }, 200, 'osm')).toBe(false);
+    expect(state.isBuildingsFetchCovered({ lat: 52.0, lon: 21.0 }, 500, 'wfs:Warszawa')).toBe(false);
+    expect(state.isBuildingsFetchCovered({ lat: 53.0, lon: 21.0 }, 200, 'wfs:Warszawa')).toBe(false);
+  });
+});

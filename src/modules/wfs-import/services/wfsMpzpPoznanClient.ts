@@ -8,7 +8,7 @@ import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
 import { parseWfsPolygonGml, parseWfsLineStringGml } from './wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
-const POZNAN_WFS_URL = '/api/poznan-mpzp-wfs';
+const POZNAN_WFS_URL = '/api/wfs?target=poznan-mpzp-wfs';
 
 export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
   zones: MpzpZoneRawFeature[];
@@ -26,7 +26,7 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
       TYPENAME: 'ZbiorDanychPrzestrzennychMPZP:app.WydzieleniePlanistyczne.MPZP',
       BBOX: bboxStr,
     });
-    const res = await fetch(`${POZNAN_WFS_URL}?${paramsZones}`);
+    const res = await fetch(`${POZNAN_WFS_URL}&${paramsZones}`);
     if (res.ok) {
       const gml = await res.text();
       const parsed = parseWfsPolygonGml(
@@ -60,7 +60,7 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
       TYPENAME: 'ZbiorDanychPrzestrzennychMPZP:app.LinieZabudowy.MPZP',
       BBOX: bboxStr,
     });
-    const res = await fetch(`${POZNAN_WFS_URL}?${paramsLines}`);
+    const res = await fetch(`${POZNAN_WFS_URL}&${paramsLines}`);
     if (res.ok) {
       const gml = await res.text();
       const parsed = parseWfsLineStringGml(gml, 'app.LinieZabudowy.MPZP', [
