@@ -165,6 +165,15 @@ export const useProjectGeoSync = () => {
         try {
           const parcelsGeoJson = await citySource.fetchParcels(bbox);
           parcels = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter).parcels;
+          // Pusty wynik bez wyjątku traktujemy jako niepewny, nie autorytatywny — niektóre
+          // miejskie WFS (np. Poznań, patrz komentarz w wfsPoznanClient.ts) potrafią "cicho"
+          // zwrócić HTTP 200 z zerem dopasowań dla małych promieni zamiast rzucić błąd, więc
+          // brak wyjątku nie gwarantuje, że w promieniu naprawdę nie ma działek.
+          if (parcels.length === 0) {
+            console.warn(`WFS ${citySource.name} zwrócił 0 działek, fallback krajowy (ULDK) na wszelki wypadek`);
+            parcelsSourceKey = 'uldk';
+            parcels = await fetchUldkParcels();
+          }
         } catch (err) {
           console.warn(`Nie udało się pobrać działek z ${citySource.name}, fallback krajowy (ULDK):`, err);
           parcelsSourceKey = 'uldk';

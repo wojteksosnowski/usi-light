@@ -12,7 +12,14 @@
  * bezpośrednim testem `curl` na serwer, np. BBOX ±5000m wokół centrum Poznania zwraca
  * poprawnie 120070 dopasowań).
  *
- * UWAGA — `Budynki_ewidencyjne` jest CELOWO wyłączona (patrz `fetchPoznanBuildings` niżej):
+ * UWAGA — `Działki_ewidencyjne` potwierdzone jako działające tylko przy dużym BBOX (±5000m).
+ * Dla małych promieni realnych projektów (100-300m) NIE zweryfikowano, czy warstwa cierpi na
+ * ten sam błąd co `Budynki_ewidencyjne` niżej (cichy HTTP 200 z zerem dopasowań) — zamiast
+ * wyłączać ją na stałe, `useProjectGeoSync.ts` traktuje 0 zwróconych działek bez wyjątku jako
+ * wynik niepewny i automatycznie próbuje fallbacku krajowego (ULDK), więc małe promienie mają
+ * gwarantowany wynik niezależnie od tego, czy to faktyczny brak działek, czy błąd serwera.
+ *
+ * `Budynki_ewidencyjne` jest CELOWO wyłączona (patrz `fetchPoznanBuildings` niżej):
  * bezpośredni test `curl` na serwer (bez naszej apki/proxy) wykazał, że filtr przestrzenny
  * (BBOX) tej konkretnej warstwy jest zepsuty po stronie serwera Poznania — dla realnego
  * promienia projektu (100-300m wokół centrum, EPSG:2177 N≈5808660 E≈6426862) odpowiedzi są
