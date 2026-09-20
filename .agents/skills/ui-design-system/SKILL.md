@@ -13,9 +13,9 @@ Niniejszy skill definiuje zasady utrzymania spójności wizualnej, czystości ko
 
 Przed przystąpieniem do jakichkolwiek modyfikacji interfejsu lub tworzenia nowych komponentów, zapoznaj się z poniższymi plikami:
 
-1. **Główny dokument Design Systemu**: [`design-system.md`](file:///Volumes/Samsam/py/usi-light/design-system.md) – skodyfikowane tokeny barw, typografia, promienie zaokrągleń i komponenty bazowe.
+1. **Główny dokument Design Systemu**: [`design-system.md`](file:///Volumes/Samsam/py/usi-light/design-system.md) – skodyfikowane tokeny barw, typografia, promienie zaokrągleń i komponenty bazowe. To pierwsze i zwykle jedyne miejsce, które trzeba sprawdzić przy szukaniu tokenu.
 2. **Specyfikacja układu i architektury**: [`layout_specification.md`](file:///Volumes/Samsam/py/usi-light/layout_specification.md) – wymiary paneli, siatka, HUD, zachowanie responsywne.
-3. **Zmienne i style CSS**: [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.css) – definicje `:root`, klasy przycisków, kart i scrollbara.
+3. **Zmienne i style CSS**: [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.css) – definicje `:root`, klasy przycisków, kart i scrollbara. Otwieraj tylko, gdy szukany token nie występuje w `design-system.md` (plik jest duży — nie czytaj go w całości bez potrzeby).
 4. **Konfiguracja wizualna silnika CAD**: [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/src/config/appConfig.ts) – kolory obiektów CAD, pasma analityczne § 12 i § 56, OSNAP i OTRACK.
 
 ---
@@ -27,10 +27,7 @@ Przed przystąpieniem do jakichkolwiek modyfikacji interfejsu lub tworzenia nowy
 - Używaj wyłącznie tokenów CSS:
   - Zmienne w stylach inline: `style={{ color: 'var(--text-primary)', background: 'var(--bg-card)' }}`
   - Predefiniowane klasy: `.btn-primary`, `.btn-secondary`, `.btn-tile`, `.ui-card`, `.ui-title` z [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.css).
-- Stosuj spójną skalę zaokrągleń:
-  - Tagi / badge: `4px` - `6px`
-  - Przyciski i kafle: `8px` - `12px`
-  - Panele i modale: `12px` - `18px`
+- Stosuj skalę zaokrągleń zgodnie z mapowaniem elementów w [`design-system.md`](file:///Volumes/Samsam/py/usi-light/design-system.md) (sekcja promieni zaokrągleń) — nie zgaduj wartości.
 
 ### 2.2. Warstwa Silnika CAD Canvas 2.5D
 - **BEZWZGLĘDNY ZAKAZ** bezpośredniego wpisywania ciągów kolorów w plikach renderujących (np. `ctx.fillStyle = '#38bdf8'`).
@@ -104,19 +101,4 @@ ctx.stroke();
 
 ## 5. Procedura Dodawania Nowych Stylów
 
-1. Sprawdź, czy odpowiedni token istnieje w [`design-system.md`](file:///Volumes/Samsam/py/usi-light/design-system.md).
-2. Jeśli nie istnieje:
-   - Dopytaj użytkownika o preferowany wariant, lub
-   - Zdefiniuj nową zmienną w `:root` w [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.css) (dla UI) lub w `APP_CONFIG` w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/src/config/appConfig.ts) (dla Canvas).
-   - Zaktualizuj [`design-system.md`](file:///Volumes/Samsam/py/usi-light/design-system.md).
-3. Użyj nowo zdefiniowanego tokenu w komponencie.
-
----
-
-## 6. Lista Kontrolna Przed Zakończeniem Prac (Self-Review Checklist)
-
-- [ ] Czy wszystkie kolory tekstu, tła i obramowań korzystają ze zmiennych `var(--...)` lub klas CSS?
-- [ ] Czy wyeliminowano wszystkie hardcodowane wartości `#hex` i `rgb(...)` z plików JSX/TSX?
-- [ ] Czy wszystkie moduły rysujące Canvas korzystają ze stałych `APP_CONFIG`?
-- [ ] Czy zachowano standardowe zaokrąglenia i hierarchię typograficzną?
-- [ ] Czy w przypadku jakichkolwiek wątpliwości skonsultowano się z użytkownikiem i zaktualizowano `design-system.md`?
+Jeśli token nie istnieje w [`design-system.md`](file:///Volumes/Samsam/py/usi-light/design-system.md), zastosuj zasadę Dopytywania z Sekcji 3. Po ustaleniu wariantu z użytkownikiem: zdefiniuj zmienną w `:root` w [`src/index.css`](file:///Volumes/Samsam/py/usi-light/src/index.css) (dla UI) lub w `APP_CONFIG` w [`src/config/appConfig.ts`](file:///Volumes/Samsam/py/usi-light/src/config/appConfig.ts) (dla Canvas), zaktualizuj `design-system.md`, po czym użyj nowego tokenu w komponencie.

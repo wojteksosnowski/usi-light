@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getRedisAndRatelimit, resolveMasterDevKey, resolveLocalFallbackLicense } from '../_lib/serverRedis';
-import type { LicenseRecord } from '../_lib/serverRedis';
+import { getRedisAndRatelimit, resolveMasterDevKey, resolveLocalFallbackLicense } from '../_lib/serverRedis.js';
+import type { LicenseRecord } from '../_lib/serverRedis.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
