@@ -526,11 +526,13 @@ export const ObjectEditorSection: React.FC = () => {
           </div>
         )}
 
-        {/* Zunifikowany blok przełączników obok siebie (4 dla dzialek — z "Inwestycja towarzysząca") */}
+        {/* Zunifikowany blok przełączników obok siebie (4 dla dzialek/budynkow — z "Inwestycja towarzysząca") */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: `repeat(${selectedBuilding.category === 'boundary' ? 4 : 3}, 1fr)`,
+            gridTemplateColumns: `repeat(${
+              selectedBuilding.category === 'boundary' || selectedBuilding.category === 'building' ? 4 : 3
+            }, 1fr)`,
             gap: '4px',
             marginTop: '4px',
           }}
@@ -585,7 +587,7 @@ export const ObjectEditorSection: React.FC = () => {
             </span>
           </button>
 
-          {selectedBuilding.category === 'boundary' && (
+          {(selectedBuilding.category === 'boundary' || selectedBuilding.category === 'building') && (
             <button
               type="button"
               onClick={() => {
@@ -606,7 +608,7 @@ export const ObjectEditorSection: React.FC = () => {
                 textAlign: 'center',
                 minHeight: '48px',
               }}
-              title="Oznacz działkę jako inwestycję towarzyszącą — status rozłączny z „W projekcie”"
+              title="Oznacz obiekt jako inwestycję towarzyszącą — status rozłączny z „W projekcie”"
             >
               <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Inwestycja towarzysząca</span>
               <span style={{ fontSize: '9.5px', fontWeight: 700 }}>

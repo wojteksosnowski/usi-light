@@ -41,6 +41,7 @@ export const MASTERPLAN_COLORS = {
   innerEdge: '#64748B',
   selectedOutline: '#2563EB',
   hoverFill: 'rgba(254, 243, 199, 0.35)',
+  accompanyingInvestment: '#3B82F6',
 };
 
 /**
@@ -102,15 +103,20 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     // A. Rysowanie scalonych grup działek projektowanych (wspólna obwiednia + delikatne linie wewnętrzne)
     for (const group of mergeableGroups) {
       if (!group.outer || group.outer.length < 3) continue;
-      const isSelected = isBuildingSelected(group.buildingIds[0]);
+      const isSelected = group.buildingIds.some(isBuildingSelected);
       const isPlayground = group.areaType === 'playground';
+      const isAccompanying = group.poolKind === 'accompanying';
       const strokeColor = isSelected
         ? MASTERPLAN_COLORS.selectedOutline
+        : isAccompanying
+        ? MASTERPLAN_COLORS.accompanyingInvestment
         : isPlayground
         ? MASTERPLAN_COLORS.projectBoundaryPlayground
         : MASTERPLAN_COLORS.projectBoundary;
       const fillColor = isSelected
         ? (isPlayground ? 'rgba(245, 158, 11, 0.16)' : 'rgba(220, 38, 38, 0.12)')
+        : isAccompanying
+        ? 'rgba(59, 130, 246, 0.06)'
         : (isPlayground ? 'rgba(245, 158, 11, 0.06)' : 'rgba(220, 38, 38, 0.04)');
 
       ctx.save();
@@ -138,7 +144,11 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
 
       // Delikatne linie podziału na krawędziach wewnętrznych
       if (group.sharedEdges && group.sharedEdges.length > 0) {
-        ctx.strokeStyle = isPlayground ? 'rgba(217, 119, 6, 0.35)' : 'rgba(220, 38, 38, 0.35)';
+        ctx.strokeStyle = isAccompanying
+          ? 'rgba(59, 130, 246, 0.35)'
+          : isPlayground
+          ? 'rgba(217, 119, 6, 0.35)'
+          : 'rgba(220, 38, 38, 0.35)';
         ctx.lineWidth = 0.8 / viewState.scale;
         ctx.setLineDash([3 / viewState.scale, 2 / viewState.scale]);
         for (const se of group.sharedEdges) {
@@ -158,6 +168,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
       if (mergeableBoundaryIds.has(bound.id)) continue; // obsłużone w grupie wyżej
 
       const isTested = bound.isTested === true;
+      const isAccompanying = bound.isAccompanyingInvestment === true;
       const isSelected = isBuildingSelected(bound.id);
       const isPlayground = bound.areaType === 'playground';
 
@@ -179,6 +190,17 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
         const fillColor = isSelected
           ? (isPlayground ? 'rgba(245, 158, 11, 0.16)' : 'rgba(220, 38, 38, 0.12)')
           : (isPlayground ? 'rgba(245, 158, 11, 0.06)' : 'rgba(220, 38, 38, 0.04)');
+
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = (isSelected ? 2.5 : 1.8) / viewState.scale;
+        ctx.setLineDash([]);
+        ctx.stroke();
+      } else if (isAccompanying) {
+        // Inwestycja towarzysząca - akcent niebieski, rozłączny z isTested
+        const strokeColor = isSelected ? MASTERPLAN_COLORS.selectedOutline : MASTERPLAN_COLORS.accompanyingInvestment;
+        const fillColor = isSelected ? 'rgba(59, 130, 246, 0.14)' : 'rgba(59, 130, 246, 0.06)';
 
         ctx.fillStyle = fillColor;
         ctx.fill();

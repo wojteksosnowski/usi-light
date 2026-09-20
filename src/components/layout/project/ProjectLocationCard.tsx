@@ -27,6 +27,7 @@ export const ProjectLocationCard: React.FC = () => {
     status,
     syncFeedback,
     isPro,
+    openModal,
     formatWfsProgress,
     WFS_IMPORT_CONTINUE_HINT,
     updateProjectCenter,
@@ -173,15 +174,19 @@ export const ProjectLocationCard: React.FC = () => {
           </div>
         </div>
 
-        {/* Źródło budynków: Geoportal / OSM */}
+        {/* Źródło budynków: Geoportal / OSM (PRO) */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Źródło budynków:</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            Źródło budynków:
+            {!isPro && <span style={{ fontSize: '8px', fontWeight: 800, opacity: 0.8 }}>PRO</span>}
+          </span>
           <div
             className="project-grid-presets"
             style={{
               gridTemplateColumns: 'repeat(2, 1fr)',
               padding: '3px',
               borderRadius: '8px',
+              opacity: isPro ? 1 : 0.7,
             }}
           >
             {([
@@ -193,10 +198,22 @@ export const ProjectLocationCard: React.FC = () => {
                 <button
                   key={opt.id}
                   type="button"
-                  onClick={() => setBuildingSource(opt.id)}
+                  onClick={() => {
+                    if (!isPro) {
+                      openModal('pricing');
+                      return;
+                    }
+                    setBuildingSource(opt.id);
+                  }}
                   className={`project-preset-btn ${isActive ? 'active-cyan' : ''}`}
-                  style={{ padding: '3px 6px', fontSize: '10px' }}
-                  title={opt.id === 'geoportal' ? 'Pobierz budynki z geoportalu miejskiego (WFS/EGiB)' : 'Pobierz budynki z OpenStreetMap'}
+                  style={{ padding: '3px 6px', fontSize: '10px', cursor: isPro ? 'pointer' : 'not-allowed' }}
+                  title={
+                    !isPro
+                      ? 'Funkcja dostępna w wersji PRO'
+                      : opt.id === 'geoportal'
+                        ? 'Pobierz budynki z geoportalu miejskiego (WFS/EGiB)'
+                        : 'Pobierz budynki z OpenStreetMap'
+                  }
                 >
                   {opt.label}
                 </button>

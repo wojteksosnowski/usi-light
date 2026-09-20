@@ -2,10 +2,8 @@ import React from 'react';
 import type { BuildingLoop } from '@/types/geometry';
 import { useSceneStore, useUiStore } from '../../store';
 import { useCadToolStore } from '../../store/useCadToolStore';
-import { translateBuildingGeometry } from '@/store/useSceneStore';
-import { getPolygonCentroid } from '@/utils/math2d/polygons';
+import { useLocalizedBuilding } from '@/hooks/useLocalizedBuilding';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
-import { getCompoundGroupBuildings } from '@/utils/compoundObjectPipeline';
 import { findSelectedBuilding } from '@/utils/geometrySelectors';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
@@ -18,16 +16,6 @@ export const BuildingPreviewPanel: React.FC = React.memo(() => {
   const selectedBuilding = React.useMemo(
     () => findSelectedBuilding(buildings, selectedBuildingId),
     [buildings, selectedBuildingId]
-  );
-
-  // Punkt odniesienia (anchor) dla lokalnego układu współrzędnych podglądu 3D - liczony
-  // WYŁĄCZNIE z ostatnio zatwierdzonego w store stanu (`selectedBuilding`), NIGDY z danych
-  // "na żywo" edytowanych w trakcie przeciągania (`patchedSelectedBuilding` poniżej). Dzięki
-  // temu pozycja obiektu w scenie jest całkowicie niezależna od tego, co dzieje się z pojedynczym
-  // wierzchołkiem podczas edycji - anchor nie drgnie, dopóki edycja nie zostanie zatwierdzona.
-  const anchor = React.useMemo(
-    () => (selectedBuilding ? getPolygonCentroid(selectedBuilding.vertices) : null),
-    [selectedBuilding]
   );
 
   // Vertex/edge dragging doesn't commit to useSceneStore until mouseup (avoids rebuilding
@@ -48,14 +36,16 @@ export const BuildingPreviewPanel: React.FC = React.memo(() => {
     return { ...selectedBuilding, vertices };
   }, [selectedBuilding, liveVertexPreview]);
 
-  // Przesunięcie geometrii do lokalnego układu współrzędnych obiektu (względem `anchor`) - ani
-  // czyste przesunięcie całego budynku po scenie, ani edycja pojedynczego wierzchołka nie
-  // powodują już przeskakiwania kamery: translacja nie zmienia kształtu względem samego siebie,
-  // a anchor pochodzi wyłącznie ze stanu sprzed bieżącej, niezatwierdzonej interakcji.
-  const localizedBuilding = React.useMemo(() => {
-    if (!patchedSelectedBuilding || !anchor) return patchedSelectedBuilding;
-    return translateBuildingGeometry(patchedSelectedBuilding, -anchor.x, -anchor.y);
-  }, [patchedSelectedBuilding, anchor]);
+  // Lokalny układ współrzędnych obiektu (patrz useLocalizedBuilding.ts) - anchor pochodzi
+  // WYŁĄCZNIE z `selectedBuilding` (ostatnio zatwierdzony w store stan), NIGDY z
+  // `patchedSelectedBuilding` (może zawierać niezatwierdzoną, "na żywo" edytowaną pozycję
+  // wierzchołka) - dzięki temu pozycja obiektu w scenie jest całkowicie niezależna od tego, co
+  // dzieje się z pojedynczym wierzchołkiem podczas edycji.
+  const { localizedBuilding, localizedGroupBuildings } = useLocalizedBuilding(
+    selectedBuilding,
+    patchedSelectedBuilding,
+    buildings
+  );
 
   // Grace state: if a building id is selected but momentarily doesn't resolve (a store-update
   // race between `selectedBuildingId` and `buildings`), keep showing the last-known building for
@@ -73,13 +63,6 @@ export const BuildingPreviewPanel: React.FC = React.memo(() => {
     effectiveBuilding?.modifiers,
     expandedModifierId
   );
-
-  const localizedGroupBuildings = React.useMemo(() => {
-    if (!selectedBuilding || !selectedBuilding.groupId || !anchor) return undefined;
-    const inGroup = getCompoundGroupBuildings(buildings, selectedBuilding.groupId);
-    if (inGroup.length <= 1) return undefined;
-    return inGroup.map((b) => translateBuildingGeometry(b, -anchor.x, -anchor.y));
-  }, [buildings, selectedBuilding, anchor]);
 
   if (!effectiveBuilding) {
     return null;

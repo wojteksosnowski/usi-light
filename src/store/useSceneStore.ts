@@ -133,6 +133,7 @@ export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: nu
   const translate = (p: Point2D) => ({ x: p.x + dx, y: p.y + dy });
 
   const newVertices = bldg.vertices.map(translate);
+  const newHoles = bldg.holes ? bldg.holes.map((hole) => hole.map(translate)) : undefined;
   const newSweepPath = bldg.sweepPath ? bldg.sweepPath.map(translate) : undefined;
 
   const newStoryPolygons = bldg.storyPolygons
@@ -165,6 +166,7 @@ export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: nu
   return {
     ...bldg,
     vertices: newVertices,
+    holes: newHoles,
     sweepPath: newSweepPath,
     storyPolygons: newStoryPolygons,
     zonePolygons: newZonePolygons,

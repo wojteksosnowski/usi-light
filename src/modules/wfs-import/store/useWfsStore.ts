@@ -291,7 +291,7 @@ export const useWfsStore = create<WfsState>()(
 
       projectRadius: 200,
       isProjectCenterLocked: true,
-      buildingSource: 'geoportal',
+      buildingSource: 'osm',
 
       showGeoOverlayGroup: false,
       showPlansOverlayGroup: false,

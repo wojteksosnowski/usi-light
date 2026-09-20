@@ -1556,8 +1556,64 @@ describe('modifierPipeline', () => {
       expect(polyNext.some((p) => Math.abs(p.x - 20) < 0.01)).toBe(true);
     });
 
-    // `reference/pila2.dxf` is gitignored (local scratch fixture): hand-drawn "source" (layer
-    // `source`) vs. correct "expected" (layer `0`) polygon pairs for the sawtooth modifier.
+    // `reference/pila2.dxf`/`pila3.dxf` are gitignored (local scratch fixtures): hand-drawn
+    // "source" (layer `source`) vs. correct "expected" (layer `0`) polygon pairs for the
+    // sawtooth modifier.
+    const parseDxfPolylines = (dxfPath: string): { layer: string; pts: Point2D[] }[] => {
+      const lines = fs.readFileSync(dxfPath, 'utf-8').split(/\r?\n/);
+      const entities: { layer: string; pts: Point2D[] }[] = [];
+      let inEntities = false;
+      let i = 0;
+      while (i < lines.length) {
+        const code = lines[i]?.trim();
+        const val = lines[i + 1]?.trim() ?? '';
+        if (code === '2' && val === 'ENTITIES') inEntities = true;
+        if (inEntities && code === '0' && val === 'LWPOLYLINE') {
+          let j = i + 2;
+          let layer = '';
+          const pts: Point2D[] = [];
+          let cur: Partial<Point2D> = {};
+          while (j < lines.length && lines[j].trim() !== '0') {
+            const c = lines[j].trim();
+            const v = lines[j + 1]?.trim() ?? '';
+            if (c === '8') layer = v;
+            if (c === '10') {
+              if (cur.x !== undefined) { pts.push(cur as Point2D); cur = {}; }
+              cur.x = parseFloat(v);
+            }
+            if (c === '20') cur.y = parseFloat(v);
+            j += 2;
+          }
+          if (cur.x !== undefined) pts.push(cur as Point2D);
+          entities.push({ layer, pts });
+          i = j;
+          continue;
+        }
+        if (inEntities && code === '0' && val === 'ENDSEC') break;
+        i += 2;
+      }
+      return entities;
+    };
+
+    // Cyclic, direction-agnostic point-set comparison (result may start at a different vertex).
+    const expectSameRing = (actual: Point2D[], expected: Point2D[]) => {
+      expect(actual.length).toBe(expected.length);
+      const n = actual.length;
+      let best = Infinity;
+      for (const candidate of [actual, [...actual].reverse()]) {
+        for (let r = 0; r < n; r++) {
+          let err = 0;
+          for (let k = 0; k < n; k++) {
+            const p = candidate[(k + r) % n];
+            const q = expected[k];
+            err += Math.hypot(p.x - q.x, p.y - q.y);
+          }
+          best = Math.min(best, err);
+        }
+      }
+      expect(best).toBeLessThan(0.01);
+    };
+
     // Regression coverage for the bug where cleanPolygonRing's collinear-point removal was
     // silently deleting original outline corners whenever a tooth's last segment happened to
     // land on the same line as the adjacent untouched edge.
@@ -1565,63 +1621,8 @@ describe('modifierPipeline', () => {
       const dxfPath = path.resolve(__dirname, '../../../reference/pila2.dxf');
       const dxfExists = fs.existsSync(dxfPath);
 
-      const parseDxfPolylines = (): { layer: string; pts: Point2D[] }[] => {
-        const lines = fs.readFileSync(dxfPath, 'utf-8').split(/\r?\n/);
-        const entities: { layer: string; pts: Point2D[] }[] = [];
-        let inEntities = false;
-        let i = 0;
-        while (i < lines.length) {
-          const code = lines[i]?.trim();
-          const val = lines[i + 1]?.trim() ?? '';
-          if (code === '2' && val === 'ENTITIES') inEntities = true;
-          if (inEntities && code === '0' && val === 'LWPOLYLINE') {
-            let j = i + 2;
-            let layer = '';
-            const pts: Point2D[] = [];
-            let cur: Partial<Point2D> = {};
-            while (j < lines.length && lines[j].trim() !== '0') {
-              const c = lines[j].trim();
-              const v = lines[j + 1]?.trim() ?? '';
-              if (c === '8') layer = v;
-              if (c === '10') {
-                if (cur.x !== undefined) { pts.push(cur as Point2D); cur = {}; }
-                cur.x = parseFloat(v);
-              }
-              if (c === '20') cur.y = parseFloat(v);
-              j += 2;
-            }
-            if (cur.x !== undefined) pts.push(cur as Point2D);
-            entities.push({ layer, pts });
-            i = j;
-            continue;
-          }
-          if (inEntities && code === '0' && val === 'ENDSEC') break;
-          i += 2;
-        }
-        return entities;
-      };
-
-      // Cyclic, direction-agnostic point-set comparison (result may start at a different vertex).
-      const expectSameRing = (actual: Point2D[], expected: Point2D[]) => {
-        expect(actual.length).toBe(expected.length);
-        const n = actual.length;
-        let best = Infinity;
-        for (const candidate of [actual, [...actual].reverse()]) {
-          for (let r = 0; r < n; r++) {
-            let err = 0;
-            for (let k = 0; k < n; k++) {
-              const p = candidate[(k + r) % n];
-              const q = expected[k];
-              err += Math.hypot(p.x - q.x, p.y - q.y);
-            }
-            best = Math.min(best, err);
-          }
-        }
-        expect(best).toBeLessThan(0.01);
-      };
-
       it.skipIf(!dxfExists)('trapezoid A, edge 1, next_edge/90°/3 teeth matches expected outline', () => {
-        const entities = parseDxfPolylines();
+        const entities = parseDxfPolylines(dxfPath);
         const sourceA = entities.filter((e) => e.layer === 'source')[0].pts;
         const expectedA1 = entities.filter((e) => e.layer === '0' && e.pts.length === 9)[0].pts;
         const out = generatePilaPolygon(sourceA, 3, 1, 90, 'next_edge');
@@ -1629,7 +1630,7 @@ describe('modifierPipeline', () => {
       });
 
       it.skipIf(!dxfExists)('trapezoid B, edge 1, next_edge/90°/5 teeth matches expected outline', () => {
-        const entities = parseDxfPolylines();
+        const entities = parseDxfPolylines(dxfPath);
         const sourceB = entities.filter((e) => e.layer === 'source')[1].pts;
         const expectedB1 = entities.filter((e) => e.layer === '0' && e.pts.length === 13)[0].pts;
         const out = generatePilaPolygon(sourceB, 5, 1, 90, 'next_edge');
@@ -1637,7 +1638,7 @@ describe('modifierPipeline', () => {
       });
 
       it.skipIf(!dxfExists)('quad C, edge 3, prev_edge and next_edge/90°/4 teeth match expected outlines', () => {
-        const entities = parseDxfPolylines();
+        const entities = parseDxfPolylines(dxfPath);
         const sourceC = entities.filter((e) => e.layer === 'source')[2].pts;
         const resultsC = entities.filter((e) => e.layer === '0' && e.pts.length === 11);
         const outPrev = generatePilaPolygon(sourceC, 4, 3, 90, 'prev_edge');
@@ -1657,64 +1658,10 @@ describe('modifierPipeline', () => {
       const dxfPath = path.resolve(__dirname, '../../../reference/pila3.dxf');
       const dxfExists = fs.existsSync(dxfPath);
 
-      const parseDxfPolylines = (): { layer: string; pts: Point2D[] }[] => {
-        const lines = fs.readFileSync(dxfPath, 'utf-8').split(/\r?\n/);
-        const entities: { layer: string; pts: Point2D[] }[] = [];
-        let inEntities = false;
-        let i = 0;
-        while (i < lines.length) {
-          const code = lines[i]?.trim();
-          const val = lines[i + 1]?.trim() ?? '';
-          if (code === '2' && val === 'ENTITIES') inEntities = true;
-          if (inEntities && code === '0' && val === 'LWPOLYLINE') {
-            let j = i + 2;
-            let layer = '';
-            const pts: Point2D[] = [];
-            let cur: Partial<Point2D> = {};
-            while (j < lines.length && lines[j].trim() !== '0') {
-              const c = lines[j].trim();
-              const v = lines[j + 1]?.trim() ?? '';
-              if (c === '8') layer = v;
-              if (c === '10') {
-                if (cur.x !== undefined) { pts.push(cur as Point2D); cur = {}; }
-                cur.x = parseFloat(v);
-              }
-              if (c === '20') cur.y = parseFloat(v);
-              j += 2;
-            }
-            if (cur.x !== undefined) pts.push(cur as Point2D);
-            entities.push({ layer, pts });
-            i = j;
-            continue;
-          }
-          if (inEntities && code === '0' && val === 'ENDSEC') break;
-          i += 2;
-        }
-        return entities;
-      };
-
-      const expectSameRing = (actual: Point2D[], expected: Point2D[]) => {
-        expect(actual.length).toBe(expected.length);
-        const n = actual.length;
-        let best = Infinity;
-        for (const candidate of [actual, [...actual].reverse()]) {
-          for (let r = 0; r < n; r++) {
-            let err = 0;
-            for (let k = 0; k < n; k++) {
-              const p = candidate[(k + r) % n];
-              const q = expected[k];
-              err += Math.hypot(p.x - q.x, p.y - q.y);
-            }
-            best = Math.min(best, err);
-          }
-        }
-        expect(best).toBeLessThan(0.01);
-      };
-
       it.skipIf(!dxfExists)(
         'quad F, edge 1, prev_edge/120°/2 teeth matches expected outline (tooth base perpendicular to adjacent wall)',
         () => {
-          const entities = parseDxfPolylines();
+          const entities = parseDxfPolylines(dxfPath);
           const sourceF = entities.filter((e) => e.layer === 'source')[0].pts;
           const expectedF1 = entities.filter((e) => e.layer === '0' && e.pts.length === 7)[0].pts;
           const out = generatePilaPolygon(sourceF, 2, 1, 120, 'prev_edge');

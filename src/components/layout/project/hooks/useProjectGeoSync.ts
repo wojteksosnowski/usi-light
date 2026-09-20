@@ -30,6 +30,7 @@ import { EPSG_2180 } from '../../../../modules/wfs-import/services/wfsEgibClient
 import { analyzeBuildingHeights } from '../../../../modules/wfs-import/utils/terrainAnalyzer';
 import { latLonToBbox } from '../../../../modules/wfs-import/services/geocoding';
 import { detectCoordinateSystem, CrsDetectionResult, LatLon, wgs84ToCadPoint } from '../../../../utils/geoTransform';
+import { translateBuildingGeometry } from '../../../../store/useSceneStore';
 import { parseGoogleMapsCoordinates } from '../../../../utils/geoParser';
 import { BuildingLoop } from '../../../../types/geometry';
 import { fetchOsmBuildings } from '../../../../modules/wfs-import/services/osmBuildingsClient';
@@ -90,6 +91,7 @@ export const useProjectGeoSync = () => {
 
     const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
     const delta = wgs84ToCadPoint({ lat: oldLat, lon: oldLon }, projectCrs, { lat: newLat, lon: newLon });
+    setBuildings(buildings.map((b) => translateBuildingGeometry(b, delta.x, delta.y)));
     useWfsStore.getState().shiftVectorLayers(delta);
     useOsmLanduseStore.getState().shiftFeatures(delta);
 
@@ -400,6 +402,7 @@ export const useProjectGeoSync = () => {
     status,
     syncFeedback,
     isPro,
+    openModal,
     overtureLoading,
     mpzpZonesLoading,
     landCoverLoading,
