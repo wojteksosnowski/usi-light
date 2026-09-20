@@ -11,8 +11,10 @@ import {
   FileSpreadsheet,
   Layers,
   Map,
+  Map as MapIcon,
   DraftingCompass,
-  FileText,
+  Check,
+  CloudUpload,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 import { useLicenseStore } from '../../store/useLicenseStore';
@@ -72,6 +74,8 @@ export const CadTopHud: React.FC = () => {
   const setShareModalOpen = useUiStore((s) => s.setShareModalOpen);
   const viewMode2D = useUiStore((s) => s.viewMode2D);
   const setViewMode2D = useUiStore((s) => s.setViewMode2D);
+  const isDirty = useUiStore((s) => s.isDirty);
+  const lastSavedAt = useUiStore((s) => s.lastSavedAt);
 
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
   const settings = useSolarAnalysisStore((s) => s.settings);
@@ -157,6 +161,31 @@ export const CadTopHud: React.FC = () => {
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedCity}</span>
       </div>
 
+      {/* Wskaźnik zapisu projektu */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '4px 8px',
+          borderRadius: '6px',
+          fontSize: '11px',
+          color: isDirty ? 'var(--text-secondary)' : 'var(--status-emerald-text)',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+        title={
+          isDirty
+            ? 'Zapisywanie zmian...'
+            : lastSavedAt
+              ? `Projekt zapisany lokalnie o ${new Date(lastSavedAt).toLocaleTimeString('pl-PL')}`
+              : 'Brak zapisanych zmian'
+        }
+      >
+        {isDirty ? <CloudUpload size={13} /> : <Check size={13} />}
+        <span className="hud-btn-label">{isDirty ? 'Zapisywanie...' : 'Zapisano'}</span>
+      </div>
+
       <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
 
       {/* Segmented Control 2D Viewport Mode: CAD / Masterplan [V] */}
@@ -212,7 +241,7 @@ export const CadTopHud: React.FC = () => {
             transition: 'all 0.15s ease',
           }}
         >
-          <FileText size={14} />
+          <MapIcon size={14} />
         </button>
       </div>
 
@@ -220,6 +249,7 @@ export const CadTopHud: React.FC = () => {
 
       <button
         onClick={() => setShowShadowingLines((prev) => !prev)}
+        title="Włącz / wyłącz linie przesłaniania § 12"
         style={{
           height: '28px',
           padding: '0 7px',
@@ -241,6 +271,7 @@ export const CadTopHud: React.FC = () => {
       </button>
       <button
         onClick={() => setShowSunlightLines((prev) => !prev)}
+        title="Włącz / wyłącz linie nasłonecznienia § 56"
         style={{
           height: '28px',
           padding: '0 7px',

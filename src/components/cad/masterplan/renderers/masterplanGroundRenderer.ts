@@ -101,7 +101,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
 
     // A. Rysowanie scalonych grup działek projektowanych (wspólna obwiednia + delikatne linie wewnętrzne)
     for (const group of mergeableGroups) {
-      if (!group.mergedVertices || group.mergedVertices.length < 3) continue;
+      if (!group.outer || group.outer.length < 3) continue;
       const isSelected = isBuildingSelected(group.buildingIds[0]);
       const isPlayground = group.areaType === 'playground';
       const strokeColor = isSelected
@@ -115,13 +115,21 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
 
       ctx.save();
       ctx.beginPath();
-      group.mergedVertices.forEach((p: Point2D, idx: number) => {
+      group.outer.forEach((p: Point2D, idx: number) => {
         if (idx === 0) ctx.moveTo(p.x, p.y);
         else ctx.lineTo(p.x, p.y);
       });
       ctx.closePath();
+      for (const hole of group.holes || []) {
+        if (!hole || hole.length < 3) continue;
+        hole.forEach((p: Point2D, idx: number) => {
+          if (idx === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      }
       ctx.fillStyle = fillColor;
-      ctx.fill();
+      ctx.fill('evenodd');
 
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = (isSelected ? 2.5 : 1.8) / viewState.scale;

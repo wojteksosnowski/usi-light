@@ -3,6 +3,7 @@ import { BuildingLoop, Point2D } from '../types/geometry';
 import { computePolygonArea } from './math2d/polygons';
 import { computePolygonIntersectionWithBoundaries } from './math2d/boundaryIntersection';
 import { calculateBuildingFloors } from './buildingFloorCalculator';
+import { filterActiveVariantBuildings } from './geometrySelectors';
 
 export interface SingleBuildingMetrics {
   id: string;
@@ -280,11 +281,13 @@ export function calculateProjectTotals(
   buildings: BuildingLoop[],
   activePlotBoundaries: Array<{ vertices: Point2D[] }> = []
 ): ProjectParametersResult {
-  const testedBuildings = buildings.filter(
+  const activeBuildings = filterActiveVariantBuildings(buildings);
+
+  const testedBuildings = activeBuildings.filter(
     (b) => b.isTested && b.category !== 'boundary' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
   );
 
-  const pavedAreas = buildings.filter(
+  const pavedAreas = activeBuildings.filter(
     (b) => b.category === 'boundary' && b.areaType === 'paved' && b.isIncluded !== false && b.vertices && b.vertices.length >= 3
   );
 

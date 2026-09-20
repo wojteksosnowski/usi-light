@@ -4,7 +4,7 @@ import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 import { useSceneStore } from './useSceneStore';
 
-export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align';
 
 export interface OsnapModes {
   vertex: boolean;
@@ -36,6 +36,10 @@ interface CadToolState {
   isEditMode: boolean;
   facadePointMode: boolean;
   showModifiersPanel: boolean;
+
+  // Linking mode display options
+  hideOtherLabelsInLinkingMode: boolean;
+  setHideOtherLabelsInLinkingMode: (hide: boolean | ((prev: boolean) => boolean)) => void;
 
   // Snapping settings
   isDirectionSnappingActive: boolean;
@@ -122,6 +126,8 @@ interface CadToolState {
   triggerFit: (options?: { ignoreSelection?: boolean }) => void;
 
   setIsInteracting: (interacting: boolean) => void;
+
+  resetCadTool: () => void;
 }
 
 export const useCadToolStore = create<CadToolState>((set, get) => ({
@@ -135,6 +141,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   isEditMode: false,
   facadePointMode: false,
   showModifiersPanel: false,
+  hideOtherLabelsInLinkingMode: true,
 
   isDirectionSnappingActive: APP_CONFIG.directionSnapping.enabledDefault,
   isOsnapActive: APP_CONFIG.osnap?.enabledDefault ?? true,
@@ -181,6 +188,11 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   setShowModifiersPanel: (show) =>
     set((state) => ({
       showModifiersPanel: typeof show === 'function' ? show(state.showModifiersPanel) : show,
+    })),
+  setHideOtherLabelsInLinkingMode: (hide) =>
+    set((state) => ({
+      hideOtherLabelsInLinkingMode:
+        typeof hide === 'function' ? hide(state.hideOtherLabelsInLinkingMode) : hide,
     })),
 
   toggleOsnap: () => set((state) => ({ isOsnapActive: !state.isOsnapActive })),
@@ -384,4 +396,23 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
       useSceneStore.getState().commitInteractionBatch();
     }
   },
+
+  resetCadTool: () =>
+    set({
+      drawingMode: 'none',
+      drawingCategory: 'building',
+      drawingVerticesCount: 0,
+      isEditMode: false,
+      facadePointMode: false,
+      showModifiersPanel: false,
+      dimensions: [],
+      isDimensionToolActive: false,
+      dimensionPendingRef: null,
+      isProjectBrushActive: false,
+      alignPendingRef: null,
+      viewRotationMode: false,
+      viewRotationDeg: 0,
+      savedViewRotationDeg: 0,
+      isInteracting: false,
+    }),
 }));

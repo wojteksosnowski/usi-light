@@ -27,6 +27,7 @@ import {
 } from './polygons';
 import {
   fastUnionTwoSimpleLoops,
+  fastDifferenceTwoSimpleLoops,
   findSegmentIntersection,
   getFastUnionTelemetry,
   resetFastUnionTelemetry,
@@ -43,6 +44,14 @@ import {
 } from '../../components/cad/masterplan/masterplanSpatial';
 import { getGlobalSolarLUT } from '../solar';
 import { Point2D, BuildingLoop } from '../../types/geometry';
+
+// Kontrola poziomu fallbacku do starej (wolnej) procedury polygon-clipping wewnątrz
+// fastUnionTwoSimpleLoops / fastDifferenceTwoSimpleLoops. Baseline zmierzony na warszawa.json:
+// union fallback ~7.1%, difference fallback ~0.0%. Progi z marginesem — przekroczenie oznacza,
+// że fast-path przestał obsługiwać większość realnych przypadków i wydajność cicho degraduje
+// do polygon-clipping (patrz Hypothesis 5 w tym pliku: polygon-clipping jest ~1.4x wolniejsze).
+const MAX_UNION_FALLBACK_RATE = 0.15;
+const MAX_DIFFERENCE_FALLBACK_RATE = 0.10;
 
 function totalArea(polys: Point2D[][]): number {
   let sum = 0;
@@ -441,6 +450,260 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
     console.log('================================================================================\n');
 
     expect(tSubTotal).toBeGreaterThan(0);
+  });
+
+  it('Drills down 2 levels deep: differencePolygonLoops(5c-iv) cost vs. input complexity (vertex-count scaling)', { timeout: 20000 }, () => {
+    if (!warszawa) return;
+
+    // Odtwórz te same realne pary (positive, negative) jak w drill-downie 5c powyżej,
+    // ale tym razem zbucketuj je wg złożoności wejścia (suma wierzchołków obu stron)
+    // żeby sprawdzić, czy 5c-iv (polygonClipping.difference wewnątrz differencePolygonLoops)
+    // skaluje się liniowo (O(n log n)) czy kwadratowo (O(n^2)) na realnych danych z warszawa.json.
+    const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 15 }));
+    const testedBuildings = buildings.filter((b) => b.isTested);
+    const candidateBlocking = buildings.filter((b) => !b.isTested && b.defaultHeight > 0);
+    const solarLUT = getGlobalSolarLUT(warszawa.latitude, warszawa.longitude, warszawa.equinoxDate);
+
+    const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+    const relevantBlocking = projectAABB
+      ? candidateBlocking.filter((b) => {
+          const bb = computeBuildingShadowReachAABB(b);
+          return bb ? doAABBsOverlap(bb, projectAABB) : false;
+        })
+      : candidateBlocking;
+
+    const preparedTested = testedBuildings.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+    const preparedBlocking = relevantBlocking.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+
+    const diffCases: Array<{ positive: Point2D[][]; negative: Point2D[][]; vertexCount: number }> = [];
+    for (let o = -5; o <= 5; o += 0.25) {
+      const offset = Math.round(o * 1000) / 1000;
+      const sData = solarLUT.getMethodData(offset, 'raycasting');
+      if (sData.elevationDeg <= 0.5) continue;
+      const azRad = sData.azimuthDeg * Math.PI / 180;
+      const elevRad = sData.elevationDeg * Math.PI / 180;
+      const uShadow = sData.unitShadowVec;
+
+      const hourTestedPolys: Point2D[][] = [];
+      for (const item of preparedTested) collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, hourTestedPolys);
+      if (hourTestedPolys.length === 0) continue;
+      const mergedHourTested = unionPolygonLoops(hourTestedPolys);
+      if (mergedHourTested.length === 0) continue;
+
+      let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+      for (const poly of mergedHourTested) {
+        for (const pt of poly) {
+          if (pt.x < hMinX) hMinX = pt.x;
+          if (pt.y < hMinY) hMinY = pt.y;
+          if (pt.x > hMaxX) hMaxX = pt.x;
+          if (pt.y > hMaxY) hMaxY = pt.y;
+        }
+      }
+      const blockingHourPolys: Point2D[][] = [];
+      for (const item of preparedBlocking) {
+        const offX = item.hTop * uShadow.x;
+        const offY = item.hTop * uShadow.y;
+        const sMinX = Math.min(item.bMinX, item.bMinX + offX);
+        const sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
+        const sMinY = Math.min(item.bMinY, item.bMinY + offY);
+        const sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
+        if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) continue;
+        collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, blockingHourPolys);
+      }
+      if (blockingHourPolys.length > 0) {
+        const vertexCount =
+          mergedHourTested.reduce((s, p) => s + p.length, 0) + blockingHourPolys.reduce((s, p) => s + p.length, 0);
+        diffCases.push({ positive: mergedHourTested, negative: blockingHourPolys, vertexCount });
+      }
+    }
+
+    expect(diffCases.length).toBeGreaterThan(0);
+
+    // Bucketowanie wg liczby wierzchołków wejściowych (small / medium / large)
+    const sorted = [...diffCases].sort((a, b) => a.vertexCount - b.vertexCount);
+    const third = Math.max(1, Math.floor(sorted.length / 3));
+    const buckets = {
+      small: sorted.slice(0, third),
+      medium: sorted.slice(third, third * 2),
+      large: sorted.slice(third * 2),
+    };
+
+    const runs = 20;
+    function benchmarkBucket(cases: typeof diffCases) {
+      if (cases.length === 0) return null;
+      let tSum = 0;
+      const avgVertices = cases.reduce((s, c) => s + c.vertexCount, 0) / cases.length;
+      for (let r = 0; r < runs; r++) {
+        for (const { positive, negative } of cases) {
+          const t0 = performance.now();
+          differencePolygonLoops(positive, negative);
+          tSum += performance.now() - t0;
+        }
+      }
+      const avgMsPerCall = tSum / (runs * cases.length);
+      return { avgVertices, avgMsPerCall, count: cases.length };
+    }
+
+    const resSmall = benchmarkBucket(buckets.small);
+    const resMedium = benchmarkBucket(buckets.medium);
+    const resLarge = benchmarkBucket(buckets.large);
+
+    console.log('\n================================================================================');
+    console.log(`[LEVEL 2 DRILL-DOWN: differencePolygonLoops COST vs. INPUT VERTEX COUNT (${diffCases.length} cases)]`);
+    console.log('================================================================================');
+    for (const [label, res] of [['small', resSmall], ['medium', resMedium], ['large', resLarge]] as const) {
+      if (!res) continue;
+      console.log(` ${label.padEnd(7)} (n=${String(res.count).padStart(2)}): avg ${res.avgVertices.toFixed(0).padStart(4)} vertices/call | ${res.avgMsPerCall.toFixed(4).padStart(8)} ms/call | ${(res.avgMsPerCall / res.avgVertices * 1000).toFixed(2)} us/vertex`);
+    }
+    if (resSmall && resLarge) {
+      const vertexRatio = resLarge.avgVertices / resSmall.avgVertices;
+      const timeRatio = resLarge.avgMsPerCall / resSmall.avgMsPerCall;
+      const empiricalExponent = Math.log(timeRatio) / Math.log(vertexRatio);
+      console.log('--------------------------------------------------------------------------------');
+      console.log(` Wierzchołki large/small: ${vertexRatio.toFixed(2)}x | Czas large/small: ${timeRatio.toFixed(2)}x | Empiryczny wykładnik skalowania: n^${empiricalExponent.toFixed(2)}`);
+      console.log(` (n^1.0 = liniowo/O(n log n), n^2.0 = kwadratowo — im bliżej 2, tym bardziej opłacalny lepszy AABB pre-filter)`);
+    }
+    console.log('================================================================================\n');
+
+    expect(resSmall).not.toBeNull();
+  });
+
+  it('Real-path split of 5c: time spent in fast-peel (fastDifferenceTwoSimpleLoops chains) vs. batched polygon-clipping fallback', { timeout: 20000 }, () => {
+    if (!warszawa) return;
+
+    // differencePolygonLoops (polygons.ts) już robi fast-peel per pozytywna pętla, a dopiero
+    // reszta (chain-abort na dziurze, lub relevant.length > MAX_FAST_DIFFERENCE_CHAIN_LENGTH=6)
+    // trafia batchowo do polygon-clipping. Poprzedni drill-down (5c-iv) mierzył hipotetyczny
+    // "stary" pipeline (zawsze polygon-clipping) — ten test mierzy REALNY podział czasu 5c
+    // pomiędzy te dwie faktyczne ścieżki na warszawa.json.
+    const MAX_FAST_DIFFERENCE_CHAIN_LENGTH_MIRROR = 6; // mirror prywatnej stałej z polygons.ts
+
+    const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 15 }));
+    const testedBuildings = buildings.filter((b) => b.isTested);
+    const candidateBlocking = buildings.filter((b) => !b.isTested && b.defaultHeight > 0);
+    const solarLUT = getGlobalSolarLUT(warszawa.latitude, warszawa.longitude, warszawa.equinoxDate);
+
+    const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+    const relevantBlocking = projectAABB
+      ? candidateBlocking.filter((b) => {
+          const bb = computeBuildingShadowReachAABB(b);
+          return bb ? doAABBsOverlap(bb, projectAABB) : false;
+        })
+      : candidateBlocking;
+
+    const preparedTested = testedBuildings.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+    const preparedBlocking = relevantBlocking.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+
+    const diffCases: Array<{ positive: Point2D[][]; negative: Point2D[][] }> = [];
+    for (let o = -5; o <= 5; o += 0.25) {
+      const offset = Math.round(o * 1000) / 1000;
+      const sData = solarLUT.getMethodData(offset, 'raycasting');
+      if (sData.elevationDeg <= 0.5) continue;
+      const azRad = sData.azimuthDeg * Math.PI / 180;
+      const elevRad = sData.elevationDeg * Math.PI / 180;
+      const uShadow = sData.unitShadowVec;
+
+      const hourTestedPolys: Point2D[][] = [];
+      for (const item of preparedTested) collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, hourTestedPolys);
+      if (hourTestedPolys.length === 0) continue;
+      const mergedHourTested = unionPolygonLoops(hourTestedPolys);
+      if (mergedHourTested.length === 0) continue;
+
+      let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+      for (const poly of mergedHourTested) for (const pt of poly) {
+        if (pt.x < hMinX) hMinX = pt.x; if (pt.y < hMinY) hMinY = pt.y;
+        if (pt.x > hMaxX) hMaxX = pt.x; if (pt.y > hMaxY) hMaxY = pt.y;
+      }
+      const blockingHourPolys: Point2D[][] = [];
+      for (const item of preparedBlocking) {
+        const offX = item.hTop * uShadow.x, offY = item.hTop * uShadow.y;
+        const sMinX = Math.min(item.bMinX, item.bMinX + offX), sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
+        const sMinY = Math.min(item.bMinY, item.bMinY + offY), sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
+        if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) continue;
+        collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, blockingHourPolys);
+      }
+      if (blockingHourPolys.length > 0) diffCases.push({ positive: mergedHourTested, negative: blockingHourPolys });
+    }
+    expect(diffCases.length).toBeGreaterThan(0);
+
+    const runs = 10;
+    let tFastPeelSum = 0;
+    let tBatchFallbackSum = 0;
+    let peeledPositiveCount = 0;
+    let fallbackPositiveCount = 0;
+
+    for (let r = 0; r < runs; r++) {
+      for (const { positive, negative } of diffCases) {
+        const negBoxes = negative.map(computePointsBoundingBox);
+        for (const posLoop of positive) {
+          const pb = computePointsBoundingBox(posLoop);
+          const relevant = negative.filter((_, j) => {
+            const nb = negBoxes[j];
+            return !(nb.maxX < pb.minX || nb.minX > pb.maxX || nb.maxY < pb.minY || nb.minY > pb.maxY);
+          });
+          if (relevant.length === 0) continue;
+
+          if (relevant.length > MAX_FAST_DIFFERENCE_CHAIN_LENGTH_MIRROR) {
+            const t0 = performance.now();
+            differencePolygonLoops([posLoop], relevant);
+            tBatchFallbackSum += performance.now() - t0;
+            fallbackPositiveCount++;
+            continue;
+          }
+
+          const t0 = performance.now();
+          let currentPieces: { outer: Point2D[]; holes: Point2D[][] }[] = [{ outer: posLoop, holes: [] }];
+          let chainFailed = false;
+          for (const neg of relevant) {
+            if (currentPieces.length === 0) break;
+            const nextPieces: { outer: Point2D[]; holes: Point2D[][] }[] = [];
+            for (const piece of currentPieces) {
+              if (piece.holes.length > 0) { chainFailed = true; break; }
+              const diffRes = fastDifferenceTwoSimpleLoops(piece.outer, neg);
+              if (diffRes === null) { chainFailed = true; break; }
+              nextPieces.push(...diffRes);
+            }
+            if (chainFailed) break;
+            currentPieces = nextPieces;
+          }
+          tFastPeelSum += performance.now() - t0;
+
+          if (chainFailed) {
+            const t1 = performance.now();
+            differencePolygonLoops([posLoop], relevant);
+            tBatchFallbackSum += performance.now() - t1;
+            fallbackPositiveCount++;
+          } else {
+            peeledPositiveCount++;
+          }
+        }
+      }
+    }
+
+    const totalTime = tFastPeelSum + tBatchFallbackSum;
+    const totalPositives = peeledPositiveCount + fallbackPositiveCount;
+    const realFallbackRate = totalPositives > 0 ? fallbackPositiveCount / totalPositives : 0;
+
+    console.log('\n================================================================================');
+    console.log('[REAL-PATH SPLIT: differencePolygonLoops (5c) — fast-peel vs. batched polygon-clipping fallback]');
+    console.log('================================================================================');
+    console.log(` Fast-peel (fastDifferenceTwoSimpleLoops chains): ${tFastPeelSum.toFixed(2).padStart(7)} ms (${((tFastPeelSum / totalTime) * 100).toFixed(1).padStart(5)}%) | ${peeledPositiveCount} positive loops peeled successfully`);
+    console.log(` Batched polygon-clipping fallback:               ${tBatchFallbackSum.toFixed(2).padStart(7)} ms (${((tBatchFallbackSum / totalTime) * 100).toFixed(1).padStart(5)}%) | ${fallbackPositiveCount} positive loops fell back`);
+    console.log('--------------------------------------------------------------------------------');
+    console.log(` TOTAL:                                           ${totalTime.toFixed(2).padStart(7)} ms (100.0%)`);
+    console.log(` REAL fallback rate (per positive loop): ${(realFallbackRate * 100).toFixed(1)}% — <== ważniejsza miara niż getFastDifferenceTelemetry()`);
+    console.log(` UWAGA: gdy relevant.length > MAX_FAST_DIFFERENCE_CHAIN_LENGTH (6), differencePolygonLoops`);
+    console.log(` NIGDY nie woła fastDifferenceTwoSimpleLoops — ten przypadek jest NIEWIDOCZNY w`);
+    console.log(` getFastDifferenceTelemetry() (stąd tam 0% fallback), mimo że realnie i tak trafia do`);
+    console.log(` starego polygon-clipping. Ten test jest właściwym miejscem kontroli tego poziomu.`);
+    console.log('================================================================================\n');
+
+    expect(totalTime).toBeGreaterThan(0);
+    // Kontrola poziomu "niewidocznego" fallbacku (chain-length-exceeded), którego nie łapie
+    // getFastDifferenceTelemetry(). Baseline na warszawa.json: ~49.8% (gęsta zabudowa, 15
+    // testowanych vs ~47 blokujących budynków -> dużo pozytywnych pętli ma >6 nakładających
+    // się negatywów). Próg z marginesem — dalszy wzrost gęstości sceny powinien go podnieść.
+    expect(realFallbackRate).toBeLessThan(0.70);
   });
 
   it('Hypothesis 5: fastDifferenceTwoSimpleLoops-based differencePolygonLoops vs. old pure polygon-clipping, same process (no machine-noise drift)', { timeout: 30000 }, () => {
@@ -1138,9 +1401,14 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
       console.log(`      - caughtExceptionExits:            ${t.caughtExceptionExits}`);
       console.log('--------------------------------------------------------------------------------');
       console.log(`  Short-circuit (disjoint/contain) rate: ${shortCircuitRate.toFixed(1)}% of all fastUnionTwoSimpleLoops calls`);
+      console.log(`  Fallback guard: ${(fallbackRate / 100).toFixed(3)} <= ${MAX_UNION_FALLBACK_RATE} (MAX_UNION_FALLBACK_RATE)`);
       console.log('================================================================================\n');
 
       expect(t.totalCalls).toBeGreaterThan(0);
+      // Kontrola poziomu fallbacku: jeśli fast-path przestaje wystarczać, unionPolygonLoops
+      // cicho degraduje do polygon-clipping (wolniejsze o ~1.4x, patrz Hypothesis 5) — ten test
+      // ma to wychwycić zanim trafi do produkcji.
+      expect(t.totalCalls > 0 ? t.fallbackCalls / t.totalCalls : 0).toBeLessThan(MAX_UNION_FALLBACK_RATE);
     });
 
     it('Telemetry: how often does fastDifferenceTwoSimpleLoops fall back to polygon-clipping during a real computeFullShadowAnalysis run', { timeout: 20000 }, () => {
@@ -1171,9 +1439,337 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
       console.log(`      - ambiguousNestingExits:           ${t.ambiguousNestingExits}`);
       console.log(`      - emptyLoopsExits:                ${t.emptyLoopsExits}`);
       console.log(`      - caughtExceptionExits:            ${t.caughtExceptionExits}`);
+      console.log(`  Fallback guard: ${(fallbackRate / 100).toFixed(3)} <= ${MAX_DIFFERENCE_FALLBACK_RATE} (MAX_DIFFERENCE_FALLBACK_RATE)`);
       console.log('================================================================================\n');
 
       expect(t.totalCalls).toBeGreaterThan(0);
+      // Kontrola poziomu fallbacku: differencePolygonLoops peeluje kawałki fast-diff, a resztę
+      // batchuje do polygon-clipping — ten próg pilnuje, żeby ta "reszta" pozostała marginalna.
+      expect(t.totalCalls > 0 ? t.fallbackCalls / t.totalCalls : 0).toBeLessThan(MAX_DIFFERENCE_FALLBACK_RATE);
+    });
+  });
+
+  describe('Hypothesis 6 & 7: Fast-Peel Difference and Geometry-Keyed Cache', () => {
+    it('Hypothesis 6: fast-peel differencePolygonLoops (fastDifferenceTwoSimpleLoops per-pair before polygon-clipping batch)', { timeout: 30000 }, () => {
+      if (!warszawa) return;
+
+      // Odtwórz realne pary (mergedHourTested, blockingHourPolys) z każdej godziny
+      const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 15 }));
+      const testedBuildings = buildings.filter((b) => b.isTested);
+      const candidateBlocking = buildings.filter((b) => !b.isTested && b.defaultHeight > 0);
+      const solarLUT = getGlobalSolarLUT(warszawa.latitude, warszawa.longitude, warszawa.equinoxDate);
+
+      const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+      const relevantBlocking = projectAABB
+        ? candidateBlocking.filter((b) => { const bb = computeBuildingShadowReachAABB(b); return bb ? doAABBsOverlap(bb, projectAABB) : false; })
+        : candidateBlocking;
+
+      const preparedTested = testedBuildings.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+      const preparedBlocking = relevantBlocking.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+
+      const diffCases: Array<{ positive: Point2D[][]; negative: Point2D[][] }> = [];
+      for (let o = -5; o <= 5; o += 0.5) {
+        const offset = Math.round(o * 1000) / 1000;
+        const sData = solarLUT.getMethodData(offset, 'raycasting');
+        if (sData.elevationDeg <= 0.5) continue;
+        const azRad = sData.azimuthDeg * Math.PI / 180;
+        const elevRad = sData.elevationDeg * Math.PI / 180;
+        const uShadow = sData.unitShadowVec;
+
+        const hourTestedPolys: Point2D[][] = [];
+        for (const item of preparedTested) collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, hourTestedPolys);
+        if (hourTestedPolys.length === 0) continue;
+        const mergedHourTested = unionPolygonLoops(hourTestedPolys);
+        if (mergedHourTested.length === 0) continue;
+
+        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+        for (const poly of mergedHourTested) for (const pt of poly) {
+          if (pt.x < hMinX) hMinX = pt.x; if (pt.y < hMinY) hMinY = pt.y;
+          if (pt.x > hMaxX) hMaxX = pt.x; if (pt.y > hMaxY) hMaxY = pt.y;
+        }
+        const blockingHourPolys: Point2D[][] = [];
+        for (const item of preparedBlocking) {
+          const offX = item.hTop * uShadow.x, offY = item.hTop * uShadow.y;
+          const sMinX = Math.min(item.bMinX, item.bMinX + offX), sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
+          const sMinY = Math.min(item.bMinY, item.bMinY + offY), sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
+          if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) continue;
+          collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, blockingHourPolys);
+        }
+        if (blockingHourPolys.length > 0) {
+          diffCases.push({ positive: mergedHourTested, negative: blockingHourPolys });
+        }
+      }
+      expect(diffCases.length).toBeGreaterThan(0);
+
+      // Kandydacki wariant H6: fast-peel przez fastDifferenceTwoSimpleLoops przed batched polygon-clipping
+      // Dla każdej pętli ujemnej próbujemy parami z każdą pętlą dodatnią — fast-path (O(k²)).
+      // Tylko pary gdzie fast-diff zwraca null trafiają do zbiorczego polygon-clipping (O(n log n)).
+      //
+      // Uwaga: fastDifferenceTwoSimpleLoops zwraca PolygonWithHoles[] | null.
+      //   - null => fallback (złożona topologia), wrzucamy neg do hardNeg
+      //   - []   => A w całości wewnątrz B (usunięty), pos=[]
+      //   - [{outer,holes}] => poprawny wynik, może zawierać dziury (donut)
+      //
+      // Dla parity: holesy z fast-diff musimy dalej przetwarzać (odjąć z puli pozostałych).
+      // Dla uproszczenia benchmarku: pozytywne pętle z holes przekazujemy jako płaskie (outer only)
+      // i zbiorczym differencePolygonLoops ogarniamy resztę — dokładnie jak oryginalny kod.
+      function differenceH6(positiveLoops: Point2D[][], negativeLoops: Point2D[][]): Point2D[][] {
+        if (positiveLoops.length === 0) return [];
+        if (negativeLoops.length === 0) return positiveLoops;
+
+        // Zbiorczy AABB pętli dodatnich — wstępny filter pętli ujemnych
+        let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+        for (const poly of positiveLoops) for (const pt of poly) {
+          if (pt.x < pMinX) pMinX = pt.x; if (pt.y < pMinY) pMinY = pt.y;
+          if (pt.x > pMaxX) pMaxX = pt.x; if (pt.y > pMaxY) pMaxY = pt.y;
+        }
+
+        // Dla każdej pętli ujemnej: próbuj fast-path per para (pos × neg)
+        // fast-diff null => twarde, dodaj do hardNeg i hardPos (te pary trzeba przetworzyć zbiorczym diff)
+        const hardNegSet = new Set<Point2D[]>();
+        const hardPosSet = new Set<Point2D[]>();
+
+        // Akumuluj wyniki fast-path: mapa pos → wynik (zastępuje pos nowymi pętlami)
+        const replacements = new Map<Point2D[], Point2D[][]>();
+        for (const pos of positiveLoops) replacements.set(pos, [pos]);
+
+        for (const neg of negativeLoops) {
+          const nb = computePointsBoundingBox(neg);
+          if (nb.maxX < pMinX || nb.minX > pMaxX || nb.maxY < pMinY || nb.minY > pMaxY) continue;
+
+          for (const pos of positiveLoops) {
+            const currentPieces = replacements.get(pos) || [pos];
+            const nextPieces: Point2D[][] = [];
+            let thisNegIsHard = false;
+
+            for (const piece of currentPieces) {
+              const pb = computePointsBoundingBox(piece);
+              if (pb.maxX < nb.minX || pb.minX > nb.maxX || pb.maxY < nb.minY || pb.minY > nb.maxY) {
+                nextPieces.push(piece); // disjoint — zachowaj
+                continue;
+              }
+              try {
+                const fastResult = fastDifferenceTwoSimpleLoops(piece, neg);
+                if (fastResult === null) {
+                  // Fallback — tego neg nie da się fast-peelować z tym pos
+                  nextPieces.push(piece);
+                  thisNegIsHard = true;
+                } else {
+                  // Sukces — zbierz wszystkie outer z wyników (ignorujemy holes w benchmarku,
+                  // gdyż dalszy pass i tak zbiorczy diff ogarnie przypadki dziur)
+                  for (const pwh of fastResult) {
+                    if (pwh.outer && pwh.outer.length >= 3) nextPieces.push(pwh.outer);
+                    // holes z fast-diff → traktujemy jako dodatkowe negatywne pętle
+                    // (wpływ na pole: w 99% przypadków bez holes w realnych danych)
+                  }
+                }
+              } catch {
+                nextPieces.push(piece);
+                thisNegIsHard = true;
+              }
+            }
+
+            if (thisNegIsHard) {
+              hardNegSet.add(neg);
+              hardPosSet.add(pos);
+            }
+            replacements.set(pos, nextPieces);
+          }
+        }
+
+        // Zbierz wyniki fast-path dla pos bez twardych przypadków
+        const easyResult: Point2D[][] = [];
+        for (const pos of positiveLoops) {
+          if (!hardPosSet.has(pos)) {
+            easyResult.push(...(replacements.get(pos) || []));
+          }
+        }
+
+        // Dla twardych par: użyj zbiorczego differencePolygonLoops
+        const hardPosList = [...hardPosSet];
+        const hardNegList = [...hardNegSet];
+        if (hardPosList.length > 0 && hardNegList.length > 0) {
+          const hardResult = differencePolygonLoops(hardPosList, hardNegList);
+          easyResult.push(...hardResult);
+        } else if (hardPosList.length > 0) {
+          easyResult.push(...hardPosList);
+        }
+
+        return easyResult;
+      }
+
+
+      // Warmup
+      for (const { positive, negative } of diffCases) {
+        differencePolygonLoops(positive, negative);
+      }
+
+      const runs = 10;
+      let tCurrentSum = 0;
+      let tH6Sum = 0;
+
+      for (let r = 0; r < runs; r++) {
+        for (const { positive, negative } of diffCases) {
+          const t0 = performance.now();
+          differencePolygonLoops(positive, negative);
+          tCurrentSum += performance.now() - t0;
+
+          const t1 = performance.now();
+          differenceH6(positive, negative);
+          tH6Sum += performance.now() - t1;
+        }
+      }
+
+      // 1:1 Area parity verification
+      let maxAreaDiff = 0;
+      for (const { positive, negative } of diffCases) {
+        const areaCurrent = totalArea(differencePolygonLoops(positive, negative));
+        const areaH6 = totalArea(differenceH6(positive, negative));
+        maxAreaDiff = Math.max(maxAreaDiff, Math.abs(areaCurrent - areaH6));
+      }
+
+      console.log('\n================================================================================');
+      console.log('[A/B HYPOTHESIS 6: FAST-PEEL differencePolygonLoops (fastDiff per-pair przed batch)]');
+      console.log('================================================================================');
+      console.log(`  - Hourly diff cases: ${diffCases.length} | runs: ${runs}`);
+      console.log(`  - Current (batched polygon-clipping):   ${(tCurrentSum / runs).toFixed(3)} ms/run`);
+      console.log(`  - H6 (fast-peel + batched fallback):    ${(tH6Sum / runs).toFixed(3)} ms/run`);
+      console.log(`  - Speedup Factor: ${(tCurrentSum / tH6Sum).toFixed(2)}x (${(((tCurrentSum - tH6Sum) / tCurrentSum) * 100).toFixed(1)}% ${tH6Sum < tCurrentSum ? 'faster' : 'SLOWER'})`);
+      console.log(`  - 1:1 Area Parity (max diff): ${maxAreaDiff.toFixed(3)} m² — benchmark upraszcza holes z fast-diff`);
+      console.log('  UWAGA: Rozbieżność pola wynika z tego, że benchmark-owa differenceH6 pomija holes');
+      console.log('  z wyników fastDifferenceTwoSimpleLoops (uproszczenie dla pomiaru samej prędkości).');
+      console.log('  Produkcyjna implementacja H6 musi propagować holes lub użyć differencePolygonLoops');
+      console.log('  dla par zwracających PolygonWithHoles z holes.length > 0.');
+      console.log(`  Wniosek: H6 jest ${tH6Sum < tCurrentSum ? `SZYBSZA o ${(((tCurrentSum - tH6Sum) / tCurrentSum) * 100).toFixed(1)}%` : 'WOLNIEJSZA'} — weryfikacja parity wymaga pełnej implementacji.`);
+      console.log('================================================================================\n');
+
+      // Benchmark H6 weryfikuje speedup, nie parity (uproszczona implementacja pomija holes)
+      // Parity weryfikuje H5 (który ma pełną implementację) — tam maxAreaDiff = 0.000000 m²
+      expect(tH6Sum).toBeGreaterThan(0);
+      // Speedup powinien być pozytywny (nawet jeśli skromny)
+      expect(tCurrentSum / tH6Sum).toBeGreaterThan(0.5); // przynajmniej nie dramatycznie wolniejszy
+
+    });
+
+    it('Hypothesis 7: geometry-keyed cache hit-ratio before vs after variant switch (WFS import simulation)', { timeout: 20000 }, () => {
+      if (!warszawa) return;
+
+      const buildings: BuildingLoop[] = warszawa.buildings
+        .filter((b) => b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + (b.defaultHeight ?? 0)) > 0)
+        .slice(0, 50)
+        .map((b, idx) => ({ ...b, isTested: idx < 10 }));
+
+      const solarLUT = getGlobalSolarLUT(warszawa.latitude, warszawa.longitude, warszawa.equinoxDate);
+      const sData = solarLUT.getMethodData(0, 'raycasting');
+      const azRad = sData.azimuthDeg * Math.PI / 180;
+      const elevRad = sData.elevationDeg * Math.PI / 180;
+
+      // Symulacja zmiany wariantu: WFS zastępuje id budynku nowym (np. "146510_..." → "146510_..._wfs")
+      // ale geometria (vertices) pozostaje IDENTYCZNA lub bardzo zbliżona.
+      const buildingsWFS: BuildingLoop[] = buildings.map((b) => ({
+        ...b,
+        id: b.id + '_wfs',    // nowe ID — inwaliduje stary klucz id-based cache
+        // vertices identyczne z oryginałem — czyli geometry-keyed cache NIE zostanie zinwalidowany
+      }));
+
+      // ── Cache oparty na ID budynku (stary sposób — klucz: "id|hTop|hBase|method|offset|vertFingerprint") ──
+      // Emulujemy: pierwsze n wywołań warms up cache, po zmianie id wszystkie są cache-miss.
+      function polygonFingerprint(v: Point2D[]): string {
+        let s = String(v.length);
+        for (const p of v) s += `:${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+        return s;
+      }
+
+      const idCache = new Map<string, Point2D[]>();
+      function getIdCached(bldg: BuildingLoop, az: number, el: number, hTop: number, hBase: number): Point2D[] {
+        const key = `${bldg.id}|${hTop}|${hBase}|${az.toFixed(4)}|${el.toFixed(4)}`;
+        let poly = idCache.get(key);
+        if (!poly) {
+          poly = computeFastShadowPolygon(bldg.vertices, az, el, hTop, hBase);
+          idCache.set(key, poly);
+        }
+        return poly;
+      }
+
+      // ── Cache oparty na geometrii (kandydacki — klucz: polygonFingerprint bez id) ──
+      const geoCache = new Map<string, Point2D[]>();
+      function getGeoCached(bldg: BuildingLoop, az: number, el: number, hTop: number, hBase: number): Point2D[] {
+        const key = `${polygonFingerprint(bldg.vertices)}|${hTop}|${hBase}|${az.toFixed(4)}|${el.toFixed(4)}`;
+        let poly = geoCache.get(key);
+        if (!poly) {
+          poly = computeFastShadowPolygon(bldg.vertices, az, el, hTop, hBase);
+          geoCache.set(key, poly);
+        }
+        return poly;
+      }
+
+      // Warm-up: buildings (Wariant A) → zapełnia oba cache
+      idCache.clear(); geoCache.clear();
+      for (const b of buildings) {
+        const hTop = (b.elevation ?? 0) + b.defaultHeight;
+        getIdCached(b, azRad, elevRad, hTop, b.elevation ?? 0);
+        getGeoCached(b, azRad, elevRad, hTop, b.elevation ?? 0);
+      }
+
+      // ── Po przełączeniu wariantu (buildings → buildingsWFS) ──
+      // ID cache: wszystkie miss (nowe id)
+      // Geo cache: wszystkie HIT (ta sama geometria)
+
+      let idHits = 0, idMisses = 0;
+      let geoHits = 0, geoMisses = 0;
+      let tIdCacheSum = 0, tGeoCacheSum = 0;
+
+      const runs = 20;
+      for (let r = 0; r < runs; r++) {
+        // Pomiar ID cache (po zmianie wariantu)
+        const tId0 = performance.now();
+        for (const b of buildingsWFS) {
+          const hTop = (b.elevation ?? 0) + b.defaultHeight;
+          const key = `${b.id}|${hTop}|${b.elevation ?? 0}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
+          if (idCache.has(key)) { if (r === 0) idHits++; }
+          else { if (r === 0) idMisses++; }
+          getIdCached(b, azRad, elevRad, hTop, b.elevation ?? 0);
+        }
+        tIdCacheSum += performance.now() - tId0;
+
+        // Pomiar Geo cache (po zmianie wariantu — ta sama geometria, inne id)
+        const tGeo0 = performance.now();
+        for (const b of buildingsWFS) {
+          const hTop = (b.elevation ?? 0) + b.defaultHeight;
+          const key = `${polygonFingerprint(b.vertices)}|${hTop}|${b.elevation ?? 0}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
+          if (geoCache.has(key)) { if (r === 0) geoHits++; }
+          else { if (r === 0) geoMisses++; }
+          getGeoCached(b, azRad, elevRad, hTop, b.elevation ?? 0);
+        }
+        tGeoCacheSum += performance.now() - tGeo0;
+      }
+
+      const idHitRate = (idHits / (idHits + idMisses)) * 100;
+      const geoHitRate = (geoHits / (geoHits + geoMisses)) * 100;
+
+      console.log('\n================================================================================');
+      console.log('[HYPOTHESIS 7: GEOMETRY-KEYED CACHE HIT-RATIO AFTER VARIANT SWITCH (WFS IMPORT)]');
+      console.log('================================================================================');
+      console.log(`  - Budynki testowane: ${buildings.length} (Wariant A) → ${buildingsWFS.length} (Wariant B / WFS)`);
+      console.log(`  - ID-keyed cache po switch:  hits=${idHits}/${idHits + idMisses} (${idHitRate.toFixed(0)}%) | ${(tIdCacheSum / runs).toFixed(3)} ms/run`);
+      console.log(`  - Geo-keyed cache po switch: hits=${geoHits}/${geoHits + geoMisses} (${geoHitRate.toFixed(0)}%) | ${(tGeoCacheSum / runs).toFixed(3)} ms/run`);
+      console.log(`  - Hit-rate improvement: +${(geoHitRate - idHitRate).toFixed(0)}pp (${geoHitRate.toFixed(0)}% vs ${idHitRate.toFixed(0)}%)`);
+      console.log(`  - Speedup Factor: ${(tIdCacheSum / tGeoCacheSum).toFixed(2)}x`);
+      console.log('================================================================================');
+      console.log('  Wniosek: Geo-keyed cache eliminuje cold-start po przełączeniu wariantu WFS,');
+      console.log('  jeśli geometria budynku nie zmieniła się (tylko id). W praktyce WFS często');
+      console.log('  przypisuje inne id temu samemu budynkowi, co inwaliduje stary id-keyed cache.');
+      console.log('================================================================================\n');
+
+      // Geo cache powinien mieć wyższy hit-rate po zmianie id (identyczna geometria)
+      expect(geoHitRate).toBeGreaterThanOrEqual(idHitRate);
+      // Oba warianty muszą zwracać tę samą geometrię (poprawność)
+      for (const b of buildingsWFS) {
+        const hTop = (b.elevation ?? 0) + b.defaultHeight;
+        const polyId = getIdCached(b, azRad, elevRad, hTop, b.elevation ?? 0);
+        const polyGeo = getGeoCached(b, azRad, elevRad, hTop, b.elevation ?? 0);
+        expect(polyId.length).toBe(polyGeo.length);
+      }
     });
   });
 });

@@ -95,7 +95,7 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
   let allTiers: MasterplanStoryTier[] = [];
   let baseline: any = null;
 
-  if (fs.existsSync(warszawaPath) && fs.existsSync(baselinePath)) {
+  if (fs.existsSync(warszawaPath)) {
     const rawScene = JSON.parse(fs.readFileSync(warszawaPath, 'utf-8'));
     buildings = (rawScene.buildings || []).filter(
       (b: any) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && (b.defaultHeight || 0) > 0
@@ -103,7 +103,77 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
     for (const bldg of buildings) {
       allTiers.push(...extractBuildingStoryTiers(bldg));
     }
-    baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
+
+    // Regeneracja baseline: UPDATE_BASELINE=1 npx vitest run umbraA456.regression.test.ts
+    if (process.env.UPDATE_BASELINE === '1') {
+      const latitude = 52.23;
+      const longitude = 21.01;
+      const equinox: 'spring' | 'autumn' = 'spring';
+      const testHours = [11.0, 12.0, 13.0];
+      const testOffsets = [-1, 0, 1];
+
+      function computeUmbraForBaseline(tiers: MasterplanStoryTier[], hour: number, minuteOffset: number): PolygonWithHoles[] {
+        const angles = getMasterplanSolarAngles(latitude, longitude, equinox, hour, minuteOffset, 'raycasting');
+        const validTiers = tiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0);
+        const clusters = clusterTiersByShadowOverlap(validTiers, angles);
+        const result: PolygonWithHoles[] = [];
+        for (const cluster of clusters) {
+          const cUmbra: PolygonWithHoles[] = [];
+          for (const tier of cluster) {
+            cUmbra.push(...computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom));
+          }
+          if (cUmbra.length === 1) result.push(cUmbra[0]);
+          else if (cUmbra.length > 1) result.push(...unionPolygonsWithHolesHierarchical(cUmbra));
+        }
+        return result;
+      }
+
+      const hoursData: Record<string, Record<string, any>> = {};
+      for (const hour of testHours) {
+        hoursData[String(hour)] = {};
+        for (const offset of testOffsets) {
+          const polys = computeUmbraForBaseline(allTiers, hour, offset);
+          let totalNetArea = 0;
+          let totalSegments = 0;
+          const polygonDetails: any[] = [];
+          for (const poly of polys) {
+            const outerArea = Math.abs(calculateSignedArea(poly.outer));
+            let holeAreaSum = 0;
+            for (const hole of poly.holes || []) {
+              holeAreaSum += Math.abs(calculateSignedArea(hole));
+              totalSegments += hole.length;
+            }
+            totalSegments += poly.outer.length;
+            totalNetArea += outerArea - holeAreaSum;
+            polygonDetails.push({ outer: poly.outer, holes: poly.holes || [] });
+          }
+          const bounds = polygonsWithHolesBounds(polys);
+          hoursData[String(hour)][`offset_${offset}`] = {
+            polygonsCount: polys.length,
+            totalNetArea,
+            totalSegments,
+            bounds,
+            polygons: polygonDetails,
+          };
+        }
+      }
+      const newBaseline = {
+        buildingsCount: buildings.length,
+        tiersCount: allTiers.length,
+        latitude,
+        longitude,
+        equinox,
+        generatedAt: new Date().toISOString(),
+        hours: hoursData,
+      };
+      fs.writeFileSync(baselinePath, JSON.stringify(newBaseline, null, 2), 'utf-8');
+      console.log(`\n[UPDATE_BASELINE] Zapisano nowy baseline → ${baselinePath}`);
+      console.log(`  Budynki: ${buildings.length} | Tiery: ${allTiers.length}`);
+    }
+
+    if (fs.existsSync(baselinePath)) {
+      baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
+    }
   }
 
   describe('1. Baseline 1:1 Regression on warszawa.json (Hours -1h, 0h, +1h and Offsets -1, 0, +1 min)', () => {

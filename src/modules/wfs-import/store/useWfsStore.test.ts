@@ -31,6 +31,10 @@ describe('useWfsStore - shiftVectorLayers and group toggles', () => {
         powBio: '30%',
         liczKond: '4',
         nazwaPlan: 'Plan 1',
+        nrUchwaly: null,
+        dataUchwalenia: null,
+        minPowBio: null,
+        minInten: null,
       }],
       landCoverUnits: [{
         id: 'lcv-1',

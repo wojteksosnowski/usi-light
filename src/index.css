@@ -644,6 +644,11 @@ html, body, #root {
   border-color: rgba(99, 102, 241, 0.4);
   color: #a5b4fc;
 }
+.btn-tile.active-blue {
+  background-color: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+}
 .btn-tile.active-cyan {
   /* Alpha-blend tokenu --accent-cyan (#38bdf8 = rgb(56, 189, 248)), spójny z active-emerald/amber/indigo */
   background-color: rgba(56, 189, 248, 0.15);

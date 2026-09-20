@@ -228,4 +228,48 @@ describe('evaluateBuildingDragMultiSnap', () => {
 
     expect(snap).toBeNull();
   });
+
+  it('ignores reference edges from excluded buildings (same logical group)', () => {
+    const line1 = createCachedLineEquation('bldg-grouped-edge-1', 'bldg-grouped', 0, { x: 10, y: 0 }, { x: 10, y: 10 });
+    const line2 = createCachedLineEquation('bldg-grouped_zone_0_edge_0', 'bldg-grouped_zone_0', 0, { x: 10, y: 0 }, { x: 10, y: 10 });
+
+    const movingVertices = [
+      { x: 10.1, y: 10.1 },
+      { x: 20.1, y: 10.1 },
+      { x: 20.1, y: 20.1 },
+      { x: 10.1, y: 20.1 },
+    ];
+
+    const snap = evaluateBuildingDragMultiSnap({
+      movingVertices,
+      movingBuildingId: 'bldg-primary',
+      excludeBuildingIds: ['bldg-primary', 'bldg-grouped'],
+      referenceBuffer: [line1, line2],
+      distanceThresholdMeters: 0.35,
+    });
+
+    expect(snap).toBeNull();
+  });
+
+  it('ignores reference edges from excluded buildings in evaluateEdgeDragSnap', () => {
+    const refEdge = createCachedLineEquation('bldg-grouped-edge-1', 'bldg-grouped', 0, { x: 0, y: 10 }, { x: 20, y: 10 });
+    const edgeP1 = { x: 5, y: 9.8 };
+    const edgeP2 = { x: 15, y: 9.8 };
+    const normal = { x: 0, y: 1 };
+
+    const snap = evaluateEdgeDragSnap({
+      edgeP1,
+      edgeP2,
+      normal,
+      buildingId: 'bldg-primary',
+      excludeBuildingIds: ['bldg-primary', 'bldg-grouped'],
+      edgeIndex: 0,
+      tentativeDelta: { dx: 0, dy: 0.1 },
+      referenceBuffer: [refEdge],
+      distanceThresholdMeters: 0.35,
+    });
+
+    expect(snap).toBeNull();
+  });
 });
+

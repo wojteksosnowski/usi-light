@@ -1,6 +1,8 @@
 import { BuildingLoop, Point2D } from '@/types/geometry';
 import { getOrComputeBuildingGeo } from '../renderers/buildingsRenderer';
 import { MASTERPLAN_COLORS } from './renderers/masterplanGroundRenderer';
+import { filterActiveVariantBuildings } from '@/utils/geometrySelectors';
+import { getCompoundObjectSummary } from '@/utils/compoundObjectPipeline';
 
 const LABEL_FONT_SIZE = 11;
 const BUILDING_LABEL_TEXT_H = LABEL_FONT_SIZE + 6;
@@ -57,7 +59,7 @@ function normalizeReadableAngle(angleRad: number): number {
 
 /**
  * Przygotowuje listę prostych etykiet Master Plan.
- * Budynki: wysokość na środku.
+ * Budynki: wysokość na środku (w tym zagregowana etykieta dla połączonych obiektów logicznych).
  * Obszary: sama nazwa obrócona do głównego kierunku obiektu.
  */
 export function buildMasterplanLabelCandidates(
@@ -70,11 +72,73 @@ export function buildMasterplanLabelCandidates(
   viewRotationDeg: number = 0
 ): MasterplanLabelCandidate[] {
   const candidates: MasterplanLabelCandidate[] = [];
-  const fontSize = LABEL_FONT_SIZE;
   const viewRotRad = (viewRotationDeg * Math.PI) / 180;
 
-  for (let i = 0; i < buildings.length; i++) {
-    const bldg = buildings[i];
+  const activeBuildings = filterActiveVariantBuildings(buildings);
+
+  // Grupowanie obiektów według groupId
+  const groupMap = new Map<string, BuildingLoop[]>();
+  const independentBuildings: BuildingLoop[] = [];
+
+  for (const bldg of activeBuildings) {
+    if (bldg.groupId && bldg.category !== 'boundary') {
+      const list = groupMap.get(bldg.groupId) || [];
+      list.push(bldg);
+      groupMap.set(bldg.groupId, list);
+    } else {
+      independentBuildings.push(bldg);
+    }
+  }
+
+  // 1. Etykiety dla obiektów logicznych (połączonych brył wieloczęściowych)
+  for (const [groupId, gBldgs] of groupMap.entries()) {
+    const summary = getCompoundObjectSummary(gBldgs);
+    if (!summary) continue;
+
+    const isGroupSelected = gBldgs.some(
+      (b) => b.id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(b.id))
+    );
+    const isGroupHovered = gBldgs.some((b) => b.id === hoveredBuildingId);
+
+    const spanX = Math.max(0.1, summary.bbox.maxX - summary.bbox.minX);
+    const spanY = Math.max(0.1, summary.bbox.maxY - summary.bbox.minY);
+    const maxSpan = Math.max(spanX, spanY);
+    const minSpan = Math.min(spanX, spanY);
+
+    const heightText =
+      summary.minHeight === summary.maxHeight
+        ? formatBuildingHeightLabel(summary.maxHeight)
+        : `${formatBuildingHeightLabel(summary.minHeight)}-${formatBuildingHeightLabel(summary.maxHeight)}`;
+
+    const textW = heightText.length * 7 + 10;
+    const textH = BUILDING_LABEL_TEXT_H;
+
+    if (maxSpan * scale < textW || minSpan * scale < textH) {
+      continue;
+    }
+
+    const pt = worldToScreen(summary.labelAnchor.x, summary.labelAnchor.y);
+    if (!Number.isFinite(pt.sx) || !Number.isFinite(pt.sy)) continue;
+
+    candidates.push({
+      id: `group-${groupId}`,
+      buildingIds: gBldgs.map((b) => b.id),
+      category: 'composite',
+      text: heightText,
+      sx: pt.sx,
+      sy: pt.sy,
+      angleRad: 0,
+      cardW: textW,
+      cardH: textH,
+      isSelected: !!isGroupSelected,
+      isHovered: !!isGroupHovered,
+      priority: isGroupSelected ? 105 : isGroupHovered ? 95 : summary.isTested ? 85 : 55,
+    });
+  }
+
+  // 2. Etykiety dla niezależnych obiektów pojedynczych i granic
+  for (let i = 0; i < independentBuildings.length; i++) {
+    const bldg = independentBuildings[i];
     if (!bldg.vertices || bldg.vertices.length < 3) continue;
 
     const geo = getOrComputeBuildingGeo(bldg);

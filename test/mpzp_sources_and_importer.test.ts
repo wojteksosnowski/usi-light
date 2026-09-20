@@ -60,6 +60,10 @@ describe('mpzpSources & geoJsonImporter MPZP', () => {
           INTENSYWNOSC: '1.2',
           POW_BIOLOGICZNA: '30%',
           NAZWA_PLANU: 'MPZP Centrum',
+          NR_UCHWALY: 'XII/345/2020',
+          DATA_UCHWALENIA: '2020-06-15',
+          MIN_POW_BIOLOGICZNIE_CZYNNA: '20%',
+          INTENSYWNOSC_MIN: '0.5',
         },
       },
       // Obiekt z atrybutami standardu APP (Poznań / Gdynia)
@@ -98,6 +102,10 @@ describe('mpzpSources & geoJsonImporter MPZP', () => {
     expect(imported[0].intenZab).toBe('1.2');
     expect(imported[0].powBio).toBe('30%');
     expect(imported[0].nazwaPlan).toBe('MPZP Centrum');
+    expect(imported[0].nrUchwaly).toBe('XII/345/2020');
+    expect(imported[0].dataUchwalenia).toBe('2020-06-15');
+    expect(imported[0].minPowBio).toBe('20%');
+    expect(imported[0].minInten).toBe('0.5');
     expect(imported[0].rings).toHaveLength(1);
     expect(imported[0].rings[0].length).toBe(5);
 

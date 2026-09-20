@@ -9,8 +9,11 @@ import {
   Link2,
   Car,
   TreePine,
+  FileText,
+  X,
 } from 'lucide-react';
 import { useSceneStore, useUiStore, useCadToolStore } from '../../store';
+import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
 import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 import { computePolygonArea } from '@/utils/math2d';
 import {
@@ -20,6 +23,7 @@ import {
   ProjectParametersResult,
 } from '@/utils/projectParameters';
 import { FloatingInspectorCard } from '../common/FloatingInspectorCard';
+import type { BuildingLoop } from '@/types/geometry';
 
 interface ProjectParametersPanelProps {
   onClose?: () => void;
@@ -111,18 +115,32 @@ const MetricsGroup: React.FC<{
   </>
 );
 
+const formatPlotsForClipboard = (plots: BuildingLoop[]): string => {
+  const lines: string[] = [`=== DZIAŁKI W PROJEKCIE (${plots.length} szt.) ===`];
+  for (const b of plots) {
+    const label = b.plotNumber || b.name;
+    const idPart = b.plotId ? ` (${b.plotId})` : '';
+    const area = Math.round(computePolygonArea(b.vertices || []));
+    lines.push(`Działka ${label}${idPart} — ${area} m²`);
+  }
+  return lines.join('\n');
+};
+
 export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = React.memo(({
   onClose,
   isEmbedded = false,
   isCollapsed,
   onToggleCollapse,
 }) => {
+  const [isPlotListHovered, setIsPlotListHovered] = React.useState(false);
   const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
   const layerSettings = useSceneStore((s) => s.layerSettings);
   const showCopiedToast = useUiStore((s) => s.showCopiedToast);
   const copiedToast = useUiStore((s) => s.copiedToast);
   const isInteracting = useCadToolStore((s) => s.isInteracting);
+  const selectedMpzpZone = useWfsStore((s) => s.selectedMpzpZone);
+  const setSelectedMpzpZone = useWfsStore((s) => s.setSelectedMpzpZone);
 
   // Active building object
   const selectedBuilding = useMemo(() => {
@@ -306,6 +324,17 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
       });
   };
 
+  const handleCopyPlotsToClipboard = () => {
+    navigator.clipboard
+      .writeText(formatPlotsForClipboard(testedBoundaryObjects))
+      .then(() => {
+        showCopiedToast('Skopiowano listę działek do schowka!');
+      })
+      .catch(() => {
+        showCopiedToast('Nie udało się skopiować.');
+      });
+  };
+
   return (
     <FloatingInspectorCard
       title="Parametry projektu"
@@ -444,6 +473,45 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
           />
         </div>
 
+        {/* 3b. Sekcja: Plan miejscowy (MPZP) */}
+        {selectedMpzpZone && (
+          <div
+            style={{
+              padding: '8px 10px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(96, 165, 250, 0.08)',
+              border: '1px solid rgba(96, 165, 250, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+            }}
+          >
+            <div style={{ fontWeight: 700, color: '#60a5fa', marginBottom: '2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <FileText size={12} />
+                <span>Strefa MPZP {selectedMpzpZone.funSymb || ''}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedMpzpZone(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+            {selectedMpzpZone.funNazwa && <StatRow label="Przeznaczenie:" value={selectedMpzpZone.funNazwa} color="#60a5fa" />}
+            {selectedMpzpZone.maxWysokosc && <StatRow label="Maks. wysokość:" value={`${selectedMpzpZone.maxWysokosc} m`} color="#60a5fa" />}
+            {selectedMpzpZone.liczKond && <StatRow label="Liczba kondygnacji:" value={selectedMpzpZone.liczKond} color="#60a5fa" />}
+            {selectedMpzpZone.intenZab && <StatRow label="Intensywność zabudowy (maks.):" value={selectedMpzpZone.intenZab} color="#60a5fa" />}
+            {selectedMpzpZone.minInten && <StatRow label="Intensywność zabudowy (min.):" value={selectedMpzpZone.minInten} color="#60a5fa" />}
+            {selectedMpzpZone.powBio && <StatRow label="Pow. biologicznie czynna:" value={`${selectedMpzpZone.powBio}%`} color="#60a5fa" />}
+            {selectedMpzpZone.minPowBio && <StatRow label="Min. pow. biologicznie czynna:" value={`${selectedMpzpZone.minPowBio}%`} color="#60a5fa" />}
+            {selectedMpzpZone.nazwaPlan && <StatRow label="Plan:" value={selectedMpzpZone.nazwaPlan} color="var(--text-secondary)" />}
+            {selectedMpzpZone.nrUchwaly && <StatRow label="Nr uchwały:" value={selectedMpzpZone.nrUchwaly} color="var(--text-secondary)" />}
+            {selectedMpzpZone.dataUchwalenia && <StatRow label="Data uchwalenia:" value={selectedMpzpZone.dataUchwalenia} color="var(--text-secondary)" />}
+          </div>
+        )}
+
         {/* 4. Sekcja: Działki i wskaźniki urbanistyczne (Bilans Terenu) */}
         <div
           style={{
@@ -468,6 +536,73 @@ export const ProjectParametersPanel: React.FC<ProjectParametersPanelProps> = Rea
             value={totalBoundaryArea > 0 ? `${Math.round(totalBoundaryArea)} m² (${(totalBoundaryArea / 100).toFixed(2)} a)` : 'Brak działek'}
             color="var(--accent-rose)"
           />
+
+          {testedBoundaryObjects.length > 0 && (
+            <div
+              onClick={handleCopyPlotsToClipboard}
+              onMouseEnter={() => setIsPlotListHovered(true)}
+              onMouseLeave={() => setIsPlotListHovered(false)}
+              title="Kliknij żeby skopiować"
+              style={{
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '3px',
+                marginTop: '2px',
+                padding: '6px 7px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(239, 68, 68, 0.06)',
+                border: '1px dashed rgba(239, 68, 68, 0.25)',
+                cursor: 'pointer',
+              }}
+            >
+              {testedBoundaryObjects.map((b) => (
+                <div
+                  key={b.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: '6px',
+                    fontSize: '10.5px',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: '5px', minWidth: 0, overflow: 'hidden' }}>
+                    <b style={{ color: 'var(--text-primary)' }}>{b.plotNumber || b.name}</b>
+                    {b.plotId && (
+                      <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '9.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {b.plotId}
+                      </span>
+                    )}
+                  </span>
+                  <b style={{ color: 'var(--accent-rose)', fontFamily: 'monospace', flexShrink: 0 }}>
+                    {Math.round(computePolygonArea(b.vertices || []))} m²
+                  </b>
+                </div>
+              ))}
+
+              {isPlotListHovered && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '5px',
+                    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                    borderRadius: '6px',
+                    color: 'var(--text-primary)',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                  }}
+                >
+                  <Copy size={12} />
+                  <span>Kliknij żeby skopiować</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {totalBoundaryArea > 0 && (
             <>

@@ -22,6 +22,8 @@ export const ProjectLocationCard: React.FC = () => {
     setProjectRadius,
     isProjectCenterLocked,
     setIsProjectCenterLocked,
+    buildingSource,
+    setBuildingSource,
     status,
     syncFeedback,
     isPro,
@@ -153,7 +155,7 @@ export const ProjectLocationCard: React.FC = () => {
               borderRadius: '8px',
             }}
           >
-            {([50, 100, 200, 300] as const).map((r) => {
+            {([100, 200, 300, 500] as const).map((r) => {
               const isActive = projectRadius === r;
               return (
                 <button
@@ -165,6 +167,38 @@ export const ProjectLocationCard: React.FC = () => {
                   title={`Obszar analizy i synchronizacji: okrąg o promieniu ${r} m`}
                 >
                   {r} m
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Źródło budynków: Geoportal / OSM */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Źródło budynków:</span>
+          <div
+            className="project-grid-presets"
+            style={{
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              padding: '3px',
+              borderRadius: '8px',
+            }}
+          >
+            {([
+              { id: 'geoportal' as const, label: 'Geoportal' },
+              { id: 'osm' as const, label: 'OSM' },
+            ]).map((opt) => {
+              const isActive = buildingSource === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setBuildingSource(opt.id)}
+                  className={`project-preset-btn ${isActive ? 'active-cyan' : ''}`}
+                  style={{ padding: '3px 6px', fontSize: '10px' }}
+                  title={opt.id === 'geoportal' ? 'Pobierz budynki z geoportalu miejskiego (WFS/EGiB)' : 'Pobierz budynki z OpenStreetMap'}
+                >
+                  {opt.label}
                 </button>
               );
             })}

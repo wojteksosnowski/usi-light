@@ -9,7 +9,13 @@ import {
   resetFastDifferenceTelemetry,
 } from './polygonBooleanTwo';
 import { Point2D } from '../../types/geometry';
-import { calculateSignedArea, toNormalizedClippingRing, clippingResultToPolygonsWithHoles } from './polygons';
+import {
+  calculateSignedArea,
+  toNormalizedClippingRing,
+  clippingResultToPolygonsWithHoles,
+  differencePolygonLoops,
+  isPolygonCCW,
+} from './polygons';
 
 function totalAbsArea(pieces: { outer: Point2D[]; holes: Point2D[][] }[]): number {
   let sum = 0;
@@ -22,10 +28,18 @@ function totalAbsArea(pieces: { outer: Point2D[]; holes: Point2D[][] }[]): numbe
 
 /** Ground truth via polygon-clipping.difference, for cross-checking fastDifferenceTwoSimpleLoops. */
 function groundTruthDifferenceArea(polyA: Point2D[], polyB: Point2D[]): number {
-  const ringA = toNormalizedClippingRing(polyA, 1000);
-  const ringB = toNormalizedClippingRing(polyB, 1000);
-  if (!ringA || !ringB) return 0;
-  const diffRes = polygonClipping.difference([ringA], [ringB]);
+  return groundTruthDifferenceAreaMulti([polyA], [polyB]);
+}
+
+/** Ground truth via polygon-clipping.difference for N positives \ M negatives, for cross-checking differencePolygonLoops. */
+function groundTruthDifferenceAreaMulti(positives: Point2D[][], negatives: Point2D[][]): number {
+  const ringsA = positives.map((p) => toNormalizedClippingRing(p, 1000)).filter((r): r is NonNullable<typeof r> => !!r);
+  const ringsB = negatives.map((p) => toNormalizedClippingRing(p, 1000)).filter((r): r is NonNullable<typeof r> => !!r);
+  if (ringsA.length === 0) return 0;
+  if (ringsB.length === 0) {
+    return positives.reduce((s, p) => s + Math.abs(calculateSignedArea(p)), 0);
+  }
+  const diffRes = polygonClipping.difference(ringsA.map((r) => [r]) as any, ringsB.map((r) => [r]) as any);
   const pwhList = clippingResultToPolygonsWithHoles(diffRes);
   let sum = 0;
   for (const p of pwhList) {
@@ -33,6 +47,17 @@ function groundTruthDifferenceArea(polyA: Point2D[], polyB: Point2D[]): number {
     for (const h of p.holes || []) sum -= Math.abs(calculateSignedArea(h));
   }
   return sum;
+}
+
+/** Sums |area| of outer loops minus |area| of hole loops from differencePolygonLoops' flat Point2D[][] result,
+ * using signed-area orientation (CW holes vs CCW outers) to tell them apart. */
+function flatLoopsNetArea(loops: Point2D[][]): number {
+  let sum = 0;
+  for (const loop of loops) {
+    const signed = calculateSignedArea(loop);
+    sum += signed; // outers and holes carry opposite winding, so a plain sum nets them out
+  }
+  return Math.abs(sum);
 }
 
 describe('polygonBooleanTwo - Fast 2-Polygon Boolean Union', () => {
@@ -391,6 +416,97 @@ describe('polygonBooleanTwo - Fast 2-Polygon Boolean Union', () => {
       // Sanity: the graph-trace path must actually be exercised, not silently
       // falling back to polygon-clipping on every call.
       expect(t.fastPathSuccess).toBeGreaterThan(0);
+    });
+  });
+
+  // Testy tożsamościowe bezpośrednio na produkcyjnym differencePolygonLoops (polygons.ts) —
+  // wypełnia lukę: do tej pory ta funkcja była ćwiczona tylko pośrednio przez
+  // shadowEnvelope.test.ts/benchmarki, bez dedykowanej kotwicy 1:1 na peeling łańcuchowy,
+  // propagację dziur i próg MAX_FAST_DIFFERENCE_CHAIN_LENGTH (=6, batch-fallback).
+  describe('differencePolygonLoops - production entry point (chain-peel, holes, batch-fallback)', () => {
+    const bigSquare: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ];
+
+    function makeBite(cx: number, size: number): Point2D[] {
+      const h = size / 2;
+      return [
+        { x: cx - h, y: -5 },
+        { x: cx + h, y: -5 },
+        { x: cx + h, y: 5 },
+        { x: cx - h, y: 5 },
+      ];
+    }
+
+    it('chain-peels 3 non-overlapping negative loops (within MAX_FAST_DIFFERENCE_CHAIN_LENGTH) with 1:1 area vs polygon-clipping', () => {
+      const negatives = [makeBite(15, 10), makeBite(50, 10), makeBite(85, 10)];
+      const res = differencePolygonLoops([bigSquare], negatives);
+
+      const fastArea = flatLoopsNetArea(res);
+      const truthArea = groundTruthDifferenceAreaMulti([bigSquare], negatives);
+      expect(fastArea).toBeCloseTo(truthArea, 3);
+      expect(fastArea).toBeCloseTo(10000 - 3 * 10 * 5, 3); // 3 kęsy 10 szerokie x 5 głębokie (tylko część y=0..5 wchodzi w kwadrat) -> po 50 m² każdy
+    });
+
+    it('propagates a donut hole through the flat Point2D[][] result when a single negative sits fully inside', () => {
+      const innerHole: Point2D[] = [
+        { x: 40, y: 40 },
+        { x: 60, y: 40 },
+        { x: 60, y: 60 },
+        { x: 40, y: 60 },
+      ];
+      const res = differencePolygonLoops([bigSquare], [innerHole]);
+
+      // Oczekiwane 2 pętle: outer (CCW) + hole (CW) — kotwica na dokładne pole.
+      expect(res.length).toBe(2);
+      const outer = res.find((l) => isPolygonCCW(l))!;
+      const hole = res.find((l) => !isPolygonCCW(l))!;
+      expect(Math.abs(calculateSignedArea(outer))).toBeCloseTo(10000, 6);
+      expect(Math.abs(calculateSignedArea(hole))).toBeCloseTo(400, 6);
+      expect(flatLoopsNetArea(res)).toBeCloseTo(groundTruthDifferenceAreaMulti([bigSquare], [innerHole]), 3);
+    });
+
+    it('routes to batched polygon-clipping fallback when relevant negatives exceed MAX_FAST_DIFFERENCE_CHAIN_LENGTH, still 1:1 with ground truth', () => {
+      // 8 kęsów > próg 6 -> differencePolygonLoops musi przełączyć się na differencePolygonLoopsViaClipping
+      const negatives = Array.from({ length: 8 }, (_, i) => makeBite(5 + i * 12, 8));
+      const res = differencePolygonLoops([bigSquare], negatives);
+
+      const fastArea = flatLoopsNetArea(res);
+      const truthArea = groundTruthDifferenceAreaMulti([bigSquare], negatives);
+      expect(fastArea).toBeCloseTo(truthArea, 3);
+    });
+
+    it('aborts chain-peel and falls back correctly when a mid-chain piece already carries a hole', () => {
+      // Pierwsza negatywna (w środku) tworzy donut -> kolejny peel na kawałku z dziurą musi
+      // odpaść do fallbacku (polygons.ts:825-830), zamiast próbować dalej fastDifferenceTwoSimpleLoops.
+      const donutMaker: Point2D[] = [
+        { x: 40, y: 40 },
+        { x: 60, y: 40 },
+        { x: 60, y: 60 },
+        { x: 40, y: 60 },
+      ];
+      const secondBite = makeBite(15, 10);
+      const negatives = [donutMaker, secondBite];
+      const res = differencePolygonLoops([bigSquare], negatives);
+
+      const fastArea = flatLoopsNetArea(res);
+      const truthArea = groundTruthDifferenceAreaMulti([bigSquare], negatives);
+      expect(fastArea).toBeCloseTo(truthArea, 3);
+    });
+
+    it('leaves unrelated (AABB-disjoint) positive loops untouched (100% quick-reject path)', () => {
+      const farAway: Point2D[] = [
+        { x: 500, y: 500 },
+        { x: 550, y: 500 },
+        { x: 550, y: 550 },
+        { x: 500, y: 550 },
+      ];
+      const res = differencePolygonLoops([bigSquare, farAway], [makeBite(15, 10)]);
+      const untouched = res.find((l) => l === farAway);
+      expect(untouched).toBe(farAway);
     });
   });
 });

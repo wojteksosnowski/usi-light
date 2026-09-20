@@ -65,6 +65,14 @@ export interface MpzpZoneFeature {
   powBio: string | null;
   liczKond: string | null;
   nazwaPlan: string | null;
+  /** Numer uchwały przyjmującej plan. */
+  nrUchwaly: string | null;
+  /** Data uchwalenia / wejścia w życie planu. */
+  dataUchwalenia: string | null;
+  /** Minimalna wymagana powierzchnia biologicznie czynna (gdy oddzielna od `powBio`). */
+  minPowBio: string | null;
+  /** Minimalna intensywność zabudowy (gdy `intenZab` reprezentuje maksimum). */
+  minInten: string | null;
 }
 
 export type MpzpLineType =
@@ -121,7 +129,9 @@ export interface WfsImportOptions {
   terrainShading: boolean;
 }
 
-export type ProjectRadius = 50 | 100 | 200 | 300;
+export type ProjectRadius = 100 | 200 | 300 | 500;
+
+export type BuildingSource = 'geoportal' | 'osm';
 
 interface WfsState {
   trees: WfsTreeFeature[];
@@ -131,6 +141,9 @@ interface WfsState {
   // Środek projektu & promień
   projectRadius: ProjectRadius;
   isProjectCenterLocked: boolean;
+
+  // Źródło danych budynków przy synchronizacji geo (Geoportal/EGiB miejski vs OpenStreetMap)
+  buildingSource: BuildingSource;
 
   // Warstwy podkładów geodezyjnych (PRO) - Podkład (GESUT, BDOT10k)
   showGeoOverlayGroup: boolean; // Master toggle Podkład
@@ -163,6 +176,7 @@ interface WfsState {
   mpzpZones: MpzpZoneFeature[];
   mpzpLines: MpzpLineFeature[];
   showMpzpZonesLayer: boolean;
+  selectedMpzpZone: MpzpZoneFeature | null;
 
   // Pokrycie terenu (wektor) — ogólnopolskie, patrz wfsLcvClient.ts.
   landCoverUnits: LandCoverFeature[];
@@ -179,6 +193,7 @@ interface WfsState {
   setOptions: (patch: Partial<WfsImportOptions>) => void;
   setProjectRadius: (radius: ProjectRadius) => void;
   setIsProjectCenterLocked: (locked: boolean) => void;
+  setBuildingSource: (source: BuildingSource) => void;
 
   /** Przesuwa wszystkie zaimportowane warstwy wektorowe o wektor delta (zachowanie pozycji geograficznej przy zmianie środka projektu) */
   shiftVectorLayers: (delta: Point2D) => void;
@@ -210,6 +225,7 @@ interface WfsState {
   setMpzpLines: (lines: MpzpLineFeature[]) => void;
   setMpzpData: (zones: MpzpZoneFeature[], lines: MpzpLineFeature[]) => void;
   setShowMpzpZonesLayer: (show: boolean) => void;
+  setSelectedMpzpZone: (zone: MpzpZoneFeature | null) => void;
 
   setLandCoverUnits: (units: LandCoverFeature[]) => void;
   setShowLandCoverLayer: (show: boolean) => void;
@@ -275,6 +291,7 @@ export const useWfsStore = create<WfsState>()(
 
       projectRadius: 200,
       isProjectCenterLocked: true,
+      buildingSource: 'geoportal',
 
       showGeoOverlayGroup: false,
       showPlansOverlayGroup: false,
@@ -301,6 +318,7 @@ export const useWfsStore = create<WfsState>()(
   mpzpZones: [],
   mpzpLines: [],
   showMpzpZonesLayer: false,
+  selectedMpzpZone: null,
 
   landCoverUnits: [],
   showLandCoverLayer: false,
@@ -320,6 +338,7 @@ export const useWfsStore = create<WfsState>()(
 
   setProjectRadius: (radius) => set({ projectRadius: radius }),
   setIsProjectCenterLocked: (locked) => set({ isProjectCenterLocked: locked }),
+  setBuildingSource: (source) => set({ buildingSource: source }),
 
   shiftVectorLayers: (delta: Point2D) => {
     if (delta.x === 0 && delta.y === 0) return;
@@ -455,6 +474,7 @@ export const useWfsStore = create<WfsState>()(
   setMpzpLines: (lines) => set({ mpzpLines: lines }),
   setMpzpData: (zones, lines) => set({ mpzpZones: zones, mpzpLines: lines }),
   setShowMpzpZonesLayer: (show) => set({ showMpzpZonesLayer: show }),
+  setSelectedMpzpZone: (zone) => set({ selectedMpzpZone: zone }),
 
   setLandCoverUnits: (units) => set({ landCoverUnits: units }),
   setShowLandCoverLayer: (show) => set({ showLandCoverLayer: show }),
@@ -476,6 +496,7 @@ export const useWfsStore = create<WfsState>()(
         mpzpInvertColors: state.mpzpInvertColors,
         terrainOpacity: state.terrainOpacity,
         projectRadius: state.projectRadius,
+        buildingSource: state.buildingSource,
       }),
     }
   )

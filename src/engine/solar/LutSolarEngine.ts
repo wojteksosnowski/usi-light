@@ -5,6 +5,7 @@ import {
   ProjectSettings,
 } from '../../types/geometry';
 import { isPointInPolygon } from '@/utils/math2d';
+import { isBuildingVariantActive } from '@/utils/geometrySelectors';
 import { buildShadowRangeLUT, ShadowRangeLut } from '../shadowRangeLut';
 import { buildSingleHourShadowPolygon } from '../shadowRangeBuilder';
 import { RegulationEvaluator } from '../regulationEvaluator';
@@ -52,6 +53,7 @@ export class LutSolarEngine implements ISolarEngine {
         if (bldg.id === targetBuildingId || bldg.isIncluded === false || bldg.category === 'boundary') {
           continue;
         }
+        if (!isBuildingVariantActive(bldg)) continue;
 
         const height = bldg.defaultHeight ?? 15;
         const shadowPoly = buildSingleHourShadowPolygon(bldg.vertices, height, ray);

@@ -1,5 +1,6 @@
 import { BuildingLoop, Point2D } from '../types/geometry';
 import { isPolygonCCW } from '@/utils/math2d';
+import { isBuildingVariantActive } from './geometrySelectors';
 import { buildRingSegments, computeLineEquation, ensureOppositeWinding } from './ringSegments';
 
 export { computeLineEquation };
@@ -100,6 +101,7 @@ export function analyzeSegmentsStatistics(
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (!isBuildingVariantActive(bldg)) continue;
     for (const seg of bldg.segments) {
       const len = seg.length;
       if (Number.isFinite(len) && len >= 1e-4) {
@@ -132,6 +134,7 @@ export function analyzeSegmentsStatistics(
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (!isBuildingVariantActive(bldg)) continue;
 
     for (const seg of bldg.segments) {
       const len = seg.length;

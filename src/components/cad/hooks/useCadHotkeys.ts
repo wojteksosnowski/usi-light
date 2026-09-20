@@ -79,7 +79,7 @@ export function useCadHotkeys({
           onCancelEdgeLength?.();
           return;
         }
-        if (e.key === 'Enter' || e.code === 'NumpadEnter') {
+        if (e.key === 'Enter' || e.code === 'NumpadEnter' || e.key === ' ' || e.code === 'Space') {
           e.preventDefault();
           onCommitEdgeLength?.();
           return;
@@ -152,6 +152,18 @@ export function useCadHotkeys({
         return;
       }
 
+      if ((e.key === 'c' || e.key === 'C') && !isModifier && !isEditingEdgeLength) {
+        e.preventDefault();
+        useCadToolStore.getState().triggerFit();
+        return;
+      }
+
+      if ((e.key === 'x' || e.key === 'X') && !isModifier && !isEditingEdgeLength) {
+        e.preventDefault();
+        useCadToolStore.getState().toggleUcsRotation();
+        return;
+      }
+
       if (e.key === 'Escape') {
         useCadToolStore.getState().setShowModifiersPanel(false);
         useCadToolStore.getState().setIsProjectBrushActive(false);
@@ -160,12 +172,14 @@ export function useCadHotkeys({
           setCurrentMouseWorld(null);
           onCancelDrawing?.();
         }
-      } else if (e.key === 'Enter') {
+      } else if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space') {
         if (drawingMode === 'polyline' && drawingVertices.length >= 3) {
+          e.preventDefault();
           onFinishDrawing?.(drawingVertices, 'polyline');
           setDrawingVertices([]);
           setCurrentMouseWorld(null);
         } else if (drawingMode === 'sweep' && drawingVertices.length >= 2) {
+          e.preventDefault();
           onFinishDrawing?.(drawingVertices, 'sweep');
           setDrawingVertices([]);
           setCurrentMouseWorld(null);

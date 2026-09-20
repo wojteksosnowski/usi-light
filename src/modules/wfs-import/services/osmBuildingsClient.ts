@@ -119,44 +119,68 @@ export function resolveBuildingType(tags: Record<string, string>): BuildingType 
 }
 
 /**
- * Ekstrahuje i estymuje wysokość oraz liczbę kondygnacji z tagów OSM
+ * Ekstrahuje i estymuje wysokość, rzędną dolnej krawędzi (posadowienie bryły) oraz liczbę kondygnacji z tagów OSM
  */
 export function extractOsmBuildingElevation(tags: Record<string, string>): {
   defaultHeight: number;
+  elevation: number;
   storeysCount: number;
   heightSource: BuildingLoop['heightSource'];
 } {
-  const explicitHeight = parseOsmHeight(tags.height);
+  // 1. Wysokość dolnej krawędzi bryły od poziomu gruntu (min_height / building:min_level)
+  const explicitMinHeight = parseOsmHeight(tags.min_height || tags['building:min_height']);
+  const minLevelsRaw = tags['building:min_level'] || tags.min_level;
+  const parsedMinLevels = minLevelsRaw ? parseInt(minLevelsRaw, 10) : undefined;
+  const minStoreys = parsedMinLevels && !isNaN(parsedMinLevels) && parsedMinLevels > 0 ? parsedMinLevels : undefined;
+
+  let baseElevation = 0.0;
+  if (explicitMinHeight !== undefined && explicitMinHeight >= 0) {
+    baseElevation = explicitMinHeight;
+  } else if (minStoreys !== undefined) {
+    baseElevation = minStoreys === 1
+      ? FIRST_FLOOR_HEIGHT
+      : FIRST_FLOOR_HEIGHT + (minStoreys - 1) * DEFAULT_FLOOR_HEIGHT;
+  }
+
+  // 2. Całkowita wysokość dachu bryły od poziomu gruntu (height / building:levels)
+  const explicitHeight = parseOsmHeight(tags.height || tags['building:height'] || tags['roof:height']);
   const levelsRaw = tags['building:levels'] || tags.levels || tags['roof:levels'];
   const parsedLevels = levelsRaw ? parseInt(levelsRaw, 10) : undefined;
   const storeys = parsedLevels && !isNaN(parsedLevels) && parsedLevels > 0 ? parsedLevels : undefined;
 
-  if (explicitHeight !== undefined && explicitHeight > 0) {
-    const derivedStoreys = storeys ?? (explicitHeight > FIRST_FLOOR_HEIGHT
-      ? 1 + Math.round((explicitHeight - FIRST_FLOOR_HEIGHT) / DEFAULT_FLOOR_HEIGHT)
-      : 1);
-    return {
-      defaultHeight: Number(explicitHeight.toFixed(1)),
-      storeysCount: derivedStoreys,
-      heightSource: 'storeys-wfs',
-    };
-  }
+  let topHeight: number | undefined;
+  let derivedStoreys: number = DEFAULT_STOREYS;
+  let source: BuildingLoop['heightSource'] = 'default';
 
-  if (storeys !== undefined) {
-    const computedHeight = storeys === 1
+  if (explicitHeight !== undefined && explicitHeight > 0) {
+    // W OSM tag `height` określa całkowitą wysokość wierzchołka od gruntu.
+    // Jeśli `height` jest mniejsze lub równe `baseElevation`, traktujemy `height` jako grubość względną bryły.
+    topHeight = explicitHeight > baseElevation ? explicitHeight : baseElevation + explicitHeight;
+    const bodyHeight = topHeight - baseElevation;
+    derivedStoreys = storeys ?? (bodyHeight > FIRST_FLOOR_HEIGHT
+      ? 1 + Math.round((bodyHeight - FIRST_FLOOR_HEIGHT) / DEFAULT_FLOOR_HEIGHT)
+      : 1);
+    source = 'storeys-wfs';
+  } else if (storeys !== undefined) {
+    const computedBodyHeight = storeys === 1
       ? FIRST_FLOOR_HEIGHT
       : FIRST_FLOOR_HEIGHT + (storeys - 1) * DEFAULT_FLOOR_HEIGHT;
-    return {
-      defaultHeight: Number(computedHeight.toFixed(1)),
-      storeysCount: storeys,
-      heightSource: 'storeys-wfs',
-    };
+    topHeight = baseElevation + computedBodyHeight;
+    derivedStoreys = storeys;
+    source = 'storeys-wfs';
+  } else {
+    topHeight = baseElevation + DEFAULT_HEIGHT;
+    derivedStoreys = DEFAULT_STOREYS;
+    source = 'default';
   }
 
+  const effectiveHeight = Math.max(1.0, topHeight - baseElevation);
+
   return {
-    defaultHeight: DEFAULT_HEIGHT,
-    storeysCount: DEFAULT_STOREYS,
-    heightSource: 'default',
+    defaultHeight: Number(effectiveHeight.toFixed(1)),
+    elevation: Number(baseElevation.toFixed(1)),
+    storeysCount: Math.max(1, derivedStoreys),
+    heightSource: source,
   };
 }
 
@@ -264,10 +288,32 @@ export function parseOverpassBuildingsResponse(
   const processedWayIds = new Set<number>();
   const centerCad = wgs84ToCadPoint(projectCenter, projectCrs, projectCenter);
 
+  // 0. Indeksowanie relacji type=building (łączących outline / building:part)
+  const buildingRelationMemberMap = new Map<number, { relId: number; relName?: string }>();
+  const outlineWayIdsWithParts = new Set<number>();
+
+  for (const rel of relations) {
+    const tags = rel.tags || {};
+    if (tags.type === 'building' || (tags.building && tags.type !== 'multipolygon')) {
+      const relName = formatOsmBuildingName(rel.id, tags);
+      const hasPartMembers = rel.members.some((m) => m.role === 'part' || m.role === '');
+      for (const member of rel.members) {
+        if (member.type === 'way') {
+          buildingRelationMemberMap.set(member.ref, { relId: rel.id, relName });
+          // Jeśli relacja zawiera części (part), oznaczamy drogę nadrzędną (outline), aby nie tworzyć z niej zbędnej bryły
+          if (member.role === 'outline' && hasPartMembers) {
+            outlineWayIdsWithParts.add(member.ref);
+            processedWayIds.add(member.ref);
+          }
+        }
+      }
+    }
+  }
+
   // 1. Przetwarzanie relacji multipolygon (budynki z dziedzińcami / złożone bryły)
   for (const rel of relations) {
     const tags = rel.tags || {};
-    if (!tags.building) continue;
+    if (!tags.building && tags.type !== 'multipolygon') continue;
 
     const outerWays: number[][] = [];
     const innerWays: number[][] = [];
@@ -290,9 +336,12 @@ export function parseOverpassBuildingsResponse(
     const innerRings = assembleWaysIntoRings(innerWays, nodeCoords);
     if (outerRings.length === 0) continue;
 
-    const { defaultHeight, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
+    const { defaultHeight, elevation, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
     const buildingType = resolveBuildingType(tags);
     const buildingName = formatOsmBuildingName(rel.id, tags);
+
+    const hasMultipleOuterRings = outerRings.length > 1;
+    const relGroupId = hasMultipleOuterRings ? `group-osm-rel-${rel.id}` : undefined;
 
     for (let ri = 0; ri < outerRings.length; ri++) {
       const outerLatLons = outerRings[ri];
@@ -334,11 +383,14 @@ export function parseOverpassBuildingsResponse(
         }
       }
 
+      const nameWithPart = hasMultipleOuterRings ? `${buildingName} (cz. ${ri + 1}/${outerRings.length})` : buildingName;
+
       const loop: BuildingLoop = {
         id: bldgId,
-        name: buildingName,
+        name: nameWithPart,
         layer: 'WFS_BUDYNKI',
         category: 'building',
+        groupId: relGroupId,
         isTested: false,
         isIncluded: true,
         isLocked: true,
@@ -347,7 +399,7 @@ export function parseOverpassBuildingsResponse(
         defaultHeight,
         heightSource,
         hWindowBottom: 0.85,
-        elevation: 0.0,
+        elevation,
         firstFloorHeight: FIRST_FLOOR_HEIGHT,
         typicalFloorHeight: DEFAULT_FLOOR_HEIGHT,
         storeysCount,
@@ -380,9 +432,10 @@ export function parseOverpassBuildingsResponse(
       wgs84ToCadPoint(coord, projectCrs, projectCenter)
     );
 
-    const { defaultHeight, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
+    const { defaultHeight, elevation, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
     const buildingType = resolveBuildingType(tags);
-    const buildingName = formatOsmBuildingName(wayId, tags);
+    const relInfo = buildingRelationMemberMap.get(wayId);
+    const buildingName = relInfo?.relName || formatOsmBuildingName(wayId, tags);
     const bldgId = `osm-bld-${wayId}`;
 
     const sanitized = sanitizePolygon(rawCadPoints, {
@@ -399,11 +452,14 @@ export function parseOverpassBuildingsResponse(
       if (ratio < 0.1) continue;
     }
 
+    const wayGroupId = relInfo ? `group-osm-bld-${relInfo.relId}` : undefined;
+
     const loop: BuildingLoop = {
       id: bldgId,
       name: buildingName,
       layer: 'WFS_BUDYNKI',
       category: 'building',
+      groupId: wayGroupId,
       isTested: false,
       isIncluded: true,
       isLocked: true,
@@ -412,7 +468,7 @@ export function parseOverpassBuildingsResponse(
       defaultHeight,
       heightSource,
       hWindowBottom: 0.85,
-      elevation: 0.0,
+      elevation,
       firstFloorHeight: FIRST_FLOOR_HEIGHT,
       typicalFloorHeight: DEFAULT_FLOOR_HEIGHT,
       storeysCount,
@@ -443,9 +499,10 @@ export function parseOverpassBuildingsResponse(
       wgs84ToCadPoint(coord, projectCrs, projectCenter)
     );
 
-    const { defaultHeight, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
+    const { defaultHeight, elevation, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
     const buildingType = resolveBuildingType(tags);
-    const buildingName = formatOsmBuildingName(wayId, tags);
+    const relInfo = buildingRelationMemberMap.get(wayId);
+    const buildingName = relInfo?.relName || formatOsmBuildingName(wayId, tags);
     const bldgId = `osm-part-${wayId}`;
 
     const sanitized = sanitizePolygon(rawCadPoints, {
@@ -462,11 +519,14 @@ export function parseOverpassBuildingsResponse(
       if (ratio < 0.1) continue;
     }
 
+    const partGroupId = relInfo ? `group-osm-bld-${relInfo.relId}` : undefined;
+
     const loop: BuildingLoop = {
       id: bldgId,
       name: buildingName,
       layer: 'WFS_BUDYNKI',
       category: 'building',
+      groupId: partGroupId,
       isTested: false,
       isIncluded: true,
       isLocked: true,
@@ -475,7 +535,7 @@ export function parseOverpassBuildingsResponse(
       defaultHeight,
       heightSource,
       hWindowBottom: 0.85,
-      elevation: 0.0,
+      elevation,
       firstFloorHeight: FIRST_FLOOR_HEIGHT,
       typicalFloorHeight: DEFAULT_FLOOR_HEIGHT,
       storeysCount,

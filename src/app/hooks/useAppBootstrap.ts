@@ -15,7 +15,7 @@ import { AnalysisAccuracyOptions } from '@/engine/analysisEngine';
 import { saveProjectToStorage, sanitizeBuildingForStorage } from '@/utils/projectStorage';
 import { extractLicenseKeyFromUrl, stripLicenseFromUrl } from '@/utils/licenseUrl';
 
-const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
+export const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
 
 export function useAppBootstrap() {
   // License & Stripe Checkout
@@ -185,10 +185,15 @@ export function useAppBootstrap() {
   }, [loadSceneData, setSettings, setPinnedPoints, setActivePinnedPointId]);
 
   // LocalStorage Persistence (Debounced Save on update, skipping when isInteracting)
+  // Uruchamiane przy każdej zmianie geometrii/undo-history (buildings, layerSettings) oraz,
+  // jako fallback, przy zmianach ustawień projektu / punktów pomiarowych, które same w sobie
+  // nie tworzą kroku undo (nie są objęte partialize w zundo temporal).
   useEffect(() => {
     if (!sceneHydratedRef.current) return;
     if (new URLSearchParams(window.location.search).get('perfScene')) return;
     if (isInteracting) return; // Nie zapisujemy podczas przeciągania myszą / animacji
+
+    useUiStore.getState().markDirty();
 
     const timer = setTimeout(() => {
       const scene: SavedSceneData = {
@@ -212,6 +217,7 @@ export function useAppBootstrap() {
 
       try {
         localStorage.setItem(SCENE_STORAGE_KEY, JSON.stringify(scene));
+        useUiStore.getState().markSaved(Date.now());
       } catch (err) {
         console.warn('Nie udało się zapisać bieżącego stanu sceny (localStorage):', err);
       }

@@ -1,5 +1,6 @@
 import { BuildingLoop, Point2D } from '../../types/geometry';
 import { isPointInPolygon } from '../../utils/math2d/polygons';
+import { isBuildingVariantActive } from '../../utils/geometrySelectors';
 
 export interface HeightmapBounds {
   minX: number;
@@ -37,6 +38,7 @@ export class HeightmapShadowEngine {
 
     for (const bldg of buildings) {
       if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
+      if (!isBuildingVariantActive(bldg)) continue;
       for (const v of bldg.vertices) {
         if (v.x < minX) minX = v.x;
         if (v.x > maxX) maxX = v.x;
@@ -85,6 +87,7 @@ export class HeightmapShadowEngine {
     for (const bldg of buildings) {
       if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
       if (bldg.isIncluded === false) continue;
+      if (!isBuildingVariantActive(bldg)) continue;
 
       const topHeight = (bldg.elevation || 0) + (bldg.defaultHeight || 0);
       if (topHeight <= 0) continue;

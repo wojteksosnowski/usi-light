@@ -508,7 +508,7 @@ export function createBuildingFromVertices(
   category: import('../types/geometry').ObjectCategory = 'building'
 ): BuildingLoop {
   const isCCW = isPolygonCCW(vertices);
-  const newId = `bldg-${Date.now()}`;
+  const newId = `bldg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const segments: FacadeSegment[] = [];
 
   for (let i = 0; i < vertices.length; i++) {

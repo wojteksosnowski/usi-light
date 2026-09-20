@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { CadTopHud } from '@/components/layout/CadTopHud';
@@ -6,7 +6,6 @@ import { ControlPointButton } from '@/components/layout/ControlPointButton';
 import { CadToolBar } from '@/components/layout/CadToolBar';
 import { CadLegendBottom } from '@/components/layout/CadLegendBottom';
 import { CadCanvas } from '@/components/CadCanvas';
-import { DevLicenseToolbar } from '@/components/license/DevLicenseToolbar';
 import { FloatingPanelsHost } from './FloatingPanelsHost';
 import {
   useSceneStore,
@@ -224,6 +223,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   const pinnedPointResults = useStableWhileInteracting(rawPinnedPointResults, isInteracting);
 
+  const setPinnedPointResults = useSolarAnalysisStore((s) => s.setPinnedPointResults);
+  useEffect(() => {
+    setPinnedPointResults(pinnedPointResults);
+  }, [pinnedPointResults, setPinnedPointResults]);
+
   const selectedBuildingPinnedPoints = useMemo<AnalysisPointResult[]>(() => {
     if (!selectedBuildingId) return [];
     return pinnedPointResults.filter((p) => p.buildingId === selectedBuildingId);
@@ -279,18 +283,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       rotateBuilding(id, pivot, deltaAngleRad);
     },
     [rotateBuilding]
-  );
-
-  const handleBooleanUnion = useCallback(
-    (bldgIdA: string, bldgIdB: string) => {
-      const res = booleanUnion(bldgIdA, bldgIdB);
-      if (res.success) {
-        setDrawingMode('none');
-      } else {
-        alert(res.error || 'Obiekty muszą się stykać lub przenikać, aby wykonać sumę.');
-      }
-    },
-    [booleanUnion, setDrawingMode]
   );
 
   return (
@@ -393,7 +385,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             onUpdateBuildingVertices={updateBuildingVertices}
             onUpdateBuildingSweepPath={updateBuildingSweepPath}
             onBuildingRotate={handleBuildingRotate}
-            onBooleanUnion={handleBooleanUnion}
             facadePointMode={facadePointMode}
             onFacadePointMove={(buildingId, segmentId, offsetRatio) => {
               addPinnedPoint({ buildingId, segmentId, offsetRatio });
@@ -434,9 +425,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           loadStatus={loadStatus}
           onDismissStatus={onDismissStatus}
         />
-
-        {/* Development Floating Toolbar */}
-        <DevLicenseToolbar />
       </main>
     </div>
   );

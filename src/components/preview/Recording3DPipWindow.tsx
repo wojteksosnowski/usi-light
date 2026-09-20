@@ -6,6 +6,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useSceneStore, useUiStore } from '../../store';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
+import { filterActiveVariantBuildings, findSelectedBuilding } from '@/utils/geometrySelectors';
+import { getCompoundGroupBuildings } from '@/utils/compoundObjectPipeline';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
 export const Recording3DPipWindow: React.FC = () => {
@@ -24,15 +26,17 @@ export const Recording3DPipWindow: React.FC = () => {
 
   const isDemoRecordingActive = (isRecording || isCountingDown) && show3DPreview;
 
-  // Aktywny budynek: zaznaczony -> projektowany (isTested) -> pierwszy na liście
+  // Aktywny budynek: zaznaczony (niezależnie od aktywnego wariantu) -> projektowany (isTested, tylko
+  // aktywny wariant) -> pierwszy na liście (wyłącznie aktywny wariant). Jawne zaznaczenie użytkownika
+  // ma pierwszeństwo, żeby podgląd nigdy nie podmieniał obiektu w ciszy, gdy wybrany obiekt należy
+  // do nieaktywnego wariantu A/B.
   const activeBuilding = useMemo(() => {
-    if (selectedBuildingId) {
-      const found = buildings.find((b) => b.id === selectedBuildingId && b.category !== 'boundary');
-      if (found) return found;
-    }
-    const tested = buildings.find((b) => b.isTested && b.category !== 'boundary');
+    const selected = findSelectedBuilding(buildings, selectedBuildingId);
+    if (selected) return selected;
+    const activeBuildings = filterActiveVariantBuildings(buildings);
+    const tested = activeBuildings.find((b) => b.isTested && b.category !== 'boundary');
     if (tested) return tested;
-    return buildings.find((b) => b.category !== 'boundary') || null;
+    return activeBuildings.find((b) => b.category !== 'boundary') || null;
   }, [buildings, selectedBuildingId]);
 
   const activeHighlight = getActiveHighlightEdgeIndex(
@@ -42,9 +46,7 @@ export const Recording3DPipWindow: React.FC = () => {
 
   const groupBuildings = useMemo(() => {
     if (!activeBuilding || !activeBuilding.groupId) return undefined;
-    const inGroup = buildings.filter(
-      (b) => b.groupId === activeBuilding.groupId && b.category !== 'boundary'
-    );
+    const inGroup = getCompoundGroupBuildings(buildings, activeBuilding.groupId);
     return inGroup.length > 1 ? inGroup : undefined;
   }, [buildings, activeBuilding]);
 

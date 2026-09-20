@@ -1,5 +1,5 @@
 import { BuildingLoop, Point2D } from '../../types/geometry';
-import { unionPolygonLoops } from './polygons';
+import { unionPolygonsWithHoles } from './polygons';
 
 const ADJACENCY_TOLERANCE = 0.01; // 1cm - styczność wierzchołków/krawędzi
 
@@ -10,9 +10,12 @@ export interface BoundarySharedEdge {
 
 export interface BoundaryMergeGroup {
   buildingIds: string[];
-  mergedVertices: Point2D[];
+  outer: Point2D[];
+  holes: Point2D[][];
   sharedEdges: BoundarySharedEdge[];
   areaType: 'plot' | 'playground';
+  /** Pula, z której pochodzi grupa (jednorodna dla wszystkich członków) - używane przez renderer do doboru koloru akcentu bez ponownego przeszukiwania `buildings`. */
+  poolKind: 'tested' | 'accompanying';
 }
 
 function dist(a: Point2D, b: Point2D): number {
@@ -100,16 +103,16 @@ class UnionFind {
 }
 
 /**
- * Wykrywa grupy stykających się obiektów category='boundary' będących "obiektem badanym"
- * (isTested === true) - granice z isTested !== true nigdy nie są łączone, niezależnie od
+ * Wykrywa grupy stykających się obiektów category='boundary' w obrębie jednej "puli" (isTested
+ * lub isAccompanyingInvestment) - granice spoza puli nigdy nie są łączone, niezależnie od
  * stykania się z sąsiadami. Grupa jest zwracana tylko gdy wszystkie obiekty w niej mają
  * ten sam areaType - w przeciwnym razie renderer ma zastosować fallback (rysowanie osobno),
  * więc niejednorodne grupy są pomijane.
  */
-export function detectBoundaryMergeGroups(buildings: BuildingLoop[]): BoundaryMergeGroup[] {
-  const boundaries = buildings.filter(
-    (b) => b.category === 'boundary' && b.isTested === true && Array.isArray(b.vertices) && b.vertices.length >= 3
-  );
+function detectBoundaryMergeGroupsForPool(
+  boundaries: BuildingLoop[],
+  poolKind: 'tested' | 'accompanying'
+): BoundaryMergeGroup[] {
   if (boundaries.length < 2) return [];
 
   const uf = new UnionFind(boundaries.length);
@@ -136,9 +139,11 @@ export function detectBoundaryMergeGroups(buildings: BuildingLoop[]): BoundaryMe
     const areaTypes = new Set(members.map((b) => b.areaType ?? 'plot'));
     if (areaTypes.size !== 1) continue; // niejednorodny areaType -> fallback per-building
 
-    const polygons = members.map((b) => b.vertices);
-    const unioned = unionPolygonLoops(polygons);
-    if (unioned.length !== 1) continue; // np. rozłączne komponenty po union -> fallback
+    const polygons = members.map((b) => ({ outer: b.vertices, holes: [] as Point2D[][] }));
+    const unioned = unionPolygonsWithHoles(polygons);
+    // Rozłączne komponenty po union (nie stykają się w rzeczywistości mimo AABB) -> fallback per-building.
+    // Otwory (unioned[0].holes.length > 0, np. wspólne podwórko) są prawidłowym wynikiem - nie odrzucamy ich.
+    if (unioned.length !== 1) continue;
 
     const sharedEdges: BoundarySharedEdge[] = [];
     for (let i = 0; i < members.length; i++) {
@@ -149,11 +154,34 @@ export function detectBoundaryMergeGroups(buildings: BuildingLoop[]): BoundaryMe
 
     result.push({
       buildingIds: members.map((b) => b.id),
-      mergedVertices: unioned[0],
+      outer: unioned[0].outer,
+      holes: unioned[0].holes,
       sharedEdges,
       areaType: [...areaTypes][0] as 'plot' | 'playground',
+      poolKind,
     });
   }
 
   return result;
+}
+
+/**
+ * Wykrywa grupy stykających się obiektów category='boundary' do optycznego scalania. Działa
+ * niezależnie na dwóch pulach: "obiekt badany" (isTested === true) oraz "inwestycja towarzysząca"
+ * (isAccompanyingInvestment === true) - flagi te są rozłączne, więc granice z tych dwóch pul nigdy
+ * nie łączą się ze sobą, ale w obrębie każdej puli scalanie działa identycznie.
+ */
+export function detectBoundaryMergeGroups(buildings: BuildingLoop[]): BoundaryMergeGroup[] {
+  const isValidBoundary = (b: BuildingLoop) =>
+    b.category === 'boundary' && Array.isArray(b.vertices) && b.vertices.length >= 3;
+
+  const testedBoundaries = buildings.filter((b) => isValidBoundary(b) && b.isTested === true);
+  const accompanyingBoundaries = buildings.filter(
+    (b) => isValidBoundary(b) && b.isAccompanyingInvestment === true
+  );
+
+  return [
+    ...detectBoundaryMergeGroupsForPool(testedBoundaries, 'tested'),
+    ...detectBoundaryMergeGroupsForPool(accompanyingBoundaries, 'accompanying'),
+  ];
 }

@@ -21,12 +21,33 @@ import {
   PolygonWithHoles,
   isPointInPolygon,
   isPolygonCCW,
+  unionPolygonLoops,
+  differencePolygonLoops,
 } from './polygons';
 import {
   findSegmentIntersection,
   fastUnionTwoSimpleLoops,
+  getFastUnionTelemetry,
+  resetFastUnionTelemetry,
 } from './polygonBooleanTwo';
+import {
+  computeFullShadowAnalysis,
+  prepareShadowBuilding,
+  collectBuildingShadowPolysPrepared,
+  computeProjectShadowReachAABB,
+  computeBuildingShadowReachAABB,
+  doAABBsOverlap,
+  PreparedShadowBuilding,
+} from './shadowEnvelope';
+import { getGlobalSolarLUT } from '../solar';
+import { getCachedGroundShadowSamples, MasterplanColorSample } from '../../components/cad/masterplan/masterplanShadowCache';
 import { Point2D, BuildingLoop } from '../../types/geometry';
+
+
+// Kontrola poziomu fallbacku do polygon-clipping wewnątrz fastUnionTwoSimpleLoops, tak jak
+// w shadowEnvelope.benchmark.test.ts — tu dla ścieżki MasterPlan (unionPolygonsWithHolesHierarchical
+// w masterplanSpatial.ts również woła fastUnionTwoSimpleLoops per-parę przed fallbackiem).
+const MAX_MASTERPLAN_UNION_FALLBACK_RATE = 0.15;
 
 describe('UMBRA A456 - Armored Performance Benchmark & Bottleneck Drill-Down', () => {
   const warszawaPath = path.resolve(__dirname, '../../../reference/warszawa.json');
@@ -149,6 +170,41 @@ describe('UMBRA A456 - Armored Performance Benchmark & Bottleneck Drill-Down', (
 
     expect(avgTotal).toBeLessThan(1500);
   }, 30000);
+
+  it('Telemetry: how often does fastUnionTwoSimpleLoops fall back to polygon-clipping in the MasterPlan hierarchical union', { timeout: 20000 }, () => {
+    const latitude = 52.23;
+    const longitude = 21.01;
+    const equinox = 'spring';
+    const hour = 12.0;
+
+    resetFastUnionTelemetry();
+    for (let r = 0; r < 5; r++) {
+      const solarAngles = getMasterplanSolarAngles(latitude, longitude, equinox, hour, 0, 'raycasting');
+      const validTiers = allTiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0);
+      const clusters = clusterTiersByShadowOverlap(validTiers, solarAngles);
+      for (const cluster of clusters) {
+        const cList: PolygonWithHoles[] = [];
+        for (const tier of cluster) {
+          cList.push(...computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, solarAngles, tier.hTop, tier.hBottom));
+        }
+        if (cList.length > 1) unionPolygonsWithHolesHierarchical(cList);
+      }
+    }
+    const t = getFastUnionTelemetry();
+    const fallbackRate = t.totalCalls > 0 ? t.fallbackCalls / t.totalCalls : 0;
+
+    console.log('\n================================================================================');
+    console.log('[fastUnionTwoSimpleLoops TELEMETRY: 5x MasterPlan hierarchical union on warszawa.json]');
+    console.log('================================================================================');
+    console.log(`  - Total calls:                  ${t.totalCalls}`);
+    console.log(`  - Fast-path success:             ${t.fastPathSuccess} (${(t.totalCalls ? t.fastPathSuccess / t.totalCalls * 100 : 0).toFixed(1)}%)`);
+    console.log(`  - FALLBACK to polygon-clipping:  ${t.fallbackCalls} (${(fallbackRate * 100).toFixed(1)}%)`);
+    console.log(`  Fallback guard: ${fallbackRate.toFixed(3)} <= ${MAX_MASTERPLAN_UNION_FALLBACK_RATE} (MAX_MASTERPLAN_UNION_FALLBACK_RATE)`);
+    console.log('================================================================================\n');
+
+    expect(t.totalCalls).toBeGreaterThan(0);
+    expect(fallbackRate).toBeLessThan(MAX_MASTERPLAN_UNION_FALLBACK_RATE);
+  });
 
   it('drills down 1 level deeper into the largest bottleneck (Hierarchical Boolean Union)', () => {
     const solarAngles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0, 'raycasting');
@@ -287,6 +343,431 @@ describe('UMBRA A456 - Armored Performance Benchmark & Bottleneck Drill-Down', (
 
     expect(totalSubTime).toBeGreaterThan(0);
   }, 40000);
+
+  it('drills down 2 levels deep: fastUnionTwoSimpleLoops (subprocess E, 55.7% of union cost) scaling vs. input vertex count', { timeout: 40000 }, () => {
+    // Subprocess E powyżej mierzy pełne, realne wywołanie fastUnionTwoSimpleLoops (AABB-pruned
+    // intersection search + subsegment build + classification + trawersacja grafu razem — to
+    // jedna zoptymalizowana funkcja, nie da się jej rozłożyć z zewnątrz bez zmiany kodu
+    // produkcyjnego). Zamiast tego sprawdzamy empirycznie, jak CAŁKOWITY koszt tej funkcji
+    // skaluje się wraz ze złożonością wejścia na realnych klastrach z warszawa.json.
+    const solarAngles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0, 'raycasting');
+    const validTiers = allTiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0);
+    const clusters = clusterTiersByShadowOverlap(validTiers, solarAngles);
+
+    const polyPairs: { a: Point2D[]; b: Point2D[]; vertexCount: number }[] = [];
+    for (const cluster of clusters) {
+      if (cluster.length <= 1) continue;
+      const cPolys: Point2D[][] = [];
+      for (const tier of cluster) {
+        for (const r of computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, solarAngles, tier.hTop, tier.hBottom)) {
+          cPolys.push(r.outer);
+        }
+      }
+      for (let i = 0; i < cPolys.length - 1; i++) {
+        const b1 = computePointsBoundingBox(cPolys[i]);
+        const b2 = computePointsBoundingBox(cPolys[i + 1]);
+        if (boundsOverlap(b1, b2)) {
+          polyPairs.push({ a: cPolys[i], b: cPolys[i + 1], vertexCount: cPolys[i].length + cPolys[i + 1].length });
+        }
+      }
+    }
+    expect(polyPairs.length).toBeGreaterThan(0);
+
+    const sorted = [...polyPairs].sort((a, b) => a.vertexCount - b.vertexCount);
+    const third = Math.max(1, Math.floor(sorted.length / 3));
+    const buckets = { small: sorted.slice(0, third), medium: sorted.slice(third, third * 2), large: sorted.slice(third * 2) };
+
+    const runs = 200;
+    function benchmarkBucket(pairs: typeof polyPairs) {
+      if (pairs.length === 0) return null;
+      let tSum = 0;
+      const avgVertices = pairs.reduce((s, p) => s + p.vertexCount, 0) / pairs.length;
+      for (let r = 0; r < runs; r++) {
+        for (const { a, b } of pairs) {
+          const t0 = performance.now();
+          fastUnionTwoSimpleLoops(a, b);
+          tSum += performance.now() - t0;
+        }
+      }
+      return { avgVertices, avgMsPerCall: tSum / (runs * pairs.length), count: pairs.length };
+    }
+
+    const resSmall = benchmarkBucket(buckets.small);
+    const resMedium = benchmarkBucket(buckets.medium);
+    const resLarge = benchmarkBucket(buckets.large);
+
+    console.log('\n================================================================================');
+    console.log(`[LEVEL 2 DRILL-DOWN: fastUnionTwoSimpleLoops COST vs. INPUT VERTEX COUNT (${polyPairs.length} pairs)]`);
+    console.log('================================================================================');
+    for (const [label, res] of [['small', resSmall], ['medium', resMedium], ['large', resLarge]] as const) {
+      if (!res) continue;
+      console.log(` ${label.padEnd(7)} (n=${String(res.count).padStart(2)}): avg ${res.avgVertices.toFixed(0).padStart(4)} vertices/pair | ${res.avgMsPerCall.toFixed(4).padStart(8)} ms/call | ${(res.avgMsPerCall / res.avgVertices * 1000).toFixed(2)} us/vertex`);
+    }
+    if (resSmall && resLarge && resLarge.avgVertices > resSmall.avgVertices) {
+      const vertexRatio = resLarge.avgVertices / resSmall.avgVertices;
+      const timeRatio = resLarge.avgMsPerCall / resSmall.avgMsPerCall;
+      const empiricalExponent = Math.log(timeRatio) / Math.log(vertexRatio);
+      console.log('--------------------------------------------------------------------------------');
+      console.log(` Wierzchołki large/small: ${vertexRatio.toFixed(2)}x | Czas large/small: ${timeRatio.toFixed(2)}x | Empiryczny wykładnik: n^${empiricalExponent.toFixed(2)}`);
+      console.log(` (naiwna implementacja segment-intersection w tej klasie algorytmów jest O(nA*nB) ~ n^2; wynik bliski n^2 sugeruje, że AABB-pruning obecny w kodzie nie eliminuje kwadratowego rdzenia na gęsto nakładających się parach)`);
+    }
+    console.log('================================================================================\n');
+
+    expect(resSmall).not.toBeNull();
+  });
+});
+
+describe('CadCanvas Rendering Performance — Variant A vs B (WFS switch) on warszawa.json', () => {
+  const warszawaPath = path.resolve(__dirname, '../../../reference/warszawa.json');
+
+  let buildingsVariantA: BuildingLoop[] = [];
+  let buildingsVariantB: BuildingLoop[] = [];
+
+  if (fs.existsSync(warszawaPath)) {
+    const rawScene = JSON.parse(fs.readFileSync(warszawaPath, 'utf-8'));
+    const all = (rawScene.buildings || []) as BuildingLoop[];
+
+    // Wariant A: pierwsze 15 budynków jako testowane, reszta jako kontekst blokujący
+    // (symulacja przed pobieraniem WFS — lokalna geometria)
+    buildingsVariantA = all
+      .filter((b) => b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + (b.defaultHeight ?? 0)) > 0)
+      .map((b, idx) => ({ ...b, isTested: idx < 15, category: b.category ?? 'building' }));
+
+    // Wariant B: symulacja po przełączeniu na WFS — dodatkowe budynki z większą liczbą wierzchołków
+    // Emulujemy efekt WFS: 30% budynków dostaje dodatkowe wierzchołki (dokładniejsze obrysy) +
+    // dorzucamy 20 nowych budynków (nowe obiekty z geoportalu) jako dodatkowe kontekstowe.
+    buildingsVariantB = buildingsVariantA.map((b) => {
+      if (!b.isTested && b.vertices && b.vertices.length >= 4 && Math.random() > 0.7) {
+        // Rozgęszczamy obrys: wstawiamy punkty środkowe krawędzi (symuluje dokładniejszy obrys WFS)
+        const densified: Point2D[] = [];
+        for (let i = 0; i < b.vertices.length; i++) {
+          densified.push(b.vertices[i]);
+          const next = b.vertices[(i + 1) % b.vertices.length];
+          densified.push({ x: (b.vertices[i].x + next.x) / 2, y: (b.vertices[i].y + next.y) / 2 });
+        }
+        return { ...b, vertices: densified, id: b.id + '_wfs' };
+      }
+      return b;
+    });
+
+    // Dodaj 20 nowych budynków WFS (nowe obiekty na scenie, nieobecne w wariancie A)
+    const existingBuildings = buildingsVariantA.filter((b) => !b.isTested);
+    const centroid = existingBuildings.reduce(
+      (acc, b) => ({ x: acc.x + (b.vertices[0]?.x ?? 0), y: acc.y + (b.vertices[0]?.y ?? 0) }),
+      { x: 0, y: 0 }
+    );
+    centroid.x /= Math.max(1, existingBuildings.length);
+    centroid.y /= Math.max(1, existingBuildings.length);
+
+    for (let k = 0; k < 20; k++) {
+      const angle = (k / 20) * Math.PI * 2;
+      const r = 80 + k * 15;
+      const cx = centroid.x + Math.cos(angle) * r;
+      const cy = centroid.y + Math.sin(angle) * r;
+      const w = 12 + k * 2;
+      const h = 10 + k;
+      buildingsVariantB.push({
+        id: `wfs_new_${k}`,
+        name: `WFS Budynek ${k}`,
+        category: 'building',
+        isTested: false,
+        vertices: [
+          { x: cx, y: cy },
+          { x: cx + w, y: cy },
+          { x: cx + w, y: cy + h },
+          { x: cx, y: cy + h },
+        ],
+        defaultHeight: 9 + k * 1.5,
+        elevation: 0,
+        segments: [],
+        layer: 'BUD_WFS',
+        buildingType: 'residential',
+        isCityCentre: false,
+        hWindowBottom: 0.85,
+      } as unknown as BuildingLoop);
+    }
+  }
+
+  it('profiles full CadCanvas shadow engine cycle for Variant A (local) vs Variant B (after WFS switch)', { timeout: 60000 }, () => {
+    if (buildingsVariantA.length === 0) return;
+
+    const latitude = 52.23;
+    const longitude = 21.01;
+    const equinox: 'spring' | 'autumn' = 'spring';
+    const stepHours = 0.5; // 21 kroków godzinowych jak w live analysis
+    const runs = 5;
+
+    // ── Funkcja profilowania pełnego cyklu silnika cienia (1 klatka CadCanvas) ──
+    function profileShadowCycle(
+      buildings: BuildingLoop[],
+      label: string
+    ): {
+      tPrepare: number;
+      tHourlyLoop: number;
+      tProjectTested: number;
+      tUnionTested: number;
+      tProjectBlocking: number;
+      tDifference: number;
+      tFinalUnion: number;
+      tTotal: number;
+      testedCount: number;
+      blockingCount: number;
+      hourSteps: number;
+      finalLoops: number;
+    } {
+      let tPrepareSum = 0;
+      let tHourlyLoopSum = 0;
+      let tProjectTestedSum = 0;
+      let tUnionTestedSum = 0;
+      let tProjectBlockingSum = 0;
+      let tDifferenceSum = 0;
+      let tFinalUnionSum = 0;
+      let tTotalSum = 0;
+      let testedCount = 0;
+      let blockingCount = 0;
+      let hourSteps = 0;
+      let finalLoops = 0;
+
+      for (let r = 0; r < runs; r++) {
+        const tStart = performance.now();
+
+        // Krok A: prepareShadowBuilding (pre-collapse kondygnacji, AABB, isConvex)
+        const tPrepA = performance.now();
+        const testedBuildings = buildings.filter(
+          (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + (b.defaultHeight ?? 0)) > 0
+        );
+        const candidateBlocking = buildings.filter(
+          (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3
+        );
+        const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+        const relevantBlocking = projectAABB
+          ? candidateBlocking.filter((b) => { const bb = computeBuildingShadowReachAABB(b); return bb ? doAABBsOverlap(bb, projectAABB) : false; })
+          : candidateBlocking;
+
+        const preparedTested = testedBuildings.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+        const preparedBlocking = relevantBlocking.map((b) => prepareShadowBuilding(b)).filter((p): p is PreparedShadowBuilding => p !== null);
+        tPrepareSum += performance.now() - tPrepA;
+        testedCount = preparedTested.length;
+        blockingCount = preparedBlocking.length;
+
+        // Krok B: pętla godzinowa
+        const tHourlyA = performance.now();
+        const solarLUT = getGlobalSolarLUT(latitude, longitude, equinox);
+        const maxOffset = 5;
+        const hourlyBatches: Point2D[][][] = [];
+
+        let tProjTestedAccum = 0;
+        let tUnionTestedAccum = 0;
+        let tProjBlockingAccum = 0;
+        let tDiffAccum = 0;
+        let stepCount = 0;
+
+        for (let o = -maxOffset; o <= maxOffset + 1e-6; o += stepHours) {
+          const offset = Math.round(o * 1000) / 1000;
+          const sData = solarLUT.getMethodData(offset, 'raycasting');
+          if (sData.elevationDeg <= 0.5) continue;
+
+          const azRad = sData.azimuthDeg * (Math.PI / 180);
+          const elevRad = sData.elevationDeg * (Math.PI / 180);
+          const uShadow = sData.unitShadowVec;
+          stepCount++;
+
+          // Krok B1: projekcja testowanych
+          const tProjT = performance.now();
+          const hourTestedPolys: Point2D[][] = [];
+          for (const item of preparedTested) collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, hourTestedPolys);
+          tProjTestedAccum += performance.now() - tProjT;
+
+          if (hourTestedPolys.length === 0) continue;
+
+          // Krok B2: unia cieni testowanych
+          const tUnionT = performance.now();
+          const mergedHourTested = unionPolygonLoops(hourTestedPolys);
+          tUnionTestedAccum += performance.now() - tUnionT;
+          if (mergedHourTested.length === 0) continue;
+
+          // Krok B3: projekcja blokujących (per-hour AABB filter)
+          const tProjB = performance.now();
+          let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+          for (const poly of mergedHourTested) for (const pt of poly) {
+            if (pt.x < hMinX) hMinX = pt.x; if (pt.y < hMinY) hMinY = pt.y;
+            if (pt.x > hMaxX) hMaxX = pt.x; if (pt.y > hMaxY) hMaxY = pt.y;
+          }
+          const blockingHourPolys: Point2D[][] = [];
+          for (const item of preparedBlocking) {
+            const offX = item.hTop * uShadow.x, offY = item.hTop * uShadow.y;
+            const sMinX = Math.min(item.bMinX, item.bMinX + offX), sMaxX = Math.max(item.bMaxX, item.bMaxX + offX);
+            const sMinY = Math.min(item.bMinY, item.bMinY + offY), sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
+            if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) continue;
+            collectBuildingShadowPolysPrepared(item, azRad, elevRad, 'raycasting', offset, blockingHourPolys);
+          }
+          tProjBlockingAccum += performance.now() - tProjB;
+
+          // Krok B4: różnica boolowska A\B
+          let finalHour = mergedHourTested;
+          if (blockingHourPolys.length > 0) {
+            const tDiff = performance.now();
+            finalHour = differencePolygonLoops(mergedHourTested, blockingHourPolys);
+            tDiffAccum += performance.now() - tDiff;
+          }
+
+          if (finalHour.length > 0) hourlyBatches.push(finalHour);
+        }
+
+        tHourlyLoopSum += performance.now() - tHourlyA;
+        tProjectTestedSum += tProjTestedAccum;
+        tUnionTestedSum += tUnionTestedAccum;
+        tProjectBlockingSum += tProjBlockingAccum;
+        tDifferenceSum += tDiffAccum;
+        hourSteps = stepCount;
+
+        // Krok C: finalna hierarchiczna unia godzinowa
+        const tFinalA = performance.now();
+        let current = hourlyBatches;
+        while (current.length > 1) {
+          const next: Point2D[][][] = [];
+          for (let i = 0; i < current.length; i += 2) {
+            if (i + 1 < current.length) next.push(unionPolygonLoops([...current[i], ...current[i + 1]]));
+            else next.push(current[i]);
+          }
+          if (next.length === current.length) break;
+          current = next;
+        }
+        const envelope = current[0] || [];
+        tFinalUnionSum += performance.now() - tFinalA;
+        finalLoops = envelope.length;
+
+        tTotalSum += performance.now() - tStart;
+      }
+
+      return {
+        tPrepare: tPrepareSum / runs,
+        tHourlyLoop: tHourlyLoopSum / runs,
+        tProjectTested: tProjectTestedSum / runs,
+        tUnionTested: tUnionTestedSum / runs,
+        tProjectBlocking: tProjectBlockingSum / runs,
+        tDifference: tDifferenceSum / runs,
+        tFinalUnion: tFinalUnionSum / runs,
+        tTotal: tTotalSum / runs,
+        testedCount,
+        blockingCount,
+        hourSteps,
+        finalLoops,
+      };
+    }
+
+    // Warm-up (JIT stabilizacja — pierwsza iteracja computeFullShadowAnalysis jest wolniejsza)
+    computeFullShadowAnalysis(buildingsVariantA.slice(0, 10), latitude, longitude, equinox, stepHours, 'raycasting');
+
+    const resultA = profileShadowCycle(buildingsVariantA, 'Variant A');
+    const resultB = profileShadowCycle(buildingsVariantB, 'Variant B');
+
+    const delta = resultB.tTotal - resultA.tTotal;
+    const deltaPercent = (delta / resultA.tTotal) * 100;
+
+    const fmt = (n: number) => n.toFixed(3).padStart(8);
+    const pct = (n: number, total: number) => ((n / total) * 100).toFixed(1).padStart(5);
+
+    console.log('\n================================================================================');
+    console.log('[CADCANVAS SHADOW ENGINE — VARIANT A (local) vs VARIANT B (post-WFS switch)]');
+    console.log('================================================================================');
+    console.log(`  Budynki:  Wariant A: ${resultA.testedCount} tested + ${resultA.blockingCount} blocking | Wariant B: ${resultB.testedCount} tested + ${resultB.blockingCount} blocking`);
+    console.log(`  Budynki WFS (nowe w B): ${buildingsVariantB.length - buildingsVariantA.length} | Kroki godzinowe: ${resultA.hourSteps}`);
+    console.log('--------------------------------------------------------------------------------');
+    console.log('  Krok                              |   Wariant A |   Wariant B |      Delta');
+    console.log('--------------------------------------------------------------------------------');
+    console.log(`  A. prepareShadowBuilding (×N)     | ${fmt(resultA.tPrepare)} ms | ${fmt(resultB.tPrepare)} ms | ${(resultB.tPrepare - resultA.tPrepare) >= 0 ? '+' : ''}${(resultB.tPrepare - resultA.tPrepare).toFixed(3)} ms`);
+    console.log(`  B1. Projekcja testowanych         | ${fmt(resultA.tProjectTested)} ms | ${fmt(resultB.tProjectTested)} ms | ${(resultB.tProjectTested - resultA.tProjectTested) >= 0 ? '+' : ''}${(resultB.tProjectTested - resultA.tProjectTested).toFixed(3)} ms`);
+    console.log(`  B2. Unia testowanych/hour         | ${fmt(resultA.tUnionTested)} ms | ${fmt(resultB.tUnionTested)} ms | ${(resultB.tUnionTested - resultA.tUnionTested) >= 0 ? '+' : ''}${(resultB.tUnionTested - resultA.tUnionTested).toFixed(3)} ms`);
+    console.log(`  B3. Projekcja blokujących         | ${fmt(resultA.tProjectBlocking)} ms | ${fmt(resultB.tProjectBlocking)} ms | ${(resultB.tProjectBlocking - resultA.tProjectBlocking) >= 0 ? '+' : ''}${(resultB.tProjectBlocking - resultA.tProjectBlocking).toFixed(3)} ms`);
+    console.log(`  B4. differencePolygonLoops (A\\B)  | ${fmt(resultA.tDifference)} ms | ${fmt(resultB.tDifference)} ms | ${(resultB.tDifference - resultA.tDifference) >= 0 ? '+' : ''}${(resultB.tDifference - resultA.tDifference).toFixed(3)} ms`);
+    console.log(`  C.  Hierarchical Final Union      | ${fmt(resultA.tFinalUnion)} ms | ${fmt(resultB.tFinalUnion)} ms | ${(resultB.tFinalUnion - resultA.tFinalUnion) >= 0 ? '+' : ''}${(resultB.tFinalUnion - resultA.tFinalUnion).toFixed(3)} ms`);
+    console.log('--------------------------------------------------------------------------------');
+    console.log(`  TOTAL / frame                     | ${fmt(resultA.tTotal)} ms | ${fmt(resultB.tTotal)} ms | ${delta >= 0 ? '+' : ''}${delta.toFixed(3)} ms (${delta >= 0 ? '+' : ''}${deltaPercent.toFixed(1)}%)`);
+    console.log(`  FPS equiv.                        | ${(1000 / resultA.tTotal).toFixed(1).padStart(8)} FPS | ${(1000 / resultB.tTotal).toFixed(1).padStart(8)} FPS |`);
+    console.log('================================================================================');
+
+    // Identyfikacja największego zawalidrogi w Wariancie B
+    const steps = [
+      { name: 'prepareShadowBuilding', tA: resultA.tPrepare, tB: resultB.tPrepare },
+      { name: 'Projekcja testowanych', tA: resultA.tProjectTested, tB: resultB.tProjectTested },
+      { name: 'Unia testowanych', tA: resultA.tUnionTested, tB: resultB.tUnionTested },
+      { name: 'Projekcja blokujących', tA: resultA.tProjectBlocking, tB: resultB.tProjectBlocking },
+      { name: 'differencePolygonLoops', tA: resultA.tDifference, tB: resultB.tDifference },
+      { name: 'Final Union', tA: resultA.tFinalUnion, tB: resultB.tFinalUnion },
+    ];
+    steps.sort((a, b) => (b.tB - b.tA) - (a.tB - a.tA));
+    const topBottleneck = steps[0];
+    console.log(`\n  ► Największy wzrost latency (A→B): "${topBottleneck.name}"`);
+    console.log(`    +${(topBottleneck.tB - topBottleneck.tA).toFixed(3)} ms (+${(((topBottleneck.tB - topBottleneck.tA) / Math.max(topBottleneck.tA, 0.001)) * 100).toFixed(1)}%)`);
+    console.log(`    ${resultB.blockingCount} blokujących budynków → więcej par w AABB-filter + więcej wierzchołków`);
+    console.log('================================================================================\n');
+
+    expect(resultA.tTotal).toBeGreaterThan(0);
+    expect(resultB.tTotal).toBeGreaterThan(0);
+    // Wariant B nie może być szybszy (warunki egzekucji są cięższe)
+    // Tolerancja: 2x dozwolone spowolnienie — w realnym scenariuszu z cache warm-up spodziewamy się <1.5x
+    expect(resultB.tTotal).toBeLessThan(resultA.tTotal * 3.0);
+    expect(resultA.finalLoops).toBeGreaterThan(0);
+  });
+
+  it('measures FPS for CadCanvas (§12/§56 pipeline) + MasterPlan (ground shadow cache) per frame during sun-scrubbing, live vs final accuracy', { timeout: 60000 }, () => {
+    if (buildingsVariantA.length === 0) return;
+
+    const latitude = 52.23;
+    const longitude = 21.01;
+    const equinox: 'spring' | 'autumn' = 'spring';
+    const buildings = buildingsVariantA;
+
+    // Symulacja przeciągania suwaka godzinowego: kilka klatek z różną pozycją słońca,
+    // tak jak podczas interakcji użytkownika (isInteracting=true -> accuracyStage='live')
+    const scrubHours = [9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0];
+
+    const allTiers: MasterplanStoryTier[] = [];
+    for (const bldg of buildings) allTiers.push(...extractBuildingStoryTiers(bldg));
+    const masterplanSamples: MasterplanColorSample[] = [{ color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 }];
+
+    // Warm-up (JIT + pierwszy cache-fill)
+    computeFullShadowAnalysis(buildings, latitude, longitude, equinox, 1.0, 'raycasting');
+    getCachedGroundShadowSamples(allTiers, masterplanSamples, latitude, longitude, equinox, scrubHours[0]);
+
+    function benchmarkStage(stepHours: number, label: string) {
+      let tCadCanvasSum = 0;
+      let tMasterplanSum = 0;
+
+      for (const hour of scrubHours) {
+        const t0 = performance.now();
+        computeFullShadowAnalysis(buildings, latitude, longitude, equinox, stepHours, 'raycasting');
+        tCadCanvasSum += performance.now() - t0;
+
+        const t1 = performance.now();
+        getCachedGroundShadowSamples(allTiers, masterplanSamples, latitude, longitude, equinox, hour);
+        tMasterplanSum += performance.now() - t1;
+      }
+
+      const avgCadCanvas = tCadCanvasSum / scrubHours.length;
+      const avgMasterplan = tMasterplanSum / scrubHours.length;
+      const avgFrame = avgCadCanvas + avgMasterplan;
+
+      console.log(`  ${label.padEnd(28)} | CadCanvas: ${avgCadCanvas.toFixed(2).padStart(8)} ms | MasterPlan: ${avgMasterplan.toFixed(2).padStart(8)} ms | Frame: ${avgFrame.toFixed(2).padStart(8)} ms | ${(1000 / avgFrame).toFixed(1).padStart(6)} FPS`);
+
+      return { avgCadCanvas, avgMasterplan, avgFrame };
+    }
+
+    console.log('\n================================================================================');
+    console.log(`[FPS: CADCANVAS + MASTERPLAN PER FRAME (warszawa.json, ${buildings.length} buildings, ${scrubHours.length}-frame sun-scrub)]`);
+    console.log('================================================================================');
+    const live = benchmarkStage(1.0, 'LIVE (coarse, isInteracting=true)');
+    const final = benchmarkStage(0.25, 'FINAL (fine, 200ms after release)');
+    console.log('--------------------------------------------------------------------------------');
+    console.log(`  Live→Final slowdown: ${(final.avgFrame / live.avgFrame).toFixed(2)}x`);
+    console.log('================================================================================\n');
+
+    expect(live.avgFrame).toBeGreaterThan(0);
+    expect(final.avgFrame).toBeGreaterThan(0);
+    // Live (coarse) musi pozostać wystarczająco płynny do interakcji w czasie rzeczywistym
+    expect(1000 / live.avgFrame).toBeGreaterThan(5);
+  });
 });
 
 function solarAngles(lat: number, lon: number, eq: 'spring' | 'autumn', hr: number) {

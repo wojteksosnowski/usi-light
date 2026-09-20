@@ -16,6 +16,7 @@ export class BuildingsLayer implements CadRenderLayer {
       buildings,
       selectedBuildingId = null,
       selectedBuildingIds = [],
+      openGroupId = null,
       hoveredBuildingId = null,
       hoveredLabelBuildingId = null,
       hoveredEdge = null,
@@ -78,7 +79,8 @@ export class BuildingsLayer implements CadRenderLayer {
       drawingMode === 'align',
       selectedBuildingIds,
       showAnalysisPoints,
-      hoveredLabelBuildingId
+      hoveredLabelBuildingId,
+      openGroupId
     );
   }
 }

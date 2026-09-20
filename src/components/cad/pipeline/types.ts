@@ -25,6 +25,7 @@ export interface CadRenderFrameContext {
   readonly visibleBuildings?: BuildingLoop[];
   readonly selectedBuildingId?: string | null;
   readonly selectedBuildingIds?: string[];
+  readonly openGroupId?: string | null;
   readonly hoveredBuildingId?: string | null;
   readonly hoveredLabelBuildingId?: string | null;
   readonly hoveredEdge?: { buildingId: string; edgeIndex: number } | null;
@@ -47,7 +48,8 @@ export interface CadRenderFrameContext {
     ratio: number;
   } | null;
   readonly facadePointMode?: boolean;
-  readonly drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+  readonly drawingMode?: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align';
+  readonly hideOtherLabelsInLinkingMode?: boolean;
   readonly showAnalysisPoints?: boolean;
   readonly showShadowRange?: boolean;
   readonly showShadowFill?: boolean;

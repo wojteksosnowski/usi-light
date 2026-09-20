@@ -1,7 +1,21 @@
 import { CadRenderContext } from '../types';
 import { Point2D } from '../../../types/geometry';
-import { getPolygonInteriorPoint, computePolygonDominantAngle, isPointInPolygon, splitSegmentByOccludingPolygons, distancePointToSegment, calculateOutwardNormal, isPolygonCCW, applyMatrixToContext, createViewportMatrix } from '@/utils/math2d';
+import {
+  getPolygonInteriorPoint,
+  computePolygonDominantAngle,
+  isPointInPolygon,
+  splitSegmentByOccludingPolygons,
+  distancePointToSegment,
+  calculateOutwardNormal,
+  isPolygonCCW,
+  applyMatrixToContext,
+  createViewportMatrix,
+  computeGroupEnvelope,
+  resolveScreenLabelPositions,
+  ScreenLabelItem,
+} from '@/utils/math2d';
 import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
+import { isBuildingVariantActive, isBuildingDimmedInGroupMode } from '@/utils/geometrySelectors';
 
 export interface EditingEdgeLengthState {
   buildingId: string;
@@ -54,24 +68,32 @@ const NON_TESTED_FILL = { normal: 'rgba(203, 213, 225, 0.08)', selected: 'rgba(2
 // Kolory obiektów 'boundary' (działka=czerwony, plac zabaw=bursztynowy, utwardzenie=stalowo-szary), z osobną wersją dla
 // isTested=true ("obiekt badany", wyraźnie eksponowana) i isTested!=true (stonowana).
 const BOUNDARY_RGB = { plot: '239, 68, 68', playground: '245, 158, 11', paved: '148, 163, 184' };
-function getBoundaryStyle(areaType: 'plot' | 'playground' | 'paved' = 'plot', isTested: boolean = false) {
-  const rgb = BOUNDARY_RGB[areaType] || BOUNDARY_RGB.plot;
-  const strokeOpacity = isTested ? 0.9 : 0.65;
-  const selectedStroke =
-    areaType === 'playground'
-      ? '#f59e0b'
-      : areaType === 'paved'
-      ? '#94a3b8'
-      : '#ef4444';
+// Akcent "Inwestycja towarzysząca" (isAccompanyingInvestment) - rozłączny z isTested, niebieski (#3b82f6).
+const ACCOMPANYING_RGB = '59, 130, 246';
+function getBoundaryStyle(
+  areaType: 'plot' | 'playground' | 'paved' = 'plot',
+  isTested: boolean = false,
+  isAccompanyingInvestment: boolean = false
+) {
+  const rgb = isAccompanyingInvestment ? ACCOMPANYING_RGB : BOUNDARY_RGB[areaType] || BOUNDARY_RGB.plot;
+  const emphasized = isTested || isAccompanyingInvestment;
+  const strokeOpacity = emphasized ? 0.9 : 0.65;
+  const selectedStroke = isAccompanyingInvestment
+    ? '#3b82f6'
+    : areaType === 'playground'
+    ? '#f59e0b'
+    : areaType === 'paved'
+    ? '#94a3b8'
+    : '#ef4444';
 
   return {
-    strokeSelected: isTested ? selectedStroke : `rgba(${rgb}, 0.85)`,
+    strokeSelected: emphasized ? selectedStroke : `rgba(${rgb}, 0.85)`,
     strokeDefault: `rgba(${rgb}, ${strokeOpacity})`,
-    strokeWidthSelected: isTested ? 2.5 : 1.8,
-    strokeWidthDefault: isTested ? 1.8 : 1.4,
-    fillSelected: isTested ? `rgba(${rgb}, 0.22)` : `rgba(${rgb}, 0.12)`,
-    fillHover: isTested ? `rgba(${rgb}, 0.16)` : `rgba(${rgb}, 0.08)`,
-    fillDefault: isTested ? `rgba(${rgb}, 0.10)` : `rgba(${rgb}, 0.05)`,
+    strokeWidthSelected: emphasized ? 2.5 : 1.8,
+    strokeWidthDefault: emphasized ? 1.8 : 1.4,
+    fillSelected: emphasized ? `rgba(${rgb}, 0.22)` : `rgba(${rgb}, 0.12)`,
+    fillHover: emphasized ? `rgba(${rgb}, 0.16)` : `rgba(${rgb}, 0.08)`,
+    fillDefault: emphasized ? `rgba(${rgb}, 0.10)` : `rgba(${rgb}, 0.05)`,
   };
 }
 
@@ -124,6 +146,89 @@ export function getBuildingLabelCardSize(bldg: any): { cardW: number; cardH: num
 }
 
 /**
+ * Zbiera i rozmieszcza etykiety '+' / '-' trybu isLinkingMode dla budynku wybranego (selectedBuildingId)
+ * względem pozostałych budynków w scenie. Współdzielone przez hit-testing i renderowanie.
+ */
+function collectLinkingModeLabels(
+  buildings: any[],
+  selectedBuildingId: string,
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  layerSettings: Record<string, any>,
+  currentGroupId: string | null | undefined
+): ReturnType<typeof resolveScreenLabelPositions> {
+  const labelItems: ScreenLabelItem[] = [];
+  for (const bldg of buildings) {
+    if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
+    if (!isBuildingVariantActive(bldg)) continue;
+    const lyr = bldg.layer || 'Bariery';
+    if (layerSettings[lyr]?.isVisible === false) continue;
+
+    const geo = getOrComputeBuildingGeo(bldg);
+    if (!geo) continue;
+
+    const { sx, sy } = worldToScreen(geo.labelAnchor.x, geo.labelAnchor.y);
+    if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
+
+    const isMember = currentGroupId ? bldg.groupId === currentGroupId : bldg.id === selectedBuildingId;
+    labelItems.push({
+      id: bldg.id,
+      originalAnchor: geo.labelAnchor,
+      screenPos: { sx, sy },
+      width: 28,
+      height: 28,
+      type: isMember ? 'minus' : 'plus',
+    });
+  }
+
+  return resolveScreenLabelPositions(labelItems, 4);
+}
+
+/**
+ * Sprawdza czy kliknięcie w punkcie ekranowym (screenX, screenY) w trybie isLinkingMode
+ * trafiło w interaktywną etykietę '+' (dodaj do grupy) lub '-' (odłącz z grupy).
+ */
+export function getLinkingActionHitAtPoint(
+  screenX: number,
+  screenY: number,
+  buildings: any[],
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  selectedBuildingId: string | null,
+  layerSettings: Record<string, any> = {}
+): { buildingId: string; action: 'add' | 'remove' } | null {
+  if (!selectedBuildingId) return null;
+  const selectedBldg = buildings.find((b) => b.id === selectedBuildingId);
+  if (!selectedBldg) return null;
+
+  const placedLabels = collectLinkingModeLabels(
+    buildings,
+    selectedBuildingId,
+    worldToScreen,
+    layerSettings,
+    selectedBldg.groupId
+  );
+
+  for (let i = placedLabels.length - 1; i >= 0; i--) {
+    const item = placedLabels[i];
+    const halfW = item.width / 2 + 3;
+    const halfH = item.height / 2 + 3;
+
+    if (
+      screenX >= item.placedScreenPos.sx - halfW &&
+      screenX <= item.placedScreenPos.sx + halfW &&
+      screenY >= item.placedScreenPos.sy - halfH &&
+      screenY <= item.placedScreenPos.sy + halfH
+    ) {
+      return {
+        buildingId: item.id,
+        action: item.type === 'minus' ? 'remove' : 'add',
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Sprawdza czy kliknięcie w punkcie ekranowym (screenX, screenY) trafiło w etykietę/kartę obiektu.
  */
 export function getBuildingLabelHitAtPoint(
@@ -137,6 +242,7 @@ export function getBuildingLabelHitAtPoint(
   for (let i = buildings.length - 1; i >= 0; i--) {
     const bldg = buildings[i];
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
+    if (!isBuildingVariantActive(bldg)) continue;
 
     const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
@@ -498,7 +604,8 @@ export function renderBuildings(
   isRotateMode?: boolean,
   selectedBuildingIds: string[] = [],
   showAnalysisPoints: boolean = true,
-  hoveredLabelBuildingId: string | null = null
+  hoveredLabelBuildingId: string | null = null,
+  openGroupId: string | null = null
 ) {
 
   const { ctx, worldToScreen, screenToWorld, width, height, viewState, viewRotationDeg } = rc;
@@ -552,8 +659,15 @@ export function renderBuildings(
   // w jedną pętlę (jeden save/cull/setup per budynek) to kolejny potencjalny krok dalszej
   // redukcji narzutu - odłożone jako średnie-ryzyko (Pass 1 używa ctx.setTransform, Pass 2
   // pracuje w przestrzeni ekranu przez worldToScreen), wymaga dokładnego QA wizualnego przed/po.
+  // Sprawdzenie, czy aktywny jest obiekt logiczny lub otwarta grupa
+  const selectedBldgForGroup = selectedBuildingId ? buildings.find((b) => b.id === selectedBuildingId) : null;
+  const activeLogicalGroupId = openGroupId || (selectedBldgForGroup?.groupId ? selectedBldgForGroup.groupId : null);
+
   for (const bldg of buildings) {
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
+
+    // Filtrowanie wariantu A/B dla obiektów logicznych (gdy obiekt ma przypisany wariant różny od aktywnego)
+    if (!isBuildingVariantActive(bldg)) continue;
 
     const geo = getOrComputeBuildingGeo(bldg);
     if (!geo) continue;
@@ -573,7 +687,14 @@ export function renderBuildings(
     const isTested = bldg.isTested;
     const isIncluded = bldg.isIncluded !== false;
 
+    // Przygaszanie obiektów, które nie wchodzą w skład otwartej grupy (wyłącznie w trybie edycji grupy)
+    const isDimmed = isBuildingDimmedInGroupMode(bldg, openGroupId, isSelected);
+
     ctx.save();
+
+    if (isDimmed) {
+      ctx.globalAlpha = 0.28;
+    }
 
     const vm = rc.viewportMatrix || createViewportMatrix(viewState.panX, viewState.panY, viewState.scale, viewRotationDeg);
     applyMatrixToContext(vm, ctx);
@@ -583,7 +704,7 @@ export function renderBuildings(
     const isBalcony = bldg.category === 'balcony';
 
     if (isBoundary) {
-      const bs = getBoundaryStyle(areaType, bldg.isTested === true);
+      const bs = getBoundaryStyle(areaType, bldg.isTested === true, bldg.isAccompanyingInvestment === true);
       ctx.fillStyle = isSelected
         ? bs.fillSelected
         : bldg.id === hoveredBuildingId
@@ -676,7 +797,7 @@ export function renderBuildings(
     } else if (isSelected) {
       ctx.lineWidth = (isBoundary ? 2.0 : 2.5) / s;
       ctx.strokeStyle = isBoundary
-        ? getBoundaryStyle(areaType, bldg.isTested === true).strokeSelected
+        ? getBoundaryStyle(areaType, bldg.isTested === true, bldg.isAccompanyingInvestment === true).strokeSelected
         : isBalcony
         ? '#c084fc'
         : isTested
@@ -728,6 +849,9 @@ export function renderBuildings(
   for (const bldg of buildings) {
     if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) continue;
 
+    // Filtrowanie wariantu A/B dla obiektów logicznych (gdy obiekt ma przypisany wariant różny od aktywnego)
+    if (!isBuildingVariantActive(bldg)) continue;
+
     const geo = getOrComputeBuildingGeo(bldg);
     if (!geo) continue;
 
@@ -746,9 +870,17 @@ export function renderBuildings(
     const isTested = bldg.isTested;
     const isIncluded = bldg.isIncluded !== false;
 
+    // Przygaszanie obiektów, które nie wchodzą w skład otwartej grupy (wyłącznie w trybie edycji grupy)
+    const isDimmed = isBuildingDimmedInGroupMode(bldg, openGroupId, isSelected);
+
     const isSweep = Array.isArray(bldg.sweepPath) && bldg.sweepPath.length >= 2;
     const bldgIsBoundary = bldg.category === 'boundary';
     const bldgIsPlayground = bldgIsBoundary && bldg.areaType === 'playground';
+
+    ctx.save();
+    if (isDimmed) {
+      ctx.globalAlpha = 0.28;
+    }
 
     // Kandydaci na przesłaniające budynki, ograniczeni RAZ na budynek (nie per-segment) do tych,
     // których AABB w ogóle przecina AABB tego budynku - dużo mniejszy zbiór niż cała scena.
@@ -869,7 +1001,7 @@ export function renderBuildings(
           strokeColor = '#38bdf8';
           strokeWidth = 4;
         } else if (isBoundary) {
-          const bs = getBoundaryStyle(bldg.areaType || 'plot', isTested === true);
+          const bs = getBoundaryStyle(bldg.areaType || 'plot', isTested === true, bldg.isAccompanyingInvestment === true);
           strokeColor = isSelected ? bs.strokeSelected : bs.strokeDefault;
           strokeWidth = isSelected ? bs.strokeWidthSelected : bs.strokeWidthDefault;
         } else if (isBalcony) {
@@ -954,7 +1086,7 @@ export function renderBuildings(
       // Etykiety pokazują wyłącznie krawędzie geometrii źródłowej (bldg.vertices),
       // nie odcinki wygenerowane przez modyfikatory (uskok/wykusz/taras/donat/ścięcie).
       // Hidden during vertex editing and rotation to not obstruct handles/rotations
-      if (isSelected && Array.isArray(bldg.vertices) && bldg.vertices.length >= 3 && !isVertexEditMode && !isRotateMode) {
+      if (isSelected && Array.isArray(bldg.vertices) && bldg.vertices.length >= 3 && !isVertexEditMode && !isRotateMode && !isLinkingMode) {
         const baseVertices = bldg.vertices;
         const nBase = baseVertices.length;
         const baseIsCCW = isPolygonCCW(baseVertices);
@@ -1062,8 +1194,8 @@ export function renderBuildings(
       }
     }
 
-    // Centroid Label for Building
-    if (geo) {
+    // Centroid Label for Building (schowane w trybie łączenia obiektów dla czystości interfejsu)
+    if (geo && !isLinkingMode) {
       // Szybkie odrzucenie O(1) przy oddalonym zoomie
       if (viewState.scale >= geo.minScaleForLabel) {
         const cx = geo.labelAnchor.x;
@@ -1272,7 +1404,7 @@ export function renderBuildings(
     const f = viewState.panY;
 
     for (const group of mergeableGroups) {
-      if (!group.mergedVertices || group.mergedVertices.length < 3) continue;
+      if (!group.outer || group.outer.length < 3) continue;
       const isSelected = isBuildingSelected(group.buildingIds[0]);
       const isPlayground = group.areaType === 'playground';
 
@@ -1280,14 +1412,30 @@ export function renderBuildings(
       ctx.setTransform(a, b, c, d, e, f);
 
       const envelopePath = new Path2D();
-      envelopePath.moveTo(group.mergedVertices[0].x, group.mergedVertices[0].y);
-      for (let i = 1; i < group.mergedVertices.length; i++) {
-        envelopePath.lineTo(group.mergedVertices[i].x, group.mergedVertices[i].y);
+      envelopePath.moveTo(group.outer[0].x, group.outer[0].y);
+      for (let i = 1; i < group.outer.length; i++) {
+        envelopePath.lineTo(group.outer[i].x, group.outer[i].y);
       }
       envelopePath.closePath();
+      // Otwory (np. wspólne podwórko po unii) dodane jako osobne podścieżki - rysowane tym samym
+      // ctx.stroke(), więc kontur otworu jest widoczny; przy ewentualnym fill trzeba by użyć 'evenodd'.
+      for (const hole of group.holes || []) {
+        if (!hole || hole.length < 3) continue;
+        envelopePath.moveTo(hole[0].x, hole[0].y);
+        for (let i = 1; i < hole.length; i++) {
+          envelopePath.lineTo(hole[i].x, hole[i].y);
+        }
+        envelopePath.closePath();
+      }
 
-      // Grupy łączone istnieją tylko dla isTested===true (patrz detectBoundaryMergeGroups).
-      const bs = getBoundaryStyle(group.areaType || (isPlayground ? 'playground' : 'plot'), true);
+      // Grupy łączone istnieją dla puli isTested albo isAccompanyingInvestment (patrz
+      // detectBoundaryMergeGroups) - kolor akcentu dobieramy na podstawie `poolKind`, ustawionego
+      // raz przy budowie grupy, więc renderer nie przeszukuje ponownie `buildings`.
+      const bs = getBoundaryStyle(
+        group.areaType || (isPlayground ? 'playground' : 'plot'),
+        group.poolKind === 'tested',
+        group.poolKind === 'accompanying'
+      );
       ctx.lineWidth = (isSelected ? bs.strokeWidthSelected : bs.strokeWidthDefault) / s;
       ctx.strokeStyle = isSelected ? bs.strokeSelected : bs.strokeDefault;
       ctx.setLineDash([]);
@@ -1309,56 +1457,56 @@ export function renderBuildings(
     }
   }
 
-  // 3. Render Group Links / Link Handles
-  const groupBuildings = new Map<string, any[]>();
-  buildings.forEach((b) => {
-    if (b.groupId) {
-      if (!groupBuildings.has(b.groupId)) groupBuildings.set(b.groupId, []);
-      groupBuildings.get(b.groupId)!.push(b);
-    }
-  });
+  // 2.6 Render Group Envelope for Active Group Selection or Linking Mode
+  const shouldRenderGroupEnvelope = (isLinkingMode && selectedBuildingId) || (!!activeLogicalGroupId && (!openGroupId || openGroupId === activeLogicalGroupId));
+  if (shouldRenderGroupEnvelope) {
+    const targetGroupId = activeLogicalGroupId;
+    const activeGroupBuildings = targetGroupId
+      ? buildings.filter((b) => b.groupId === targetGroupId && isBuildingVariantActive(b))
+      : selectedBldgForGroup
+      ? [selectedBldgForGroup]
+      : [];
 
-  groupBuildings.forEach((bldgs) => {
-    if (bldgs.length < 2) return;
-    for (let i = 0; i < bldgs.length - 1; i++) {
-      const b1 = bldgs[i];
-      const b2 = bldgs[i + 1];
-      if (!b1.vertices?.length || !b2.vertices?.length) continue;
+    if (activeGroupBuildings.length > 1 || (isLinkingMode && activeGroupBuildings.length > 0)) {
+      const envelopeLoops = computeGroupEnvelope(activeGroupBuildings, 1.0);
 
-      const c1 = b1.vertices.reduce((acc: any, v: any) => ({ x: acc.x + v.x / b1.vertices.length, y: acc.y + v.y / b1.vertices.length }), { x: 0, y: 0 });
-      const c2 = b2.vertices.reduce((acc: any, v: any) => ({ x: acc.x + v.x / b2.vertices.length, y: acc.y + v.y / b2.vertices.length }), { x: 0, y: 0 });
+      if (envelopeLoops.length > 0) {
+        const rot = ((viewRotationDeg || 0) * Math.PI) / 180;
+        const cosR = Math.cos(rot);
+        const sinR = Math.sin(rot);
+        const a = s * cosR;
+        const b = -s * sinR;
+        const c = -s * sinR;
+        const d = -s * cosR;
+        const e = viewState.panX;
+        const f = viewState.panY;
 
-      const s1 = worldToScreen(c1.x, c1.y);
-      const s2 = worldToScreen(c2.x, c2.y);
+        ctx.save();
+        ctx.setTransform(a, b, c, d, e, f);
 
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(s1.sx, s1.sy);
-      ctx.lineTo(s2.sx, s2.sy);
-      ctx.stroke();
+        for (const loop of envelopeLoops) {
+          if (!loop || loop.length < 3) continue;
+          const path = new Path2D();
+          path.moveTo(loop[0].x, loop[0].y);
+          for (let i = 1; i < loop.length; i++) {
+            path.lineTo(loop[i].x, loop[i].y);
+          }
+          path.closePath();
 
-      const midX = (s1.sx + s2.sx) / 2;
-      const midY = (s1.sy + s2.sy) / 2;
-      if (Number.isFinite(midX) && Number.isFinite(midY)) {
-        ctx.fillStyle = '#0f172a';
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(midX, midY, 9, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.stroke();
+          ctx.fillStyle = isLinkingMode ? 'rgba(245, 158, 11, 0.12)' : 'rgba(56, 189, 248, 0.08)';
+          ctx.fill(path);
 
-        ctx.font = '10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🔗', midX, midY + 1);
+          ctx.lineWidth = 2.0 / s;
+          ctx.strokeStyle = isLinkingMode ? '#f59e0b' : '#38bdf8';
+          ctx.setLineDash([6 / s, 4 / s]);
+          ctx.stroke(path);
+          ctx.setLineDash([]);
+        }
+
+        ctx.restore();
       }
-      ctx.restore();
     }
-  });
+  }
 
   // 4. Render All Pinned Analysis Points (P1, P2, P3)
   if (showAnalysisPoints && pinnedPointResults && pinnedPointResults.length > 0) {
@@ -1471,35 +1619,50 @@ export function renderBuildings(
     }
   }
 
-  // 6. Linking Mode Interactive Link Preview
-  if (isLinkingMode && linkingSourceId) {
-    const srcBldg = buildings.find((b) => b.id === linkingSourceId);
-    if (srcBldg && srcBldg.vertices.length > 0) {
-      const srcCentroid = srcBldg.vertices.reduce(
-        (acc: any, v: any) => ({ x: acc.x + v.x / srcBldg.vertices.length, y: acc.y + v.y / srcBldg.vertices.length }),
-        { x: 0, y: 0 }
+  // 6. Linking Mode: Render Non-Overlapping Interactive '+' and '-' Action Badges
+  if (isLinkingMode && selectedBuildingId) {
+    const selectedBldg = buildings.find((b) => b.id === selectedBuildingId);
+    if (selectedBldg) {
+      const placedLabels = collectLinkingModeLabels(
+        buildings,
+        selectedBuildingId,
+        worldToScreen,
+        layerSettings,
+        selectedBldg.groupId
       );
-      const sc = worldToScreen(srcCentroid.x, srcCentroid.y);
 
-      ctx.save();
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
+      for (const item of placedLabels) {
+        const { sx, sy } = item.placedScreenPos;
+        const isMinus = item.type === 'minus';
+        const isHovered = item.id === hoveredLabelBuildingId || item.id === hoveredBuildingId;
 
-      for (const targetBldg of buildings) {
-        if (targetBldg.id === linkingSourceId) continue;
-        const targetCentroid = targetBldg.vertices.reduce(
-          (acc: any, v: any) => ({ x: acc.x + v.x / targetBldg.vertices.length, y: acc.y + v.y / targetBldg.vertices.length }),
-          { x: 0, y: 0 }
-        );
-        const tc = worldToScreen(targetCentroid.x, targetCentroid.y);
+        ctx.save();
+        ctx.translate(sx, sy);
 
+        const r = 13;
         ctx.beginPath();
-        ctx.moveTo(sc.sx, sc.sy);
-        ctx.lineTo(tc.sx, tc.sy);
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = isMinus
+          ? isHovered
+            ? 'rgba(239, 68, 68, 0.95)'
+            : 'rgba(239, 68, 68, 0.85)'
+          : isHovered
+          ? 'rgba(99, 102, 241, 0.95)'
+          : 'rgba(30, 41, 59, 0.9)';
+        ctx.fill();
+
+        ctx.lineWidth = isHovered ? 2 : 1.5;
+        ctx.strokeStyle = isMinus ? '#fca5a5' : '#818cf8';
         ctx.stroke();
+
+        ctx.font = 'bold 15px Inter, sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(isMinus ? '−' : '+', 0, 0);
+
+        ctx.restore();
       }
-      ctx.restore();
     }
   }
 }

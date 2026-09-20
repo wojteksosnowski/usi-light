@@ -92,7 +92,7 @@ export * from './modifiers';
 import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
 
 
-export type ObjectCategory = 'building' | 'boundary' | 'balcony';
+export type ObjectCategory = 'building' | 'boundary' | 'balcony' | 'compound';
 export type AreaType = 'plot' | 'playground' | 'paved';
 
 export interface PlaygroundSamplePoint {
@@ -137,6 +137,7 @@ export interface BuildingLoop {
   zonePolygons?: ZoneFootprint[]; // Wyliczone obrysy stref buforowych / obszarów
   layer: string;
   isTested: boolean; // True for the building under analysis, false for existing/obstacles
+  isAccompanyingInvestment?: boolean; // "Inwestycja towarzysząca" — status rozłączny z isTested, akcent niebieski, dla dzialek (category: 'boundary')
   isIncluded?: boolean; // True (default) if included in calculations (as tested or obstacle); false to ignore
   isLocked?: boolean; // Indywidualna kłódka obiektu (blokada przesuwania i edycji)
   isGhosted?: boolean; // Indywidualny tryb ducha (pomijanie kliknięć i selekcji)

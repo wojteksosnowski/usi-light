@@ -6,6 +6,7 @@ import { computeLineEquation, rebuildBuildingSegments } from '../utils/segmentSt
 import { translateLineBuffer, rotateLineBuffer } from '../utils/lineBufferEngine';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
+import { useUiStore } from './useUiStore';
 
 export interface SavedSceneData {
   version: 1;
@@ -51,10 +52,13 @@ interface SceneState {
   dxfImportInfo: DxfUnitInfo | null;
   lastDxfText: string | null;
 
+  openGroupId: string | null; // ID grupy logicznej, do której wnętrza użytkownik wszedł (izolacja grupy)
+
   // Actions
   setBuildings: (buildings: BuildingLoop[] | ((prev: BuildingLoop[]) => BuildingLoop[])) => void;
   setSelectedBuildingId: (id: string | null) => void;
   setSelectedBuildingIds: (ids: string[]) => void;
+  setOpenGroupId: (groupId: string | null) => void;
   selectBuilding: (id: string | null, isMultiSelect?: boolean) => void;
   addBuilding: (building: BuildingLoop) => void;
   deleteBuilding: (id: string) => void;
@@ -85,6 +89,8 @@ interface SceneState {
   performLinkBuildings: (sourceId: string, targetId: string) => void;
   performUnlinkBuilding: (id: string) => void;
   performUnlinkAllInGroup: (groupId: string) => void;
+  updateGroup: (groupId: string, patch: Partial<BuildingLoop>) => void;
+  rotateGroup: (groupId: string, targetDeg: number) => void;
 
   // Layers
   setLayerSettings: (settings: Record<string, CadLayerSettings> | ((prev: Record<string, CadLayerSettings>) => Record<string, CadLayerSettings>)) => void;
@@ -175,10 +181,7 @@ function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: number): 
 /** Rotates a building's vertices, sweep path, story/zone polygons, and facade segments around a pivot. */
 function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRad: number): BuildingLoop {
   const deltaDeg = (deltaAngleRad * 180) / Math.PI;
-  const rotate = (v: Point2D) => {
-    const r = rotatePointAroundPivot(v, pivot, deltaAngleRad);
-    return { x: pivot.x + r.x, y: pivot.y + r.y };
-  };
+  const rotate = (v: Point2D) => rotatePointAroundPivot(v, pivot, deltaAngleRad);
   const rotateNormal = (n: Point2D) => rotatePointAroundPivot(n, { x: 0, y: 0 }, deltaAngleRad);
 
   const newVertices = bldg.vertices.map(rotate);
@@ -248,6 +251,7 @@ export const useSceneStore = create<SceneState>()(
   dxfUnit: 'auto',
   dxfImportInfo: null,
   lastDxfText: null,
+  openGroupId: null,
 
   setBuildings: (updater) => {
     set((state) => ({
@@ -255,10 +259,26 @@ export const useSceneStore = create<SceneState>()(
     }));
   },
 
+  setOpenGroupId: (groupId) => {
+    set({ openGroupId: groupId });
+  },
+
   setSelectedBuildingId: (id) => {
-    set({
-      selectedBuildingId: id,
-      selectedBuildingIds: id ? [id] : [],
+    set((state) => {
+      const bldg = id ? state.buildings.find((b) => b.id === id) : null;
+      // Jeśli obiekt należy do grupy, a nie jesteśmy wewnątrz tej grupy, zaznaczamy wszystkie obiekty grupy
+      if (bldg?.groupId && state.openGroupId !== bldg.groupId) {
+        const groupBldgs = state.buildings.filter((b) => b.groupId === bldg.groupId);
+        const groupIds = groupBldgs.map((b) => b.id);
+        return {
+          selectedBuildingId: id,
+          selectedBuildingIds: groupIds,
+        };
+      }
+      return {
+        selectedBuildingId: id,
+        selectedBuildingIds: id ? [id] : [],
+      };
     });
   },
 
@@ -270,22 +290,31 @@ export const useSceneStore = create<SceneState>()(
   },
 
   selectBuilding: (id, isMultiSelect = false) => {
-    const { isLinkingMode, linkingSourceId, performLinkBuildings } = get();
+    const { isLinkingMode, linkingSourceId, performLinkBuildings, buildings, openGroupId } = get();
     if (isLinkingMode && linkingSourceId && id && id !== linkingSourceId) {
       performLinkBuildings(linkingSourceId, id);
-      set({
-        isLinkingMode: false,
-        linkingSourceId: null,
-        selectedBuildingId: id,
-        selectedBuildingIds: [id],
-      });
       return;
     }
 
     if (!id) {
-      set({ selectedBuildingId: null, selectedBuildingIds: [] });
+      set({ selectedBuildingId: null, selectedBuildingIds: [], openGroupId: null });
       return;
     }
+
+    // Automatycznie otwieramy sidebar i przełączamy na 'Warstwy i obiekty' przy wyborze obiektu
+    const uiState = useUiStore.getState();
+    if (!uiState.isSidebarOpen) {
+      uiState.setSidebarOpen(true);
+    }
+    if (uiState.openSidebarGroup !== 'layers') {
+      uiState.setOpenSidebarGroup('layers');
+    }
+
+    const clickedBldg = buildings.find((b) => b.id === id);
+    const clickedGroupId = clickedBldg?.groupId;
+
+    // Jeśli kliknięto obiekt poza aktualnie otwartą grupą, zamykamy otwartą grupę
+    const nextOpenGroupId = clickedGroupId && openGroupId === clickedGroupId ? openGroupId : null;
 
     if (isMultiSelect) {
       set((state) => {
@@ -296,13 +325,27 @@ export const useSceneStore = create<SceneState>()(
         return {
           selectedBuildingIds: nextIds,
           selectedBuildingId: nextIds.length > 0 ? nextIds[nextIds.length - 1] : null,
+          openGroupId: nextOpenGroupId,
         };
       });
     } else {
-      set({
-        selectedBuildingId: id,
-        selectedBuildingIds: [id],
-      });
+      // Jeśli obiekt należy do grupy logicznej, a nie jesteśmy wewnątrz grupy -> zaznaczamy wszystkie obiekty grupy
+      if (clickedGroupId && nextOpenGroupId !== clickedGroupId) {
+        const groupBldgIds = buildings
+          .filter((b) => b.groupId === clickedGroupId)
+          .map((b) => b.id);
+        set({
+          selectedBuildingId: id,
+          selectedBuildingIds: groupBldgIds,
+          openGroupId: null,
+        });
+      } else {
+        set({
+          selectedBuildingId: id,
+          selectedBuildingIds: [id],
+          openGroupId: nextOpenGroupId,
+        });
+      }
     }
   },
 
@@ -548,10 +591,11 @@ export const useSceneStore = create<SceneState>()(
     set((state) => {
       const targetBldg = state.buildings.find((b) => b.id === id);
       const targetGroupId = targetBldg?.groupId;
+      const isGroupOpen = !!targetGroupId && state.openGroupId === targetGroupId;
 
       return {
         buildings: state.buildings.map((bldg) => {
-          const shouldMove = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
+          const shouldMove = bldg.id === id || (!isGroupOpen && !!targetGroupId && bldg.groupId === targetGroupId);
           if (!shouldMove) return bldg;
           return translateBuildingGeometry(bldg, dx, dy);
         }),
@@ -565,7 +609,10 @@ export const useSceneStore = create<SceneState>()(
       const targetGroupIds = new Set<string>();
       ids.forEach((id) => {
         const b = state.buildings.find((item) => item.id === id);
-        if (b?.groupId) targetGroupIds.add(b.groupId);
+        // Jeśli dana grupa nie jest otwarta w trybie wnętrza, dołączamy jej obiekty do przesunięcia grupowego
+        if (b?.groupId && state.openGroupId !== b.groupId) {
+          targetGroupIds.add(b.groupId);
+        }
       });
 
       const idsSet = new Set(ids);
@@ -610,15 +657,16 @@ export const useSceneStore = create<SceneState>()(
           }
         }
 
-        const newVerts = offsetPolygonEdge(bldg.vertices, edgeIndex, { x: dx, y: dy });
-        const updated = updateBuildingWithNewVertices(bldg, newVerts);
-        if (updated.modifiers && updated.modifiers.length > 0) {
-          const modRes = applyBuildingModifiers(updated);
-          updated.storyPolygons = modRes.storyPolygons;
-          updated.zonePolygons = modRes.zonePolygons;
-          updated.segments = modRes.segments;
+        // Standardowy poligon budynku: przesunięcie krawędzi z zachowaniem kątów sąsiednich ścian
+        const newVertices = offsetPolygonEdge(bldg.vertices, edgeIndex, { x: dx, y: dy });
+        const rebuilt = rebuildBuildingSegments(bldg, newVertices);
+        if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+          const modRes = applyBuildingModifiers(rebuilt);
+          rebuilt.storyPolygons = modRes.storyPolygons;
+          rebuilt.zonePolygons = modRes.zonePolygons;
+          rebuilt.segments = modRes.segments;
         }
-        return updated;
+        return rebuilt;
       }),
     }));
   },
@@ -627,10 +675,11 @@ export const useSceneStore = create<SceneState>()(
     set((state) => {
       const targetBldg = state.buildings.find((b) => b.id === id);
       const targetGroupId = targetBldg?.groupId;
+      const isGroupOpen = !!targetGroupId && state.openGroupId === targetGroupId;
 
       return {
         buildings: state.buildings.map((bldg) => {
-          const shouldRotate = bldg.id === id || (!!targetGroupId && bldg.groupId === targetGroupId);
+          const shouldRotate = bldg.id === id || (!isGroupOpen && !!targetGroupId && bldg.groupId === targetGroupId);
           if (!shouldRotate) return bldg;
           return rotateBuildingGeometry(bldg, pivot, deltaAngleRad);
         }),
@@ -688,6 +737,8 @@ export const useSceneStore = create<SceneState>()(
     set((state) => ({
       buildings: state.buildings.map((bldg) => {
         if (bldg.id !== buildingId) return bldg;
+        // Obiekt połączony w grupę logiczną (Node / Compound) nie może posiadać modyfikatorów
+        if (bldg.groupId || bldg.category === 'compound') return bldg;
         const currentMods = bldg.modifiers || [];
         const newMods = [...currentMods, modifier];
         const withMods = { ...bldg, modifiers: newMods };
@@ -840,6 +891,44 @@ export const useSceneStore = create<SceneState>()(
     set((state) => ({
       buildings: state.buildings.map((b) => (b.groupId === groupId ? { ...b, groupId: undefined } : b)),
     }));
+  },
+
+  updateGroup: (groupId, patch) => {
+    set((state) => ({
+      buildings: state.buildings.map((b) => {
+        if (b.groupId !== groupId) return b;
+        return { ...b, ...patch };
+      }),
+    }));
+  },
+
+  rotateGroup: (groupId, targetDeg) => {
+    set((state) => {
+      const groupBuildings = state.buildings.filter((b) => b.groupId === groupId);
+      if (groupBuildings.length === 0) return state;
+
+      // Wyznacz wspólny centroid dla wszystkich obiektów grupy
+      const targetBldgs = groupBuildings;
+
+      const allVertices = targetBldgs.flatMap((b) => b.vertices || []);
+      if (allVertices.length === 0) return state;
+
+      const pivot = getPolygonCentroid(allVertices);
+
+      // Oblicz bieżący kąt grupy
+      const currentRot = targetBldgs[0]?.transform?.rotationDeg ?? 0;
+      let deltaDeg = targetDeg - currentRot;
+      while (deltaDeg > 180) deltaDeg -= 360;
+      while (deltaDeg < -180) deltaDeg += 360;
+      const deltaRad = (deltaDeg * Math.PI) / 180;
+
+      return {
+        buildings: state.buildings.map((bldg) => {
+          if (bldg.groupId !== groupId) return bldg;
+          return rotateBuildingGeometry(bldg, pivot, deltaRad);
+        }),
+      };
+    });
   },
 
   setLayerSettings: (updater) => {

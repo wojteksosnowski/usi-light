@@ -6,7 +6,7 @@ import { parseDxfWithMetadata } from '../src/utils/dxfParser';
 describe('dxfParser - mapa.dxf', () => {
   it('parses reference/mapa.dxf extracting 11 buildings and detecting PL-1992', () => {
     const filePath = path.resolve(__dirname, '../reference/mapa.dxf');
-    if (!fs.existsSync(filePath)) return;
+    expect(fs.existsSync(filePath)).toBe(true);
 
     const content = fs.readFileSync(filePath, 'utf-8');
     const res = parseDxfWithMetadata(content);

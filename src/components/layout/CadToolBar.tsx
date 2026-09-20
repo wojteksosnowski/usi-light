@@ -308,10 +308,10 @@ export const CadToolBar: React.FC = () => {
           }}
           title={
             isLinkingMode
-              ? 'Tryb łączenia aktywny — kliknij drugi obiekt na scenie, aby go połączyć (lub kliknij ponownie, aby anulować)'
+              ? 'Tryb łączenia aktywny — klikaj etykiety [+] aby dodać, lub [−] aby odłączyć obiekt (kliknij ponownie, aby zamknąć)'
               : selectedBuildingId
-              ? `Połącz ${selectedBuilding ? selectedBuilding.name : 'zaznaczony obiekt'} z innym obiektem`
-              : 'Zaznacz obiekt, aby go połączyć'
+              ? `Połącz ${selectedBuilding ? selectedBuilding.name : 'zaznaczony obiekt'} w grupę obiektów`
+              : 'Zaznacz obiekt, aby zarządzać grupą połączeń'
           }
         >
           <Link2 size={14} />

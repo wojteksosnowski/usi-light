@@ -1,6 +1,7 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation } from '../../../utils/lineBufferEngine';
 import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
+import { filterCandidateLines } from './snapExclusionUtils';
 
 export class VertexSnapStrategy implements SnapStrategy {
   readonly name = 'VertexSnapStrategy';
@@ -19,19 +20,15 @@ export class VertexSnapStrategy implements SnapStrategy {
 
     let candidateEdges: CachedLineEquation[];
     if (context.spatialIndex) {
-      candidateEdges = context.spatialIndex.queryBBox(
+      const queried = context.spatialIndex.queryBBox(
         point.x - snapRadiusWorld,
         point.y - snapRadiusWorld,
         point.x + snapRadiusWorld,
         point.y + snapRadiusWorld
       );
-      if (context.excludeBuildingId) {
-        candidateEdges = candidateEdges.filter((e) => e.objectId !== context.excludeBuildingId);
-      }
+      candidateEdges = filterCandidateLines(queried, context);
     } else {
-      candidateEdges = context.excludeBuildingId
-        ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
-        : context.lineBuffer;
+      candidateEdges = filterCandidateLines(context.lineBuffer, context);
     }
 
     if (candidateEdges.length === 0) return [];

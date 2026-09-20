@@ -48,8 +48,8 @@ export function rotatePointAroundPivot(pt: Point2D, pivot: Point2D, angleRad: nu
   const rx = pt.x - pivot.x;
   const ry = pt.y - pivot.y;
   return {
-    x: rx * cos - ry * sin,
-    y: rx * sin + ry * cos,
+    x: pivot.x + rx * cos - ry * sin,
+    y: pivot.y + rx * sin + ry * cos,
   };
 }
 
@@ -66,12 +66,15 @@ export function getRotateHandleScreenPos(
   bldg: { vertices: Point2D[]; transform?: { rotationDeg?: number } },
   worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
   scale: number,
-  viewRotationDeg: number = 0
+  viewRotationDeg: number = 0,
+  customPivot?: Point2D,
+  allVertices?: Point2D[]
 ): { sx: number; sy: number } | null {
-  if (!bldg.vertices || bldg.vertices.length === 0) return null;
-  const centroid = getPolygonCentroid(bldg.vertices);
+  const verts = allVertices && allVertices.length > 0 ? allVertices : bldg.vertices;
+  if (!verts || verts.length === 0) return null;
+  const centroid = customPivot || getPolygonCentroid(verts);
   let maxDistSq = -Infinity;
-  for (const v of bldg.vertices) {
+  for (const v of verts) {
     const d = (v.x - centroid.x) ** 2 + (v.y - centroid.y) ** 2;
     if (d > maxDistSq) maxDistSq = d;
   }

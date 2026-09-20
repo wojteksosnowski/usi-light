@@ -9,7 +9,7 @@ import { APP_CONFIG } from '../../../config/appConfig';
  */
 export function renderDrawingToolPreview(
   rc: CadRenderContext,
-  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union',
+  drawingMode: 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align',
   drawingVertices: Point2D[],
   currentMouseWorld: Point2D | null,
   selectedBuilding?: BuildingLoop | null,
@@ -892,8 +892,17 @@ export function renderDrawingToolPreview(
     const isHandleRotating = Boolean((selectedBuilding as any).isRotating);
     const handleRotAngleDeg = (selectedBuilding as any).rotAngleDeg || 0;
 
-    const centroid = getPolygonCentroid(selectedBuilding.vertices);
-    const handlePos = getRotateHandleScreenPos(selectedBuilding, worldToScreen, rc.viewState.scale, rc.viewRotationDeg);
+    const customPivot = (selectedBuilding as any).customPivot;
+    const allGroupVertices = (selectedBuilding as any).allGroupVertices;
+    const centroid = customPivot || getPolygonCentroid(selectedBuilding.vertices);
+    const handlePos = getRotateHandleScreenPos(
+      selectedBuilding,
+      worldToScreen,
+      rc.viewState.scale,
+      rc.viewRotationDeg,
+      customPivot,
+      allGroupVertices
+    );
     const centroidScreen = worldToScreen(centroid.x, centroid.y);
 
     if (handlePos && Number.isFinite(centroidScreen.sx)) {

@@ -1,6 +1,7 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
 import { SnapContext, SnapResult, SnapStrategy, SnapGuideLine, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
+import { filterCandidateLines } from './snapExclusionUtils';
 
 /**
  * PerpendicularSnapStrategy - Wykrywa punkt rzutu prostopadłego z punktu bazowego
@@ -24,9 +25,7 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
     const origin = context.originPoint;
     const { thresholdPx } = computeClampedWorldTolerance(point, context, 12);
 
-    const candidateEdges = context.excludeBuildingId
-      ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
-      : context.lineBuffer;
+    const candidateEdges = filterCandidateLines(context.lineBuffer, context);
 
     if (candidateEdges.length === 0) return [];
 

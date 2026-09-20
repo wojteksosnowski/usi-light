@@ -1,9 +1,10 @@
 import React from 'react';
-import { Building, Square } from 'lucide-react';
+import { Building, Square, Layers } from 'lucide-react';
 import { useObjectEditor } from './hooks/useObjectEditor';
 import { PlaygroundInspector } from './PlaygroundInspector';
 import { BuildingFloorsInspector } from './BuildingFloorsInspector';
 import { SweepParamsInspector } from './SweepParamsInspector';
+import { CompoundObjectInspector } from './CompoundObjectInspector';
 
 export const ObjectEditorSection: React.FC = () => {
   const {
@@ -12,6 +13,11 @@ export const ObjectEditorSection: React.FC = () => {
     selectedBuildingArea,
     playgroundAnalysis,
     sunlightMethod,
+    groupBuildings,
+    isLogicalGroupRootSelected,
+    setOpenGroupId,
+    updateGroup,
+    rotateGroup,
     updateSelectedBuilding,
     handleSetBuildingAbsoluteRotation,
   } = useObjectEditor();
@@ -33,6 +39,25 @@ export const ObjectEditorSection: React.FC = () => {
     : selectedBuilding.segments.length > 0
     ? Number((((selectedBuilding.segments[0].angleRad * 180) / Math.PI + 360) % 360).toFixed(1))
     : 0;
+
+  // Renderowanie dla Obiektu Logicznego (Grupy na Level 0)
+  if (isLogicalGroupRootSelected) {
+    return (
+      <div className="ui-card">
+        <div className="ui-title">
+          <span>Obiekt Logiczny</span>
+          <Layers size={14} color="var(--accent-cyan, #38bdf8)" />
+        </div>
+        <CompoundObjectInspector
+          groupBuildings={groupBuildings}
+          selectedBuilding={selectedBuilding}
+          onUpdateGroup={updateGroup}
+          onRotateGroup={rotateGroup}
+          onEnterGroup={(gId) => setOpenGroupId(gId)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="ui-card">
@@ -501,8 +526,15 @@ export const ObjectEditorSection: React.FC = () => {
           </div>
         )}
 
-        {/* Zunifikowany blok 3 przełączników obok siebie */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', marginTop: '4px' }}>
+        {/* Zunifikowany blok przełączników obok siebie (4 dla dzialek — z "Inwestycja towarzysząca") */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${selectedBuilding.category === 'boundary' ? 4 : 3}, 1fr)`,
+            gap: '4px',
+            marginTop: '4px',
+          }}
+        >
           <button
             type="button"
             onClick={() => updateSelectedBuilding({ isIncluded: selectedBuilding.isIncluded === false ? true : false })}
@@ -527,7 +559,13 @@ export const ObjectEditorSection: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => updateSelectedBuilding({ isTested: !selectedBuilding.isTested })}
+            onClick={() => {
+              const next = !selectedBuilding.isTested;
+              updateSelectedBuilding({
+                isTested: next,
+                isAccompanyingInvestment: next ? false : selectedBuilding.isAccompanyingInvestment,
+              });
+            }}
             className={`btn-tile ${selectedBuilding.isTested ? 'active-indigo' : 'inactive'}`}
             style={{
               display: 'flex',
@@ -546,6 +584,36 @@ export const ObjectEditorSection: React.FC = () => {
               {selectedBuilding.isTested ? 'TAK' : 'NIE'}
             </span>
           </button>
+
+          {selectedBuilding.category === 'boundary' && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !selectedBuilding.isAccompanyingInvestment;
+                updateSelectedBuilding({
+                  isAccompanyingInvestment: next,
+                  isTested: next ? false : selectedBuilding.isTested,
+                });
+              }}
+              className={`btn-tile ${selectedBuilding.isAccompanyingInvestment ? 'active-blue' : 'inactive'}`}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                padding: '6px 4px',
+                textAlign: 'center',
+                minHeight: '48px',
+              }}
+              title="Oznacz działkę jako inwestycję towarzyszącą — status rozłączny z „W projekcie”"
+            >
+              <span style={{ fontSize: '10px', lineHeight: '1.2' }}>Inwestycja towarzysząca</span>
+              <span style={{ fontSize: '9.5px', fontWeight: 700 }}>
+                {selectedBuilding.isAccompanyingInvestment ? 'TAK' : 'NIE'}
+              </span>
+            </button>
+          )}
 
           <button
             type="button"

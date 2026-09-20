@@ -27,7 +27,6 @@ import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 import { SnappingToolsCard } from './tools/SnappingToolsCard';
 
 const ALIGN_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'align')!;
-const UNION_TOOL = DRAWING_TOOLS.find((t) => t.mode === 'union')!;
 
 /** Układ przycisków "dodaj modyfikator" — jeden wiersz = jeden rząd siatki w kolejności deklaracji. */
 const ADD_MODIFIER_ROWS: ModifierType[][] = [
@@ -483,14 +482,14 @@ export const ToolsGroup: React.FC = () => {
           )}
 
           {/* Operations on Selected Building */}
-          {selectedBuilding && (
+          {selectedBuilding ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px', borderTop: '1px solid var(--border-light)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
                 <button
                   type="button"
                   onClick={() => duplicateBuilding(selectedBuilding.id)}
                   className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 6px' }}
                   title="Utwórz kopię tego obiektu"
                 >
                   <Copy size={13} />
@@ -515,7 +514,7 @@ export const ToolsGroup: React.FC = () => {
                     }
                   }}
                   className={`btn-tile ${drawingMode === 'align' ? 'active-indigo' : 'inactive'}`}
-                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
+                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 6px' }}
                   title={ALIGN_TOOL.title}
                 >
                   <ALIGN_TOOL.Icon size={13} />
@@ -524,26 +523,9 @@ export const ToolsGroup: React.FC = () => {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setDrawingMode(drawingMode === 'union' ? 'none' : 'union');
-                    setDrawingVerticesCount(0);
-                    setIsDimensionToolActive(false);
-                    setFacadePointMode(false);
-                    setIsEditMode(false);
-                  }}
-                  className={`btn-tile ${drawingMode === 'union' ? 'active-indigo' : 'inactive'}`}
-                  style={{ justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
-                  title={UNION_TOOL.title}
-                >
-                  <UNION_TOOL.Icon size={13} />
-                  <span style={{ fontWeight: 600 }}>{UNION_TOOL.label}</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => deleteBuilding(selectedBuilding.id)}
                   style={{
-                    padding: '8px 10px',
+                    padding: '8px 6px',
                     borderRadius: '10px',
                     border: '1px solid rgba(244, 63, 94, 0.4)',
                     backgroundColor: 'rgba(244, 63, 94, 0.15)',
@@ -582,7 +564,7 @@ export const ToolsGroup: React.FC = () => {
                     <span>Tryb łączenia aktywny</span>
                   </div>
                   <div style={{ color: '#cbd5e1', fontSize: '10.5px' }}>
-                    Kliknij <b>drugi obiekt</b> na rzucie CAD, aby go połączyć z <b>{selectedBuilding.name}</b>.
+                    Klikaj etykiety <b>+</b> na scenie, aby dodać obiekty do grupy, lub <b>−</b>, aby je odłączyć.
                   </div>
                   <button
                     type="button"
@@ -602,7 +584,7 @@ export const ToolsGroup: React.FC = () => {
                       cursor: 'pointer',
                     }}
                   >
-                    Anuluj łączenie
+                    Zakończ łączenie
                   </button>
                 </div>
               ) : selectedBuilding.groupId ? (
@@ -618,35 +600,56 @@ export const ToolsGroup: React.FC = () => {
                     gap: '6px',
                   }}
                 >
-                  <div style={{ color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Link size={13} />
-                    <span>Połączony w grupie</span>
+                  <div style={{ color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Link size={13} />
+                      <span>{useSceneStore.getState().openGroupId === selectedBuilding.groupId ? 'Wnętrze grupy logicznej' : 'Obiekt logiczny (Grupa)'}</span>
+                    </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsLinkingMode(true);
-                        setLinkingSourceId(selectedBuilding.id);
-                      }}
-                      style={{
-                        padding: '6px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid #38bdf8',
-                        backgroundColor: 'rgba(56, 189, 248, 0.2)',
-                        color: '#e0f2fe',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      <Link2 size={12} />
-                      <span>Dołącz kolejny</span>
-                    </button>
+                    {useSceneStore.getState().openGroupId === selectedBuilding.groupId ? (
+                      <button
+                        type="button"
+                        onClick={() => useSceneStore.getState().setOpenGroupId(null)}
+                        style={{
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid #38bdf8',
+                          backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                          color: '#e0f2fe',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <span>Wyjdź z grupy</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => useSceneStore.getState().setOpenGroupId(selectedBuilding.groupId || null)}
+                        style={{
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid #38bdf8',
+                          backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                          color: '#e0f2fe',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <span>Wejdź do środka</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => performUnlinkBuilding(selectedBuilding.id)}
@@ -654,7 +657,7 @@ export const ToolsGroup: React.FC = () => {
                         padding: '6px 8px',
                         borderRadius: '6px',
                         border: '1px solid rgba(244, 63, 94, 0.4)',
-                        backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                        backgroundColor: 'rgba(244, 63, 94, 0.12)',
                         color: '#fca5a5',
                         fontSize: '11px',
                         fontWeight: 600,
@@ -666,34 +669,25 @@ export const ToolsGroup: React.FC = () => {
                       }}
                     >
                       <Unlink size={12} />
-                      <span>Rozłącz obiekt</span>
+                      <span>Odłącz</span>
                     </button>
                   </div>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsLinkingMode(true);
-                    setLinkingSourceId(selectedBuilding.id);
-                  }}
-                  className="btn-tile active-indigo"
-                  style={{ justifyContent: 'center', gap: '8px', padding: '9px 12px' }}
-                >
-                  <Link2 size={14} />
-                  <span style={{ fontWeight: 600 }}>Połącz z innym obiektem</span>
-                </button>
-              )}
+              ) : null}
+            </div>
+          ) : (
+            <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', textAlign: 'center', padding: '12px 4px' }}>
+              Zaznacz budynek lub obszar na scenie, aby zarządzać jego geometrią.
             </div>
           )}
         </div>
       </div>
 
-      {/* 3.2 Kafel Modyfikatory 2.5D */}
+      {/* MODYFIKATORY GEOMETRII 2.5D */}
       <div className="ui-card">
         <div className="ui-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>Modyfikatory</span>
+            <span>Modyfikatory 2.5D</span>
             {selectedBuilding && (
               <span
                 style={{
@@ -718,11 +712,27 @@ export const ToolsGroup: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {selectedBuilding ? (
             <>
+              {selectedBuilding.groupId || selectedBuilding.category === 'compound' ? (
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    color: '#fbbf24',
+                    fontSize: '10.5px',
+                    lineHeight: '1.4',
+                  }}
+                >
+                  Obiekt jest połączony w grupę logiczną (Node) — transformacje wykonują się wspólnie, a modyfikatory są zablokowane.
+                </div>
+              ) : null}
               {ADD_MODIFIER_ROWS.map((row, rowIdx) => (
                 <div key={rowIdx} style={{ display: 'grid', gridTemplateColumns: `repeat(${row.length}, 1fr)`, gap: '4px' }}>
                   {row.map((type) => {
                     const descriptor = MODIFIER_DESCRIPTORS[type];
-                    const disabled = type !== 'zone_offset' && selectedBuilding.category === 'boundary';
+                    const isGroupMember = !!selectedBuilding.groupId || selectedBuilding.category === 'compound';
+                    const disabled = isGroupMember || (type !== 'zone_offset' && selectedBuilding.category === 'boundary');
                     return (
                       <button
                         key={type}
@@ -742,7 +752,13 @@ export const ToolsGroup: React.FC = () => {
                           opacity: disabled ? 0.4 : 1,
                           cursor: disabled ? 'not-allowed' : 'pointer',
                         }}
-                        title={disabled ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji ani elewacji' : `Dodaj modyfikator: ${descriptor.title}`}
+                        title={
+                          isGroupMember
+                            ? 'Obiekty połączone w grupę logiczną nie mogą posiadać modyfikatorów geometrycznych'
+                            : disabled
+                            ? 'Obiekty geodezyjne (granica/obszar) nie posiadają kondygnacji ani elewacji'
+                            : `Dodaj modyfikator: ${descriptor.title}`
+                        }
                       >
                         <descriptor.Icon size={12} color={disabled ? 'var(--text-secondary)' : descriptor.accentVar} />
                         <span style={{ fontWeight: 600 }}>+ {descriptor.title.split(' ')[0]}</span>

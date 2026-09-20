@@ -33,7 +33,6 @@ import { detectCoordinateSystem, CrsDetectionResult, LatLon, wgs84ToCadPoint } f
 import { parseGoogleMapsCoordinates } from '../../../../utils/geoParser';
 import { BuildingLoop } from '../../../../types/geometry';
 import { fetchOsmBuildings } from '../../../../modules/wfs-import/services/osmBuildingsClient';
-import { reconcileBuildingsWithOsm } from '../../../../modules/wfs-import/services/buildingGeometryMatcher';
 
 import { useOsmLanduseStore } from '../../../../modules/wfs-import/store/useOsmLanduseStore';
 
@@ -58,6 +57,8 @@ export const useProjectGeoSync = () => {
   const setProjectRadius = useWfsStore((s) => s.setProjectRadius);
   const isProjectCenterLocked = useWfsStore((s) => s.isProjectCenterLocked);
   const setIsProjectCenterLocked = useWfsStore((s) => s.setIsProjectCenterLocked);
+  const buildingSource = useWfsStore((s) => s.buildingSource);
+  const setBuildingSource = useWfsStore((s) => s.setBuildingSource);
   const showOvertureGreenAreas = useWfsStore((s) => s.showOvertureGreenAreas);
   const setShowOvertureGreenAreas = useWfsStore((s) => s.setShowOvertureGreenAreas);
   const showMpzpZonesLayer = useWfsStore((s) => s.showMpzpZonesLayer);
@@ -156,53 +157,37 @@ export const useProjectGeoSync = () => {
         );
       }
 
-      // 2. Budynki wektorowe (WFS z automatycznym dopasowaniem i ulepszaniem z OpenStreetMap)
+      // 2. Budynki wektorowe — z jednego, wybranego przez użytkownika źródła (Geoportal lub OSM)
       let importedBuildings: BuildingLoop[] = [];
       let buildingsFetchError: string | null = null;
       let buildingsSourceLabel = citySource?.name || 'WFS';
-      let wfsBuildings: BuildingLoop[] = [];
-      let osmBuildings: BuildingLoop[] = [];
 
       setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0 });
 
-      // Równoległe pobieranie budynków z WFS oraz OSM
-      const fetchWfsPromise = citySource
-        ? citySource.fetchBuildings(bbox).then((bldGeoJson) => {
+      if (buildingSource === 'geoportal') {
+        if (citySource) {
+          try {
+            const bldGeoJson = await citySource.fetchBuildings(bbox);
             const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter, radius);
-            return res.buildings;
-          }).catch((err) => {
-            console.warn(`Nie udało się pobrać budynków z WFS (${citySource.name}):`, err);
-            return [] as BuildingLoop[];
-          })
-        : Promise.resolve([] as BuildingLoop[]);
-
-      const fetchOsmPromise = fetchOsmBuildings(bbox, projectCenter, projectCrs, radius).catch((osmErr) => {
-        console.warn('Nie udało się pobrać budynków z OSM:', osmErr);
-        return [] as BuildingLoop[];
-      });
-
-      const [wfsResult, osmResult] = await Promise.all([fetchWfsPromise, fetchOsmPromise]);
-      wfsBuildings = wfsResult;
-      osmBuildings = osmResult;
-
-      let osmEnhancedInfo = '';
-      if (wfsBuildings.length > 0 && osmBuildings.length > 0) {
-        // Godzenie geometrii — wybór bogatszych brył i brakujących dziedzińców z OSM
-        const reconciled = reconcileBuildingsWithOsm(wfsBuildings, osmBuildings);
-        importedBuildings = reconciled.buildings;
-        buildingsSourceLabel = `${citySource?.name || 'WFS'} + OSM`;
-        const totalReplaced = reconciled.stats.replacedWithMoreParts + reconciled.stats.replacedWithHoles;
-        if (totalReplaced > 0) {
-          osmEnhancedInfo = ` (w tym ${totalReplaced} z ulepszoną geometrią OSM)`;
+            importedBuildings = res.buildings;
+            buildingsSourceLabel = citySource.name;
+          } catch (err) {
+            console.warn(`Nie udało się pobrać budynków z Geoportalu (${citySource.name}):`, err);
+          }
         }
-      } else if (wfsBuildings.length > 0) {
-        importedBuildings = wfsBuildings;
-        buildingsSourceLabel = citySource?.name || 'WFS';
-      } else if (osmBuildings.length > 0) {
-        importedBuildings = osmBuildings;
-        buildingsSourceLabel = 'OpenStreetMap';
+        if (importedBuildings.length === 0) {
+          buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
+        }
       } else {
-        buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
+        try {
+          importedBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
+          buildingsSourceLabel = 'OpenStreetMap';
+        } catch (osmErr) {
+          console.warn('Nie udało się pobrać budynków z OSM:', osmErr);
+        }
+        if (importedBuildings.length === 0) {
+          buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
+        }
       }
 
       // 2c. Wzbogacenie o wysokości LiDAR NMT/NMPT dla budynków bez precyzyjnych kondygnacji
@@ -251,7 +236,7 @@ export const useProjectGeoSync = () => {
         buildingsCount: importedBuildings.length,
       });
       setSyncFeedback(
-        `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków (${buildingsSourceLabel}${osmEnhancedInfo})` +
+        `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków (${buildingsSourceLabel})` +
         (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '')
       );
 
@@ -410,6 +395,8 @@ export const useProjectGeoSync = () => {
     setProjectRadius,
     isProjectCenterLocked,
     setIsProjectCenterLocked,
+    buildingSource,
+    setBuildingSource,
     status,
     syncFeedback,
     isPro,

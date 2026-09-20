@@ -32,6 +32,12 @@ interface UiState {
    * podświetla krawędź odpowiadającą temu modyfikatorowi, nie pierwszemu z listy. */
   expandedModifierId: string | null;
 
+  /** Wskaźnik zapisu projektu na HUD topbar */
+  isDirty: boolean;
+  lastSavedAt: number | null;
+  markDirty: () => void;
+  markSaved: (timestamp: number) => void;
+
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   setOpenSidebarGroup: (group: SidebarGroupType | null) => void;
@@ -65,6 +71,11 @@ export const useUiStore = create<UiState>((set) => ({
   viewportScale: 14,
   viewMode2D: 'cad',
   expandedModifierId: null,
+
+  isDirty: false,
+  lastSavedAt: null,
+  markDirty: () => set({ isDirty: true }),
+  markSaved: (timestamp) => set({ isDirty: false, lastSavedAt: timestamp }),
 
   setViewMode2D: (mode) => {
     set({ viewMode2D: mode });

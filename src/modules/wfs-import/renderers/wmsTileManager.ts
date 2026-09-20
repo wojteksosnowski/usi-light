@@ -14,6 +14,7 @@ import {
   TileRange,
 } from '../../../utils/tilePrefetchMath';
 import { TileZoomHysteresis } from '../../../utils/tileGridProjection';
+import { getCachedTile, putCachedTile } from './wmsTileDb';
 
 export interface WmsTileConfig {
   baseUrl: string;
@@ -256,7 +257,68 @@ export class WmsTileManager {
     return baseUrl;
   }
 
+  /** Klucz zbiorczy do trwałego cache'u IndexedDB — łączy warstwę WMS (bo klucz kafla `z/x/y`
+   * sam w sobie nie jest unikalny pomiędzy różnymi warstwami/serwisami). */
+  private dbKeyFor(key: string): string {
+    return `${this.config.layers}::${key}`;
+  }
+
+  private finishTileLoad(key: string, img: HTMLImageElement) {
+    this.pending.delete(key);
+    this.cache.set(key, img);
+    this.totalBytesLoaded += this.config.format === 'image/jpeg' ? 22000 : 35000;
+    this.activePrefetches--;
+    const wasSilent = this.silentKeys.delete(key);
+    if (!wasSilent) this.onTileLoaded?.();
+    this.processQueue();
+  }
+
+  /** Best-effort: zapisuje pomyślnie załadowany kafel do trwałego cache'u IndexedDB, żeby przetrwał
+   * zamknięcie przeglądarki. Nigdy nie blokuje renderu — błędy (np. tainted canvas z powodu braku
+   * nagłówków CORS na serwerze WMS) są po cichu ignorowane. */
+  private persistTileToDb(key: string, img: HTMLImageElement) {
+    try {
+      const w = img.naturalWidth || 256;
+      const h = img.naturalHeight || 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          void putCachedTile(this.dbKeyFor(key), blob, this.config.layers);
+        }
+      }, this.config.format === 'image/jpeg' ? 'image/jpeg' : 'image/png');
+    } catch {
+      // Tainted canvas lub brak wsparcia — cache trwały pominięty dla tego kafla, RAM cache dalej działa.
+    }
+  }
+
   private loadTile(x: number, y: number, z: number, key: string) {
+    // 1. Spróbuj odtworzyć kafel z trwałego cache'u IndexedDB, zanim wyślemy request sieciowy.
+    void getCachedTile(this.dbKeyFor(key)).then((cached) => {
+      if (!this.pending.has(key)) return; // Kafel już obsłużony (np. anulowany / wyczyszczony cache)
+      if (cached) {
+        const objectUrl = URL.createObjectURL(cached.blob);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          this.finishTileLoad(key, img);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          this.fetchTileFromNetwork(x, y, z, key);
+        };
+        img.src = objectUrl;
+        return;
+      }
+      this.fetchTileFromNetwork(x, y, z, key);
+    });
+  }
+
+  private fetchTileFromNetwork(x: number, y: number, z: number, key: string) {
     const { layers, format, crs, tileSize } = this.config;
     const effectiveBaseUrl = this.getEffectiveBaseUrl();
     const size = tileSize || 256;
@@ -280,20 +342,8 @@ export class WmsTileManager {
     img.crossOrigin = 'anonymous';
 
     img.onload = () => {
-      this.pending.delete(key);
-      this.cache.set(key, img);
-      // Inwersja NIE liczy się tutaj — większość kafli ładowanych w tle (prefetch w promieniu
-      // projektu na wielu poziomach zoomu) nigdy nie trafia na ekran. Liczymy ją leniwie, tylko
-      // dla kafli faktycznie odczytanych przez renderer (getTileFromMemory).
-      this.totalBytesLoaded += format === 'image/jpeg' ? 22000 : 35000;
-      this.activePrefetches--;
-      // Kafle dociągnięte cicho w tle (prefetch poza bieżącym ekranem) nie wywołują przerysowania —
-      // inaczej setki kafli ładujących się w tle po zatrzymaniu zoomu wymuszałyby ciągłe
-      // przerysowanie całego pipeline'u przez cały czas trwania prefetchu (patrz regresja opisana
-      // w test/zoom_band_transition_profile.test.ts).
-      const wasSilent = this.silentKeys.delete(key);
-      if (!wasSilent) this.onTileLoaded?.();
-      this.processQueue();
+      this.persistTileToDb(key, img);
+      this.finishTileLoad(key, img);
     };
 
     img.onerror = () => {

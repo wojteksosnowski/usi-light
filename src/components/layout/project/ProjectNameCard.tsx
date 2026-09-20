@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FolderKanban, Share2, X, Save, Trash2, Folder, CheckCircle2, Clock } from 'lucide-react';
+import { FolderKanban, Share2, X, Save, Trash2, Folder, CheckCircle2, Clock, FilePlus2 } from 'lucide-react';
 import {
   useSolarAnalysisStore,
   useSceneStore,
@@ -14,6 +14,7 @@ import {
   StoredProjectSummary,
 } from '../../../utils/projectStorage';
 import { ConfirmDeletePayload } from '../../common/ConfirmDeleteModal';
+import { createNewProject } from '../../../app/actions/createNewProject';
 
 export const ProjectNameCard: React.FC = () => {
   const projectName = useSolarAnalysisStore((s) => s.projectName);
@@ -206,11 +207,41 @@ export const ProjectNameCard: React.FC = () => {
     openModal('confirmDelete', payload as unknown as Record<string, unknown>);
   };
 
+  const handleNewProject = () => {
+    const confirmed = window.confirm(
+      'Czy na pewno chcesz rozpocząć nowy projekt? Bieżąca scena, ustawienia i punkty pomiarowe zostaną wyczyszczone (zapisane projekty w liście poniżej nie zostaną usunięte).'
+    );
+    if (!confirmed) return;
+    createNewProject();
+    refreshList();
+    showCopiedToast('Rozpoczęto nowy projekt');
+  };
+
   return (
     <div className="ui-card">
-      <div className="ui-title">
-        <span>Projekt</span>
-        <FolderKanban size={14} color="var(--accent-amber)" />
+      <div className="ui-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span>Projekt</span>
+          <FolderKanban size={14} color="var(--accent-amber)" />
+        </div>
+        <button
+          type="button"
+          onClick={handleNewProject}
+          className="btn-secondary"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px 8px',
+            fontSize: '10.5px',
+            fontWeight: 600,
+            borderRadius: '6px',
+          }}
+          title="Rozpocznij nowy projekt (czyści scenę, ustawienia i punkty pomiarowe)"
+        >
+          <FilePlus2 size={12} />
+          <span>Nowy Projekt</span>
+        </button>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

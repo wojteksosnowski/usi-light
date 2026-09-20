@@ -1,4 +1,5 @@
 import { Point2D, BuildingLoop, Edge2D, HourlyShadowLoop, ShadowAnalysisResult } from '../../types/geometry';
+import { isBuildingVariantActive } from '../geometrySelectors';
 import { calculateSolarPosition, getGlobalSolarLUT, GlobalSolarLUT, SolarMethodLUTData } from '../solar';
 import polygonClipping from 'polygon-clipping';
 import {
@@ -619,7 +620,10 @@ export function computeCombinedShadowEnvelope(
   longitude: number = 21.01
 ): Point2D[][] {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
+    (b) => {
+      if (!isBuildingVariantActive(b)) return false;
+      return b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0;
+    }
   );
   if (testedBuildings.length === 0) return [];
 
@@ -645,7 +649,10 @@ export function computeFullShadowAnalysis(
   const t0 = performance.now();
 
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
+    (b) => {
+      if (!isBuildingVariantActive(b)) return false;
+      return b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0;
+    }
   );
 
   if (testedBuildings.length === 0) {
@@ -661,7 +668,10 @@ export function computeFullShadowAnalysis(
 
   // Budynki ograniczające ("negatywny cień") odsiane wstępnie przez kardynalne AABB zasięgu cienia
   const candidateBlocking = buildings.filter(
-    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
+    (b) => {
+      if (!isBuildingVariantActive(b)) return false;
+      return !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0;
+    }
   );
 
   const blockingBuildings = projectAABB
@@ -795,14 +805,20 @@ export function computeHourlyShadowsLive(
   sunlightMethod: 'raycasting' | 'segments' = 'raycasting'
 ): { hourlyShadows: HourlyShadowLoop[]; envelopeLoops: Point2D[][] } {
   const testedBuildings = buildings.filter(
-    (b) => b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
+    (b) => {
+      if (!isBuildingVariantActive(b)) return false;
+      return b.isTested && b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0;
+    }
   );
   if (testedBuildings.length === 0) return { hourlyShadows: [], envelopeLoops: [] };
 
   const projectAABB = computeProjectShadowReachAABB(testedBuildings);
 
   const candidateBlocking = buildings.filter(
-    (b) => !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0
+    (b) => {
+      if (!isBuildingVariantActive(b)) return false;
+      return !b.isTested && b.category !== 'boundary' && b.defaultHeight > 0 && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + b.defaultHeight) > 0;
+    }
   );
 
   const blockingBuildings = projectAABB

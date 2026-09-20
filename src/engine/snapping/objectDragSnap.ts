@@ -6,6 +6,7 @@ import {
   normalizeAnglePi,
   angleDiffPi,
 } from '../../utils/lineBufferEngine';
+import { isIdExcluded } from './strategies/snapExclusionUtils';
 
 /**
  * Wykrywa równoległość i kolinearność przy transformacji krawędzi lub obiektu
@@ -88,6 +89,7 @@ export interface BuildingDragSnapResult {
 export interface EvaluateBuildingDragSnapOptions {
   movingVertices: Point2D[];
   movingBuildingId: string;
+  excludeBuildingIds?: string[];
   referenceBuffer: CachedLineEquation[];
   distanceThresholdMeters?: number;
   angleToleranceRad?: number;
@@ -109,6 +111,7 @@ export function evaluateBuildingDragMultiSnap(
   const {
     movingVertices,
     movingBuildingId,
+    excludeBuildingIds,
     referenceBuffer,
     distanceThresholdMeters = 0.35,
     angleToleranceRad = (0.8 * Math.PI) / 180,
@@ -119,7 +122,12 @@ export function evaluateBuildingDragMultiSnap(
   const n = movingVertices.length;
   if (n < 2) return null;
 
-  let otherBuffer = referenceBuffer.filter((e) => e.objectId !== movingBuildingId);
+  const excludedSet = new Set<string>(excludeBuildingIds || []);
+  excludedSet.add(movingBuildingId);
+
+  const isExcludedEdge = (e: CachedLineEquation) => isIdExcluded(e.objectId, excludedSet);
+
+  let otherBuffer = referenceBuffer.filter((e) => !isExcludedEdge(e));
   if (viewportBounds) {
     otherBuffer = otherBuffer.filter((e) => {
       const eMinX = Math.min(e.p1.x, e.p2.x);
@@ -456,6 +464,7 @@ export interface EvaluateEdgeDragSnapOptions {
   edgeP2: Point2D;
   normal: { x: number; y: number };
   buildingId: string;
+  excludeBuildingIds?: string[];
   edgeIndex: number;
   tentativeDelta: { dx: number; dy: number };
   referenceBuffer: CachedLineEquation[];
@@ -490,6 +499,7 @@ export function evaluateEdgeDragSnap(
     edgeP2,
     normal,
     buildingId,
+    excludeBuildingIds,
     edgeIndex,
     tentativeDelta,
     referenceBuffer,
@@ -516,7 +526,12 @@ export function evaluateEdgeDragSnap(
   const tentP1 = { x: edgeP1.x + rawD * normal.x, y: edgeP1.y + rawD * normal.y };
   const tentP2 = { x: edgeP2.x + rawD * normal.x, y: edgeP2.y + rawD * normal.y };
 
-  let otherBuffer = referenceBuffer.filter((e) => e.objectId !== buildingId);
+  const excludedSet = new Set<string>(excludeBuildingIds || []);
+  excludedSet.add(buildingId);
+
+  const isExcludedEdge = (e: CachedLineEquation) => isIdExcluded(e.objectId, excludedSet);
+
+  let otherBuffer = referenceBuffer.filter((e) => !isExcludedEdge(e));
   if (viewportBounds) {
     otherBuffer = otherBuffer.filter((e) => {
       const eMinX = Math.min(e.p1.x, e.p2.x);

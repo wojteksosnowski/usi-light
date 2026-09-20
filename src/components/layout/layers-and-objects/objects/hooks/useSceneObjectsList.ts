@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSceneStore } from '@/store';
 import { BuildingLoop } from '@/types/geometry';
+import { filterActiveVariantBuildings } from '@/utils/geometrySelectors';
 import { useMultiSelection } from '../../common/useMultiSelection';
 
 export interface BuildingSubgroup {
@@ -61,9 +62,11 @@ function groupBuildingsByHeight(items: BuildingLoop[], prefix: string): Building
 }
 
 export function computeObjectTree(buildings: BuildingLoop[]): ObjectTreeStructure {
-  const buildingList = buildings.filter((b) => b.category !== 'boundary' && b.category !== 'balcony');
-  const areaList = buildings.filter((b) => b.category === 'boundary');
-  const balconyList = buildings.filter((b) => b.category === 'balcony');
+  const activeBuildings = filterActiveVariantBuildings(buildings);
+
+  const buildingList = activeBuildings.filter((b) => b.category !== 'boundary' && b.category !== 'balcony');
+  const areaList = activeBuildings.filter((b) => b.category === 'boundary');
+  const balconyList = activeBuildings.filter((b) => b.category === 'balcony');
 
   const buildingsInProject = buildingList.filter((b) => b.isTested === true);
   const buildingsOutside = buildingList.filter((b) => b.isTested !== true);

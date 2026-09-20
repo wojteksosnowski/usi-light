@@ -16,6 +16,11 @@ export const useObjectEditor = () => {
   const settings = useSolarAnalysisStore((s) => s.settings);
   const sunlightMethod = useSolarAnalysisStore((s) => s.sunlightMethod);
 
+  const openGroupId = useSceneStore((s) => s.openGroupId);
+  const setOpenGroupId = useSceneStore((s) => s.setOpenGroupId);
+  const updateGroup = useSceneStore((s) => s.updateGroup);
+  const rotateGroup = useSceneStore((s) => s.rotateGroup);
+
   // Active building object
   const selectedBuilding = useMemo(() => {
     if (!selectedBuildingId) return null;
@@ -25,6 +30,17 @@ export const useObjectEditor = () => {
     if (layerSettings[lyr]?.isVisible === false) return null;
     return b;
   }, [buildings, selectedBuildingId, layerSettings]);
+
+  // All buildings belonging to the active selected group
+  const groupBuildings = useMemo(() => {
+    if (!selectedBuilding?.groupId) return [];
+    return buildings.filter((b) => b.groupId === selectedBuilding.groupId);
+  }, [buildings, selectedBuilding?.groupId]);
+
+  // Is logical group selected at root level (Level 0)
+  const isLogicalGroupRootSelected = useMemo(() => {
+    return Boolean(selectedBuilding?.groupId && openGroupId !== selectedBuilding.groupId);
+  }, [selectedBuilding?.groupId, openGroupId]);
 
   // Selected building area
   const selectedBuildingArea = useMemo(() => {
@@ -50,6 +66,12 @@ export const useObjectEditor = () => {
   // Absolute rotation
   const handleSetBuildingAbsoluteRotation = useCallback(
     (buildingId: string, targetDeg: number) => {
+      const targetBldg = buildings.find((b) => b.id === buildingId);
+      if (targetBldg?.groupId && openGroupId !== targetBldg.groupId) {
+        rotateGroup(targetBldg.groupId, targetDeg);
+        return;
+      }
+
       const targetIds = selectedBuildingIds.length > 0 ? selectedBuildingIds : [buildingId];
       targetIds.forEach((id) => {
         const target = buildings.find((b) => b.id === id);
@@ -76,7 +98,7 @@ export const useObjectEditor = () => {
         rotateBuilding(id, pivot, deltaRad);
       });
     },
-    [buildings, selectedBuildingIds, rotateBuilding]
+    [buildings, selectedBuildingIds, openGroupId, rotateBuilding, rotateGroup]
   );
 
   return {
@@ -87,6 +109,12 @@ export const useObjectEditor = () => {
     selectedBuildingArea,
     playgroundAnalysis,
     sunlightMethod,
+    groupBuildings,
+    isLogicalGroupRootSelected,
+    openGroupId,
+    setOpenGroupId,
+    updateGroup,
+    rotateGroup,
     updateSelectedBuilding,
     updateBuilding,
     handleSetBuildingAbsoluteRotation,

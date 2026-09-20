@@ -50,6 +50,9 @@ interface SolarAnalysisState {
   activePinnedPointId: string | null;
   activePointMode: 'shadowing' | 'sunlight';
   selectedPointResult: AnalysisPointResult | null;
+  /** Wyniki analiz §12/§56 dla WSZYSTKICH przypiętych punktów (P1/P2/P3), nie tylko aktywnego —
+   * synchronizowane z AppLayout.tsx, wykorzystywane m.in. przez eksport DXF. */
+  pinnedPointResults: AnalysisPointResult[];
 
   // Actions
   setSettings: (settings: ProjectSettings | ((prev: ProjectSettings) => ProjectSettings)) => void;
@@ -81,22 +84,38 @@ interface SolarAnalysisState {
   setActivePinnedPointId: (id: string | null) => void;
   setActivePointMode: (mode: 'shadowing' | 'sunlight') => void;
   setSelectedPointResult: (res: AnalysisPointResult | null) => void;
+  setPinnedPointResults: (results: AnalysisPointResult[]) => void;
 
   addPinnedPoint: (pt: { buildingId: string; segmentId: string; offsetRatio: number }) => void;
   deletePinnedPoint: (id: string) => void;
   updatePinnedPoint: (id: string, buildingId: string, segmentId: string, offsetRatio: number) => void;
   updatePinnedPointStorey: (id: string, storeyIndex: number | undefined) => void;
   clearPinnedPoints: () => void;
+  resetSolarAnalysis: () => void;
 }
 
+const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  latitude: 52.2297,
+  longitude: 21.0122,
+  isCityCentreDefault: false,
+  samplingInterval: 0.25,
+  equinoxDate: 'spring',
+};
+
+const DEFAULT_ANALYSIS_OUTPUT: AnalysisBatchOutput = {
+  results: [],
+  avgShadowingMs: 0,
+  avgSunlightMs: 0,
+  avgSunlightSegMs: 0,
+  totalShadowingTimeMs: 0,
+  totalSunlightTimeMs: 0,
+  shadowEnvelopeMs: 0,
+  totalAnalysisMs: 0,
+  totalPoints: 0,
+};
+
 export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
-  settings: {
-    latitude: 52.2297,
-    longitude: 21.0122,
-    isCityCentreDefault: false,
-    samplingInterval: 0.25,
-    equinoxDate: 'spring',
-  },
+  settings: { ...DEFAULT_PROJECT_SETTINGS },
   selectedCity: 'Warszawa',
   projectName: '',
   currentProjectId: null,
@@ -135,6 +154,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   activePinnedPointId: null,
   activePointMode: 'shadowing',
   selectedPointResult: null,
+  pinnedPointResults: [],
 
   setSettings: (updater) =>
     set((state) => ({
@@ -209,6 +229,7 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   setActivePinnedPointId: (id) => set({ activePinnedPointId: id }),
   setActivePointMode: (mode) => set({ activePointMode: mode }),
   setSelectedPointResult: (res) => set({ selectedPointResult: res }),
+  setPinnedPointResults: (results) => set({ pinnedPointResults: results }),
 
   addPinnedPoint: ({ buildingId, segmentId, offsetRatio }) => {
     const { pinnedPoints } = get();
@@ -267,4 +288,21 @@ export const useSolarAnalysisStore = create<SolarAnalysisState>((set, get) => ({
   },
 
   clearPinnedPoints: () => set({ pinnedPoints: [], activePinnedPointId: null }),
+
+  resetSolarAnalysis: () =>
+    set({
+      settings: { ...DEFAULT_PROJECT_SETTINGS },
+      selectedCity: 'Warszawa',
+      projectName: '',
+      currentProjectId: null,
+      mapsInput: '',
+      mapsParseError: false,
+      analysisOutput: { ...DEFAULT_ANALYSIS_OUTPUT },
+      isCalculating: false,
+      pinnedPoints: [],
+      activePinnedPointId: null,
+      activePointMode: 'shadowing',
+      selectedPointResult: null,
+      pinnedPointResults: [],
+    }),
 }));

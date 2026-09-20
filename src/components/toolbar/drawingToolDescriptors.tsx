@@ -1,5 +1,5 @@
 import React from 'react';
-import { Square, Combine } from 'lucide-react';
+import { Square } from 'lucide-react';
 import type { DrawingMode } from '../../store/useCadToolStore';
 import { IrregularPentagonIcon, BrokenLineIcon, AlignDirectionIcon } from '../common/CustomCadIcons';
 
@@ -38,7 +38,6 @@ export const ALIGN_DRAWING_TOOL: DrawingToolDescriptor = {
 /** Narzędzia operacji na obiektach */
 export const DRAWING_OPERATION_TOOLS: DrawingToolDescriptor[] = [
   ALIGN_DRAWING_TOOL,
-  { mode: 'union', label: 'Suma', Icon: Combine, title: 'Suma (Boolean Union)' },
 ];
 
 /**

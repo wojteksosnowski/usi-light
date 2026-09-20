@@ -1,3 +1,4 @@
+import { isBuildingVariantActive } from '@/utils/geometrySelectors';
 import {
   BuildingLoop,
   FacadeSegment,
@@ -84,6 +85,7 @@ export function prefilterShadowingCandidatesForSegment(
   for (const bldg of allBuildings) {
     // "Dodaj do analiz" (isIncluded): przeszkoda w §12/§56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (!isBuildingVariantActive(bldg)) continue;
 
     // Szybkie odrzucenie przestrzenne AABB: jeśli budynek jest w całości dalej niż maxReach od odcinka
     const aabb = getBuildingAABB(bldg);
@@ -225,6 +227,7 @@ export function prefilterSunlightCandidatesForSegment(
   for (const bldg of allBuildings) {
     // "Dodaj do analiz" (isIncluded): przeszkoda w §12/§56 niezależnie od tego, czy obiekt jest "W projekcie" (isTested).
     if (bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (!isBuildingVariantActive(bldg)) continue;
 
     const aabb = getBuildingAABB(bldg);
     const bldgH = Math.max(0, bldg.defaultHeight ?? 15);
@@ -1290,7 +1293,10 @@ export function runFullAnalysis(
 
   const results: AnalysisPointResult[] = [];
   // "W projekcie" (isTested): fasady tych obiektów są próbkowane jako punkty analizy §12/§56.
-  const testedBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary');
+  const testedBuildings = buildings.filter((b) => {
+    if (!isBuildingVariantActive(b)) return false;
+    return b.isTested && b.isIncluded !== false && b.category !== 'boundary';
+  });
   const interval = options?.samplingInterval ?? settings.samplingInterval ?? 0.25;
   const angleStep = options?.angleStepDeg ?? 0.5;
   const sunlightStep = options?.sunlightStepMinutes ?? 5;
@@ -1550,6 +1556,7 @@ export function analyzePlaygroundSunlight(
   const obstacleSegments: FacadeSegment[] = [];
   for (const bldg of allBuildings) {
     if (bldg.id === playground.id || bldg.isIncluded === false || bldg.category === 'boundary') continue;
+    if (!isBuildingVariantActive(bldg)) continue;
     if (!bldg.segments || bldg.segments.length === 0) continue;
     for (const seg of bldg.segments) {
       if (seg.hTop > elevation) {

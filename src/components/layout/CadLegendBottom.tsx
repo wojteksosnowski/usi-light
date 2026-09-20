@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { Activity, Timer, Globe, ZoomIn } from 'lucide-react';
-import { useSolarAnalysisStore, useSceneStore, useUiStore } from '../../store';
+import { Activity, Timer, Globe, ZoomIn, Crown, Sparkles } from 'lucide-react';
+import { useSolarAnalysisStore, useSceneStore, useUiStore, useLicenseStore } from '../../store';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { Point2D } from '../../types/geometry';
 
@@ -18,6 +18,20 @@ export const CadLegendBottom: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
   const settings = useSolarAnalysisStore((s) => s.settings);
   const viewportScale = useUiStore((s) => s.viewportScale);
+  const isPro = useLicenseStore((s) => s.isPro);
+  const activateLicense = useLicenseStore((s) => s.activateLicense);
+  const clearLicense = useLicenseStore((s) => s.clearLicense);
+  const showCopiedToast = useUiStore((s) => s.showCopiedToast);
+
+  const handleToggleDevPro = async () => {
+    if (isPro) {
+      clearLicense();
+      showCopiedToast('🛠️ DEV: Przełączono na wersję FREE (Darmową)');
+    } else {
+      await activateLicense('USI-DEV-MASTER-PRO');
+      showCopiedToast('👑 DEV: Aktywowano Master PRO (Nielimitowany)');
+    }
+  };
 
   const crsInfo = useMemo(() => {
     const allPts: Point2D[] = [];
@@ -41,13 +55,7 @@ export const CadLegendBottom: React.FC = () => {
     };
   }, [viewportScale, settings.latitude]);
 
-  const avgShadowingMs = analysisOutput?.avgShadowingMs || 0;
-  const avgSunlightMs = analysisOutput?.avgSunlightMs || 0;
-  const totalShadowingMs = analysisOutput?.totalShadowingTimeMs ?? (avgShadowingMs * (analysisOutput?.totalPoints || 0));
-  const totalSunlightMs = analysisOutput?.totalSunlightTimeMs ?? (avgSunlightMs * (analysisOutput?.totalPoints || 0));
-  const shadowEnvelopeMs = analysisOutput?.shadowEnvelopeMs || 0;
   const totalAnalysisMs = analysisOutput?.totalAnalysisMs || 0;
-  const totalPoints = analysisOutput?.totalPoints ?? 0;
 
   return (
     <div className="cad-legend-bottom" style={{ gap: '12px', alignItems: 'center' }}>
@@ -167,42 +175,86 @@ export const CadLegendBottom: React.FC = () => {
         </span>
       </div>
 
-      {/* Performance & points count badge */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '2px 8px',
-          borderRadius: '6px',
-          backgroundColor: 'var(--bg-badge)',
-          border: '1px solid var(--border-light)',
-          fontSize: '10px',
-          fontFamily: 'monospace',
-        }}
-        title={`Czas pełnego przeliczenia metod analitycznych w bieżącym cyklu:\n• Liczba zbadanych punktów: ${totalPoints.toLocaleString()} (${(totalPoints / 1000).toFixed(2)}k pkt)\n• § 12 (Przesłanianie) łącznie: ${totalShadowingMs.toFixed(2)} ms (śr. ${avgShadowingMs.toFixed(3)} ms/pkt)\n• § 56 (Nasłonecznienie) łącznie: ${totalSunlightMs.toFixed(2)} ms (śr. ${avgSunlightMs.toFixed(3)} ms/pkt)\n• Obrys i koperta cienia (§ 56): ${shadowEnvelopeMs.toFixed(2)} ms\n• Całkowity czas cyklu: ${totalAnalysisMs.toFixed(2)} ms`}
-      >
-        <Timer size={11} color="var(--text-secondary)" />
-        <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>
-          {totalPoints >= 1000
-            ? `${(totalPoints / 1000).toFixed(1)}k pkt`
-            : `${totalPoints} pkt`}
-        </span>
-        <span style={{ color: 'var(--border-light)' }}>|</span>
-        <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>
-          §12: {totalShadowingMs < 0.1 && totalShadowingMs > 0 ? '<0.1' : totalShadowingMs.toFixed(1)}ms
-        </span>
-        <span style={{ color: 'var(--border-light)' }}>|</span>
-        <span style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
-          §56: {totalSunlightMs < 0.1 && totalSunlightMs > 0 ? '<0.1' : totalSunlightMs.toFixed(1)}ms
-        </span>
-        <span style={{ color: 'var(--border-light)' }}>|</span>
-        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-          Cykl: {totalAnalysisMs < 0.1 && totalAnalysisMs > 0 ? '<0.1' : totalAnalysisMs.toFixed(1)}ms
-        </span>
-      </div>
+      {/* Dev-only: full analysis loop timer + PRO/FREE toggle */}
+      {import.meta.env.DEV && (
+        <>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              backgroundColor: 'var(--bg-badge)',
+              border: '1px solid var(--border-light)',
+              fontSize: '10px',
+              fontFamily: 'monospace',
+            }}
+            title="Czas pełnej pętli obliczeń (§ 12 + § 56) w bieżącym cyklu"
+          >
+            <Timer size={11} color="var(--text-secondary)" />
+            <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+              Cykl: {totalAnalysisMs < 0.1 && totalAnalysisMs > 0 ? '<0.1' : totalAnalysisMs.toFixed(1)}ms
+            </span>
+          </div>
 
-      <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
+          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: '6px',
+              border: `1px solid ${isPro ? 'var(--status-amber-border)' : 'var(--border-light)'}`,
+              overflow: 'hidden',
+              fontSize: '10px',
+              fontWeight: 700,
+            }}
+            title={
+              isPro
+                ? 'Przełącz na wersję darmową (aby przetestować blokady i modale zakupu)'
+                : 'Przełącz na wersję PRO (rozszerz o import geo i eksport DXF)'
+            }
+          >
+            <button
+              type="button"
+              onClick={handleToggleDevPro}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '3px 8px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: isPro ? 'transparent' : 'var(--status-indigo-bg)',
+                color: isPro ? 'var(--text-muted)' : 'var(--status-indigo-text)',
+              }}
+            >
+              <Sparkles size={11} />
+              <span>FREE</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleDevPro}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '3px 8px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: isPro ? 'var(--status-amber-bg)' : 'transparent',
+                color: isPro ? 'var(--status-amber-text)' : 'var(--text-muted)',
+              }}
+            >
+              <Crown size={11} />
+              <span>PRO</span>
+            </button>
+          </div>
+
+          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
+        </>
+      )}
 
       {/* Warstadt Website Link */}
       <a

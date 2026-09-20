@@ -12,6 +12,9 @@ import { exportSceneToDxf } from '../../../../utils/dxfExport';
 export const useProjectExport = () => {
   const buildings = useSceneStore((s) => s.buildings);
   const pinnedPoints = useSolarAnalysisStore((s) => s.pinnedPoints);
+  const pinnedPointResults = useSolarAnalysisStore((s) => s.pinnedPointResults);
+  const analysisResults = useSolarAnalysisStore((s) => s.analysisOutput.results);
+  const shadowAnalysis = useSolarAnalysisStore((s) => s.analysisOutput.shadowAnalysis);
   const settings = useSolarAnalysisStore((s) => s.settings);
   const isPro = useLicenseStore((s) => s.isPro);
   const openModal = useUiStore((s) => s.openModal);
@@ -36,7 +39,14 @@ export const useProjectExport = () => {
     setTerrainExportBusy(true);
     setExportWarning(null);
     try {
-      const { terrainWarning } = await exportSceneToDxf({ buildings, pinnedPoints, terrain });
+      const { terrainWarning } = await exportSceneToDxf({
+        buildings,
+        pinnedPoints,
+        terrain,
+        hourlyShadows: shadowAnalysis?.hourlyShadows,
+        pinnedPointResults,
+        analysisResults,
+      });
       if (terrainWarning) {
         setExportWarning(`⚠️ Eksport DXF: ${terrainWarning}`);
       }

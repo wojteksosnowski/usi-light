@@ -10,7 +10,7 @@ import {
 import { DominantDirection } from '../../utils/segmentStatistics';
 
 
-export type CadDrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align' | 'union';
+export type CadDrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align';
 
 import { AffineMatrix2D } from '../../utils/math2d/affineMatrix';
 
@@ -79,7 +79,6 @@ export interface CadCanvasProps {
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
   onUpdateBuildingSweepPath?: (buildingId: string, newSweepPath: Point2D[], width?: number, alignment?: 'center' | 'left' | 'right') => void;
   onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
-  onBooleanUnion?: (bldgIdA: string, bldgIdB: string) => void;
   pinnedPoints?: import('../../types/geometry').PinnedFacadePoint[];
 
   pinnedPointResults?: AnalysisPointResult[];

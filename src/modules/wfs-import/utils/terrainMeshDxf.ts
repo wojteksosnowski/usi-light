@@ -1,3 +1,4 @@
+import { DxfWriter, PolylineFlags } from '@tarikjabiri/dxf';
 import { cadPointToWgs84, wgs84ToCadPoint, CrsDetectionResult, LatLon } from '../../../utils/geoTransform';
 import { fetchDtmBbox } from '../services/wcsGugikClient';
 import { EPSG_2180 } from '../services/wfsEgibClient';
@@ -16,17 +17,16 @@ function decimatedIndices(max: number, step: number): number[] {
 }
 
 export interface TerrainMeshResult {
-  /** Linie DXF (POLYLINE Polygon Mesh + VERTEX*M*N + SEQEND), gotowe do wklejenia w sekcję ENTITIES. */
-  entityLines: string[];
   warning: string | null;
 }
 
 /**
- * Buduje siatkę terenu (Polygon Mesh, DXF grupa 70 = 16) z realnych danych NMT (GUGiK WCS),
- * na warstwie `RZEZBA_TERENU`, we współrzędnych lokalnych CAD projektu. Rzędne są liczone
- * względem wysokości terenu w środku projektu (0 m = poziom środka projektu).
+ * Dodaje do `dxf` siatkę terenu (Polygon Mesh, DXF grupa 70 = 16) z realnych danych NMT
+ * (GUGiK WCS), na warstwie `RZEZBA_TERENU`, we współrzędnych lokalnych CAD projektu. Rzędne są
+ * liczone względem wysokości terenu w środku projektu (0 m = poziom środka projektu).
  */
 export async function buildTerrainMeshDxfEntities(
+  dxf: DxfWriter,
   projectCenter: LatLon,
   radiusMeters: number,
   projectCrs: CrsDetectionResult
@@ -42,11 +42,11 @@ export async function buildTerrainMeshDxfEntities(
   try {
     dtm = await fetchDtmBbox(minX, minY, maxX, maxY);
   } catch (err) {
-    return { entityLines: [], warning: `Nie udało się pobrać NMT (GUGiK WCS): ${err instanceof Error ? err.message : 'nieznany błąd'}` };
+    return { warning: `Nie udało się pobrać NMT (GUGiK WCS): ${err instanceof Error ? err.message : 'nieznany błąd'}` };
   }
 
   if (dtm.ncols < 2 || dtm.nrows < 2) {
-    return { entityLines: [], warning: 'Brak pokrycia NMT dla tego obszaru — pominięto rzeźbę terenu.' };
+    return { warning: 'Brak pokrycia NMT dla tego obszaru — pominięto rzeźbę terenu.' };
   }
 
   const referenceElevation = sampleGrid(dtm, center2180.x, center2180.y);
@@ -61,11 +61,11 @@ export async function buildTerrainMeshDxfEntities(
   const M = rows.length;
   const N = cols.length;
   if (M < 2 || N < 2) {
-    return { entityLines: [], warning: 'Zbyt mało punktów NMT w tym obszarze — pominięto rzeźbę terenu.' };
+    return { warning: 'Zbyt mało punktów NMT w tym obszarze — pominięto rzeźbę terenu.' };
   }
 
   let lastValidZ = refZ;
-  const vertexLines: string[] = [];
+  const vertices: { point: { x: number; y: number; z: number } }[] = [];
   const { xllcorner, yllcorner, cellsize } = dtm;
 
   for (const r of rows) {
@@ -80,25 +80,16 @@ export async function buildTerrainMeshDxfEntities(
       const cad = wgs84ToCadPoint(wgs, projectCrs, projectCenter);
       const z = elevation - refZ;
 
-      vertexLines.push('0', 'VERTEX');
-      vertexLines.push('8', 'RZEZBA_TERENU');
-      vertexLines.push('70', '64'); // 3D polygon mesh vertex
-      vertexLines.push('10', cad.x.toFixed(3));
-      vertexLines.push('20', cad.y.toFixed(3));
-      vertexLines.push('30', z.toFixed(3));
+      vertices.push({ point: { x: cad.x, y: cad.y, z } });
     }
   }
 
-  const entityLines: string[] = [
-    '0', 'POLYLINE',
-    '8', 'RZEZBA_TERENU',
-    '66', '1',
-    '70', '16', // 3D polygon mesh
-    '71', String(M),
-    '72', String(N),
-    ...vertexLines,
-    '0', 'SEQEND',
-  ];
+  dxf.addPolyline3D(vertices, {
+    layerName: 'RZEZBA_TERENU',
+    flags: PolylineFlags.PolygonMesh3D,
+    polygonMeshM: M,
+    polygonMeshN: N,
+  });
 
-  return { entityLines, warning: null };
+  return { warning: null };
 }

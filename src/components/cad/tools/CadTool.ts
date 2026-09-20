@@ -9,7 +9,6 @@ export interface ToolActionDispatchers {
   onCancelDrawing?: () => void;
   onUpdateBuildingVertices?: (buildingId: string, newVertices: Point2D[]) => void;
   onBuildingRotate?: (buildingId: string, pivot: Point2D, deltaAngleRad: number) => void;
-  onBooleanUnion?: (bldgIdA: string, bldgIdB: string) => void;
   onAddPinnedPoint?: (point: { buildingId: string; segmentId: string; offsetRatio: number }) => void;
   onDeletePinnedPoint?: (id: string) => void;
   onUpdatePinnedPoint?: (id: string, buildingId: string, segmentId: string, offsetRatio: number) => void;

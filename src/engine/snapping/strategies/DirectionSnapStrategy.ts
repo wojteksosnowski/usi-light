@@ -16,6 +16,7 @@ import {
   CalculateDirectionSnapOptions,
   DirectionCandidate,
 } from '../types';
+import { isIdExcluded } from './snapExclusionUtils';
 
 /**
  * Gathers candidate target direction axes (in degrees [0, 180)) with strict spatial and hierarchy prioritization:
@@ -35,11 +36,16 @@ export function collectTargetDirections(
   hoveredBuildingId?: string,
   selectedBuildingId?: string,
   excludeBuildingId?: string,
+  excludeBuildingIds?: string[],
   excludeSegmentIndices?: number[],
   staticReferenceSegments: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[] = [],
   otrackModes?: { ortho?: boolean; dominant?: boolean; relative?: boolean },
   activeCategory?: ObjectCategory
 ): DirectionCandidate[] {
+  const excludedSet = new Set<string>(excludeBuildingIds || []);
+  if (excludeBuildingId) excludedSet.add(excludeBuildingId);
+
+  const isBldgExcluded = (id: string) => isIdExcluded(id, excludedSet);
   const candidates: DirectionCandidate[] = [];
   const seenAngles: number[] = [];
 
@@ -123,19 +129,19 @@ export function collectTargetDirections(
 
   // 4. Priorytetyzacja wskazanego/najechanego obiektu
   const prioritizedBuildingIds = new Set<string>();
-  if (allowRelative && hoveredBuildingId && hoveredBuildingId !== excludeBuildingId) {
+  if (allowRelative && hoveredBuildingId && !isBldgExcluded(hoveredBuildingId)) {
     prioritizedBuildingIds.add(hoveredBuildingId);
   }
-  if (allowRelative && selectedBuildingId && selectedBuildingId !== excludeBuildingId) {
+  if (allowRelative && selectedBuildingId && !isBldgExcluded(selectedBuildingId)) {
     prioritizedBuildingIds.add(selectedBuildingId);
   }
 
   const prioBuildings = allowRelative ? buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false) : [];
   for (const bldg of prioBuildings) {
-    if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+    if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
-        if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+        if (isBldgExcluded(bldg.id) && excludeSegmentIndices?.includes(sIdx)) continue;
         const seg = bldg.segments[sIdx];
         const sdx = seg.p2.x - seg.p1.x;
         const sdy = seg.p2.y - seg.p1.y;
@@ -150,7 +156,7 @@ export function collectTargetDirections(
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
-      if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+      if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
       const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
       bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
@@ -185,11 +191,11 @@ export function collectTargetDirections(
 
     for (const bldg of buildings) {
       if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id)) continue;
-      if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+      if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
       const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
       if (Array.isArray(bldg.segments)) {
         for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
-          if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+          if (isBldgExcluded(bldg.id) && excludeSegmentIndices?.includes(sIdx)) continue;
           const seg = bldg.segments[sIdx];
           const midX = (seg.p1.x + seg.p2.x) / 2;
           const midY = (seg.p1.y + seg.p2.y) / 2;
@@ -218,7 +224,7 @@ export function collectTargetDirections(
       }
 
       if (Array.isArray(bldg.zonePolygons)) {
-        if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+        if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
         bldg.zonePolygons.forEach((zf, zIdx) => {
           if (!zf.polygon || zf.polygon.length < 2) return;
           const nZ = zf.polygon.length;
@@ -288,11 +294,17 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     selectedBuildingId,
     activeCategory,
     excludeBuildingId,
+    excludeBuildingIds,
     excludeSegmentIndices,
     otrackModes,
   } = options;
 
   if (!currentMouseWorld || !originPoint) return null;
+
+  const excludedSet = new Set<string>(excludeBuildingIds || []);
+  if (excludeBuildingId) excludedSet.add(excludeBuildingId);
+
+  const isBldgExcluded = (id: string) => isIdExcluded(id, excludedSet);
 
   const dx = currentMouseWorld.x - originPoint.x;
   const dy = currentMouseWorld.y - originPoint.y;
@@ -314,6 +326,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     hoveredBuildingId,
     selectedBuildingId,
     excludeBuildingId,
+    excludeBuildingIds,
     excludeSegmentIndices,
     staticReferenceSegments,
     otrackModes,
@@ -342,6 +355,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         hoveredBuildingId,
         selectedBuildingId,
         excludeBuildingId,
+        excludeBuildingIds,
         excludeSegmentIndices,
         staticReferenceSegments,
         otrackModes,
@@ -423,11 +437,11 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false) continue;
-    if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+    if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
-        if (bldg.id === excludeBuildingId && excludeSegmentIndices?.includes(sIdx)) continue;
+        if (isBldgExcluded(bldg.id) && excludeSegmentIndices?.includes(sIdx)) continue;
         const seg = bldg.segments[sIdx];
         intersectableSegments.push({
           p1: seg.p1,
@@ -441,7 +455,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
-      if (bldg.id === excludeBuildingId && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
+      if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
       bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
         const nZ = zf.polygon.length;
@@ -633,6 +647,7 @@ export class DirectionSnapStrategy implements SnapStrategy {
       hoveredBuildingId: context.hoveredBuildingId,
       selectedBuildingId: context.selectedBuildingId,
       excludeBuildingId: context.excludeBuildingId,
+      excludeBuildingIds: context.excludeBuildingIds,
       excludeSegmentIndices: context.excludeSegmentIndices,
       activeCategory: context.activeCategory,
       otrackModes: context.otrackModes,

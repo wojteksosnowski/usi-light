@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Point2D, AnalysisPointResult, DEFAULT_SWEEP_WIDTH } from '../types/geometry';
 import { computeCombinedShadowEnvelope } from '@/utils/math2d';
+import { isBuildingVariantActive } from '@/utils/geometrySelectors';
 import { computeHourlyShadowsLive } from '@/utils/math2d/shadowEnvelope';
 import { CadCanvasProps, CadRenderContext } from './cad/types';
 import { CadRenderFrameContext } from './cad/pipeline/types';
@@ -19,10 +20,12 @@ import { HereTileManager } from '../utils/hereTileManager';
 import { detectCoordinateSystem, CrsDetectionResult } from '../utils/geoTransform';
 import { isPointInPolygon } from '@/utils/math2d';
 import { APP_CONFIG } from '../config/appConfig';
-import { useWfsStore, MpzpZoneFeature } from '../modules/wfs-import/store/useWfsStore';
+import { useWfsStore } from '../modules/wfs-import/store/useWfsStore';
 import { prefetchActiveGeoLayersInRadius } from '../modules/wfs-import/registerGeoLayers';
 import { useSolarAnalysisStore } from '../store/useSolarAnalysisStore';
+import { useSceneStore } from '../store/useSceneStore';
 import { useUiStore } from '../store/useUiStore';
+import { useCadToolStore } from '../store/useCadToolStore';
 import { MasterplanRenderPipeline } from './cad/masterplan/MasterplanRenderPipeline';
 
 export { isBuildingLocked, getBuildingTopElevation };
@@ -79,6 +82,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const openGroupId = useSceneStore((s) => s.openGroupId);
 
   useDemoRecorder(canvasRef, containerRef);
 
@@ -273,7 +278,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   // głównej logiki interakcji, aktywny tylko gdy warstwa jest widoczna.
   const showMpzpZonesLayer = useWfsStore((s) => s.showMpzpZonesLayer);
   const mpzpZones = useWfsStore((s) => s.mpzpZones);
-  const [selectedMpzpZone, setSelectedMpzpZone] = useState<MpzpZoneFeature | null>(null);
+  const setSelectedMpzpZone = useWfsStore((s) => s.setSelectedMpzpZone);
 
   const handleCanvasClickForMpzpZone = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -365,6 +370,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const visibleBuildings = useMemo(() => {
     return buildings.filter((b) => {
+      if (!isBuildingVariantActive(b)) return false;
       const lyr = b.layer || 'Domyślna (0)';
       return layerSettings[lyr]?.isVisible !== false;
     });
@@ -381,8 +387,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const liveShadowResult = useMemo(() => {
     if (!showShadowRange || !isInteracting) return null;
-    return computeHourlyShadowsLive(buildings, latitude, longitude, equinoxDate, 0.5, sunlightMethod);
-  }, [showShadowRange, isInteracting, buildings, latitude, longitude, equinoxDate, sunlightMethod]);
+    return computeHourlyShadowsLive(visibleBuildings, latitude, longitude, equinoxDate, 0.5, sunlightMethod);
+  }, [showShadowRange, isInteracting, visibleBuildings, latitude, longitude, equinoxDate, sunlightMethod]);
 
   const hourlyShadowsToRender = useMemo(() => {
     if (!showShadowRange) return [];
@@ -409,6 +415,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     }
     return pinnedPoints.flatMap((pt, idx) => {
       const bldg = buildings.find((b) => b.id === pt.buildingId);
+      if (!isBuildingVariantActive(bldg)) return [];
       const lyr = bldg?.layer || 'Domyślna (0)';
       if (!bldg || layerSettings[lyr]?.isVisible === false) return [];
       const seg = bldg.segments?.find((s) => s.id === pt.segmentId);
@@ -469,6 +476,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       buildings,
       selectedBuildingId,
       selectedBuildingIds,
+      openGroupId,
       hoveredBuildingId: interaction.hoveredBuildingId,
       hoveredLabelBuildingId: interaction.hoveredLabelBuildingId,
       hoveredEdge: interaction.hoveredEdge,
@@ -487,6 +495,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       liveFacadeSnap: interaction.liveFacadeSnap,
       facadePointMode,
       drawingMode,
+      hideOtherLabelsInLinkingMode: useCadToolStore.getState().hideOtherLabelsInLinkingMode,
       showAnalysisPoints,
       showShadowRange,
       showShadowFill,
@@ -523,6 +532,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     buildings,
     selectedBuildingId,
     selectedBuildingIds,
+    openGroupId,
     interaction.hoveredBuildingId,
     interaction.hoveredLabelBuildingId,
     interaction.hoveredEdge,
@@ -811,41 +821,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           anchor={{ sx: expandedLabelAnchor.sx, sy: expandedLabelAnchor.bottomSy }}
           onClose={() => setExpandedLabelBuildingId(null)}
         />
-      )}
-      {selectedMpzpZone && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '16px',
-            left: '16px',
-            padding: '10px 12px',
-            borderRadius: '10px',
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            border: '1px solid rgba(96, 165, 250, 0.4)',
-            color: '#e2e8f0',
-            fontSize: '11px',
-            lineHeight: 1.5,
-            maxWidth: '260px',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-            zIndex: 20,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ fontWeight: 700, color: '#60a5fa' }}>Strefa MPZP {selectedMpzpZone.funSymb || ''}</span>
-            <button
-              type="button"
-              onClick={() => setSelectedMpzpZone(null)}
-              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '13px', lineHeight: 1 }}
-            >
-              ✕
-            </button>
-          </div>
-          {selectedMpzpZone.funNazwa && <div>Przeznaczenie: {selectedMpzpZone.funNazwa}</div>}
-          {selectedMpzpZone.maxWysokosc && <div>Maks. wysokość: {selectedMpzpZone.maxWysokosc} m</div>}
-          {selectedMpzpZone.intenZab && <div>Intensywność zabudowy: {selectedMpzpZone.intenZab}</div>}
-          {selectedMpzpZone.powBio && <div>Pow. biologicznie czynna: {selectedMpzpZone.powBio}%</div>}
-          {selectedMpzpZone.nazwaPlan && <div style={{ color: '#94a3b8', marginTop: '4px' }}>Plan: {selectedMpzpZone.nazwaPlan}</div>}
-        </div>
       )}
     </div>
   );

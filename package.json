@@ -13,6 +13,7 @@
     "@duckdb/duckdb-wasm": "^1.32.0",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
+    "@tarikjabiri/dxf": "^2.9.0",
     "@types/three": "^0.185.4",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.4",

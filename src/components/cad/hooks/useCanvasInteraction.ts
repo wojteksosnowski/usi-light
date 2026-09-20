@@ -1,8 +1,10 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType, DEFAULT_SWEEP_WIDTH } from '../../../types/geometry';
 import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180, getPolygonCentroid, getRotateHandleScreenPos, offsetPolygonEdge, offsetOpenPolylineEdge } from '@/utils/math2d';
+import { isBuildingVariantActive } from '@/utils/geometrySelectors';
 import { useUiStore } from '../../../store/useUiStore';
 import { useCadToolStore } from '../../../store/useCadToolStore';
+import { useSceneStore } from '../../../store/useSceneStore';
 import {
   calculateDirectionSnap,
   DirectionSnapResult,
@@ -24,8 +26,24 @@ import {
 import { APP_CONFIG } from '../../../config/appConfig';
 import { CadCanvasProps, ViewportState } from '../types';
 import { viewportWorldBounds } from '../masterplan/masterplanSpatial';
-import { EditingEdgeLengthState, getBuildingLabelHitAtPoint } from '../renderers/buildingsRenderer';
+import { EditingEdgeLengthState, getBuildingLabelHitAtPoint, getLinkingActionHitAtPoint } from '../renderers/buildingsRenderer';
 import { getMasterplanLabelHitAtPoint } from '../masterplan/masterplanLabels';
+
+function getRotateHandleGeometry(
+  selBldg: BuildingLoop,
+  buildings: BuildingLoop[],
+  openGroupId: string | null,
+  effectivePivot: Point2D | null
+) {
+  const targetGroupId = selBldg.groupId;
+  const isGroupOpen = !!targetGroupId && openGroupId === targetGroupId;
+  const groupBldgs = targetGroupId && !isGroupOpen
+    ? buildings.filter((b) => b.groupId === targetGroupId && isBuildingVariantActive(b))
+    : [selBldg];
+  const allGroupVertices = groupBldgs.flatMap((b) => b.vertices || []);
+  const centroid = effectivePivot || getPolygonCentroid(selBldg.vertices);
+  return { allGroupVertices, centroid };
+}
 
 function getLabelHitAtPoint(
   viewMode2D: string,
@@ -289,7 +307,6 @@ export function useCanvasInteraction({
   onUpdateBuildingVertices,
   onUpdateBuildingSweepPath,
   onBuildingRotate,
-  onBooleanUnion,
   pinnedPoints = [],
   pinnedPointResults: propPinnedPointResults,
   activePinnedPointId = null,
@@ -412,14 +429,19 @@ export function useCanvasInteraction({
     setCandidateIndex((prev) => prev + 1);
   }, []);
 
-  // Effective pivot for keyboard step-rotation (group centroid, so linked buildings rotate together)
+  const openGroupId = useSceneStore((s) => s.openGroupId);
+
+  // Effective pivot for keyboard step-rotation (group centroid when closed, single building centroid when group is open)
   const effectivePivot = useMemo<Point2D | null>(() => {
     if (!selectedBuildingId) return null;
     const bldg = buildings.find((b) => b.id === selectedBuildingId);
     if (!bldg || bldg.vertices.length === 0) return null;
 
     const targetGroupId = bldg.groupId;
-    const groupBldgs = targetGroupId ? buildings.filter((b) => b.groupId === targetGroupId) : [bldg];
+    const isGroupOpen = !!targetGroupId && openGroupId === targetGroupId;
+    const groupBldgs = targetGroupId && !isGroupOpen
+      ? buildings.filter((b) => b.groupId === targetGroupId && isBuildingVariantActive(b))
+      : [bldg];
     let cx = 0;
     let cy = 0;
     let totalCount = 0;
@@ -431,7 +453,7 @@ export function useCanvasInteraction({
       }
     }
     return totalCount > 0 ? { x: cx / totalCount, y: cy / totalCount } : null;
-  }, [selectedBuildingId, buildings]);
+  }, [selectedBuildingId, buildings, openGroupId]);
 
   // Znormalizowany bufor linii Ax + By + C = 0 dla wszystkich widocznych warstwowo obiektów
   const lineBuffer = useMemo<CachedLineEquation[]>(() => {
@@ -707,6 +729,7 @@ export function useCanvasInteraction({
 
       const hits: string[] = [];
       for (const bldg of sorted) {
+        if (!isBuildingVariantActive(bldg)) continue;
         const lyr = bldg.layer || 'Domyślna (0)';
         const lyrSetting = layerSettings[lyr] || {};
         if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
@@ -927,12 +950,24 @@ export function useCanvasInteraction({
         return;
       }
 
-      // Per-object rotate handle: shown above a plainly-selected (non-editing) building.
+      // Per-object / group rotate handle: shown above a plainly-selected (non-editing) building or logical group.
       if (drawingMode === 'none' && selectedBuildingId && !facadePointMode) {
         const selBldg = buildings.find((b) => b.id === selectedBuildingId);
         if (selBldg && !isBuildingLocked(selBldg, layerSettings) && selBldg.vertices.length >= 3) {
-          const centroid = getPolygonCentroid(selBldg.vertices);
-          const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale, viewRotationDeg);
+          const targetGroupId = selBldg.groupId;
+          const groupBldgs = targetGroupId
+            ? buildings.filter((b) => b.groupId === targetGroupId && isBuildingVariantActive(b))
+            : [selBldg];
+          const allGroupVertices = groupBldgs.flatMap((b) => b.vertices || []);
+          const centroid = effectivePivot || getPolygonCentroid(selBldg.vertices);
+          const hS = getRotateHandleScreenPos(
+            selBldg,
+            worldToScreen,
+            viewState.scale,
+            viewRotationDeg,
+            effectivePivot || undefined,
+            allGroupVertices.length > 0 ? allGroupVertices : undefined
+          );
           if (hS && Math.hypot(sx - hS.sx, sy - hS.sy) <= 10) {
             const startAngleWorld = Math.atan2(world.wy - centroid.y, world.wx - centroid.x);
             setIsRotating(true);
@@ -943,18 +978,6 @@ export function useCanvasInteraction({
             return;
           }
         }
-      }
-
-      if (drawingMode === 'union') {
-        const clickedBuildingId = hoveredBuildingId || (hoveredBuildings.length > 0 ? hoveredBuildings[0] : null);
-        if (clickedBuildingId) {
-          if (!selectedBuildingId) {
-            onSelectBuilding(clickedBuildingId);
-          } else if (selectedBuildingId !== clickedBuildingId) {
-            onBooleanUnion?.(selectedBuildingId, clickedBuildingId);
-          }
-        }
-        return;
       }
 
       if (drawingMode === 'rectangle') {
@@ -1079,6 +1102,25 @@ export function useCanvasInteraction({
         }
       }
 
+      if (isLinkingMode && selectedBuildingId) {
+        const linkHit = getLinkingActionHitAtPoint(
+          sx,
+          sy,
+          buildings,
+          worldToScreen,
+          selectedBuildingId,
+          layerSettings
+        );
+        if (linkHit) {
+          if (linkHit.action === 'add') {
+            useSceneStore.getState().performLinkBuildings(selectedBuildingId, linkHit.buildingId);
+          } else {
+            useSceneStore.getState().performUnlinkBuilding(linkHit.buildingId);
+          }
+          return;
+        }
+      }
+
       const hitLabelBldgId = getLabelHitAtPoint(
         viewMode2D,
         sx,
@@ -1144,6 +1186,18 @@ export function useCanvasInteraction({
     const selBldg = buildings.find((b) => b.id === targetId);
     if (!selBldg || isBuildingLocked(selBldg, layerSettings)) return;
 
+    const currentOpenGroupId = useSceneStore.getState().openGroupId;
+
+    // 1. Jeśli obiekt należy do grupy logicznej, a użytkownik nie jest jeszcze wewnątrz tej grupy:
+    // wejście do wnętrza grupy (izolacja grupy i wybór klikniętego pojedynczego elementu)
+    if (selBldg.groupId && currentOpenGroupId !== selBldg.groupId) {
+      useSceneStore.getState().setOpenGroupId(selBldg.groupId);
+      useSceneStore.getState().setSelectedBuildingId(targetId);
+      return;
+    }
+
+    // 2. Jeśli użytkownik jest już wewnątrz grupy lub obiekt nie należy do żadnej grupy:
+    // podwójne kliknięcie wprowadza dany obiekt w tryb edycji wierzchołków
     onSelectBuilding(targetId);
     onDrawingModeChange?.('vertexEdit');
   };
@@ -1241,6 +1295,7 @@ export function useCanvasInteraction({
     let minBldgDistPx = 45;
     for (const bldg of buildings) {
       if (bldg.isIncluded === false || !Array.isArray(bldg.vertices)) continue;
+      if (!isBuildingVariantActive(bldg)) continue;
       for (const v of bldg.vertices) {
         const sv = worldToScreen(v.x, v.y);
         const d = Math.hypot(sx - sv.sx, sy - sv.sy);
@@ -1348,6 +1403,11 @@ export function useCanvasInteraction({
               setActiveDirectionSnap(dirSnap);
               setActiveOsnapSnap(null);
             } else {
+              const isGroupOpen = !!selBldg.groupId && openGroupId === selBldg.groupId;
+              const movingGroupBldgIds = selBldg.groupId && !isGroupOpen
+                ? buildings.filter((b) => b.groupId === selBldg.groupId).map((b) => b.id)
+                : [selBldg.id];
+
               if (isOsnapActive) {
                 osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
                   mouseWorld: targetPt,
@@ -1355,6 +1415,7 @@ export function useCanvasInteraction({
                   worldToScreen,
                   screenSnapThresholdPx: snapRadiusPx,
                   excludeBuildingId: selBldg.id,
+                  excludeBuildingIds: movingGroupBldgIds,
                   activeCategory: selBldg.category ?? 'building',
                   previousSnapResult: activeOsnapSnap,
                   hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
@@ -1419,6 +1480,7 @@ export function useCanvasInteraction({
                   worldToScreen,
                   hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
                   excludeBuildingId: selBldg.id,
+                  excludeBuildingIds: movingGroupBldgIds,
                   activeCategory: selBldg.category ?? 'building',
                 });
               }
@@ -1519,8 +1581,15 @@ export function useCanvasInteraction({
       const isBldgLocked = selBldg && isBuildingLocked(selBldg, layerSettings);
 
       if (selBldg && !isBldgLocked && selBldg.vertices.length >= 3) {
-        const centroid = getPolygonCentroid(selBldg.vertices);
-        const hS = getRotateHandleScreenPos(selBldg, worldToScreen, viewState.scale, viewRotationDeg);
+        const { allGroupVertices, centroid } = getRotateHandleGeometry(selBldg, buildings, openGroupId, effectivePivot);
+        const hS = getRotateHandleScreenPos(
+          selBldg,
+          worldToScreen,
+          viewState.scale,
+          viewRotationDeg,
+          effectivePivot || undefined,
+          allGroupVertices.length > 0 ? allGroupVertices : undefined
+        );
         setIsRotateHandleHovered(!!hS && Math.hypot(sx - hS.sx, sy - hS.sy) <= 10);
 
         if (isRotating && lastMouseAngleWorld !== null) {
@@ -1807,6 +1876,7 @@ export function useCanvasInteraction({
         searchBuildings = buildings
           .filter((b) => {
             if (b.category === 'boundary') return false;
+            if (!isBuildingVariantActive(b)) return false;
             const lyr = b.layer || 'Domyślna (0)';
             return layerSettings[lyr]?.isVisible !== false && layerSettings[lyr]?.isGhosted !== true;
           })
@@ -1820,6 +1890,7 @@ export function useCanvasInteraction({
       let minSnapDist = 999999;
       for (const bldg of searchBuildings) {
         if (!bldg || bldg.category === 'boundary' || !Array.isArray(bldg.segments)) continue;
+        if (!isBuildingVariantActive(bldg)) continue;
 
         for (const seg of bldg.segments) {
           const dx = seg.p2.x - seg.p1.x;
@@ -1863,6 +1934,7 @@ export function useCanvasInteraction({
       let closestSeg: { buildingId: string; segmentId: string } | null = null;
       let minSegDist = 1.2;
       for (const bldg of buildings) {
+        if (!isBuildingVariantActive(bldg)) continue;
         const lyr = bldg.layer || 'Domyślna (0)';
         const lyrSetting = layerSettings[lyr] || {};
         if (lyrSetting.isVisible === false || lyrSetting.isGhosted === true) continue;
@@ -1953,11 +2025,17 @@ export function useCanvasInteraction({
           const s1 = worldToScreen(world.wx + 1, world.wy);
           const pxPerMeter = Math.hypot(s1.sx - s0.sx, s1.sy - s0.sy) || 20;
           const distToleranceMeters = Math.max(0.1, snapRadiusPx / pxPerMeter);
+          const edgeBldg = buildings.find((b) => b.id === dragCtx.buildingId);
+          const edgeGroupBldgIds = edgeBldg?.groupId
+            ? buildings.filter((b) => b.groupId === edgeBldg.groupId).map((b) => b.id)
+            : [dragCtx.buildingId];
+
           const edgeSnap = evaluateEdgeDragSnap({
             edgeP1: dragCtx.edgeP1,
             edgeP2: dragCtx.edgeP2,
             normal: dragCtx.normal,
             buildingId: dragCtx.buildingId,
+            excludeBuildingIds: edgeGroupBldgIds,
             edgeIndex: dragCtx.edgeIndex,
             tentativeDelta: { dx: totalDx, dy: totalDy },
             referenceBuffer: visibleLineBuffer,
@@ -2024,6 +2102,14 @@ export function useCanvasInteraction({
             }
           }
 
+          const isGroupOpen = !!movingBldg.groupId && openGroupId === movingBldg.groupId;
+          const movingGroupBldgIds = new Set<string>(selectedBuildingIds);
+          if (movingBldg.groupId && !isGroupOpen) {
+            buildings.filter((b) => b.groupId === movingBldg.groupId).forEach((b) => movingGroupBldgIds.add(b.id));
+          } else {
+            movingGroupBldgIds.add(primaryId);
+          }
+
           const s0 = worldToScreen(world.wx, world.wy);
           const s1 = worldToScreen(world.wx + 1, world.wy);
           const pxPerMeter = Math.hypot(s1.sx - s0.sx, s1.sy - s0.sy) || 20;
@@ -2032,6 +2118,7 @@ export function useCanvasInteraction({
           const dragSnap = evaluateBuildingDragMultiSnap({
             movingVertices: tentVerts,
             movingBuildingId: primaryId,
+            excludeBuildingIds: Array.from(movingGroupBldgIds),
             referenceBuffer: visibleLineBuffer,
             dragAnchorVertex: dragAnchor,
             distanceThresholdMeters: distToleranceMeters,
@@ -2183,13 +2270,22 @@ export function useCanvasInteraction({
       setHoveredBuildingIndex((prev) => (hits.length === 0 ? 0 : Math.min(prev, hits.length - 1)));
     };
 
+    // Zabezpieczenie na wypadek utraty focusu okna w trakcie przeciągania (np. alt-tab) - żadne
+    // mouseup nigdy nie nadejdzie w takim wypadku, więc isInteracting utknąłby na `true`, zamrażając
+    // podgląd 3D w nieskończoność (patrz useStableWhileInteracting).
+    const handleWindowBlur = () => {
+      onInteractionChange?.(false);
+    };
+
     window.addEventListener('mousemove', handleGlobalMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('blur', handleWindowBlur);
     return () => {
       window.removeEventListener('mousemove', handleGlobalMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [getHoverCandidates, screenToWorld, containerRef, handleMouseUp]);
+  }, [getHoverCandidates, screenToWorld, containerRef, handleMouseUp, onInteractionChange]);
 
   const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (selectedBuildingId && drawingMode === 'vertexEdit' && !facadePointMode) {

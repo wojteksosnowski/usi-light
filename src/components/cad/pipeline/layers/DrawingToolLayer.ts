@@ -6,6 +6,8 @@ export class DrawingToolLayer implements CadRenderLayer {
   readonly id = 'drawing_tool_overlay';
   readonly zIndex = 90;
 
+  private groupVerticesCache: { buildings: unknown; targetGroupId: string | undefined; vertices: Point2D[] } | null = null;
+
   shouldRender(_context: CadRenderFrameContext): boolean {
     return true; // Overlay is cleared and rendered every frame
   }
@@ -53,10 +55,30 @@ export class DrawingToolLayer implements CadRenderLayer {
         : buildings;
 
     const activeSelectedBuilding = effectiveBuildings.find((b) => b.id === selectedBuildingId);
+    const targetGroupId = activeSelectedBuilding?.groupId;
+
+    let allGroupVertices: Point2D[];
+    if (
+      this.groupVerticesCache &&
+      this.groupVerticesCache.buildings === effectiveBuildings &&
+      this.groupVerticesCache.targetGroupId === targetGroupId
+    ) {
+      allGroupVertices = this.groupVerticesCache.vertices;
+    } else {
+      const groupBldgs = targetGroupId
+        ? effectiveBuildings.filter((b) => b.groupId === targetGroupId)
+        : activeSelectedBuilding
+          ? [activeSelectedBuilding]
+          : [];
+      allGroupVertices = groupBldgs.flatMap((b) => b.vertices || []);
+      this.groupVerticesCache = { buildings: effectiveBuildings, targetGroupId, vertices: allGroupVertices };
+    }
+
     const buildingForPreview = activeSelectedBuilding
       ? ({
           ...activeSelectedBuilding,
           customPivot: effectivePivot,
+          allGroupVertices: allGroupVertices.length > 0 ? allGroupVertices : undefined,
           isRotateHandleHovered,
           isRotating,
           rotAngleDeg,

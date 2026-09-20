@@ -1,4 +1,5 @@
 import { Point2D, BuildingLoop } from '../types/geometry';
+import { isBuildingVariantActive } from './geometrySelectors';
 
 export interface CachedLineEquation {
   id: string; // np. `${objectId}_edge_${index}`
@@ -155,6 +156,7 @@ export function buildLineBufferFromBuildings(
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false) continue;
+    if (!isBuildingVariantActive(bldg)) continue;
     const lyr = bldg.layer || 'Domyślna (0)';
     if (layerSettings[lyr]?.isVisible === false) continue;
 

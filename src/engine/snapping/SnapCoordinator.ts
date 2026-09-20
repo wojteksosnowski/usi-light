@@ -86,7 +86,11 @@ export class SnapCoordinator {
       if (distFromActivePx < releaseRadiusPx) {
         // Upewnij się, że obiekt nie został usunięty lub wykluczony
         const srcBldg = this.activeSnapState.candidate.sourceBuildingId;
-        if (!srcBldg || srcBldg !== context.excludeBuildingId) {
+        const isExcluded = srcBldg && (
+          srcBldg === context.excludeBuildingId ||
+          (context.excludeBuildingIds && context.excludeBuildingIds.includes(srcBldg))
+        );
+        if (!isExcluded) {
           PerfMonitor.mark('snap.evaluate.sticky', performance.now() - evalStart);
           return {
             ...this.activeSnapState.candidate,
@@ -198,6 +202,7 @@ export function evaluateOsnapSnapWithCoordinator(
     worldToScreen: (wx: number, wy: number) => { sx: number; sy: number };
     screenSnapThresholdPx?: number;
     excludeBuildingId?: string;
+    excludeBuildingIds?: string[];
     hoveredBuildingId?: string;
     selectedBuildingId?: string;
     activeCategory?: import('../../types/geometry').ObjectCategory;
@@ -222,6 +227,7 @@ export function evaluateOsnapSnapWithCoordinator(
     candidateIndex: options.candidateIndex,
     thresholdPx: options.screenSnapThresholdPx ?? 14,
     excludeBuildingId: options.excludeBuildingId,
+    excludeBuildingIds: options.excludeBuildingIds,
     hoveredBuildingId: options.hoveredBuildingId,
     selectedBuildingId: options.selectedBuildingId,
     activeCategory: options.activeCategory,

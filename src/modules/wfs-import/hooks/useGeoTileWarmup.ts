@@ -3,6 +3,9 @@ import { useLicenseStore, useSolarAnalysisStore } from '../../../store';
 import { APP_CONFIG } from '../../../config/appConfig';
 import { prefetchAllGeoLayersWarmup } from '../registerGeoLayers';
 import { useWfsStore } from '../store/useWfsStore';
+import { cleanupExpiredTiles } from '../renderers/wmsTileDb';
+
+let cleanupRanThisSession = false;
 
 /**
  * Cichy warm-up bufora kafli WMS (Z16–Z18) — przy starcie aplikacji
@@ -16,6 +19,14 @@ export function useGeoTileWarmup() {
   const latitude = useSolarAnalysisStore((s) => s.settings.latitude);
   const longitude = useSolarAnalysisStore((s) => s.settings.longitude);
   const projectRadius = useWfsStore((s) => s.projectRadius);
+
+  useEffect(() => {
+    if (!cleanupRanThisSession) {
+      cleanupRanThisSession = true;
+      // Czyszczenie wygasłych/nadmiarowych kafli w trwałym cache IndexedDB, w tle, raz na sesję.
+      void cleanupExpiredTiles();
+    }
+  }, []);
 
   useEffect(() => {
     if (!isPro) return;

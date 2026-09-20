@@ -109,6 +109,7 @@ export interface SnapContext {
   gridSize?: number;
   thresholdPx?: number;
   excludeBuildingId?: string;
+  excludeBuildingIds?: string[];
   excludeSegmentIndices?: number[];
   hoveredBuildingId?: string;
   selectedBuildingId?: string;
@@ -254,6 +255,7 @@ export interface CalculateDirectionSnapOptions {
   selectedBuildingId?: string;
   activeCategory?: ObjectCategory;
   excludeBuildingId?: string;
+  excludeBuildingIds?: string[];
   excludeSegmentIndices?: number[];
   otrackModes?: {
     ortho?: boolean;

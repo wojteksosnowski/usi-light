@@ -27,7 +27,7 @@ const holeRing = [
   [8, 8],
 ];
 
-describe('importBuildingsFromGeoJson z otworami', () => {
+describe('importBuildingsFromGeoJson z otworami i wieloczęściowymi bryłami', () => {
   it('zachowuje otwór jako BuildingLoop.holes zamiast tworzyć osobny obiekt', () => {
     const collection: GeoJsonFeatureCollection = {
       type: 'FeatureCollection',
@@ -52,6 +52,44 @@ describe('importBuildingsFromGeoJson z otworami', () => {
     // Segmenty: obrys zewnętrzny + otwór
     expect(bldg.segments.length).toBe(bldg.vertices.length + bldg.holes![0].length);
     expect(bldg.segments.some((s) => s.ringIndex === 1)).toBe(true);
+  });
+
+  it('łączy części MultiPolygon we wspólny obiekt logiczny z groupId', () => {
+    const poly1 = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+      [0, 0],
+    ];
+    const poly2 = [
+      [15, 0],
+      [25, 0],
+      [25, 10],
+      [15, 10],
+      [15, 0],
+    ];
+
+    const collection: GeoJsonFeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'MultiPolygon',
+            coordinates: [[poly1], [poly2]],
+          },
+          properties: { ID_BUDYNKU: 'multi-bld-1' },
+        },
+      ],
+    };
+
+    const { buildings, warnings } = importBuildingsFromGeoJson(collection, localCrs, localCrs, projectCenter);
+
+    expect(warnings).toHaveLength(0);
+    expect(buildings).toHaveLength(2);
+    expect(buildings[0].groupId).toBe('group-wfs-multi-bld-1');
+    expect(buildings[1].groupId).toBe('group-wfs-multi-bld-1');
   });
 });
 

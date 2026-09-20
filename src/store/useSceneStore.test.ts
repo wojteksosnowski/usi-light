@@ -1,10 +1,27 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useSceneStore } from './useSceneStore';
+import { useUiStore } from './useUiStore';
 import { createBuildingFromVertices } from '../utils/dxfParser';
 
 describe('useSceneStore', () => {
   beforeEach(() => {
     useSceneStore.getState().resetScene();
+    useUiStore.getState().setSidebarOpen(false);
+    useUiStore.getState().setOpenSidebarGroup(null);
+  });
+
+  it('selectBuilding automatically opens sidebar and activates layers tab', () => {
+    const b1 = { ...createBuildingFromVertices([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }], 'Bldg 1', 10), id: 'b1' };
+    useSceneStore.getState().setBuildings([b1]);
+
+    expect(useUiStore.getState().isSidebarOpen).toBe(false);
+    expect(useUiStore.getState().openSidebarGroup).toBeNull();
+
+    useSceneStore.getState().selectBuilding('b1');
+
+    expect(useSceneStore.getState().selectedBuildingId).toBe('b1');
+    expect(useUiStore.getState().isSidebarOpen).toBe(true);
+    expect(useUiStore.getState().openSidebarGroup).toBe('layers');
   });
 
   it('selectLayerBuildings selects all buildings on the specified layer', () => {
@@ -358,6 +375,79 @@ describe('useSceneStore', () => {
       const expectedY = movedPt.x;
       expect(rotated.storyPolygons![4].polygon[0].x).toBeCloseTo(expectedX, 2);
       expect(rotated.storyPolygons![4].polygon[0].y).toBeCloseTo(expectedY, 2);
+    });
+
+    it('links and unlinks buildings and prevents modifiers on grouped/compound objects', () => {
+      const b1 = { ...createBuildingFromVertices([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }], 'B1', 10), id: 'b1' };
+      const b2 = { ...createBuildingFromVertices([{ x: 20, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 }], 'B2', 12), id: 'b2' };
+
+      useSceneStore.getState().setBuildings([b1, b2]);
+
+      // Link b1 and b2
+      useSceneStore.getState().performLinkBuildings('b1', 'b2');
+      let state = useSceneStore.getState();
+      const linked1 = state.buildings.find((b) => b.id === 'b1');
+      const linked2 = state.buildings.find((b) => b.id === 'b2');
+
+      expect(linked1?.groupId).toBeDefined();
+      expect(linked1?.groupId).toBe(linked2?.groupId);
+
+      // Attempt to add a modifier to grouped object should be rejected
+      useSceneStore.getState().addBuildingModifier('b1', {
+        id: 'mod-test',
+        type: 'terrace',
+        enabled: true,
+        depth: -2,
+        storiesCount: -1,
+        edgeIndex: 0,
+      } as any);
+
+      state = useSceneStore.getState();
+      const b1AfterMod = state.buildings.find((b) => b.id === 'b1');
+      expect(b1AfterMod?.modifiers?.length || 0).toBe(0);
+
+      // Unlink b2
+      useSceneStore.getState().performUnlinkBuilding('b2');
+      state = useSceneStore.getState();
+      const unlinked1 = state.buildings.find((b) => b.id === 'b1');
+      const unlinked2 = state.buildings.find((b) => b.id === 'b2');
+      expect(unlinked1?.groupId).toBeUndefined();
+      expect(unlinked2?.groupId).toBeUndefined();
+    });
+
+    it('moves and rotates all group buildings when group is closed, but moves/rotates only selected building when group is open', () => {
+      const b1 = { ...createBuildingFromVertices([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], 'B1', 10), id: 'b1' };
+      const b2 = { ...createBuildingFromVertices([{ x: 20, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 }, { x: 20, y: 10 }], 'B2', 10), id: 'b2' };
+
+      useSceneStore.getState().setBuildings([b1, b2]);
+      useSceneStore.getState().performLinkBuildings('b1', 'b2');
+      const groupId = useSceneStore.getState().buildings.find((b) => b.id === 'b1')!.groupId!;
+
+      // 1. Grupa zamknięta (openGroupId === null) -> moveBuilding przesuwa oba budynki
+      useSceneStore.getState().moveBuilding('b1', 5, 5);
+      let state = useSceneStore.getState();
+      expect(state.buildings.find((b) => b.id === 'b1')!.vertices[0]).toEqual({ x: 5, y: 5 });
+      expect(state.buildings.find((b) => b.id === 'b2')!.vertices[0]).toEqual({ x: 25, y: 5 });
+
+      // 2. Wejście do wnętrza grupy (openGroupId === groupId) -> moveBuilding na b1 przesuwa TYLKO b1
+      useSceneStore.getState().setOpenGroupId(groupId);
+      useSceneStore.getState().moveBuilding('b1', 10, 0);
+      state = useSceneStore.getState();
+      expect(state.buildings.find((b) => b.id === 'b1')!.vertices[0]).toEqual({ x: 15, y: 5 });
+      expect(state.buildings.find((b) => b.id === 'b2')!.vertices[0]).toEqual({ x: 25, y: 5 }); // b2 bez zmian!
+
+      // 3. moveBuildings w otwartej grupie z przekazaniem ['b1'] -> przesuwa TYLKO b1
+      useSceneStore.getState().moveBuildings(['b1'], 0, 10);
+      state = useSceneStore.getState();
+      expect(state.buildings.find((b) => b.id === 'b1')!.vertices[0]).toEqual({ x: 15, y: 15 });
+      expect(state.buildings.find((b) => b.id === 'b2')!.vertices[0]).toEqual({ x: 25, y: 5 });
+
+      // 4. Wyjście z grupy (openGroupId === null) -> przesuwanie znowu porusza całą grupę
+      useSceneStore.getState().setOpenGroupId(null);
+      useSceneStore.getState().moveBuilding('b1', -5, -5);
+      state = useSceneStore.getState();
+      expect(state.buildings.find((b) => b.id === 'b1')!.vertices[0]).toEqual({ x: 10, y: 10 });
+      expect(state.buildings.find((b) => b.id === 'b2')!.vertices[0]).toEqual({ x: 20, y: 0 });
     });
   });
 });

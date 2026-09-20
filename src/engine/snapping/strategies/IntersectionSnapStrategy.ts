@@ -1,6 +1,7 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, intersectLines, projectPointToLine } from '../../../utils/lineBufferEngine';
 import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
+import { filterCandidateLines } from './snapExclusionUtils';
 
 /**
  * IntersectionSnapStrategy - Wykrywa punkty przecięcia rzeczywistego i pozornego
@@ -24,19 +25,15 @@ export class IntersectionSnapStrategy implements SnapStrategy {
 
     let candidateEdges: CachedLineEquation[];
     if (context.spatialIndex) {
-      candidateEdges = context.spatialIndex.queryBBox(
+      const queried = context.spatialIndex.queryBBox(
         point.x - worldRadius,
         point.y - worldRadius,
         point.x + worldRadius,
         point.y + worldRadius
       );
-      if (context.excludeBuildingId) {
-        candidateEdges = candidateEdges.filter((e) => e.objectId !== context.excludeBuildingId);
-      }
+      candidateEdges = filterCandidateLines(queried, context);
     } else {
-      candidateEdges = context.excludeBuildingId
-        ? context.lineBuffer.filter((e) => e.objectId !== context.excludeBuildingId)
-        : context.lineBuffer;
+      candidateEdges = filterCandidateLines(context.lineBuffer, context);
     }
 
     const n = candidateEdges.length;

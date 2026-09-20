@@ -134,6 +134,9 @@ export function importBuildingsFromGeoJson(
     const rawBuildingId = strOrNullIfMissing(props.ID_BUDYNKU);
     const buildingId = rawBuildingId || `wfs-bld-${now}-${fi}`;
 
+    const hasMultipleStructures = structures.length > 1;
+    const wfsGroupId = hasMultipleStructures ? `group-wfs-${buildingId}` : undefined;
+
     for (let si = 0; si < structures.length; si++) {
       const struct = structures[si];
       const rawPoints: Point2D[] = struct.outer.map(([x, y]) =>
@@ -177,11 +180,14 @@ export function importBuildingsFromGeoJson(
         holes.push(ensureOppositeWinding(sanitizedHole.vertices, isPolygonCCW(sanitizedHole.vertices), outerIsCCW));
       }
 
+      const partLabel = hasMultipleStructures ? ` (cz. ${si + 1}/${structures.length})` : '';
+
       const buildingBase: BuildingLoop = {
         id,
-        name: `WFS ${rawBuildingId || `#${fi + 1}`}`,
+        name: `WFS ${rawBuildingId || `#${fi + 1}`}${partLabel}`,
         layer: 'WFS_BUDYNKI',
         category: 'building',
+        groupId: wfsGroupId,
         isTested: false,
         isIncluded: true,
         isLocked: true,
@@ -587,6 +593,28 @@ export function importMpzpZonesFromGeoJson(
       strOrNullIfMissing(props.nazwaWlasna) ||
       strOrNullIfMissing(props.plan);
 
+    const nrUchwaly =
+      strOrNullIfMissing(props.nr_uchwaly) ||
+      strOrNullIfMissing(props.NR_UCHWALY) ||
+      strOrNullIfMissing(props.numer_uchwaly) ||
+      strOrNullIfMissing(props.uchwala);
+
+    const dataUchwalenia =
+      strOrNullIfMissing(props.data_uchwalenia) ||
+      strOrNullIfMissing(props.DATA_UCHWALENIA) ||
+      strOrNullIfMissing(props.data_wejscia_w_zycie) ||
+      strOrNullIfMissing(props.data_obowiazywania);
+
+    const minPowBio =
+      strOrNullIfMissing(props.min_pow_bio) ||
+      strOrNullIfMissing(props.MIN_POW_BIOLOGICZNIE_CZYNNA) ||
+      strOrNullIfMissing(props.wsk_pow_bio_min);
+
+    const minInten =
+      strOrNullIfMissing(props.min_inten_zab) ||
+      strOrNullIfMissing(props.INTENSYWNOSC_MIN) ||
+      strOrNullIfMissing(props.intensywnosc_min);
+
     result.push({
       id: featureId,
       rings,
@@ -597,6 +625,10 @@ export function importMpzpZonesFromGeoJson(
       powBio,
       liczKond,
       nazwaPlan,
+      nrUchwaly,
+      dataUchwalenia,
+      minPowBio,
+      minInten,
     });
   }
 

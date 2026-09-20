@@ -14,7 +14,6 @@ import {
   importTrees,
 } from '../services/geoJsonImporter';
 import { fetchOsmBuildings } from '../services/osmBuildingsClient';
-import { reconcileBuildingsWithOsm } from '../services/buildingGeometryMatcher';
 import { detectCoordinateSystem } from '../../../utils/geoTransform';
 import { BuildingLoop } from '../../../types/geometry';
 
@@ -36,6 +35,8 @@ export const WfsImportPanel: React.FC = () => {
   const options = useWfsStore((s) => s.options);
   const setOptions = useWfsStore((s) => s.setOptions);
   const setLastImportBbox = useWfsStore((s) => s.setLastImportBbox);
+  const buildingSource = useWfsStore((s) => s.buildingSource);
+  const setBuildingSource = useWfsStore((s) => s.setBuildingSource);
 
   const fetchOsmLanduseAction = useOsmLanduseStore((s) => s.fetchLanduse);
   const osmFeatures = useOsmLanduseStore((s) => s.features);
@@ -69,36 +70,24 @@ export const WfsImportPanel: React.FC = () => {
 
       if (options.buildings) {
         setStatus({ stage: 'buildings' });
-        let wfsBuildings: BuildingLoop[] = [];
-        let osmBuildings: BuildingLoop[] = [];
-
-        const fetchWfsPromise = citySource
-          ? citySource.fetchBuildings(bbox).then((bldGeoJson) => {
-              const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
-              return res.buildings;
-            }).catch((err) => {
-              console.warn(`[WFS Import] Nie udało się pobrać budynków z WFS:`, err);
-              return [] as BuildingLoop[];
-            })
-          : Promise.resolve([] as BuildingLoop[]);
-
-        const fetchOsmPromise = fetchOsmBuildings(bbox, projectCenter, projectCrs, radius).catch((osmErr) => {
-          console.warn('[WFS Import] Nie udało się pobrać budynków z OSM:', osmErr);
-          return [] as BuildingLoop[];
-        });
-
-        const [wfsRes, osmRes] = await Promise.all([fetchWfsPromise, fetchOsmPromise]);
-        wfsBuildings = wfsRes;
-        osmBuildings = osmRes;
-
         let finalBuildings: BuildingLoop[] = [];
-        if (wfsBuildings.length > 0 && osmBuildings.length > 0) {
-          const reconciled = reconcileBuildingsWithOsm(wfsBuildings, osmBuildings);
-          finalBuildings = reconciled.buildings;
-        } else if (wfsBuildings.length > 0) {
-          finalBuildings = wfsBuildings;
-        } else if (osmBuildings.length > 0) {
-          finalBuildings = osmBuildings;
+
+        if (buildingSource === 'geoportal') {
+          if (citySource) {
+            try {
+              const bldGeoJson = await citySource.fetchBuildings(bbox);
+              const res = importBuildingsFromGeoJson(bldGeoJson, citySource.sourceCrs, projectCrs, projectCenter);
+              finalBuildings = res.buildings;
+            } catch (err) {
+              console.warn('[WFS Import] Nie udało się pobrać budynków z Geoportalu:', err);
+            }
+          }
+        } else {
+          try {
+            finalBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
+          } catch (osmErr) {
+            console.warn('[WFS Import] Nie udało się pobrać budynków z OSM:', osmErr);
+          }
         }
 
         for (const bld of finalBuildings) {
@@ -162,7 +151,7 @@ export const WfsImportPanel: React.FC = () => {
         treesCount: 0,
       });
     }
-  }, [selectedLocation, radius, options, settings, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup]);
+  }, [selectedLocation, radius, options, settings, buildingSource, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -190,6 +179,26 @@ export const WfsImportPanel: React.FC = () => {
           {RADIUS_OPTIONS.map((r) => (
             <option key={r} value={r}>{r} m</option>
           ))}
+        </select>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Źródło budynków:</span>
+        <select
+          value={buildingSource}
+          onChange={(e) => setBuildingSource(e.target.value as 'geoportal' | 'osm')}
+          style={{
+            flex: 1,
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '6px',
+            padding: '6px 8px',
+            fontSize: '12px',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <option value="geoportal">Geoportal</option>
+          <option value="osm">OSM</option>
         </select>
       </div>
 
