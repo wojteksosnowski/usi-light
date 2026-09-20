@@ -29,6 +29,10 @@ export const SceneObjectsSection: React.FC = () => {
     updateBuilding(id, { isGhosted: !currentGhosted });
   };
 
+  const handleToggleVisibility = (id: string, currentVisible: boolean) => {
+    updateBuilding(id, { isVisible: !currentVisible });
+  };
+
   const handleMassLock = (items: BuildingLoop[]) => {
     const allLocked = items.every((b) => b.isLocked);
     items.forEach((b) => updateBuilding(b.id, { isLocked: !allLocked }));
@@ -138,6 +142,7 @@ export const SceneObjectsSection: React.FC = () => {
                   onSelect={selectBuilding}
                   onToggleLock={handleToggleLock}
                   onToggleGhost={handleToggleGhost}
+                  onToggleVisibility={handleToggleVisibility}
                 />
               ))}
             </div>
@@ -311,6 +316,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onSelect={selectBuilding}
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
+                            onToggleVisibility={handleToggleVisibility}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -340,6 +346,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onSelect={selectBuilding}
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
+                            onToggleVisibility={handleToggleVisibility}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -429,6 +436,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onSelect={selectBuilding}
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
+                            onToggleVisibility={handleToggleVisibility}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -458,6 +466,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onSelect={selectBuilding}
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
+                            onToggleVisibility={handleToggleVisibility}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -547,6 +556,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onSelect={selectBuilding}
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
+                            onToggleVisibility={handleToggleVisibility}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -576,6 +586,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onSelect={selectBuilding}
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
+                            onToggleVisibility={handleToggleVisibility}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -629,6 +640,7 @@ export const SceneObjectsSection: React.FC = () => {
                     onSelect={selectBuilding}
                     onToggleLock={handleToggleLock}
                     onToggleGhost={handleToggleGhost}
+                    onToggleVisibility={handleToggleVisibility}
                   />
                 ))}
               </ObjectScopeSubgroup>
@@ -658,6 +670,7 @@ export const SceneObjectsSection: React.FC = () => {
                     onSelect={selectBuilding}
                     onToggleLock={handleToggleLock}
                     onToggleGhost={handleToggleGhost}
+                    onToggleVisibility={handleToggleVisibility}
                   />
                 ))}
               </ObjectScopeSubgroup>

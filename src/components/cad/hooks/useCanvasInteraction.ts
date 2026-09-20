@@ -1525,6 +1525,14 @@ export function useCanvasInteraction({
             if (dragVertexContextRef.current) {
               dragVertexContextRef.current.currentTargetPt = targetPt;
               const dragCtx = dragVertexContextRef.current;
+              // Tani, natychmiastowy kanał (bez rebuildu segmentów/R-tree/analizy) zasilający
+              // podgląd 3D na żywo podczas przeciągania - właściwy commit do useSceneStore
+              // nadal następuje dopiero na mouseup (patrz handleMouseUp).
+              useCadToolStore.getState().setLiveVertexPreview({
+                buildingId: dragCtx.buildingId,
+                vertexIndex: dragCtx.vertexIndex,
+                point: targetPt,
+              });
               const currVerts = dragCtx.initialVertices.map((v, idx) =>
                 idx === dragCtx.vertexIndex ? targetPt : v
               );

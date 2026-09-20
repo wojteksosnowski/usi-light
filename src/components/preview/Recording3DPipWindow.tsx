@@ -5,6 +5,8 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useSceneStore, useUiStore } from '../../store';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
+import { translateBuildingGeometry } from '@/store/useSceneStore';
+import { getPolygonCentroid } from '@/utils/math2d/polygons';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
 import { filterActiveVariantBuildings, findSelectedBuilding } from '@/utils/geometrySelectors';
 import { getCompoundGroupBuildings } from '@/utils/compoundObjectPipeline';
@@ -44,11 +46,23 @@ export const Recording3DPipWindow: React.FC = () => {
     expandedModifierId
   );
 
+  // Lokalny układ współrzędnych obiektu (patrz BuildingPreviewPanel.tsx) - pozycja obiektu w
+  // scenie nie może wpływać na kadr podglądu 3D.
+  const anchor = useMemo(
+    () => (activeBuilding ? getPolygonCentroid(activeBuilding.vertices) : null),
+    [activeBuilding]
+  );
+  const localizedBuilding = useMemo(() => {
+    if (!activeBuilding || !anchor) return activeBuilding;
+    return translateBuildingGeometry(activeBuilding, -anchor.x, -anchor.y);
+  }, [activeBuilding, anchor]);
+
   const groupBuildings = useMemo(() => {
-    if (!activeBuilding || !activeBuilding.groupId) return undefined;
+    if (!activeBuilding || !activeBuilding.groupId || !anchor) return undefined;
     const inGroup = getCompoundGroupBuildings(buildings, activeBuilding.groupId);
-    return inGroup.length > 1 ? inGroup : undefined;
-  }, [buildings, activeBuilding]);
+    if (inGroup.length <= 1) return undefined;
+    return inGroup.map((b) => translateBuildingGeometry(b, -anchor.x, -anchor.y));
+  }, [buildings, activeBuilding, anchor]);
 
   // Rejestracja Canvasu WebGL Three.js w store do nagrywania wideo
   useEffect(() => {
@@ -92,7 +106,7 @@ export const Recording3DPipWindow: React.FC = () => {
       }}
     >
       <BuildingIsoPreview
-        building={activeBuilding}
+        building={localizedBuilding!}
         groupBuildings={groupBuildings}
         highlightEdgeIndex={activeHighlight}
         hideToolbar={false}

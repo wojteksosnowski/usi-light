@@ -162,6 +162,7 @@ function collectLinkingModeLabels(
     if (!isBuildingVariantActive(bldg)) continue;
     const lyr = bldg.layer || 'Bariery';
     if (layerSettings[lyr]?.isVisible === false) continue;
+    if (bldg.isVisible === false) continue;
 
     const geo = getOrComputeBuildingGeo(bldg);
     if (!geo) continue;
@@ -247,6 +248,7 @@ export function getBuildingLabelHitAtPoint(
     const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
+    if (bldg.isVisible === false) continue;
 
     const geo = getOrComputeBuildingGeo(bldg);
     if (!geo) continue;
@@ -680,6 +682,7 @@ export function renderBuildings(
     const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
+    if (bldg.isVisible === false) continue;
 
     const isGhosted = lyrSetting.isGhosted === true;
     const isLocked = bldg.isLocked === true || lyrSetting.isLocked === true;
@@ -863,6 +866,7 @@ export function renderBuildings(
     const lyr = bldg.layer || 'Bariery';
     const lyrSetting = layerSettings[lyr] || {};
     if (lyrSetting.isVisible === false) continue;
+    if (bldg.isVisible === false) continue;
 
     const isGhosted = lyrSetting.isGhosted === true;
     const isLocked = bldg.isLocked === true || lyrSetting.isLocked === true;

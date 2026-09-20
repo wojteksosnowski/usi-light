@@ -47,7 +47,6 @@ export const PilaFields: React.FC<ModifierFieldsProps<PilaModifier>> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '4px' }}>
       <SegmentedControl
-        label="Kąt schodkowania (między a i b):"
         value={currentAngle}
         options={ANGLE_OPTIONS}
         onChange={(toothAngle) => onChange({ toothAngle })}

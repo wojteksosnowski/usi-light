@@ -129,7 +129,7 @@ function deriveStoreysCount(height: number, firstFloorHeight: number, typicalFlo
 }
 
 /** Translates a building's vertices, sweep path, story/zone polygons, and facade segments by (dx, dy). */
-function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: number): BuildingLoop {
+export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: number): BuildingLoop {
   const translate = (p: Point2D) => ({ x: p.x + dx, y: p.y + dy });
 
   const newVertices = bldg.vertices.map(translate);

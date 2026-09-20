@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Lock, Unlock, Ghost } from 'lucide-react';
+import { Lock, Unlock, Ghost, Lightbulb, LightbulbOff } from 'lucide-react';
 import { CircleSelectionIcon } from '../common/CircleSelectionIcon';
 import { BuildingLoop } from '@/types/geometry';
 
@@ -10,6 +10,7 @@ interface ObjectTreeItemProps {
   onSelect: (id: string, isMulti: boolean) => void;
   onToggleLock: (id: string, currentLocked: boolean) => void;
   onToggleGhost: (id: string, currentGhosted: boolean) => void;
+  onToggleVisibility: (id: string, currentVisible: boolean) => void;
 }
 
 export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
@@ -19,9 +20,11 @@ export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
   onSelect,
   onToggleLock,
   onToggleGhost,
+  onToggleVisibility,
 }) => {
   const isLocked = item.isLocked === true;
   const isGhosted = item.isGhosted === true;
+  const isVisible = item.isVisible !== false;
 
   // Variant styling tokens
   const getVariantStyles = () => {
@@ -144,6 +147,24 @@ export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
           }}
         >
           <Ghost size={12} />
+        </button>
+
+        <button
+          type="button"
+          title={isVisible ? 'Ukryj' : 'Pokaż'}
+          onClick={() => onToggleVisibility(item.id, isVisible)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: isVisible ? 'var(--accent-amber)' : 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: '2px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {isVisible ? <Lightbulb size={12} /> : <LightbulbOff size={12} />}
         </button>
       </div>
     </div>

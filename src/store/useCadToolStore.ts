@@ -72,6 +72,10 @@ interface CadToolState {
   // Interaction accuracy flag
   isInteracting: boolean;
 
+  // Tani, niezależny od zundo kanał do zasilania podglądu 3D na żywo podczas przeciągania
+  // wierzchołka/krawędzi (przed commitem do useSceneStore, który następuje dopiero na mouseup).
+  liveVertexPreview: { buildingId: string; vertexIndex: number; point: { x: number; y: number } } | null;
+
   // Actions
   setDrawingMode: (mode: DrawingMode) => void;
   setDrawingCategory: (category: import('../types/geometry').ObjectCategory) => void;
@@ -126,6 +130,9 @@ interface CadToolState {
   triggerFit: (options?: { ignoreSelection?: boolean }) => void;
 
   setIsInteracting: (interacting: boolean) => void;
+  setLiveVertexPreview: (
+    preview: { buildingId: string; vertexIndex: number; point: { x: number; y: number } } | null
+  ) => void;
 
   resetCadTool: () => void;
 }
@@ -177,6 +184,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   fitRequest: { nonce: 0, ignoreSelection: false },
 
   isInteracting: false,
+  liveVertexPreview: null,
 
   setDrawingMode: (mode) => set({ drawingMode: mode, ...(mode !== 'none' ? { isProjectBrushActive: false } : {}) }),
   setDrawingCategory: (category) => set({ drawingCategory: category }),
@@ -395,7 +403,11 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
     } else {
       useSceneStore.getState().commitInteractionBatch();
     }
+    if (!interacting) {
+      set({ liveVertexPreview: null });
+    }
   },
+  setLiveVertexPreview: (preview) => set({ liveVertexPreview: preview }),
 
   resetCadTool: () =>
     set({

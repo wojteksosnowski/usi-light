@@ -141,6 +141,7 @@ export interface BuildingLoop {
   isIncluded?: boolean; // True (default) if included in calculations (as tested or obstacle); false to ignore
   isLocked?: boolean; // Indywidualna kłódka obiektu (blokada przesuwania i edycji)
   isGhosted?: boolean; // Indywidualny tryb ducha (pomijanie kliknięć i selekcji)
+  isVisible?: boolean; // Żarówka: widoczność obiektu na płótnie i w podglądzie 3D (domyślnie true)
   isCityCentre: boolean;
   buildingType: BuildingType;
   defaultHeight: number;
