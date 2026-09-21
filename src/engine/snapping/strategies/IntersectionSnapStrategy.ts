@@ -1,5 +1,6 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, intersectLines, projectPointToLine } from '../../../utils/lineBufferEngine';
+import { distance } from '../../../utils/math2d';
 import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
 import { filterCandidateLines } from './snapExclusionUtils';
 
@@ -52,7 +53,7 @@ export class IntersectionSnapStrategy implements SnapStrategy {
         if (!intPt) continue;
 
         // Sprawdź czy punkt leży w promieniu poszukiwania w świecie
-        if (Math.hypot(intPt.x - point.x, intPt.y - point.y) > worldRadius) continue;
+        if (distance(intPt, point) > worldRadius) continue;
 
         // Sprawdź czy punkt leży w pobliżu obu segmentów (dozwolone drobne przedłużenie)
         const proj1 = projectPointToLine(intPt, e1);
@@ -68,7 +69,7 @@ export class IntersectionSnapStrategy implements SnapStrategy {
 
         if (distPx <= thresholdPx) {
           // Deduplikacja bardzo bliskich przecięć
-          const isDuplicate = seenPoints.some((p) => Math.hypot(p.x - intPt.x, p.y - intPt.y) < 1e-3);
+          const isDuplicate = seenPoints.some((p) => distance(p, intPt) < 1e-3);
           if (isDuplicate) continue;
           seenPoints.push(intPt);
 

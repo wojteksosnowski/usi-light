@@ -14,6 +14,34 @@ import { PerfMonitor } from '../perf/PerfMonitor';
  * Wyznacza dEff kandydata `target` tak, jakby kursor znajdował się w punkcie `cursorPoint`
  * zamiast rzeczywistej pozycji myszy — użyteczne do testu punktu stałego (fixed-point).
  */
+const OSNAP_PRIORITY_MAP: Record<string, 1 | 2 | 3 | 4 | 5 | 6> = {
+  vertex: 1,
+  intersection: 2,
+  otrack_intersection: 2,
+  perpendicular: 4,
+  edge: 5,
+  extension: 5,
+  otrack_ray: 6,
+};
+
+function mapSnapTypeToOsnapType(type: SnapResult['type']): import('./types').OsnapSnapType {
+  switch (type) {
+    case 'vertex':
+      return 'endpoint';
+    case 'intersection':
+    case 'otrack_intersection':
+      return 'otrack_intersection';
+    case 'perpendicular':
+      return 'perpendicular';
+    case 'extension':
+      return 'extension';
+    case 'otrack_ray':
+      return 'otrack_ray';
+    default:
+      return 'nearest';
+  }
+}
+
 function computeDEffFrom(
   cursorPoint: Point2D,
   target: SnapResult,
@@ -346,44 +374,14 @@ export function evaluateOsnapSnapWithCoordinator(
     return { osnap: null, debugEdgeHpfCandidates };
   }
 
-  const osnapType: import('./types').OsnapSnapType = snapRes.type === 'vertex'
-    ? 'endpoint'
-    : snapRes.type === 'intersection' || snapRes.type === 'otrack_intersection'
-    ? 'otrack_intersection'
-    : snapRes.type === 'perpendicular'
-    ? 'perpendicular'
-    : snapRes.type === 'extension'
-    ? 'extension'
-    : snapRes.type === 'otrack_ray'
-    ? 'otrack_ray'
-    : 'nearest';
-
-  const priorityMap: Record<string, 1 | 2 | 3 | 4 | 5 | 6> = {
-    vertex: 1,
-    intersection: 2,
-    otrack_intersection: 2,
-    perpendicular: 4,
-    edge: 5,
-    extension: 5,
-    otrack_ray: 6,
-  };
+  const osnapType = mapSnapTypeToOsnapType(snapRes.type);
 
   let secondaryOsnap: import('./types').OsnapSnapResult | undefined = undefined;
   if (snapRes.secondarySnap && snapRes.secondarySnap.snapped) {
     const sec = snapRes.secondarySnap;
-    const secType: import('./types').OsnapSnapType = sec.type === 'vertex'
-      ? 'endpoint'
-      : sec.type === 'intersection' || sec.type === 'otrack_intersection'
-      ? 'otrack_intersection'
-      : sec.type === 'perpendicular'
-      ? 'perpendicular'
-      : sec.type === 'extension'
-      ? 'extension'
-      : sec.type === 'otrack_ray'
-      ? 'otrack_ray'
-      : 'nearest';
+    const secType = mapSnapTypeToOsnapType(sec.type);
     secondaryOsnap = {
-      priority: priorityMap[sec.type] ?? 5,
+      priority: OSNAP_PRIORITY_MAP[sec.type] ?? 5,
       type: secType,
       snappedPoint: sec.point,
       screenDistancePx: sec.screenDistancePx ?? 0,
@@ -401,7 +399,7 @@ export function evaluateOsnapSnapWithCoordinator(
 
   return {
     osnap: {
-      priority: priorityMap[snapRes.type] ?? 5,
+      priority: OSNAP_PRIORITY_MAP[snapRes.type] ?? 5,
       type: osnapType,
       snappedPoint: snapRes.point,
       screenDistancePx: snapRes.screenDistancePx ?? 0,

@@ -18,23 +18,15 @@ export function isIdExcluded(id: string, excludedSet: Set<string>): boolean {
  * or any of its sub-parts / zones / group members.
  */
 export function isLineExcluded(line: CachedLineEquation, context: SnapContext): boolean {
-  if (context.excludeBuildingId) {
-    if (line.objectId === context.excludeBuildingId) return true;
-    if (line.objectId.startsWith(`${context.excludeBuildingId}_`) || line.objectId.startsWith(`${context.excludeBuildingId}-`)) {
-      return true;
-    }
+  if (context.excludeBuildingId && line.objectId === context.excludeBuildingId) return true;
+
+  if (!context.excludeBuildingIds || context.excludeBuildingIds.length === 0) {
+    return context.excludeBuildingId ? isIdExcluded(line.objectId, new Set([context.excludeBuildingId])) : false;
   }
 
-  if (context.excludeBuildingIds && context.excludeBuildingIds.length > 0) {
-    for (const exId of context.excludeBuildingIds) {
-      if (line.objectId === exId) return true;
-      if (line.objectId.startsWith(`${exId}_`) || line.objectId.startsWith(`${exId}-`)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  const excludedSet = new Set(context.excludeBuildingIds);
+  if (context.excludeBuildingId) excludedSet.add(context.excludeBuildingId);
+  return isIdExcluded(line.objectId, excludedSet);
 }
 
 /**

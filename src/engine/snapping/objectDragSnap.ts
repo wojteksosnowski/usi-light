@@ -9,6 +9,22 @@ import {
 import { isIdExcluded } from './strategies/snapExclusionUtils';
 import { SpatialLineIndex } from './SpatialLineIndex';
 
+interface ViewportBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+function edgeWithinViewport(e: CachedLineEquation, viewportBounds: ViewportBounds | undefined): boolean {
+  if (!viewportBounds) return true;
+  const eMinX = Math.min(e.p1.x, e.p2.x);
+  const eMaxX = Math.max(e.p1.x, e.p2.x);
+  const eMinY = Math.min(e.p1.y, e.p2.y);
+  const eMaxY = Math.max(e.p1.y, e.p2.y);
+  return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
+}
+
 /**
  * Wykrywa równoległość i kolinearność przy transformacji krawędzi lub obiektu
  */
@@ -132,14 +148,7 @@ export function evaluateBuildingDragMultiSnap(
   excludedSet.add(movingBuildingId);
 
   const isExcludedEdge = (e: CachedLineEquation) => isIdExcluded(e.objectId, excludedSet);
-  const withinViewport = (e: CachedLineEquation) => {
-    if (!viewportBounds) return true;
-    const eMinX = Math.min(e.p1.x, e.p2.x);
-    const eMaxX = Math.max(e.p1.x, e.p2.x);
-    const eMinY = Math.min(e.p1.y, e.p2.y);
-    const eMaxY = Math.max(e.p1.y, e.p2.y);
-    return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
-  };
+  const withinViewport = (e: CachedLineEquation) => edgeWithinViewport(e, viewportBounds);
 
   // AABB Culling: Wyznacz bounding box przemieszczanej bryły rozszerzony o próg snapowania
   let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
@@ -554,14 +563,7 @@ export function evaluateEdgeDragSnap(
   excludedSet.add(buildingId);
 
   const isExcludedEdge = (e: CachedLineEquation) => isIdExcluded(e.objectId, excludedSet);
-  const withinViewport = (e: CachedLineEquation) => {
-    if (!viewportBounds) return true;
-    const eMinX = Math.min(e.p1.x, e.p2.x);
-    const eMaxX = Math.max(e.p1.x, e.p2.x);
-    const eMinY = Math.min(e.p1.y, e.p2.y);
-    const eMaxY = Math.max(e.p1.y, e.p2.y);
-    return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
-  };
+  const withinViewport = (e: CachedLineEquation) => edgeWithinViewport(e, viewportBounds);
 
   let otherBuffer: CachedLineEquation[];
   if (spatialIndex) {

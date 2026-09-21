@@ -1,6 +1,6 @@
 import { Point2D } from '../../types/geometry';
 import { AnchorPoint, SnapResult, SnapContext, TrackingRay, SnapGuideLine, computeClampedWorldTolerance } from './types';
-import { normalizeAngle180, lineIntersection2D } from '../../utils/math2d';
+import { normalizeAngle180, lineIntersection2D, distance } from '../../utils/math2d';
 
 export interface OtrackDwellState {
   candidateVertex: Point2D | null;
@@ -55,7 +55,7 @@ export class OtrackManager {
     if (
       !this.dwellState ||
       !this.dwellState.candidateVertex ||
-      Math.hypot(this.dwellState.candidateVertex.x - hoveredVertex.x, this.dwellState.candidateVertex.y - hoveredVertex.y) > 0.05 ||
+      distance(this.dwellState.candidateVertex, hoveredVertex) > 0.05 ||
       Math.hypot(this.dwellState.lastScreenPos.sx - mouseScreen.sx, this.dwellState.lastScreenPos.sy - mouseScreen.sy) > 6.0
     ) {
       this.dwellState = {
@@ -72,7 +72,7 @@ export class OtrackManager {
     if (elapsed >= this.dwellThresholdMs) {
       const v = this.dwellState.candidateVertex;
       const existingIdx = this.acquiredAnchors.findIndex(
-        (a) => Math.hypot(a.point.x - v.x, a.point.y - v.y) < 0.05
+        (a) => distance(a.point, v) < 0.05
       );
 
       if (existingIdx >= 0) {

@@ -1,5 +1,6 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
+import { distance } from '../../../utils/math2d';
 import { SnapContext, SnapResult, SnapStrategy, SnapGuideLine, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
 import { filterCandidateLines } from './snapExclusionUtils';
 
@@ -64,8 +65,8 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
 
       if (distPx <= thresholdPx) {
         const isOnSegment = proj.isOnSegment;
-        const d1 = Math.hypot(edge.p1.x - perpPt.x, edge.p1.y - perpPt.y);
-        const d2 = Math.hypot(edge.p2.x - perpPt.x, edge.p2.y - perpPt.y);
+        const d1 = distance(edge.p1, perpPt);
+        const d2 = distance(edge.p2, perpPt);
 
         if (!isOnSegment) {
           // Twardy limit zasięgu przedłużenia: odrzucamy rzuty wypadające dalece poza
