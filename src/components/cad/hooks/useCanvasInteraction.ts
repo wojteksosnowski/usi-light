@@ -25,7 +25,7 @@ import {
 } from '../../../engine/snapping';
 import { APP_CONFIG } from '../../../config/appConfig';
 import { CadCanvasProps, ViewportState } from '../types';
-import { viewportWorldBounds } from '../masterplan/masterplanSpatial';
+import { viewportWorldBounds, edgeIntersectsScreenRect } from '../masterplan/masterplanSpatial';
 import { EditingEdgeLengthState, getBuildingLabelHitAtPoint, getLinkingActionHitAtPoint } from '../renderers/buildingsRenderer';
 import { getMasterplanLabelHitAtPoint } from '../masterplan/masterplanLabels';
 
@@ -470,14 +470,19 @@ export function useCanvasInteraction({
 
     const vp = viewportWorldBounds({ width, height, screenToWorld }, 0.1);
 
-    return lineBuffer.filter((edge) => {
-      const eMinX = Math.min(edge.p1.x, edge.p2.x);
-      const eMaxX = Math.max(edge.p1.x, edge.p2.x);
-      const eMinY = Math.min(edge.p1.y, edge.p2.y);
-      const eMaxY = Math.max(edge.p1.y, edge.p2.y);
-      return eMaxX >= vp.minX && eMinX <= vp.maxX && eMaxY >= vp.minY && eMinY <= vp.maxY;
-    });
-  }, [lineBuffer, screenToWorld, containerRef, canvasRef, viewState]);
+    return lineBuffer
+      .filter((edge) => {
+        const eMinX = Math.min(edge.p1.x, edge.p2.x);
+        const eMaxX = Math.max(edge.p1.x, edge.p2.x);
+        const eMinY = Math.min(edge.p1.y, edge.p2.y);
+        const eMaxY = Math.max(edge.p1.y, edge.p2.y);
+        return eMaxX >= vp.minX && eMinX <= vp.maxX && eMaxY >= vp.minY && eMinY <= vp.maxY;
+      })
+      // Ścisły cull w przestrzeni ekranu — odrzuca krawędzie, które przeszły zgrubny filtr
+      // world-space (margines %), ale przy obróconym widoku wciąż leżą poza faktycznym oknem
+      // canvasu. Margines w px = promień snapowania, by nie ucinać krawędzi tuż przy brzegu.
+      .filter((edge) => edgeIntersectsScreenRect(edge.p1, edge.p2, worldToScreen, width, height, snapRadiusPx));
+  }, [lineBuffer, screenToWorld, worldToScreen, containerRef, canvasRef, viewState, snapRadiusPx]);
 
   const handleDeleteSelectedVertex = useCallback(() => {
     if (selectedVertexIndex === null || !selectedBuildingId) return;

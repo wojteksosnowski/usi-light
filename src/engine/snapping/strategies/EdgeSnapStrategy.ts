@@ -115,6 +115,7 @@ export class EdgeSnapStrategy implements SnapStrategy {
           : undefined;
 
         const displayName = edge.objectName || edge.objectId;
+        const lengthOverDistance = edge.length / Math.max(distPx, 1e-6);
         results.push({
           point: { ...proj.projectedPoint },
           snapped: true,
@@ -130,12 +131,25 @@ export class EdgeSnapStrategy implements SnapStrategy {
           sourceEdgeIndex: edge.edgeIndex,
           cachedEdge: edge,
           guideLines,
-          metadata: { effDistPx: effDist },
+          metadata: { effDistPx: effDist, lengthOverDistance },
         });
       }
     }
 
-    results.sort((a, b) => ((a.metadata?.effDistPx as number) ?? 0) - ((b.metadata?.effDistPx as number) ?? 0));
-    return results;
+    // Filtr górnoprzepustowy: odrzuca dolne 20% kandydatów wg length/distance (te same
+    // dwie wielkości, które napędzają computeEdgeScore w SnapCoordinator), żeby małe
+    // i odległe krawędzie nie zaśmiecały dalszego scoringu. Pomijany przy małej liczbie
+    // kandydatów, gdzie percentyl nie ma sensu i mógłby wyzerować wynik.
+    const MIN_CANDIDATES_FOR_CUTOFF = 5;
+    let filtered = results;
+    if (results.length >= MIN_CANDIDATES_FOR_CUTOFF) {
+      const sortedMetrics = results.map((r) => r.metadata!.lengthOverDistance as number).sort((a, b) => a - b);
+      const cutoffIndex = Math.floor(0.2 * sortedMetrics.length);
+      const cutoff = sortedMetrics[cutoffIndex];
+      filtered = results.filter((r) => (r.metadata!.lengthOverDistance as number) >= cutoff);
+    }
+
+    filtered.sort((a, b) => ((a.metadata?.effDistPx as number) ?? 0) - ((b.metadata?.effDistPx as number) ?? 0));
+    return filtered;
   }
 }

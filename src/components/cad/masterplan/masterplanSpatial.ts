@@ -78,6 +78,29 @@ export function viewportWorldBounds(
 }
 
 /**
+ * Ścisły test: czy odcinek world-space (p1, p2) przecina prostokąt ekranu [0,width] x [0,height]
+ * (z marginesem w px), po rzutowaniu obu końców przez worldToScreen. W odróżnieniu od
+ * `viewportWorldBounds` (world-space AABB z marginesem procentowym), ten test działa poprawnie
+ * przy obróconym widoku, bo porównuje bezpośrednio w przestrzeni ekranu.
+ */
+export function edgeIntersectsScreenRect(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  worldToScreen: (wx: number, wy: number) => { sx: number; sy: number },
+  width: number,
+  height: number,
+  marginPx = 0
+): boolean {
+  const s1 = worldToScreen(p1.x, p1.y);
+  const s2 = worldToScreen(p2.x, p2.y);
+  const eMinX = Math.min(s1.sx, s2.sx);
+  const eMaxX = Math.max(s1.sx, s2.sx);
+  const eMinY = Math.min(s1.sy, s2.sy);
+  const eMaxY = Math.max(s1.sy, s2.sy);
+  return eMaxX >= -marginPx && eMinX <= width + marginPx && eMaxY >= -marginPx && eMinY <= height + marginPx;
+}
+
+/**
  * Odsiewa budynki, których bryła i szacowany zasięg cienia nie przecinają się z viewportem —
  * tani wstępny filtr przed ekstrakcją tierów (`extractBuildingStoryTiers`), operujący na
  * cache'owanym AABB budynku (`getBuildingAABB`), nie na pełnej geometrii cienia.
