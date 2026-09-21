@@ -5,14 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev          # Dev server on port 3000
+npm run dev          # Dev server on port 3000 (Vite middleware also serves /api/** locally, see below)
 npm run build        # TypeScript check + Vite production build
 npm test             # Run all tests (vitest)
-npx vitest run src/engine/benchmarks.test.ts          # Single file
-npx vitest run src/utils/math2d.fast.test.ts          # Math equivalence tests
+npx vitest run src/utils/math2d/umbraA456.regression.test.ts   # Single file (geometry regression suite)
+npx vitest run src/utils/math2d/polygonBooleanTwo.benchmark.test.ts  # Perf benchmark suite
+npm run test:live    # Live WFS integration tests against real Polish geodata servers (RUN_LIVE_WFS_TESTS=1)
 ```
 
 Path alias `@/` resolves to `src/`.
+
+Two supplementary architecture docs exist and are worth consulting for deep dives: `AGENTS.md` (buffer/matrix invariants, see below) and `GEMINI.md` (full type/store/component index in Polish).
 
 ## Project Overview
 
@@ -29,7 +32,9 @@ Stack: React 19, TypeScript strict, Vite 8, Tailwind CSS 3.4, Zustand 5 + zundo 
 - **`canvasRef`** — base scene canvas: grid, buildings, shadows, analysis bands. Only redraws on scene/viewport changes.
 - **`overlayCanvasRef`** — interactive overlay: cursor, OSNAP snapping markers, live drawing previews. Redraws at full 60/120 FPS.
 
-Both are driven by a **`CadRenderPipeline`** (`src/components/cad/pipeline/CadRenderPipeline.ts`) — an ordered stack of `CadRenderLayer` instances sorted by `zIndex`. To add a render layer, implement `CadRenderLayer` and register it in the pipeline constructor or via `registerGeoLayers()` for geo overlays.
+Both are driven by a **`CadRenderPipeline`** (`src/components/cad/pipeline/CadRenderPipeline.ts`) — an ordered stack of `CadRenderLayer` instances sorted by `zIndex`. To add a render layer, implement `CadRenderLayer` and register it in the pipeline constructor or via `registerGeoLayers()` for geo overlays. Default main-layer stack (increasing `zIndex`): satellite tiles → grid → shadow range → shadowing (§12) → analysis bands (§56) → playground → buildings → sunlight vectors → dimensions → recorder overlays. The interactive overlay canvas carries only `DrawingToolLayer` (drawing previews, edit handles, OSNAP markers).
+
+A separate **`MasterplanRenderPipeline`** (`src/components/cad/masterplan/MasterplanRenderPipeline.ts`) reuses the same analysis render layers to produce a standalone "ink on white paper" masterplan view (multi-level ΔH shadow projection with soft penumbra) — see `src/components/cad/masterplan/` for its own geometry/label/spatial-index helpers, independent of the main dual-canvas pipeline.
 
 ### State — Five Zustand Stores (`src/store/`)
 - **`useSceneStore`** — buildings, layers, DXF import state, undo history (via zundo temporal)
@@ -51,7 +56,13 @@ Scene is persisted to `localStorage` under key `usi-light.scene.v1`.
 - **`BuildingLoop`** — central entity: outer polygon (`vertices: Point2D[]`) + optional interior holes (`holes?: Point2D[][]`, e.g. courtyards from cadastral imports) + elevation metadata + `segments: FacadeSegment[]`. Key flags: `isTested` (object under analysis vs. obstacle), `isIncluded`, `isLocked`, `isGhosted`, `category` (`building` | `boundary`)
 - **`FacadeSegment`** — wall edge with outward unit normal, `hTop`/`hWindowBottom`, precomputed `lineEquation`, and `ringIndex` (`0`/undefined = outer ring, `1+` = hole index + 1)
 - **`PinnedFacadePoint`** — persistent measurement point: `{ buildingId, segmentId, offsetRatio }` (P1, P2, P3)
-- Segment generation (including holes, opposite-winding correction, inward normals for hole boundaries) lives in `src/utils/ringSegments.ts` — a dependency-free module (imports only `math2d/vec2.ts`) shared by `src/utils/segmentStatistics.ts` (`rebuildBuildingSegments`) and `src/utils/math2d/polygons.ts` (`booleanUnionBuildings`) specifically to avoid a circular import through the `@/utils/math2d` barrel.
+- Segment generation (including holes, opposite-winding correction, inward normals for hole boundaries) lives in `src/utils/ringSegments.ts` — a dependency-free module (imports only `math2d/vec2.ts`) shared by `src/utils/segmentStatistics.ts` (`rebuildBuildingSegments`) and `src/utils/math2d/polygons.ts` (`booleanUnionBuildings`) specifically to avoid a circular import through the `@/utils/math2d` barrel. (Note: `src/utils/math2d/segments.ts` is an unrelated module — zero-allocation ray/segment intersection math, not ring-to-segment generation.)
+
+### Geometry Buffer Invariance (see `AGENTS.md`)
+Every `BuildingLoop` caches its own derived geometry (`vertices`, `storyPolygons`, `zonePolygons`, `segments`, `flatVertices`). Moving (`moveBuilding`/`moveBuildings`) or rotating (`rotateBuilding`) an object does **not** re-run the modifier pipeline (`applyBuildingModifiers`) — it transforms the cached buffers directly and updates `transform: { tx, ty, rotationDeg }`. The modifier pipeline is only re-run when the base geometry itself changes (vertex add/remove/edit, story height, modifier params). Keep this invariant when touching move/rotate/modifier code — re-running modifiers on every drag would be a perf regression, not just a correctness no-op.
+
+### Group Hierarchy (multi-level selection)
+Buildings sharing a `groupId` form a logical group with three interaction levels: **Level 0** — single click selects the whole group (`selectedBuildingIds`), rotation pivots around the group centroid; **Level 1** — double-click enters the group (`openGroupId = groupId`), isolating it and allowing per-object selection inside; **Level 2** — double-click on a single object inside an open group enters `vertexEdit` mode. While a group is open, everything outside it renders dimmed (`globalAlpha = 0.28`).
 
 ### Geo Module (`src/modules/wfs-import/`)
 WMS/WFS overlays and vector imports from Polish geodata services (GUGiK Geoportal + city-specific WFS). Layers are registered into the `CadRenderPipeline` singleton via `registerGeoLayers()` called once in `App.tsx`; each layer/render-layer pair follows the same pattern (Zustand store slice → layer class implementing `CadRenderLayer` → renderer function drawing via `rc.worldToScreen()`). Render repaint is triggered by dispatching `new Event('geo-render-needed')` on `window`.
