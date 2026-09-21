@@ -1,5 +1,7 @@
-const NMPT_WCS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMPT/GRID1/WCS/DigitalSurfaceModel';
-const NMT_WCS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WCS/DigitalTerrainModel';
+// mapy.geoportal.gov.pl nie wysyła nagłówków CORS (ten sam host, co EGiB/LCV) — żądania
+// idą przez serverless proxy /api/wcs (api/wcs.ts) zamiast bezpośrednio z przeglądarki.
+const NMPT_WCS_URL = '/api/wcs?target=nmpt';
+const NMT_WCS_URL = '/api/wcs?target=nmt';
 
 export interface AaigridData {
   ncols: number;
@@ -11,7 +13,20 @@ export interface AaigridData {
   data: Float32Array;
 }
 
-export function parseAaigrid(text: string): AaigridData {
+// Serwer WCS GUGiK (mapy.geoportal.gov.pl) opakowuje odpowiedź GetCoverage w
+// `multipart/related; boundary=wcs`, niezależnie od żądanego formatu — czysty tekst AAIGrid
+// zaczyna się dopiero po nagłówkach MIME tej części i kończy przed domykającym markerem granicy.
+// Bez zdjęcia tej otoczki `parseAaigrid` odczytałby linie MIME jako dane siatki.
+function stripMultipartWrapper(text: string): string {
+  const start = text.indexOf('ncols');
+  if (start === -1) return text;
+  const rest = text.slice(start);
+  const boundaryIdx = rest.indexOf('\n--wcs');
+  return boundaryIdx === -1 ? rest : rest.slice(0, boundaryIdx);
+}
+
+export function parseAaigrid(rawText: string): AaigridData {
+  const text = stripMultipartWrapper(rawText);
   const lines = text.trim().split('\n');
   let ncols = 0, nrows = 0, nodata = -9999;
   let xllcorner = 0, yllcorner = 0, cellsize = 1;
@@ -86,7 +101,7 @@ export async function fetchDsmBbox(
 
   const { signal: effectiveSignal, cleanup } = createCombinedSignal(signal);
   try {
-    const res = await fetch(`${NMPT_WCS_URL}?${params}`, { signal: effectiveSignal });
+    const res = await fetch(`${NMPT_WCS_URL}&${params}`, { signal: effectiveSignal });
     if (!res.ok) throw new Error(`WCS NMPT (DSM): ${res.status}`);
     const text = await res.text();
     return parseAaigrid(text);
@@ -119,7 +134,7 @@ export async function fetchDtmBbox(
 
   const { signal: effectiveSignal, cleanup } = createCombinedSignal(signal);
   try {
-    const res = await fetch(`${NMT_WCS_URL}?${params}`, { signal: effectiveSignal });
+    const res = await fetch(`${NMT_WCS_URL}&${params}`, { signal: effectiveSignal });
     if (!res.ok) throw new Error(`WCS NMT (DTM): ${res.status}`);
     const text = await res.text();
     return parseAaigrid(text);

@@ -462,7 +462,8 @@ export class WmsTileManager {
       handleFailure();
     };
 
-    img.src = `${effectiveBaseUrl}?${params}`;
+    const separator = effectiveBaseUrl.includes('?') ? '&' : '?';
+    img.src = `${effectiveBaseUrl}${separator}${params}`;
   }
 
   private static readonly TILE_TIMEOUT_MS = 8000;
