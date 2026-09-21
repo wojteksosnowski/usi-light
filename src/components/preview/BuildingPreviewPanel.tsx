@@ -3,6 +3,7 @@ import type { BuildingLoop } from '@/types/geometry';
 import { useSceneStore, useUiStore } from '../../store';
 import { useCadToolStore } from '../../store/useCadToolStore';
 import { useLocalizedBuilding } from '@/hooks/useLocalizedBuilding';
+import { useStableWhileInteracting } from '@/hooks/useStableWhileInteracting';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
 import { findSelectedBuilding } from '@/utils/geometrySelectors';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
@@ -12,6 +13,7 @@ export const BuildingPreviewPanel: React.FC = React.memo(() => {
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
   const expandedModifierId = useUiStore((s) => s.expandedModifierId);
   const liveVertexPreview = useCadToolStore((s) => s.liveVertexPreview);
+  const isInteracting = useCadToolStore((s) => s.isInteracting);
 
   const selectedBuilding = React.useMemo(
     () => findSelectedBuilding(buildings, selectedBuildingId),
@@ -59,20 +61,26 @@ export const BuildingPreviewPanel: React.FC = React.memo(() => {
   }, [localizedBuilding]);
   const effectiveBuilding = localizedBuilding ?? (selectedBuildingId ? lastKnownBuildingRef.current : null);
 
+  // Freeze the 3D preview's inputs while dragging - rebuilding the THREE.js geometry
+  // (ExtrudeGeometry/EdgesGeometry/fat lines) on every mousemove is expensive and was the
+  // dominant cause of jank during whole-building drags (see performance trace analysis).
+  const stableBuilding = useStableWhileInteracting(effectiveBuilding, isInteracting);
+  const stableGroupBuildings = useStableWhileInteracting(localizedGroupBuildings, isInteracting);
+
   const activeHighlight = getActiveHighlightEdgeIndex(
-    effectiveBuilding?.modifiers,
+    stableBuilding?.modifiers,
     expandedModifierId
   );
 
-  if (!effectiveBuilding) {
+  if (!stableBuilding) {
     return null;
   }
 
   return (
     <div className="building-preview-card">
       <BuildingIsoPreview
-        building={effectiveBuilding}
-        groupBuildings={localizedGroupBuildings}
+        building={stableBuilding}
+        groupBuildings={stableGroupBuildings}
         highlightEdgeIndex={activeHighlight}
       />
     </div>
