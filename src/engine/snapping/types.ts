@@ -143,6 +143,48 @@ export interface SnapStrategy {
 }
 
 /**
+ * Wagi typów punktów SNAP wg hierarchii OSNAP (wyższa waga = silniejsze przyciąganie
+ * przy tej samej odległości efektywnej). Używane do globalnego porównania d_eff
+ * między kandydatami ze WSZYSTKICH strategii w SnapCoordinator.evaluate().
+ */
+export const SNAP_TYPE_WEIGHTS: Record<SnapType, number> = {
+  vertex: 1.5,
+  intersection: 1.3,
+  otrack_intersection: 1.3,
+  midpoint: 1.25,
+  perpendicular: 1.0,
+  extension: 0.8,
+  edge: 0.75,
+  otrack_ray: 0.7,
+  direction: 0.7,
+  nearest: 0.75,
+  grid: 0.5,
+  none: 0.01,
+};
+
+/**
+ * Oblicza multiplikatywny wynik jakości krawędzi Score(e) = S_len * S_dist * S_cat,
+ * promujący długie, bliskie i tematycznie zgodne krawędzie nad drobnymi detalami.
+ * maxEdgeLengthMeters pozwala znormalizować S_len względem najdłuższej krawędzi w scenie
+ * (fallback: krzywa nasycenia log10, gdy nieznana).
+ */
+export function computeEdgeScore(
+  edgeLengthMeters: number,
+  distanceToEdgeMeters: number,
+  apertureWorldMeters: number,
+  edgeCategory: ObjectCategory | undefined,
+  activeCategory: ObjectCategory | undefined,
+  maxEdgeLengthMeters = 50
+): number {
+  const sLen = Math.log10(Math.max(0, edgeLengthMeters) + 1) / Math.log10(maxEdgeLengthMeters + 1);
+  const sLenClamped = Math.min(1, Math.max(0.05, sLen));
+  const sDist = Math.min(1, Math.max(0, 1 - distanceToEdgeMeters / Math.max(apertureWorldMeters, 1e-6)));
+  const catBonus = computeCategoryAffinityBonus(edgeCategory, activeCategory);
+  const sCat = catBonus > 0 ? 1.0 : 0.6;
+  return sLenClamped * Math.max(0.05, sDist) * sCat;
+}
+
+/**
  * Oblicza bonus odległościowy (odejmowany od effDist w px) wynikający z preferencji kategorii obiektu
  */
 export function computeCategoryAffinityBonus(

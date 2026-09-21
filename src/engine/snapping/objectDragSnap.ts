@@ -7,6 +7,7 @@ import {
   angleDiffPi,
 } from '../../utils/lineBufferEngine';
 import { isIdExcluded } from './strategies/snapExclusionUtils';
+import { SpatialLineIndex } from './SpatialLineIndex';
 
 /**
  * Wykrywa równoległość i kolinearność przy transformacji krawędzi lub obiektu
@@ -96,6 +97,10 @@ export interface EvaluateBuildingDragSnapOptions {
   guidelineLengthMeters?: number;
   dragAnchorVertex?: Point2D;
   viewportBounds?: { minX: number; maxX: number; minY: number; maxY: number };
+  /** Opcjonalny indeks przestrzenny (rbush) nad referenceBuffer — gdy podany, zastępuje ręczny
+   *  O(n) skan AABB (linia 130-164) zapytaniem queryBBox, przyspieszając duże sceny. Brak
+   *  wpływu na wynik (te same kryteria filtrowania są stosowane po zapytaniu). */
+  spatialIndex?: SpatialLineIndex;
 }
 
 /**
@@ -117,6 +122,7 @@ export function evaluateBuildingDragMultiSnap(
     angleToleranceRad = (0.8 * Math.PI) / 180,
     guidelineLengthMeters = 100,
     viewportBounds,
+    spatialIndex,
   } = options;
 
   const n = movingVertices.length;
@@ -126,18 +132,14 @@ export function evaluateBuildingDragMultiSnap(
   excludedSet.add(movingBuildingId);
 
   const isExcludedEdge = (e: CachedLineEquation) => isIdExcluded(e.objectId, excludedSet);
-
-  let otherBuffer = referenceBuffer.filter((e) => !isExcludedEdge(e));
-  if (viewportBounds) {
-    otherBuffer = otherBuffer.filter((e) => {
-      const eMinX = Math.min(e.p1.x, e.p2.x);
-      const eMaxX = Math.max(e.p1.x, e.p2.x);
-      const eMinY = Math.min(e.p1.y, e.p2.y);
-      const eMaxY = Math.max(e.p1.y, e.p2.y);
-      return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
-    });
-  }
-  if (otherBuffer.length === 0) return null;
+  const withinViewport = (e: CachedLineEquation) => {
+    if (!viewportBounds) return true;
+    const eMinX = Math.min(e.p1.x, e.p2.x);
+    const eMaxX = Math.max(e.p1.x, e.p2.x);
+    const eMinY = Math.min(e.p1.y, e.p2.y);
+    const eMaxY = Math.max(e.p1.y, e.p2.y);
+    return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
+  };
 
   // AABB Culling: Wyznacz bounding box przemieszczanej bryły rozszerzony o próg snapowania
   let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
@@ -155,13 +157,28 @@ export function evaluateBuildingDragMultiSnap(
     maxY: bMaxY + pad,
   };
 
-  const nearbyRefBuffer = otherBuffer.filter((e) => {
-    const eMinX = Math.min(e.p1.x, e.p2.x);
-    const eMaxX = Math.max(e.p1.x, e.p2.x);
-    const eMinY = Math.min(e.p1.y, e.p2.y);
-    const eMaxY = Math.max(e.p1.y, e.p2.y);
-    return eMaxX >= aabb.minX && eMinX <= aabb.maxX && eMaxY >= aabb.minY && eMinY <= aabb.maxY;
-  });
+  // otherBuffer: pełny zbiór kandydatów (wykluczenia + viewport), używany tam gdzie odległość
+  // do krawędzi liczona jest wzdłuż nośnika prostej (collinear lock, linia ~233) i realna
+  // odległość przestrzenna segmentu może przekraczać AABB przemieszczanej bryły.
+  const otherBuffer = referenceBuffer.filter((e) => !isExcludedEdge(e) && withinViewport(e));
+  if (otherBuffer.length === 0) return null;
+
+  let nearbyRefBuffer: CachedLineEquation[];
+  if (spatialIndex) {
+    // Zapytanie przestrzenne (rbush) zamiast pełnego O(n) skanu referenceBuffer — patrz
+    // EvaluateBuildingDragSnapOptions.spatialIndex. Kryteria wykluczania/viewportu identyczne
+    // jak w ścieżce fallback poniżej.
+    const queried = spatialIndex.queryBBox(aabb.minX, aabb.minY, aabb.maxX, aabb.maxY);
+    nearbyRefBuffer = queried.filter((e) => !isExcludedEdge(e) && withinViewport(e));
+  } else {
+    nearbyRefBuffer = otherBuffer.filter((e) => {
+      const eMinX = Math.min(e.p1.x, e.p2.x);
+      const eMaxX = Math.max(e.p1.x, e.p2.x);
+      const eMinY = Math.min(e.p1.y, e.p2.y);
+      const eMaxY = Math.max(e.p1.y, e.p2.y);
+      return eMaxX >= aabb.minX && eMinX <= aabb.maxX && eMaxY >= aabb.minY && eMinY <= aabb.maxY;
+    });
+  }
 
   // 1. Punkt do Punktu (Vertex-to-Vertex / Corner Lock)
   let bestV2V: BuildingDragSnapResult | null = null;
@@ -473,6 +490,12 @@ export interface EvaluateEdgeDragSnapOptions {
   guidelineLengthMeters?: number;
   previousSnap?: EdgeDragSnapResult | null;
   viewportBounds?: { minX: number; maxX: number; minY: number; maxY: number };
+  /** Opcjonalny indeks przestrzenny (rbush). Ponieważ dopasowanie kolinearne/wierzchołkowe
+   *  jest tu celowo nieograniczone przestrzennie wzdłuż nośnika prostej (np. odległy narożnik
+   *  leżący dokładnie na tej samej linii), zapytanie ogranicza się do promienia
+   *  `guidelineLengthMeters` wokół przesuwanej krawędzi — tego samego zasięgu, w jakim i tak
+   *  rysowana jest linia prowadząca — a nie do ciasnego `distanceThresholdMeters`. */
+  spatialIndex?: SpatialLineIndex;
 }
 
 export interface EdgeDragSnapResult {
@@ -508,6 +531,7 @@ export function evaluateEdgeDragSnap(
     guidelineLengthMeters = 100,
     previousSnap,
     viewportBounds,
+    spatialIndex,
   } = options;
 
   const dx = edgeP2.x - edgeP1.x;
@@ -530,16 +554,26 @@ export function evaluateEdgeDragSnap(
   excludedSet.add(buildingId);
 
   const isExcludedEdge = (e: CachedLineEquation) => isIdExcluded(e.objectId, excludedSet);
+  const withinViewport = (e: CachedLineEquation) => {
+    if (!viewportBounds) return true;
+    const eMinX = Math.min(e.p1.x, e.p2.x);
+    const eMaxX = Math.max(e.p1.x, e.p2.x);
+    const eMinY = Math.min(e.p1.y, e.p2.y);
+    const eMaxY = Math.max(e.p1.y, e.p2.y);
+    return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
+  };
 
-  let otherBuffer = referenceBuffer.filter((e) => !isExcludedEdge(e));
-  if (viewportBounds) {
-    otherBuffer = otherBuffer.filter((e) => {
-      const eMinX = Math.min(e.p1.x, e.p2.x);
-      const eMaxX = Math.max(e.p1.x, e.p2.x);
-      const eMinY = Math.min(e.p1.y, e.p2.y);
-      const eMaxY = Math.max(e.p1.y, e.p2.y);
-      return eMaxX >= viewportBounds.minX && eMinX <= viewportBounds.maxX && eMaxY >= viewportBounds.minY && eMinY <= viewportBounds.maxY;
-    });
+  let otherBuffer: CachedLineEquation[];
+  if (spatialIndex) {
+    const pad = guidelineLengthMeters;
+    const minX = Math.min(edgeP1.x, edgeP2.x) - pad;
+    const maxX = Math.max(edgeP1.x, edgeP2.x) + pad;
+    const minY = Math.min(edgeP1.y, edgeP2.y) - pad;
+    const maxY = Math.max(edgeP1.y, edgeP2.y) + pad;
+    const queried = spatialIndex.queryBBox(minX, minY, maxX, maxY);
+    otherBuffer = queried.filter((e) => !isExcludedEdge(e) && withinViewport(e));
+  } else {
+    otherBuffer = referenceBuffer.filter((e) => !isExcludedEdge(e) && withinViewport(e));
   }
   if (otherBuffer.length === 0) return null;
 

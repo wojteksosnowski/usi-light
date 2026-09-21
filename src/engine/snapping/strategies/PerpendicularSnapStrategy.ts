@@ -3,6 +3,13 @@ import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBuffe
 import { SnapContext, SnapResult, SnapStrategy, SnapGuideLine, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
 import { filterCandidateLines } from './snapExclusionUtils';
 
+// Maksymalny dopuszczalny zasięg rzutu na PRZEDŁUŻENIE (poza rzeczywistym odcinkiem), jako
+// wielokrotność długości krawędzi, z sensownym minimum/maksimum w metrach. Zapobiega sytuacji,
+// w której odległa, niepowiązana ściana "widmowo" przechwytuje kursor swoim nośnikiem prostej.
+const MAX_EXTENSION_FACTOR = 0.5;
+const MIN_MAX_EXTENSION_METERS = 1.5;
+const MAX_MAX_EXTENSION_METERS = 8.0;
+
 /**
  * PerpendicularSnapStrategy - Wykrywa punkt rzutu prostopadłego z punktu bazowego
  * rysowania (originPoint) na krawędź obiektu.
@@ -23,9 +30,24 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
     if (!context.originPoint) return [];
 
     const origin = context.originPoint;
-    const { thresholdPx } = computeClampedWorldTolerance(point, context, 12);
+    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
 
-    const candidateEdges = filterCandidateLines(context.lineBuffer, context);
+    // Ograniczenie przestrzenne kandydatów: zamiast pełnego skanu całej sceny (co pozwalało
+    // odległym, niepowiązanym ścianom "widmowo" przechwytywać kursor swoim nośnikiem prostej —
+    // patrz "Prostopadły do przedłużenia" false-positive), rozważamy tylko krawędzie leżące
+    // blisko kursora LUB blisko punktu bazowego origin (bo rzut liczony jest z origin na krawędź,
+    // ale musi też wypaść blisko kursora, więc obie okolice są istotne).
+    let candidateEdges: CachedLineEquation[];
+    if (context.spatialIndex) {
+      const minX = Math.min(point.x, origin.x) - snapRadiusWorld;
+      const maxX = Math.max(point.x, origin.x) + snapRadiusWorld;
+      const minY = Math.min(point.y, origin.y) - snapRadiusWorld;
+      const maxY = Math.max(point.y, origin.y) + snapRadiusWorld;
+      const queried = context.spatialIndex.queryBBox(minX, minY, maxX, maxY);
+      candidateEdges = filterCandidateLines(queried, context);
+    } else {
+      candidateEdges = filterCandidateLines(context.lineBuffer, context);
+    }
 
     if (candidateEdges.length === 0) return [];
 
@@ -41,10 +63,28 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
       const distPx = Math.hypot(context.mouseScreen.sx - sPerp.sx, context.mouseScreen.sy - sPerp.sy);
 
       if (distPx <= thresholdPx) {
+        const isOnSegment = proj.isOnSegment;
+        const d1 = Math.hypot(edge.p1.x - perpPt.x, edge.p1.y - perpPt.y);
+        const d2 = Math.hypot(edge.p2.x - perpPt.x, edge.p2.y - perpPt.y);
+
+        if (!isOnSegment) {
+          // Twardy limit zasięgu przedłużenia: odrzucamy rzuty wypadające dalece poza
+          // rzeczywisty odcinek (patrz stałe MAX_EXTENSION_* powyżej) — bez tego dowolnie
+          // odległy nośnik prostej mógł "widmowo" przechwycić kursor.
+          const extensionDist = Math.min(d1, d2);
+          const maxExtension = Math.min(
+            MAX_MAX_EXTENSION_METERS,
+            Math.max(MIN_MAX_EXTENSION_METERS, edge.length * MAX_EXTENSION_FACTOR)
+          );
+          if (extensionDist > maxExtension) continue;
+        }
+
         let effDist = distPx;
-        // Lekki bonus dla rzutu leżącego bezpośrednio na odcinku względem rzutu na przedłużeniu
-        if (!proj.isOnSegment) {
-          effDist += 1.5;
+        // Istotna kara za rzut na przedłużenie względem rzutu na rzeczywisty odcinek —
+        // podniesiona z dawnych +1.5px, by nie przegrywał w globalnym d_eff wyłącznie przez
+        // przypadkową bliskość kursora do nośnika dalekiej, niepowiązanej ściany.
+        if (!isOnSegment) {
+          effDist += 6.0;
         }
 
         const catBonus = computeCategoryAffinityBonus(edge.category, context.activeCategory, context.categoryAffinityWeights);
@@ -52,7 +92,6 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
         effDist = Math.max(0, effDist);
 
         const displayName = edge.objectName || edge.objectId;
-        const isOnSegment = proj.isOnSegment;
 
         const guideLines: SnapGuideLine[] = [
           { p1: origin, p2: perpPt, type: 'perpendicular' },
@@ -60,8 +99,6 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
         ];
 
         if (!isOnSegment) {
-          const d1 = Math.hypot(edge.p1.x - perpPt.x, edge.p1.y - perpPt.y);
-          const d2 = Math.hypot(edge.p2.x - perpPt.x, edge.p2.y - perpPt.y);
           const nearP = d1 < d2 ? edge.p1 : edge.p2;
           guideLines.push({ p1: nearP, p2: perpPt, type: 'extension' });
         }

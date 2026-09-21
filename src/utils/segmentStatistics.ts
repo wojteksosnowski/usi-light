@@ -62,6 +62,20 @@ export interface DominantDirection {
 export interface AnalyzeSegmentsOptions {
   noisePercentileCutoff?: number; // np. 20 dla 20. percentylu
   minLengthMeters?: number; // np. 0.2m
+  /** Kąt bazowy aktywnego widoku (WORLDUCS/USERUCS) w stopniach, do reguły separacji EDGE_UCS/OTRACK. */
+  viewAngleDeg?: number;
+  /** Próg separacji kątowej wobec widoku (domyślnie 2.0°) — poniżej tego progu EDGE_UCS jest odrzucany
+   *  jako nierozróżnialny od widoku, zapobiegając nakładaniu się osi śledzenia i migotaniu UI. */
+  edgeUcsSeparationDeg?: number;
+}
+
+/**
+ * Minimalny kąt różnicy między dwoma kątami modulo 90°, wg reguły separacji OTRACK (spec §2.2):
+ * Δθ = min_k |θ_edge - θ_view - k*90°|
+ */
+export function angularSeparationMod90Deg(angleDeg: number, viewAngleDeg: number): number {
+  const raw = ((angleDeg - viewAngleDeg) % 90 + 90) % 90;
+  return Math.min(raw, 90 - raw);
 }
 
 export interface SegmentStatistics {
@@ -212,14 +226,24 @@ export function analyzeSegmentsStatistics(
 
     const exactAngle = totalDominantWeight > 0 ? ((((weightedAngleSum / totalDominantWeight) % 180) + 180) % 180) : bestAngle;
     const percentage = totalLength > 0 ? (dominantLength / totalLength) * 100 : 0;
-    // Odrzucenie marginalnych próbek: wymagane co najmniej 15% łącznej długości (lub mała liczba ścian)
+
+    // Reguła separacji EDGE_UCS/OTRACK (spec §2.2): jeśli kąt dominujący jest nierozróżnialny
+    // od kąta widoku (Δθ < próg, domyślnie 2.0°), EDGE_UCS jest ignorowany — zapobiega to
+    // nakładaniu się niemal równoległych osi śledzenia i migotaniu interfejsu.
+    const viewAngleDeg = options?.viewAngleDeg ?? 0;
+    const separationDeg = options?.edgeUcsSeparationDeg ?? 2.0;
+    const isIndistinctFromView = angularSeparationMod90Deg(exactAngle, viewAngleDeg) < separationDeg;
+
     if (percentage >= 15.0 || totalSegments <= 4) {
+      // isTrackingActive=false gdy EDGE_UCS pokrywa się z widokiem (reguła separacji §2.2):
+      // konsumenci (DirectionSnapStrategy, OtrackManager) powinni w tym przypadku pominąć tę oś,
+      // pozostawiając wyłącznie domyślną siatkę kartezjańską 0°/90°, by uniknąć duplikatu.
       dominantDirections.push({
         angleDeg: exactAngle,
         orthogonalDeg: (exactAngle + 90) % 180,
         totalLength: dominantLength,
         percentage,
-        isTrackingActive: true,
+        isTrackingActive: !isIndistinctFromView,
       });
     } else {
       // Fallback: standardowa siatka kartezjańska 0°/90°
@@ -228,7 +252,7 @@ export function analyzeSegmentsStatistics(
         orthogonalDeg: 90,
         totalLength: dominantLength,
         percentage,
-        isTrackingActive: true,
+        isTrackingActive: false,
       });
     }
   }

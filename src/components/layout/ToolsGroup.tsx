@@ -58,6 +58,7 @@ export const ToolsGroup: React.FC = () => {
   const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
   const toggleDirectionSnapping = useCadToolStore((s) => s.toggleDirectionSnapping);
   const noisePercentileCutoff = useCadToolStore((s) => s.noisePercentileCutoff);
+  const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
 
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
@@ -106,8 +107,8 @@ export const ToolsGroup: React.FC = () => {
 
   // Statistical analysis of facade segments directions
   const rawSegmentStats = useMemo(
-    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff }),
-    [buildings, noisePercentileCutoff]
+    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff, viewAngleDeg: viewRotationDeg }),
+    [buildings, noisePercentileCutoff, viewRotationDeg]
   );
   const segmentStats = useStableWhileInteracting(rawSegmentStats, isInteracting);
 

@@ -1,5 +1,5 @@
 import { Point2D } from '../../types/geometry';
-import { AnchorPoint, SnapResult, SnapContext, TrackingRay, SnapGuideLine } from './types';
+import { AnchorPoint, SnapResult, SnapContext, TrackingRay, SnapGuideLine, computeClampedWorldTolerance } from './types';
 import { normalizeAngle180, lineIntersection2D } from '../../utils/math2d';
 
 export interface OtrackDwellState {
@@ -138,7 +138,10 @@ export class OtrackManager {
       // 2. Promienie dominanty sceny jeśli dostępne
       if (context.dominantDirections && context.dominantDirections.length > 0) {
         const dom = context.dominantDirections[0];
-        if (dom.angleDeg !== 0 && dom.angleDeg !== 90) {
+        // Zsynchronizowane z regułą separacji EDGE_UCS/OTRACK (segmentStatistics.ts, spec §2.2):
+        // gdy dominanta jest nierozróżnialna od widoku, isTrackingActive===false i promienie
+        // dominanty są pomijane (uniknięcie duplikatu z promieniami ortho 0°/90° powyżej).
+        if (dom.isTrackingActive !== false && dom.angleDeg !== 0 && dom.angleDeg !== 90) {
           const rad1 = (dom.angleDeg * Math.PI) / 180;
           const rad2 = (dom.orthogonalDeg * Math.PI) / 180;
           const cos1 = Math.cos(rad1), sin1 = Math.sin(rad1);
@@ -187,7 +190,9 @@ export class OtrackManager {
     const rays = this.generateTrackingRays(context);
     if (rays.length === 0) return null;
 
-    const thresholdPx = context.thresholdPx ?? 12;
+    // Ujednolicona apertura px<->world z resztą strategii (computeClampedWorldTolerance),
+    // zamiast osobnego, nieskoordynowanego twardego `?? 12`.
+    const { thresholdPx } = computeClampedWorldTolerance(point, context);
 
     // 1. Sprawdź przecięcie dwóch promieni z różnych punktów bazowych (Dual-Ray Intersection)
     if (this.acquiredAnchors.length >= 2) {

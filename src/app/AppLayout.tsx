@@ -120,8 +120,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   // Segment statistics with user-configurable High Pass Filter (HPF)
   const rawSegmentStats = useMemo(
-    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff }),
-    [buildings, noisePercentileCutoff]
+    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff, viewAngleDeg: viewRotationDeg }),
+    [buildings, noisePercentileCutoff, viewRotationDeg]
   );
   const segmentStats = useStableWhileInteracting(rawSegmentStats, isInteracting);
 

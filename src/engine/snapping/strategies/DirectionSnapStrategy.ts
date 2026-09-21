@@ -57,7 +57,9 @@ export function collectTargetDirections(
     sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number }
   ) => {
     const norm = normalizeAngle180(angleDeg);
-    const dedupThreshold = relationType === 'dominant' ? 1.5 : 2.5;
+    // Próg separacji kątowej ujednolicony ze spec §2.2 (2.0°) oraz z regułą separacji EDGE_UCS
+    // w segmentStatistics.ts (angularSeparationMod90Deg), zapobiegając duplikatom osi śledzenia.
+    const dedupThreshold = relationType === 'dominant' ? 2.0 : 2.5;
     for (const sa of seenAngles) {
       if (angleDiff180(sa, norm) < dedupThreshold) return;
     }
@@ -68,7 +70,7 @@ export function collectTargetDirections(
   // 1. Dominant scene axes from statistics (Siatka główna)
   const allowDominant = otrackModes?.dominant !== false;
   const domPair: { angle: number; ortho: number } | null =
-    allowDominant && dominantDirections && dominantDirections.length > 0
+    allowDominant && dominantDirections && dominantDirections.length > 0 && dominantDirections[0].isTrackingActive !== false
       ? { angle: dominantDirections[0].angleDeg, ortho: dominantDirections[0].orthogonalDeg }
       : null;
 
@@ -651,11 +653,17 @@ export class DirectionSnapStrategy implements SnapStrategy {
       excludeSegmentIndices: context.excludeSegmentIndices,
       activeCategory: context.activeCategory,
       otrackModes: context.otrackModes,
+      // Ujednolicenie apertury px<->world ze wspólnym progiem strategii (zamiast osobnego
+      // APP_CONFIG.directionSnapping.screenSnapThresholdPx), by OTRACK/kierunki nie miały
+      // odrębnej, nieskoordynowanej strefy przechwytywania.
+      screenSnapThresholdPx: context.thresholdPx ?? APP_CONFIG.directionSnapping.screenSnapThresholdPx,
     });
 
     if (!dirSnap) return null;
 
     const label = dirSnap.sourceLabel || `${dirSnap.guideAngleDeg.toFixed(1)}°`;
+    const screenPt = context.worldToScreen(dirSnap.snappedPoint.x, dirSnap.snappedPoint.y);
+    const screenDistancePx = Math.hypot(context.mouseScreen.sx - screenPt.sx, context.mouseScreen.sy - screenPt.sy);
 
     return {
       point: dirSnap.snappedPoint,
@@ -663,6 +671,7 @@ export class DirectionSnapStrategy implements SnapStrategy {
       type: 'direction',
       label,
       description: `Kierunek ${dirSnap.relationType} (${label})`,
+      screenDistancePx,
       guideLines: [
         {
           p1: dirSnap.guideLine.p1,
@@ -675,6 +684,7 @@ export class DirectionSnapStrategy implements SnapStrategy {
         rawDirection: dirSnap,
         guideAngleDeg: dirSnap.guideAngleDeg,
         relationType: dirSnap.relationType,
+        effDistPx: screenDistancePx,
       },
     };
   }

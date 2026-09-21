@@ -1,11 +1,12 @@
 import { Point2D } from '../../types/geometry';
-import { SnapContext, SnapResult, SnapStrategy, ActiveSnapState } from './types';
+import { SnapContext, SnapResult, SnapStrategy, ActiveSnapState, SNAP_TYPE_WEIGHTS, computeEdgeScore, computeClampedWorldTolerance } from './types';
 import { VertexSnapStrategy } from './strategies/VertexSnapStrategy';
 import { IntersectionSnapStrategy } from './strategies/IntersectionSnapStrategy';
 import { MidpointSnapStrategy } from './strategies/MidpointSnapStrategy';
 import { PerpendicularSnapStrategy } from './strategies/PerpendicularSnapStrategy';
 import { EdgeSnapStrategy } from './strategies/EdgeSnapStrategy';
 import { DirectionSnapStrategy } from './strategies/DirectionSnapStrategy';
+import { OtrackSnapStrategy } from './strategies/OtrackSnapStrategy';
 import { GridSnapStrategy } from './strategies/GridSnapStrategy';
 import { SpatialLineIndex } from './SpatialLineIndex';
 import { PerfMonitor } from '../perf/PerfMonitor';
@@ -36,6 +37,7 @@ export class SnapCoordinator {
       new MidpointSnapStrategy(), // Priorytet 30
       new PerpendicularSnapStrategy(), // Priorytet 35
       new EdgeSnapStrategy(), // Priorytet 40
+      new OtrackSnapStrategy(), // Priorytet 55 (akwizycja Hover Dwell + promienie śledzenia)
       new DirectionSnapStrategy(), // Priorytet 60
       new GridSnapStrategy(), // Priorytet 80
     ];
@@ -51,12 +53,28 @@ export class SnapCoordinator {
     this.strategies = this.strategies.filter((s) => s.name !== strategyName);
   }
 
+  /**
+   * Zapewnia świeży indeks przestrzenny (rbush) dla podanego bufora linii i go zwraca —
+   * do użytku poza `evaluate()`, np. przez objectDragSnap.ts przy przeciąganiu obiektów,
+   * by uniknąć osobnego, zduplikowanego indeksu rbush per drag-session.
+   */
+  public ensureSpatialIndex(lineBuffer: SnapContext['lineBuffer']): SpatialLineIndex {
+    this.spatialIndex.rebuildIfStale(lineBuffer);
+    return this.spatialIndex;
+  }
+
   public getStrategies(): readonly SnapStrategy[] {
     return this.strategies;
   }
 
   public clearStickySnap(): void {
     this.activeSnapState = null;
+  }
+
+  /** Czyści zdobyte kotwice OTRACK (Hover Dwell), np. po zakończeniu/anulowaniu rysowania. */
+  public clearOtrackAnchors(): void {
+    const otrack = this.strategies.find((s): s is OtrackSnapStrategy => s instanceof OtrackSnapStrategy);
+    otrack?.getManager().clearAnchors();
   }
 
   private sortStrategies(): void {
@@ -133,26 +151,48 @@ export class SnapCoordinator {
       }
     }
 
-    // 3. Standardowy przebieg łańcucha strategii wg priorytetów 1..7 (z wykrywaniem relacji wtórnej Dual-Snap)
-    let primaryResult: SnapResult | null = null;
-    let secondaryResult: SnapResult | null = null;
+    // 3. Zbierz najlepszego kandydata z każdej strategii i wybierz globalne minimum d_eff
+    // d_eff = distancePx / (SNAP_TYPE_WEIGHTS[type] * EdgeScore(krawędź)) — porównywalne między WSZYSTKIMI
+    // typami snapu, zamiast sztywnej hierarchii priorytetów strategii (priority-tier winner-takes-all).
+    const { worldRadius: apertureWorld } = computeClampedWorldTolerance(point, context);
 
+    const scoredResults: { result: SnapResult; dEff: number }[] = [];
     for (const strategy of this.strategies) {
       const result = PerfMonitor.time(`snap.strategy.${strategy.name}`, () =>
         strategy.findSnap(point, contextWithIndex)
       );
       if (result && result.snapped) {
-        if (!primaryResult) {
-          primaryResult = result;
-        } else if (!secondaryResult) {
-          const isSameSource =
-            result.sourceBuildingId &&
-            result.sourceBuildingId === primaryResult.sourceBuildingId &&
-            result.sourceEdgeIndex === primaryResult.sourceEdgeIndex;
-          if (!isSameSource && result.type !== primaryResult.type) {
-            secondaryResult = result;
-            break;
-          }
+        const distPx = (result.metadata?.effDistPx as number | undefined) ?? result.screenDistancePx ?? 0;
+        const edge = result.cachedEdge;
+        const edgeScore = edge
+          ? computeEdgeScore(
+              edge.length,
+              Math.hypot(point.x - result.point.x, point.y - result.point.y),
+              apertureWorld,
+              edge.category,
+              context.activeCategory
+            )
+          : 1;
+        const weight = SNAP_TYPE_WEIGHTS[result.type] ?? 0.5;
+        const dEff = distPx / Math.max(1e-6, weight * edgeScore);
+        scoredResults.push({ result, dEff });
+      }
+    }
+
+    scoredResults.sort((a, b) => a.dEff - b.dEff);
+
+    let primaryResult: SnapResult | null = scoredResults.length > 0 ? scoredResults[0].result : null;
+    let secondaryResult: SnapResult | null = null;
+    if (primaryResult) {
+      for (let i = 1; i < scoredResults.length; i++) {
+        const candidate = scoredResults[i].result;
+        const isSameSource =
+          candidate.sourceBuildingId &&
+          candidate.sourceBuildingId === primaryResult.sourceBuildingId &&
+          candidate.sourceEdgeIndex === primaryResult.sourceEdgeIndex;
+        if (!isSameSource && candidate.type !== primaryResult.type) {
+          secondaryResult = candidate;
+          break;
         }
       }
     }

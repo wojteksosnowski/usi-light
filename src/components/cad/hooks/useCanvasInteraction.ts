@@ -2050,6 +2050,7 @@ export function useCanvasInteraction({
             distanceThresholdMeters: distToleranceMeters,
             angleToleranceRad: ((APP_CONFIG.osnap?.parallelAngleToleranceDeg || 1.5) * Math.PI) / 180,
             previousSnap: activeBuildingDragSnap as any,
+            spatialIndex: snapCoordinatorRef.current.ensureSpatialIndex(visibleLineBuffer),
           });
 
           if (edgeSnap) {
@@ -2131,6 +2132,7 @@ export function useCanvasInteraction({
             dragAnchorVertex: dragAnchor,
             distanceThresholdMeters: distToleranceMeters,
             angleToleranceRad: ((APP_CONFIG.osnap?.parallelAngleToleranceDeg || 0.8) * Math.PI) / 180,
+            spatialIndex: snapCoordinatorRef.current.ensureSpatialIndex(visibleLineBuffer),
           });
 
           if (dragSnap) {
