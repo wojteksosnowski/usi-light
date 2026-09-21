@@ -1,8 +1,8 @@
 import { Point2D } from '../../../types/geometry';
-import { CachedLineEquation, intersectLines, projectPointToLine } from '../../../utils/lineBufferEngine';
+import { intersectLines, projectPointToLine } from '../../../utils/lineBufferEngine';
 import { distance } from '../../../utils/math2d';
 import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
-import { filterCandidateLines } from './snapExclusionUtils';
+import { resolveCandidateEdges, findSnapFromAll, screenDistance } from './strategyHelpers';
 
 /**
  * IntersectionSnapStrategy - Wykrywa punkty przecięcia rzeczywistego i pozornego
@@ -14,28 +14,21 @@ export class IntersectionSnapStrategy implements SnapStrategy {
   readonly priority = 20; // Wysoki priorytet - punkt przecięcia dwóch geometrii
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    const snaps = this.findAllSnaps(point, context);
-    return snaps.length > 0 ? snaps[0] : null;
+    return findSnapFromAll(this, point, context);
   }
 
   findAllSnaps(point: Point2D, context: SnapContext): SnapResult[] {
     if (!context.isOsnapActive) return [];
-    if (context.activeSnapTypes && context.activeSnapTypes.intersection === false) return [];
 
     const { worldRadius, thresholdPx } = computeClampedWorldTolerance(point, context);
 
-    let candidateEdges: CachedLineEquation[];
-    if (context.spatialIndex) {
-      const queried = context.spatialIndex.queryBBox(
-        point.x - worldRadius,
-        point.y - worldRadius,
-        point.x + worldRadius,
-        point.y + worldRadius
-      );
-      candidateEdges = filterCandidateLines(queried, context);
-    } else {
-      candidateEdges = filterCandidateLines(context.lineBuffer, context);
-    }
+    const candidateEdges = resolveCandidateEdges(
+      context,
+      point.x - worldRadius,
+      point.y - worldRadius,
+      point.x + worldRadius,
+      point.y + worldRadius
+    );
 
     const n = candidateEdges.length;
     if (n < 2) return [];
@@ -64,8 +57,7 @@ export class IntersectionSnapStrategy implements SnapStrategy {
         const onE2 = proj2.t >= -extTolerance && proj2.t <= e2.length + extTolerance;
         if (!onE1 || !onE2) continue;
 
-        const s = context.worldToScreen(intPt.x, intPt.y);
-        const distPx = Math.hypot(context.mouseScreen.sx - s.sx, context.mouseScreen.sy - s.sy);
+        const distPx = screenDistance(context, intPt);
 
         if (distPx <= thresholdPx) {
           // Deduplikacja bardzo bliskich przecięć

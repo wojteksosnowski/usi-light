@@ -17,6 +17,18 @@ import {
   DirectionCandidate,
 } from '../types';
 import { isIdExcluded } from './snapExclusionUtils';
+import { buildCenteredGuideline } from '../guidelineUtils';
+
+const getDisplayName = (bldg: BuildingLoop): string =>
+  bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+
+// Kąt [0,180) krawędzi p1->p2, lub null gdy krawędź jest zbyt krótka (< 0.05 m) by liczyć się jako oś.
+const angleOfSegment = (p1: Point2D, p2: Point2D): number | null => {
+  const sdx = p2.x - p1.x;
+  const sdy = p2.y - p1.y;
+  if (Math.hypot(sdx, sdy) < 0.05) return null;
+  return normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
+};
 
 /**
  * Gathers candidate target direction axes (in degrees [0, 180)) with strict spatial and hierarchy prioritization:
@@ -39,8 +51,8 @@ export function collectTargetDirections(
   excludeBuildingIds?: string[],
   excludeSegmentIndices?: number[],
   staticReferenceSegments: { p1: Point2D; p2: Point2D; label?: string; buildingId?: string; edgeIndex?: number }[] = [],
-  otrackModes?: { ortho?: boolean; dominant?: boolean; relative?: boolean },
-  activeCategory?: ObjectCategory
+  activeCategory?: ObjectCategory,
+  maxNearbySegments: number = APP_CONFIG.directionSnapping.maxNearbySegments
 ): DirectionCandidate[] {
   const excludedSet = new Set<string>(excludeBuildingIds || []);
   if (excludeBuildingId) excludedSet.add(excludeBuildingId);
@@ -67,10 +79,21 @@ export function collectTargetDirections(
     candidates.push({ angleDeg: norm, relationType, sourceLabel, priority, sourceSegment });
   };
 
+  // Dodaje parę kandydatów (Równoległy + Prostopadły 90°) dla jednej krawędzi źródłowej —
+  // eliminuje powtórzenie dwóch wywołań addCandidate() w każdym miejscu iteracji po segmentach.
+  const addParallelPerp = (
+    segAngle: number,
+    label: string,
+    priority: number,
+    sourceSegment?: { p1: Point2D; p2: Point2D; buildingId?: string; edgeIndex?: number }
+  ) => {
+    addCandidate(segAngle, 'parallel', `${label} (Równoległy)`, priority, sourceSegment);
+    addCandidate(normalizeAngle180(segAngle + 90), 'perpendicular', `${label} (Prostopadły 90°)`, priority, sourceSegment);
+  };
+
   // 1. Dominant scene axes from statistics (Siatka główna)
-  const allowDominant = otrackModes?.dominant !== false;
   const domPair: { angle: number; ortho: number } | null =
-    allowDominant && dominantDirections && dominantDirections.length > 0 && dominantDirections[0].isTrackingActive !== false
+    dominantDirections && dominantDirections.length > 0 && dominantDirections[0].isTrackingActive !== false
       ? { angle: dominantDirections[0].angleDeg, ortho: dominantDirections[0].orthogonalDeg }
       : null;
 
@@ -80,9 +103,8 @@ export function collectTargetDirections(
   }
 
   // 2. All segments of active Polyline history (0° Parallel & 90° Perpendicular ONLY)
-  const allowRelative = otrackModes?.relative !== false;
   const nPoly = polylineVertices.length;
-  if (allowRelative && nPoly >= 2) {
+  if (nPoly >= 2) {
     for (let i = nPoly - 2; i >= 0; i--) {
       const pA = polylineVertices[i];
       const pB = polylineVertices[i + 1];
@@ -115,7 +137,7 @@ export function collectTargetDirections(
   }
 
   // 3. Static reference segments (np. pozostałe stałe krawędzie edytowanego wielokąta/wstęgi)
-  if (allowRelative && Array.isArray(staticReferenceSegments) && staticReferenceSegments.length > 0) {
+  if (Array.isArray(staticReferenceSegments) && staticReferenceSegments.length > 0) {
     for (const refSeg of staticReferenceSegments) {
       const sdx = refSeg.p2.x - refSeg.p1.x;
       const sdy = refSeg.p2.y - refSeg.p1.y;
@@ -131,57 +153,47 @@ export function collectTargetDirections(
 
   // 4. Priorytetyzacja wskazanego/najechanego obiektu
   const prioritizedBuildingIds = new Set<string>();
-  if (allowRelative && hoveredBuildingId && !isBldgExcluded(hoveredBuildingId)) {
+  if (hoveredBuildingId && !isBldgExcluded(hoveredBuildingId)) {
     prioritizedBuildingIds.add(hoveredBuildingId);
   }
-  if (allowRelative && selectedBuildingId && !isBldgExcluded(selectedBuildingId)) {
+  if (selectedBuildingId && !isBldgExcluded(selectedBuildingId)) {
     prioritizedBuildingIds.add(selectedBuildingId);
   }
 
-  const prioBuildings = allowRelative ? buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false) : [];
+  const prioBuildings = buildings.filter((b) => prioritizedBuildingIds.has(b.id) && b.isIncluded !== false);
   for (const bldg of prioBuildings) {
     if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
         if (isBldgExcluded(bldg.id) && excludeSegmentIndices?.includes(sIdx)) continue;
         const seg = bldg.segments[sIdx];
-        const sdx = seg.p2.x - seg.p1.x;
-        const sdy = seg.p2.y - seg.p1.y;
-        if (Math.hypot(sdx, sdy) >= 0.05) {
-          const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-          const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
-          const sourceSeg = { p1: seg.p1, p2: seg.p2, buildingId: bldg.id, edgeIndex: sIdx };
-          addCandidate(segAng, 'parallel', `${bLabel} (Równoległy)`, 4, sourceSeg);
-          addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `${bLabel} (Prostopadły 90°)`, 4, sourceSeg);
-        }
+        const segAng = angleOfSegment(seg.p1, seg.p2);
+        if (segAng === null) continue;
+        const bLabel = bldg.id === hoveredBuildingId ? `Obiekt wskazany (${bldg.name})` : `${bldg.name}`;
+        addParallelPerp(segAng, bLabel, 4, { p1: seg.p1, p2: seg.p2, buildingId: bldg.id, edgeIndex: sIdx });
       }
     }
 
     if (Array.isArray(bldg.zonePolygons)) {
       if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
-      const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+      const zoneLabel = `Bufor (${getDisplayName(bldg)})`;
       bldg.zonePolygons.forEach((zf, zIdx) => {
         if (!zf.polygon || zf.polygon.length < 2) return;
         const nZ = zf.polygon.length;
         for (let i = 0; i < nZ; i++) {
           const p1 = zf.polygon[i];
           const p2 = zf.polygon[(i + 1) % nZ];
-          const sdx = p2.x - p1.x;
-          const sdy = p2.y - p1.y;
-          if (Math.hypot(sdx, sdy) >= 0.05) {
-            const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-            const sourceSeg = { p1, p2, buildingId: `${bldg.id}_zone_${zIdx}`, edgeIndex: i };
-            addCandidate(segAng, 'parallel', `Bufor (${displayName}) (Równoległy)`, 4, sourceSeg);
-            addCandidate(normalizeAngle180(segAng + 90), 'perpendicular', `Bufor (${displayName}) (Prostopadły 90°)`, 4, sourceSeg);
-          }
+          const segAng = angleOfSegment(p1, p2);
+          if (segAng === null) continue;
+          addParallelPerp(segAng, zoneLabel, 4, { p1, p2, buildingId: `${bldg.id}_zone_${zIdx}`, edgeIndex: i });
         }
       });
     }
   }
 
   // 5. Pozostałe pobliskie budynki posortowane według odległości
-  if (allowRelative) {
-    const maxSegments = APP_CONFIG.directionSnapping.maxNearbySegments;
+  {
+    const maxSegments = maxNearbySegments;
     const otherNearbySegs: {
       angleDeg: number;
       dist: number;
@@ -191,37 +203,36 @@ export function collectTargetDirections(
       edgeIndex: number;
     }[] = [];
 
+    // Odległość efektywna: mniejsza z (origin, mysz) do środka krawędzi, przepołowiona
+    // dla obiektów tej samej kategorii co aktywna (priorytet spójności kategorii).
+    const effDistToMid = (p1: Point2D, p2: Point2D, bldg: BuildingLoop): number => {
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const dist = Math.min(
+        Math.hypot(origin.x - midX, origin.y - midY),
+        Math.hypot(currentMouse.x - midX, currentMouse.y - midY)
+      );
+      return activeCategory && bldg.category === activeCategory ? dist * 0.5 : dist;
+    };
+
     for (const bldg of buildings) {
       if (bldg.isIncluded === false || prioritizedBuildingIds.has(bldg.id)) continue;
       if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
-      const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+      const displayName = getDisplayName(bldg);
       if (Array.isArray(bldg.segments)) {
         for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
           if (isBldgExcluded(bldg.id) && excludeSegmentIndices?.includes(sIdx)) continue;
           const seg = bldg.segments[sIdx];
-          const midX = (seg.p1.x + seg.p2.x) / 2;
-          const midY = (seg.p1.y + seg.p2.y) / 2;
-          const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
-          const dist = Math.min(
-            Math.hypot(origin.x - midX, origin.y - midY),
-            distToMid
-          );
-          const sdx = seg.p2.x - seg.p1.x;
-          const sdy = seg.p2.y - seg.p1.y;
-          const segLen = Math.hypot(sdx, sdy);
-          const isSameCat = activeCategory && bldg.category === activeCategory;
-          const effDist = isSameCat ? dist * 0.5 : dist;
-          if (segLen >= 0.05) {
-            const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-            otherNearbySegs.push({
-              angleDeg: segAng,
-              dist: effDist,
-              buildingName: displayName,
-              seg: { p1: seg.p1, p2: seg.p2 },
-              buildingId: bldg.id,
-              edgeIndex: sIdx,
-            });
-          }
+          const segAng = angleOfSegment(seg.p1, seg.p2);
+          if (segAng === null) continue;
+          otherNearbySegs.push({
+            angleDeg: segAng,
+            dist: effDistToMid(seg.p1, seg.p2, bldg),
+            buildingName: displayName,
+            seg: { p1: seg.p1, p2: seg.p2 },
+            buildingId: bldg.id,
+            edgeIndex: sIdx,
+          });
         }
       }
 
@@ -233,26 +244,16 @@ export function collectTargetDirections(
           for (let i = 0; i < nZ; i++) {
             const p1 = zf.polygon[i];
             const p2 = zf.polygon[(i + 1) % nZ];
-            const midX = (p1.x + p2.x) / 2;
-            const midY = (p1.y + p2.y) / 2;
-            const distToMid = Math.hypot(currentMouse.x - midX, currentMouse.y - midY);
-            const dist = Math.min(Math.hypot(origin.x - midX, origin.y - midY), distToMid);
-            const isSameCat = activeCategory && bldg.category === activeCategory;
-            const effDist = isSameCat ? dist * 0.5 : dist;
-            const sdx = p2.x - p1.x;
-            const sdy = p2.y - p1.y;
-            const segLen = Math.hypot(sdx, sdy);
-            if (segLen >= 0.05) {
-              const segAng = normalizeAngle180((Math.atan2(sdy, sdx) * 180) / Math.PI);
-              otherNearbySegs.push({
-                angleDeg: segAng,
-                dist: effDist,
-                buildingName: `Bufor (${displayName})`,
-                seg: { p1, p2 },
-                buildingId: `${bldg.id}_zone_${zIdx}`,
-                edgeIndex: i,
-              });
-            }
+            const segAng = angleOfSegment(p1, p2);
+            if (segAng === null) continue;
+            otherNearbySegs.push({
+              angleDeg: segAng,
+              dist: effDistToMid(p1, p2, bldg),
+              buildingName: `Bufor (${displayName})`,
+              seg: { p1, p2 },
+              buildingId: `${bldg.id}_zone_${zIdx}`,
+              edgeIndex: i,
+            });
           }
         });
       }
@@ -261,16 +262,13 @@ export function collectTargetDirections(
     otherNearbySegs.sort((a, b) => a.dist - b.dist);
     for (const item of otherNearbySegs.slice(0, maxSegments)) {
       const sourceSeg = { p1: item.seg.p1, p2: item.seg.p2, buildingId: item.buildingId, edgeIndex: item.edgeIndex };
-      addCandidate(item.angleDeg, 'parallel', `${item.buildingName} (Równoległy)`, 6, sourceSeg);
-      addCandidate(normalizeAngle180(item.angleDeg + 90), 'perpendicular', `${item.buildingName} (Prostopadły 90°)`, 6, sourceSeg);
+      addParallelPerp(item.angleDeg, item.buildingName, 6, sourceSeg);
     }
   }
 
   // 6. Domyślne osie kartezjańskie Ortho (0° / 90°)
-  if (otrackModes?.ortho !== false) {
-    addCandidate(0, 'dominant', 'Oś X (0.0°)', 8);
-    addCandidate(90, 'dominant', 'Oś Y (90.0°)', 8);
-  }
+  addCandidate(0, 'dominant', 'Oś X (0.0°)', 8);
+  addCandidate(90, 'dominant', 'Oś Y (90.0°)', 8);
 
   return candidates;
 }
@@ -292,13 +290,14 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     angleToleranceDeg = APP_CONFIG.directionSnapping.angleToleranceDeg,
     screenSnapThresholdPx = APP_CONFIG.directionSnapping.screenSnapThresholdPx,
     minDistanceMeters = APP_CONFIG.directionSnapping.minDistanceMeters,
+    maxNearbySegments = APP_CONFIG.directionSnapping.maxNearbySegments,
+    guideLineLengthMeters = APP_CONFIG.directionSnapping.guideLineLengthMeters,
     hoveredBuildingId,
     selectedBuildingId,
     activeCategory,
     excludeBuildingId,
     excludeBuildingIds,
     excludeSegmentIndices,
-    otrackModes,
   } = options;
 
   if (!currentMouseWorld || !originPoint) return null;
@@ -331,20 +330,31 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
     excludeBuildingIds,
     excludeSegmentIndices,
     staticReferenceSegments,
-    otrackModes,
-    activeCategory
+    activeCategory,
+    maxNearbySegments
   );
 
-  const guideHalfLength = APP_CONFIG.directionSnapping.guideLineLengthMeters;
+  const guideHalfLength = guideLineLengthMeters;
+
+  // Odległość ekranowa (px) między myszą a punktem przecięcia, oraz czy mieści się w progu
+  // (wspólne dla 1a Dual-Guide i 1b Guide✕Edge, z tolerancją *1.5 i fallbackiem bez worldToScreen).
+  const screenDistToMouse = (intPt: Point2D): { screenDistPx: number; withinThreshold: boolean } => {
+    const intDist = Math.hypot(currentMouseWorld.x - intPt.x, currentMouseWorld.y - intPt.y);
+    if (worldToScreen) {
+      const sMouse = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
+      const sInt = worldToScreen(intPt.x, intPt.y);
+      const screenDistPx = Math.hypot(sMouse.sx - sInt.sx, sMouse.sy - sInt.sy);
+      return { screenDistPx, withinThreshold: screenDistPx <= (screenSnapThresholdPx || 14) * 1.5 };
+    }
+    return { screenDistPx: intDist * 25, withinThreshold: intDist <= 1.5 };
+  };
 
   // 1. Sprawdzenie przecięć prowadnic (Dual-Guide oraz Guide ✕ Edge Intersections)
   let bestIntersection: DirectionSnapResult | null = null;
   let bestIntScore = 999999;
 
-  const allowDualIntersection = otrackModes?.dualIntersection !== false;
-
   // 1a. Przecięcie dwóch prowadnic (Dual-Guide Intersection Snapping)
-  if (allowDualIntersection && secondaryOriginPoints && secondaryOriginPoints.length > 0) {
+  if (secondaryOriginPoints && secondaryOriginPoints.length > 0) {
     for (const secOrigin of secondaryOriginPoints) {
       if (Math.hypot(secOrigin.x - originPoint.x, secOrigin.y - originPoint.y) < 0.05) continue;
 
@@ -360,8 +370,8 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         excludeBuildingIds,
         excludeSegmentIndices,
         staticReferenceSegments,
-        otrackModes,
-        activeCategory
+        activeCategory,
+        maxNearbySegments
       );
 
       for (const cand1 of primaryCandidates) {
@@ -374,22 +384,9 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
           const intPt = lineIntersection2D(originPoint, rad1, secOrigin, rad2);
           if (!intPt) continue;
 
-          const intDist = Math.hypot(currentMouseWorld.x - intPt.x, currentMouseWorld.y - intPt.y);
-          let screenDistPx = intDist * 25;
-          let matchScreen = true;
+          const { screenDistPx, withinThreshold } = screenDistToMouse(intPt);
 
-          if (worldToScreen) {
-            const sMouse = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
-            const sInt = worldToScreen(intPt.x, intPt.y);
-            screenDistPx = Math.hypot(sMouse.sx - sInt.sx, sMouse.sy - sInt.sy);
-            if (screenDistPx > (screenSnapThresholdPx || 14) * 1.5) {
-              matchScreen = false;
-            }
-          } else if (intDist > 1.5) {
-            matchScreen = false;
-          }
-
-          if (matchScreen) {
+          if (withinThreshold) {
             const score = screenDistPx + (cand1.priority + cand2.priority) * 0.4;
             if (score < bestIntScore) {
               bestIntScore = score;
@@ -404,16 +401,12 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
                 guideAngleDeg: cand1.angleDeg,
                 relationType: 'guide_intersection',
                 isStatistical: false,
-                guideLine: {
-                  p1: { x: originPoint.x - guideHalfLength * cos1, y: originPoint.y - guideHalfLength * sin1 },
-                  p2: { x: originPoint.x + guideHalfLength * cos1, y: originPoint.y + guideHalfLength * sin1 },
-                },
+                guideLine: buildCenteredGuideline(originPoint, { x: cos1, y: sin1 }, guideHalfLength),
                 secondGuideLine: {
                   originPoint: secOrigin,
                   angleDeg: cand2.angleDeg,
                   label: cand2.sourceLabel,
-                  p1: { x: secOrigin.x - guideHalfLength * cos2, y: secOrigin.y - guideHalfLength * sin2 },
-                  p2: { x: secOrigin.x + guideHalfLength * cos2, y: secOrigin.y + guideHalfLength * sin2 },
+                  ...buildCenteredGuideline(secOrigin, { x: cos2, y: sin2 }, guideHalfLength),
                 },
                 distanceFromOrigin: Math.hypot(intPt.x - originPoint.x, intPt.y - originPoint.y),
                 diffAngleDeg: 0,
@@ -440,7 +433,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false) continue;
     if (isBldgExcluded(bldg.id) && (!excludeSegmentIndices || excludeSegmentIndices.length === 0)) continue;
-    const displayName = bldg.name || (bldg.plotNumber ? `Działka ${bldg.plotNumber}` : (bldg.category === 'boundary' ? 'Obszar' : 'Obiekt'));
+    const displayName = getDisplayName(bldg);
     if (Array.isArray(bldg.segments)) {
       for (let sIdx = 0; sIdx < bldg.segments.length; sIdx++) {
         if (isBldgExcluded(bldg.id) && excludeSegmentIndices?.includes(sIdx)) continue;
@@ -464,7 +457,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         for (let i = 0; i < nZ; i++) {
           const p1 = zf.polygon[i];
           const p2 = zf.polygon[(i + 1) % nZ];
-          if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 0.05) continue;
+          if (angleOfSegment(p1, p2) === null) continue;
           intersectableSegments.push({
             p1,
             p2,
@@ -503,22 +496,9 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
       if (!intRes) continue;
 
       const intPt = intRes.point;
-      const intDist = Math.hypot(currentMouseWorld.x - intPt.x, currentMouseWorld.y - intPt.y);
-      let screenDistPx = intDist * 25;
-      let matchScreen = true;
+      const { screenDistPx, withinThreshold } = screenDistToMouse(intPt);
 
-      if (worldToScreen) {
-        const sMouse = worldToScreen(currentMouseWorld.x, currentMouseWorld.y);
-        const sInt = worldToScreen(intPt.x, intPt.y);
-        screenDistPx = Math.hypot(sMouse.sx - sInt.sx, sMouse.sy - sInt.sy);
-        if (screenDistPx > (screenSnapThresholdPx || 14) * 1.5) {
-          matchScreen = false;
-        }
-      } else if (intDist > 1.5) {
-        matchScreen = false;
-      }
-
-      if (matchScreen) {
+      if (withinThreshold) {
         const projOntoRay = (intPt.x - originPoint.x) * cosA + (intPt.y - originPoint.y) * sinA;
         const mouseProj = dx * cosA + dy * sinA;
         if (
@@ -542,10 +522,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
             guideAngleDeg: cand.angleDeg,
             relationType: 'guide_intersection',
             isStatistical: false,
-            guideLine: {
-              p1: { x: originPoint.x - guideHalfLength * cosA, y: originPoint.y - guideHalfLength * sinA },
-              p2: { x: originPoint.x + guideHalfLength * cosA, y: originPoint.y + guideHalfLength * sinA },
-            },
+            guideLine: buildCenteredGuideline(originPoint, { x: cosA, y: sinA }, guideHalfLength),
             secondGuideLine: {
               originPoint: seg.p1,
               angleDeg: segAngle,
@@ -615,10 +592,7 @@ export function calculateDirectionSnap(options: CalculateDirectionSnapOptions): 
         guideAngleDeg: forwardAngleDeg,
         relationType: cand.relationType,
         isStatistical: cand.relationType === 'dominant',
-        guideLine: {
-          p1: { x: originPoint.x - guideHalfLength * cosA, y: originPoint.y - guideHalfLength * sinA },
-          p2: { x: originPoint.x + guideHalfLength * cosA, y: originPoint.y + guideHalfLength * sinA },
-        },
+        guideLine: buildCenteredGuideline(originPoint, { x: cosA, y: sinA }, guideHalfLength),
         distanceFromOrigin: Math.max(0, projectedDist),
         diffAngleDeg: diff,
         sourceLabel: cand.sourceLabel,
@@ -652,7 +626,6 @@ export class DirectionSnapStrategy implements SnapStrategy {
       excludeBuildingIds: context.excludeBuildingIds,
       excludeSegmentIndices: context.excludeSegmentIndices,
       activeCategory: context.activeCategory,
-      otrackModes: context.otrackModes,
       // Ujednolicenie apertury px<->world ze wspólnym progiem strategii (zamiast osobnego
       // APP_CONFIG.directionSnapping.screenSnapThresholdPx), by OTRACK/kierunki nie miały
       // odrębnej, nieskoordynowanej strefy przechwytywania.

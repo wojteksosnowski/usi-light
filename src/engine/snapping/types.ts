@@ -93,8 +93,6 @@ export interface SnapResult {
   secondarySnap?: SnapResult;
   secondaryGuideLines?: SnapGuideLine[];
   metadata?: Record<string, unknown>;
-  /** DEV-only: surowi kandydaci krawędzi z flagą, czy przeszli filtr HPF. */
-  debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[];
 }
 
 export interface SnapContext {
@@ -127,21 +125,14 @@ export interface SnapContext {
   minToleranceMeters?: number; // np. 0.05m dla skrajnego zoom in
   maxToleranceMeters?: number; // np. 3.00m dla skrajnego zoom out
   candidateIndex?: number; // Indeks wybranego kandydata z klawisza Tab
-  activeSnapTypes?: Partial<Record<SnapType, boolean>>;
-  otrackModes?: {
-    ortho?: boolean;
-    dominant?: boolean;
-    relative?: boolean;
-    dualIntersection?: boolean;
-  };
   /** Indeks przestrzenny (rbush) nad lineBuffer, wstrzykiwany przez SnapCoordinator.
    *  Gdy undefined, strategie korzystają z liniowego skanu (kompatybilność wsteczna). */
   spatialIndex?: SpatialLineIndex;
   /** Rozwiązana konfiguracja silnika (spec §5), wstrzykiwana przez SnapCoordinator.evaluate(). */
   config?: SnapEngineConfig;
-  /** DEV-only: żądanie zebrania surowych kandydatów krawędzi (przed/po filtrze HPF) do podglądu debugowego. */
+  /** DEV-only: żądanie zebrania surowych kandydatów krawędzi (przed/po SNAPfiltrze, patrz EdgeSnapStrategy.ts) do podglądu debugowego. */
   debugCollectEdgeHpf?: boolean;
-  /** DEV-only: wypełniane przez EdgeSnapStrategy, gdy debugCollectEdgeHpf jest true. */
+  /** DEV-only: wypełniane przez EdgeSnapStrategy, gdy debugCollectEdgeHpf jest true — wyniki SNAPfiltra. */
   debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[];
 }
 
@@ -158,6 +149,12 @@ export interface SnapStrategy {
  * przy tej samej odległości efektywnej). Używane do globalnego porównania d_eff
  * między kandydatami ze WSZYSTKICH strategii w SnapCoordinator.evaluate().
  */
+/** Typy SnapResult należące do grupy OSNAP (bramkowane wyłącznie przez isOsnapActive). */
+export const OSNAP_TYPES: readonly SnapType[] = ['vertex', 'intersection', 'perpendicular', 'edge', 'extension', 'nearest'];
+
+/** Typy SnapResult należące do grupy OTRACK (bramkowane wyłącznie przez isOtrackActive). */
+export const OTRACK_TYPES: readonly SnapType[] = ['direction', 'otrack_intersection', 'otrack_ray'];
+
 export const SNAP_TYPE_WEIGHTS: Record<SnapType, number> = {
   vertex: 1.5,
   intersection: 1.3,
@@ -207,12 +204,13 @@ export function computeEdgeScore(
   apertureWorldMeters: number,
   edgeCategory: ObjectCategory | undefined,
   activeCategory: ObjectCategory | undefined,
-  maxEdgeLengthMeters = 50
+  maxEdgeLengthMeters = 50,
+  categoryWeights?: Partial<Record<ObjectCategory, number>>
 ): number {
   const sLen = Math.log10(Math.max(0, edgeLengthMeters) + 1) / Math.log10(maxEdgeLengthMeters + 1);
   const sLenClamped = Math.min(1, Math.max(0.05, sLen));
   const sDist = Math.min(1, Math.max(0, 1 - distanceToEdgeMeters / Math.max(apertureWorldMeters, 1e-6)));
-  const catBonus = computeCategoryAffinityBonus(edgeCategory, activeCategory);
+  const catBonus = computeCategoryAffinityBonus(edgeCategory, activeCategory, categoryWeights);
   const sCat = catBonus > 0 ? 1.0 : 0.6;
   return sLenClamped * Math.max(0.05, sDist) * sCat;
 }
@@ -296,8 +294,6 @@ export interface OsnapSnapResult {
   secondarySnap?: OsnapSnapResult;
   secondaryRayLine?: { p1: Point2D; p2: Point2D };
   secondaryType?: OsnapSnapType;
-  /** DEV-only: surowi kandydaci krawędzi z flagą, czy przeszli filtr HPF (patrz debugCollectEdgeHpf). */
-  debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[];
 }
 
 export interface DirectionSnapResult {
@@ -327,18 +323,16 @@ export interface CalculateDirectionSnapOptions {
   angleToleranceDeg?: number;
   screenSnapThresholdPx?: number;
   minDistanceMeters?: number;
+  maxNearbySegments?: number;
+  guideLineLengthMeters?: number;
   hoveredBuildingId?: string;
   selectedBuildingId?: string;
   activeCategory?: ObjectCategory;
   excludeBuildingId?: string;
   excludeBuildingIds?: string[];
   excludeSegmentIndices?: number[];
-  otrackModes?: {
-    ortho?: boolean;
-    dominant?: boolean;
-    relative?: boolean;
-    dualIntersection?: boolean;
-  };
+  /** Grupowa flaga OTRACK — brak per-typu gatingu (ortho/dominant/relative/dualIntersection). */
+  isOtrackActive?: boolean;
 }
 
 export interface DirectionCandidate {

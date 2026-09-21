@@ -30,7 +30,7 @@ export class OtrackSnapStrategy implements SnapStrategy {
   }
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    if (!context.isOsnapActive) return null;
+    if (!context.isOsnapActive || !context.isDirectionSnappingActive) return null;
 
     // Akwizycja punktów kotwiczących: wykorzystujemy istniejące dopasowanie wierzchołka
     // (VertexSnapStrategy) jako detektor "kursor spoczywa nad wierzchołkiem", zamiast

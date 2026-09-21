@@ -35,7 +35,6 @@ export class DrawingToolLayer implements CadRenderLayer {
       activeDirectionSnap = null,
       selectedVertexIndex = null,
       activeOsnapSnap = null,
-      activeDebugHpfCandidates = null,
       activeBuildingDragSnap = null,
       sweepWidth = DEFAULT_SWEEP_WIDTH,
       sweepAlignment = 'center',
@@ -105,8 +104,7 @@ export class DrawingToolLayer implements CadRenderLayer {
       sweepAlignment,
       effectiveBuildings,
       alignPendingRef,
-      alignHoveredEdge,
-      activeDebugHpfCandidates
+      alignHoveredEdge
     );
   }
 }

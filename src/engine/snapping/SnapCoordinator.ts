@@ -14,6 +14,10 @@ import { PerfMonitor } from '../perf/PerfMonitor';
  * Wyznacza dEff kandydata `target` tak, jakby kursor znajdował się w punkcie `cursorPoint`
  * zamiast rzeczywistej pozycji myszy — użyteczne do testu punktu stałego (fixed-point).
  */
+// LEGACY ADAPTER — aktywnie używany przez useCanvasInteraction.ts, pipeline/types.ts i
+// drawingToolRenderer.ts (tłumaczą SnapResult/SnapType z powrotem na starszy kształt
+// OsnapSnapResult/OsnapSnapType do renderowania). NIE usuwać bez osobnego refaktoru warstwy
+// renderującej/interakcji — poza zakresem uproszczenia samego silnika snapowania.
 const OSNAP_PRIORITY_MAP: Record<string, 1 | 2 | 3 | 4 | 5 | 6> = {
   vertex: 1,
   intersection: 2,
@@ -90,7 +94,7 @@ export class SnapCoordinator {
   private strategies: SnapStrategy[] = [];
   private spatialIndex = new SpatialLineIndex();
   private activeSnapState: ActiveSnapState | null = null;
-  private readonly config: SnapEngineConfig;
+  private config: SnapEngineConfig;
 
   constructor(customStrategies?: SnapStrategy[], config?: Partial<SnapEngineConfig>) {
     this.config = { ...DEFAULT_SNAP_ENGINE_CONFIG, ...config };
@@ -113,6 +117,13 @@ export class SnapCoordinator {
       new GridSnapStrategy(), // Priorytet 80
     ];
     this.sortStrategies();
+  }
+
+  /** Pozwala na żywą korektę SnapEngineConfig (np. z suwaków panelu "Dociąganie") bez utraty
+   *  stanu histerezy/kotwic, którego wymaga przetrwanie koordynatora między klatkami. */
+  public setConfig(config?: Partial<SnapEngineConfig>): void {
+    if (!config) return;
+    this.config = { ...this.config, ...config };
   }
 
   public registerStrategy(strategy: SnapStrategy): void {
@@ -163,19 +174,6 @@ export class SnapCoordinator {
     const captureRadiusPx = context.thresholdPx ?? 12;
     const releaseRadiusPx = captureRadiusPx * 1.5;
 
-    // DEV-only: wymuś obliczenie kandydatów HPF od razu, niezależnie od tego, którą ścieżką
-    // (sticky / candidate-cycling / scoring / brak dopasowania) zakończy się ta ewaluacja —
-    // inaczej debugEdgeHpfCandidates nigdy nie dotrze do UI, gdy wygrywa sticky snap lub gdy
-    // żadna strategia nie znajdzie dopasowania.
-    if (context.debugCollectEdgeHpf) {
-      const edgeStrategy = this.strategies.find((s): s is EdgeSnapStrategy => s instanceof EdgeSnapStrategy);
-      edgeStrategy?.findAllSnaps(point, contextWithIndex);
-    }
-    const withDebug = <T extends SnapResult>(result: T): T =>
-      contextWithIndex.debugEdgeHpfCandidates
-        ? { ...result, debugEdgeHpfCandidates: contextWithIndex.debugEdgeHpfCandidates }
-        : result;
-
     // 1. Sprawdzenie dwuetapowej histerezy (Sticky Snap State)
     if (this.activeSnapState && context.isOsnapActive) {
       const activeScreen = context.worldToScreen(this.activeSnapState.candidate.point.x, this.activeSnapState.candidate.point.y);
@@ -194,10 +192,10 @@ export class SnapCoordinator {
         );
         if (!isExcluded) {
           PerfMonitor.mark('snap.evaluate.sticky', performance.now() - evalStart);
-          return withDebug({
+          return {
             ...this.activeSnapState.candidate,
             screenDistancePx: distFromActivePx,
-          });
+          };
         }
       } else {
         // Kursor opuścił strefę podtrzymania
@@ -228,10 +226,10 @@ export class SnapCoordinator {
           acquiredAt: performance.now(),
         };
         PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
-        return withDebug({
+        return {
           ...selected,
           metadata: { ...selected.metadata, candidateCount: allCandidates.length },
-        });
+        };
       }
     }
 
@@ -307,17 +305,17 @@ export class SnapCoordinator {
         };
       }
       PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
-      return withDebug(primaryResult);
+      return primaryResult;
     }
 
     // Brak dopasowania — zerowanie stanu
     this.activeSnapState = null;
     PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
-    return withDebug({
+    return {
       point: { ...point },
       snapped: false,
       type: 'none',
-    });
+    };
   }
 }
 
@@ -340,11 +338,12 @@ export function evaluateOsnapSnapWithCoordinator(
     previousSnapResult?: import('./types').OsnapSnapResult | null;
     originPoint?: Point2D | null;
     candidateIndex?: number;
-    activeSnapTypes?: Partial<Record<import('./types').SnapType, boolean>>;
-    /** DEV-only: gdy true, zbiera surowych kandydatów krawędzi (przed/po filtrze HPF) do podglądu debugowego. */
-    debug?: boolean;
+    minToleranceMeters?: number;
+    maxToleranceMeters?: number;
+    config?: Partial<SnapEngineConfig>;
   }
-): { osnap: import('./types').OsnapSnapResult | null; debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[] } {
+): { osnap: import('./types').OsnapSnapResult | null } {
+  coordinator.setConfig(options.config);
   const mouseScreen = options.worldToScreen(options.mouseWorld.x, options.mouseWorld.y);
   const snapRes = coordinator.evaluate(options.mouseWorld, {
     mouseWorld: options.mouseWorld,
@@ -358,20 +357,18 @@ export function evaluateOsnapSnapWithCoordinator(
     originPoint: options.originPoint,
     candidateIndex: options.candidateIndex,
     thresholdPx: options.screenSnapThresholdPx ?? 14,
+    minToleranceMeters: options.minToleranceMeters,
+    maxToleranceMeters: options.maxToleranceMeters,
     excludeBuildingId: options.excludeBuildingId,
     excludeBuildingIds: options.excludeBuildingIds,
     hoveredBuildingId: options.hoveredBuildingId,
     selectedBuildingId: options.selectedBuildingId,
     activeCategory: options.activeCategory,
     categoryAffinityWeights: options.categoryAffinityWeights,
-    activeSnapTypes: options.activeSnapTypes,
-    debugCollectEdgeHpf: options.debug,
   });
 
-  const debugEdgeHpfCandidates = snapRes.debugEdgeHpfCandidates;
-
   if (!snapRes.snapped || snapRes.type === 'none' || snapRes.type === 'grid' || snapRes.type === 'direction') {
-    return { osnap: null, debugEdgeHpfCandidates };
+    return { osnap: null };
   }
 
   const osnapType = mapSnapTypeToOsnapType(snapRes.type);
@@ -417,8 +414,6 @@ export function evaluateOsnapSnapWithCoordinator(
       secondarySnap: secondaryOsnap,
       secondaryRayLine: secondaryOsnap?.rayLine,
       secondaryType: secondaryOsnap?.type,
-      debugEdgeHpfCandidates,
     },
-    debugEdgeHpfCandidates,
   };
 }

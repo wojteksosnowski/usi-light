@@ -24,8 +24,7 @@ export function renderDrawingToolPreview(
   sweepAlignment: SweepAlignment = 'center',
   allBuildings?: BuildingLoop[],
   alignPendingRef?: { buildingId: string; segmentId: string } | null,
-  alignHoveredEdge?: { buildingId: string; segmentId: string } | null,
-  debugHpfCandidates?: { point: Point2D; passed: boolean }[] | null
+  alignHoveredEdge?: { buildingId: string; segmentId: string } | null
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -107,21 +106,6 @@ export function renderDrawingToolPreview(
         ctx.textBaseline = 'middle';
         ctx.fillText(badgeText, bx + 6, by);
       }
-    }
-    ctx.restore();
-  }
-
-  // DEV-only: podgląd krawędzi kandydatów przed/po filtrze górnoprzepustowym EdgeSnapStrategy.
-  // Niezależne od osnapSnapResult, żeby dots nie znikały gdy wygrywa OTRACK/guide snap.
-  if (import.meta.env.DEV && debugHpfCandidates) {
-    ctx.save();
-    for (const candidate of debugHpfCandidates) {
-      const p = worldToScreen(candidate.point.x, candidate.point.y);
-      if (!Number.isFinite(p.sx) || !Number.isFinite(p.sy)) continue;
-      ctx.beginPath();
-      ctx.arc(p.sx, p.sy, candidate.passed ? 4 : 3, 0, Math.PI * 2);
-      ctx.fillStyle = candidate.passed ? 'rgba(16, 185, 129, 0.85)' : 'rgba(239, 68, 68, 0.55)';
-      ctx.fill();
     }
     ctx.restore();
   }

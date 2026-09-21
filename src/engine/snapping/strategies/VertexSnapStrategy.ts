@@ -1,35 +1,28 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation } from '../../../utils/lineBufferEngine';
 import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
-import { filterCandidateLines } from './snapExclusionUtils';
+import { resolveCandidateEdges, computeHysteresisAdjustedDist, findSnapFromAll, screenDistance, computeCategoryAndHoverBonus } from './strategyHelpers';
 
 export class VertexSnapStrategy implements SnapStrategy {
   readonly name = 'VertexSnapStrategy';
   readonly priority = 10; // Najwyższy priorytet - dyskretne punkty charakterystyczne
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    const snaps = this.findAllSnaps(point, context);
-    return snaps.length > 0 ? snaps[0] : null;
+    return findSnapFromAll(this, point, context);
   }
 
   findAllSnaps(point: Point2D, context: SnapContext): SnapResult[] {
     if (!context.isOsnapActive) return [];
-    if (context.activeSnapTypes && context.activeSnapTypes.vertex === false) return [];
 
     const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context);
 
-    let candidateEdges: CachedLineEquation[];
-    if (context.spatialIndex) {
-      const queried = context.spatialIndex.queryBBox(
-        point.x - snapRadiusWorld,
-        point.y - snapRadiusWorld,
-        point.x + snapRadiusWorld,
-        point.y + snapRadiusWorld
-      );
-      candidateEdges = filterCandidateLines(queried, context);
-    } else {
-      candidateEdges = filterCandidateLines(context.lineBuffer, context);
-    }
+    const candidateEdges = resolveCandidateEdges(
+      context,
+      point.x - snapRadiusWorld,
+      point.y - snapRadiusWorld,
+      point.x + snapRadiusWorld,
+      point.y + snapRadiusWorld
+    );
 
     if (candidateEdges.length === 0) return [];
 
@@ -48,24 +41,14 @@ export class VertexSnapStrategy implements SnapStrategy {
 
     const results: SnapResult[] = [];
     const seenKeys = new Set<string>();
-    const hysteresisBonus = context.hysteresisBonusPx ?? 3.5;
 
     for (const item of endpointsList) {
-      const s = context.worldToScreen(item.point.x, item.point.y);
-      const distPx = Math.hypot(context.mouseScreen.sx - s.sx, context.mouseScreen.sy - s.sy);
+      const distPx = screenDistance(context, item.point);
 
       if (distPx <= thresholdPx) {
         const key = `${item.point.x.toFixed(4)}_${item.point.y.toFixed(4)}`;
         if (seenKeys.has(key)) continue;
         seenKeys.add(key);
-
-        let effDist = distPx;
-        if (
-          item.edge.objectId &&
-          (item.edge.objectId === context.hoveredBuildingId || item.edge.objectId === context.selectedBuildingId)
-        ) {
-          effDist -= 2.0;
-        }
 
         // Bonus pierwszeństwa dla kategorii obiektu (np. edycja działki faworyzuje działki)
         const catBonus = computeCategoryAffinityBonus(
@@ -73,17 +56,16 @@ export class VertexSnapStrategy implements SnapStrategy {
           context.activeCategory,
           context.categoryAffinityWeights
         );
-        effDist -= catBonus;
+        let effDist = distPx - computeCategoryAndHoverBonus(item.edge, context, catBonus);
 
-        if (context.previousSnapResult && context.previousSnapResult.type === 'vertex') {
-          const prevPt = context.previousSnapResult.point;
-          if (
-            Math.hypot(prevPt.x - item.point.x, prevPt.y - item.point.y) < 1e-3 ||
-            context.previousSnapResult.sourceBuildingId === item.edge.objectId
-          ) {
-            effDist -= hysteresisBonus;
-          }
-        }
+        effDist = computeHysteresisAdjustedDist(
+          effDist,
+          context,
+          (prev) =>
+            prev.type === 'vertex' &&
+            (Math.hypot(prev.point.x - item.point.x, prev.point.y - item.point.y) < 1e-3 ||
+              prev.sourceBuildingId === item.edge.objectId)
+        );
 
         effDist = Math.max(0, effDist);
         const displayName = item.edge.objectName || item.edge.objectId;

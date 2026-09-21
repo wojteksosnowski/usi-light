@@ -9,6 +9,7 @@ import {
   calculateDirectionSnap,
   DirectionSnapResult,
 } from '../../../engine/snapping';
+import { SnapEngineConfig, SNAP_TYPE_WEIGHTS } from '../../../engine/snapping/types';
 import {
   CachedLineEquation,
   buildLineBufferFromBuildings,
@@ -345,9 +346,39 @@ export function useCanvasInteraction({
   worldToScreen,
   screenToWorld,
 }: UseCanvasInteractionParams) {
-  const osnapModes = useCadToolStore((s) => s.osnapModes);
-  const otrackModes = useCadToolStore((s) => s.otrackModes);
-  const snapRadiusPx = useCadToolStore((s) => s.snapRadiusPx);
+  // Panel "Dociąganie" (sidebar) — parametry silnika SNAP zgodne ze spec §5 (SnapEngineConfig)
+  // i K_cat (spec §3), sterowalne z UI zamiast zahardkodowanych stałych w SnapCoordinator/types.ts.
+  const snapApertureRadiusPx = useCadToolStore((s) => s.snapApertureRadiusPx);
+  const snapRadiusPx = snapApertureRadiusPx;
+  const snapProjectRadiusMeters = useCadToolStore((s) => s.snapProjectRadiusMeters);
+  const snapEdgeUcsDeadbandDeg = useCadToolStore((s) => s.snapEdgeUcsDeadbandDeg);
+  const snapTypeWeights = useCadToolStore((s) => s.snapTypeWeights);
+  const snapCategorySameWeightPx = useCadToolStore((s) => s.snapCategorySameWeightPx);
+  const snapCategoryBalconyToBuildingWeightPx = useCadToolStore((s) => s.snapCategoryBalconyToBuildingWeightPx);
+  const snapCategoryBuildingToBoundaryWeightPx = useCadToolStore((s) => s.snapCategoryBuildingToBoundaryWeightPx);
+
+  const snapEngineConfig = useMemo<Partial<SnapEngineConfig>>(
+    () => ({
+      apertureRadiusPx: snapApertureRadiusPx,
+      projectRadius: snapProjectRadiusMeters,
+      edgeUcsDeadbandRad: (snapEdgeUcsDeadbandDeg * Math.PI) / 180,
+      typeWeights: { ...SNAP_TYPE_WEIGHTS, ...snapTypeWeights },
+    }),
+    [snapApertureRadiusPx, snapProjectRadiusMeters, snapEdgeUcsDeadbandDeg, snapTypeWeights]
+  );
+
+  const buildCategoryAffinityWeights = useCallback(
+    (activeCategory?: import('../../../types/geometry').ObjectCategory): Partial<Record<import('../../../types/geometry').ObjectCategory, number>> | undefined => {
+      if (!activeCategory) return undefined;
+      const weights: Partial<Record<import('../../../types/geometry').ObjectCategory, number>> = {
+        [activeCategory]: snapCategorySameWeightPx,
+      };
+      if (activeCategory === 'balcony') weights['building'] = snapCategoryBalconyToBuildingWeightPx;
+      if (activeCategory === 'building') weights['boundary'] = snapCategoryBuildingToBoundaryWeightPx;
+      return weights;
+    },
+    [snapCategorySameWeightPx, snapCategoryBalconyToBuildingWeightPx, snapCategoryBuildingToBoundaryWeightPx]
+  );
 
   // Drawing state
   const [drawingVertices, setDrawingVertices] = useState<Point2D[]>([]);
@@ -357,8 +388,6 @@ export function useCanvasInteraction({
   // Advanced OSNAP & OTRACK state
   const snapCoordinatorRef = useRef<SnapCoordinator>(new SnapCoordinator());
   const [activeOsnapSnap, setActiveOsnapSnap] = useState<OsnapSnapResult | null>(null);
-  // DEV-only: kandydaci krawędzi z filtra HPF, niezależni od tego, czy wygrywa OSNAP czy OTRACK/guide snap
-  const [activeDebugHpfCandidates, setActiveDebugHpfCandidates] = useState<{ point: Point2D; passed: boolean }[] | null>(null);
   const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | EdgeDragSnapResult | null>(null);
   const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
 
@@ -1415,7 +1444,6 @@ export function useCanvasInteraction({
                 ? buildings.filter((b) => b.groupId === selBldg.groupId).map((b) => b.id)
                 : [selBldg.id];
 
-              let debugEdgeHpfCandidates: { point: Point2D; passed: boolean }[] | undefined;
               if (isOsnapActive) {
                 const snapEval = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
                   mouseWorld: targetPt,
@@ -1425,15 +1453,14 @@ export function useCanvasInteraction({
                   excludeBuildingId: selBldg.id,
                   excludeBuildingIds: movingGroupBldgIds,
                   activeCategory: selBldg.category ?? 'building',
+                  categoryAffinityWeights: buildCategoryAffinityWeights(selBldg.category ?? 'building'),
                   previousSnapResult: activeOsnapSnap,
                   hoveredBuildingId: hoveredBldgId === selBldg.id ? undefined : hoveredBldgId,
                   originPoint: (draggedVertexIndex > 0 && isSweep) ? baseVerts[draggedVertexIndex - 1] : (!isSweep && baseVerts.length > 0 ? baseVerts[(draggedVertexIndex - 1 + baseVerts.length) % baseVerts.length] : null),
                   candidateIndex,
-                  activeSnapTypes: osnapModes,
-                  debug: import.meta.env.DEV && useCadToolStore.getState().debugSnapHpfOverlayEnabled,
+                  config: snapEngineConfig,
                 });
                 osnap = snapEval.osnap;
-                debugEdgeHpfCandidates = snapEval.debugEdgeHpfCandidates;
               }
 
               const n = baseVerts.length;
@@ -1495,8 +1522,6 @@ export function useCanvasInteraction({
                   activeCategory: selBldg.category ?? 'building',
                 });
               }
-
-              setActiveDebugHpfCandidates(debugEdgeHpfCandidates ?? null);
 
               if (
                 osnap &&
@@ -1788,7 +1813,6 @@ export function useCanvasInteraction({
       const drawingCategory = useCadToolStore.getState().drawingCategory ?? 'building';
       const activeCat = selectedBuildingId ? (buildings.find((b) => b.id === selectedBuildingId)?.category ?? drawingCategory) : drawingCategory;
 
-      let debugEdgeHpfCandidates: { point: Point2D; passed: boolean }[] | undefined;
       if (isOsnapActive) {
         const snapEval = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
           mouseWorld: mousePos,
@@ -1799,13 +1823,12 @@ export function useCanvasInteraction({
           hoveredBuildingId: hoveredBldgId,
           selectedBuildingId: selectedBuildingId ?? undefined,
           activeCategory: activeCat,
+          categoryAffinityWeights: buildCategoryAffinityWeights(activeCat),
           originPoint: origin,
           candidateIndex,
-          activeSnapTypes: osnapModes,
-          debug: import.meta.env.DEV && useCadToolStore.getState().debugSnapHpfOverlayEnabled,
+          config: snapEngineConfig,
         });
         osnap = snapEval.osnap;
-        debugEdgeHpfCandidates = snapEval.debugEdgeHpfCandidates;
       }
 
       let dirSnap: DirectionSnapResult | null = null;
@@ -1838,12 +1861,9 @@ export function useCanvasInteraction({
             hoveredBuildingId: hoveredBldgId,
             selectedBuildingId: selectedBuildingId ?? undefined,
             activeCategory: activeCat,
-            otrackModes,
             screenSnapThresholdPx: snapRadiusPx * 1.4,
           });
         }
-
-        setActiveDebugHpfCandidates(debugEdgeHpfCandidates ?? null);
 
         if (
           osnap &&
@@ -1877,7 +1897,6 @@ export function useCanvasInteraction({
     } else {
       if (activeDirectionSnap) setActiveDirectionSnap(null);
       if (activeOsnapSnap) setActiveOsnapSnap(null);
-      if (activeDebugHpfCandidates) setActiveDebugHpfCandidates(null);
     }
 
     if (facadePointMode) {
@@ -2215,9 +2234,6 @@ export function useCanvasInteraction({
     if (activeOsnapSnap) {
       setActiveOsnapSnap(null);
     }
-    if (activeDebugHpfCandidates) {
-      setActiveDebugHpfCandidates(null);
-    }
     if (activeBuildingDragSnap) {
       setActiveBuildingDragSnap(null);
     }
@@ -2395,7 +2411,6 @@ export function useCanvasInteraction({
     currentMouseWorld,
     activeDirectionSnap,
     activeOsnapSnap,
-    activeDebugHpfCandidates,
     activeBuildingDragSnap,
     activeRotateAngleSnap,
     selectedVertexIndex,

@@ -1,8 +1,8 @@
 import { Point2D } from '../../../types/geometry';
-import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
+import { projectPointToLine } from '../../../utils/lineBufferEngine';
 import { distance } from '../../../utils/math2d';
 import { SnapContext, SnapResult, SnapStrategy, SnapGuideLine, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
-import { filterCandidateLines } from './snapExclusionUtils';
+import { resolveCandidateEdges, findSnapFromAll, screenDistance } from './strategyHelpers';
 
 // Maksymalny dopuszczalny zasięg rzutu na PRZEDŁUŻENIE (poza rzeczywistym odcinkiem), jako
 // wielokrotność długości krawędzi, z sensownym minimum/maksimum w metrach. Zapobiega sytuacji,
@@ -21,13 +21,11 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
   readonly priority = 35; // Wysoki priorytet dla rzutów prostopadłych z aktywnego punktu bazowego
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    const snaps = this.findAllSnaps(point, context);
-    return snaps.length > 0 ? snaps[0] : null;
+    return findSnapFromAll(this, point, context);
   }
 
   findAllSnaps(point: Point2D, context: SnapContext): SnapResult[] {
     if (!context.isOsnapActive) return [];
-    if (context.activeSnapTypes && context.activeSnapTypes.perpendicular === false) return [];
     if (!context.originPoint) return [];
 
     const origin = context.originPoint;
@@ -38,17 +36,13 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
     // patrz "Prostopadły do przedłużenia" false-positive), rozważamy tylko krawędzie leżące
     // blisko kursora LUB blisko punktu bazowego origin (bo rzut liczony jest z origin na krawędź,
     // ale musi też wypaść blisko kursora, więc obie okolice są istotne).
-    let candidateEdges: CachedLineEquation[];
-    if (context.spatialIndex) {
-      const minX = Math.min(point.x, origin.x) - snapRadiusWorld;
-      const maxX = Math.max(point.x, origin.x) + snapRadiusWorld;
-      const minY = Math.min(point.y, origin.y) - snapRadiusWorld;
-      const maxY = Math.max(point.y, origin.y) + snapRadiusWorld;
-      const queried = context.spatialIndex.queryBBox(minX, minY, maxX, maxY);
-      candidateEdges = filterCandidateLines(queried, context);
-    } else {
-      candidateEdges = filterCandidateLines(context.lineBuffer, context);
-    }
+    const candidateEdges = resolveCandidateEdges(
+      context,
+      Math.min(point.x, origin.x) - snapRadiusWorld,
+      Math.min(point.y, origin.y) - snapRadiusWorld,
+      Math.max(point.x, origin.x) + snapRadiusWorld,
+      Math.max(point.y, origin.y) + snapRadiusWorld
+    );
 
     if (candidateEdges.length === 0) return [];
 
@@ -60,8 +54,7 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
       const perpPt = proj.projectedPoint;
 
       // Sprawdź czy kursor myszy znajduje się blisko rzutu prostopadłego
-      const sPerp = context.worldToScreen(perpPt.x, perpPt.y);
-      const distPx = Math.hypot(context.mouseScreen.sx - sPerp.sx, context.mouseScreen.sy - sPerp.sy);
+      const distPx = screenDistance(context, perpPt);
 
       if (distPx <= thresholdPx) {
         const isOnSegment = proj.isOnSegment;

@@ -21,7 +21,10 @@ function makeContext(mouseWorld: Point2D, lineBuffer: ReturnType<typeof flattenL
     buildings: [],
     lineBuffer,
     isOsnapActive: true,
-    isDirectionSnappingActive: false,
+    // OTRACK dwell-ray snapping (OtrackManager) is gated by the grupowa flaga OTRACK
+    // (isDirectionSnappingActive) since Faza C — must be true for otrack_ray/otrack_intersection
+    // results to be produced, consistently with DirectionSnapStrategy.
+    isDirectionSnappingActive: true,
     thresholdPx: 12,
   };
 }

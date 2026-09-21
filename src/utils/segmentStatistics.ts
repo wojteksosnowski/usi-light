@@ -103,13 +103,20 @@ export interface SegmentStatistics {
 /**
  * Performs comprehensive statistical and geometric analysis of all facade segments across buildings,
  * with noise percentile cut-off to eliminate short/noisy DXF fragments from dominant tracking directions.
+ *
+ * OTROfiltr: mechanizm filtrowania krawędzi używany wyłącznie do wyznaczenia dominującego kierunku
+ * siatki projektu (EDGE_UCS / OTRACK "Siatka projektu"), niezależny od SNAPfiltra w
+ * src/engine/snapping/strategies/EdgeSnapStrategy.ts (ten działa na kandydatach węzłów OSNAP,
+ * inny algorytm — mediana edgeScore zamiast percentyla długości).
  */
 export function analyzeSegmentsStatistics(
   buildings: BuildingLoop[],
   options?: AnalyzeSegmentsOptions
 ): SegmentStatistics {
+    // OTROfiltr: odcięcie percentylowe długości segmentów (domyślnie dolne 20%) + twardy próg minimalny,
+    // eliminujące szumowe/krótkie fragmenty przed wyznaczeniem kierunku dominującego siatki OTRACK.
     const noisePercentileCutoff = options?.noisePercentileCutoff ?? 20; // Domyślnie 20%
-  const minLengthThreshold = options?.minLengthMeters ?? 0.30; // Filtr górnoprzepustowy: min 0.30m
+  const minLengthThreshold = options?.minLengthMeters ?? 0.30; // OTROfiltr: próg minimalny, 0.30m
 
   let totalSegments = 0;
   let totalLength = 0;
@@ -118,7 +125,7 @@ export function analyzeSegmentsStatistics(
   let obstacleSegmentsCount = 0;
   let obstacleLength = 0;
 
-  // 1. Zbieranie wszystkich długości do wyznaczenia percentylu odcięcia
+  // 1. OTROfiltr, krok 1: zbieranie wszystkich długości do wyznaczenia percentylu odcięcia
   const allLengths: number[] = [];
 
   for (const bldg of buildings) {
@@ -132,7 +139,7 @@ export function analyzeSegmentsStatistics(
     }
   }
 
-  // Obliczenie wartości długości dla percentylu
+  // OTROfiltr, krok 2: obliczenie wartości długości dla percentylu (lengthCutoffMeters)
   allLengths.sort((a, b) => a - b);
   let lengthCutoffMeters = minLengthThreshold;
   if (allLengths.length > 0 && noisePercentileCutoff > 0) {
@@ -151,7 +158,7 @@ export function analyzeSegmentsStatistics(
     length: 0,
   }));
 
-  // Fine-grained 1-degree histogram for dominant axis detection (tylko segmenty powyżej progu filtru HPF)
+  // Fine-grained 1-degree histogram for dominant axis detection (tylko segmenty przechodzące OTROfiltr)
   const fineHistogram = new Float64Array(180);
 
   for (const bldg of buildings) {
@@ -182,7 +189,7 @@ export function analyzeSegmentsStatistics(
       bins[bIdx].count++;
       bins[bIdx].length += len;
 
-      // Add to fine histogram tylko dla segmentów istotnych (powyżej odcięcia filtru górnoprzepustowego)
+      // Add to fine histogram tylko dla segmentów istotnych (powyżej odcięcia OTROfiltra)
       if (len >= lengthCutoffMeters) {
         const centerDeg = Math.round(angle) % 180;
         for (let offset = -3; offset <= 3; offset++) {

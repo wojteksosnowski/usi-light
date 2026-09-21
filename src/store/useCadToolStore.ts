@@ -3,23 +3,8 @@ import { DEFAULT_SWEEP_WIDTH, DimensionItem, DimensionReference, DimensionType, 
 import { SweepAlignment } from '../utils/math2d/sweep';
 import { APP_CONFIG } from '../config/appConfig';
 import { useSceneStore } from './useSceneStore';
-
+import { DEFAULT_SNAP_ENGINE_CONFIG, SnapType, EDGE_UCS_DEADBAND_DEG } from '../engine/snapping/types';
 export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align';
-
-export interface OsnapModes {
-  vertex: boolean;
-  intersection: boolean;
-  perpendicular: boolean;
-  edge: boolean;
-  extension: boolean;
-}
-
-export interface OtrackModes {
-  ortho: boolean;
-  dominant: boolean;
-  relative: boolean;
-  dualIntersection: boolean;
-}
 
 interface CadToolState {
   // Drawing Tools
@@ -43,12 +28,16 @@ interface CadToolState {
   // Snapping settings
   isDirectionSnappingActive: boolean;
   isOsnapActive: boolean;
-  osnapModes: OsnapModes;
-  otrackModes: OtrackModes;
-  noisePercentileCutoff: number;
-  snapRadiusPx: number;
-  // DEV-only: podgląd krawędzi, które przeszły/odrzucone przez filtr górnoprzepustowy EdgeSnapStrategy
-  debugSnapHpfOverlayEnabled: boolean;
+
+  // Silnik SNAP/OSNAP — parametry z SnapEngineConfig (spec §5) i K_cat (spec §3, computeCategoryAffinityBonus),
+  // wcześniej zahardkodowane w SnapCoordinator/types.ts, teraz sterowalne z panelu "Dociąganie".
+  snapApertureRadiusPx: number; // R_aperture
+  snapProjectRadiusMeters: number; // R_proj
+  snapEdgeUcsDeadbandDeg: number; // Deadband EDGE_UCS/OTRACK (przechowywany w stopniach dla UI)
+  snapTypeWeights: Partial<Record<SnapType, number>>; // M_type — podzbiór widoczny w UI
+  snapCategorySameWeightPx: number; // K_cat: ta sama kategoria
+  snapCategoryBalconyToBuildingWeightPx: number; // K_cat: balkon → budynek
+  snapCategoryBuildingToBoundaryWeightPx: number; // K_cat: budynek → granica działki
 
   // Dimensions
   dimensions: DimensionItem[];
@@ -92,18 +81,14 @@ interface CadToolState {
   toggleDirectionSnapping: () => void;
   setIsDirectionSnappingActive: (active: boolean) => void;
 
-  toggleOsnapMode: (mode: keyof OsnapModes) => void;
-  setOsnapModes: (modes: Partial<OsnapModes>) => void;
-  setAllOsnapModes: (active: boolean) => void;
-
-  toggleOtrackMode: (mode: keyof OtrackModes) => void;
-  setOtrackModes: (modes: Partial<OtrackModes>) => void;
-  setAllOtrackModes: (active: boolean) => void;
-
-  setNoisePercentileCutoff: (cutoff: number) => void;
-  setSnapRadiusPx: (radius: number) => void;
-  setDebugSnapHpfOverlayEnabled: (active: boolean) => void;
-  toggleDebugSnapHpfOverlay: () => void;
+  setSnapApertureRadiusPx: (px: number) => void;
+  setSnapProjectRadiusMeters: (m: number) => void;
+  setSnapEdgeUcsDeadbandDeg: (deg: number) => void;
+  setSnapTypeWeight: (type: SnapType, weight: number) => void;
+  setSnapCategorySameWeightPx: (px: number) => void;
+  setSnapCategoryBalconyToBuildingWeightPx: (px: number) => void;
+  setSnapCategoryBuildingToBoundaryWeightPx: (px: number) => void;
+  resetSnapEngineDefaults: () => void;
 
   // Dimension actions
   setDimensions: (dims: DimensionItem[] | ((prev: DimensionItem[]) => DimensionItem[])) => void;
@@ -155,23 +140,20 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   isDirectionSnappingActive: APP_CONFIG.directionSnapping.enabledDefault,
   isOsnapActive: APP_CONFIG.osnap?.enabledDefault ?? true,
-  osnapModes: {
-    vertex: true,
-    intersection: true,
-    perpendicular: true,
-    edge: true,
-    extension: true,
-  },
-  otrackModes: {
-    ortho: true,
-    dominant: true,
-    relative: true,
-    dualIntersection: true,
-  },
-  noisePercentileCutoff: APP_CONFIG.statistics?.defaultNoisePercentile ?? 20,
-  snapRadiusPx: APP_CONFIG.osnap?.snapRadiusPx ?? 14,
-  debugSnapHpfOverlayEnabled: false,
 
+  snapApertureRadiusPx: DEFAULT_SNAP_ENGINE_CONFIG.apertureRadiusPx,
+  snapProjectRadiusMeters: DEFAULT_SNAP_ENGINE_CONFIG.projectRadius,
+  snapEdgeUcsDeadbandDeg: EDGE_UCS_DEADBAND_DEG,
+  snapTypeWeights: {
+    vertex: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.vertex,
+    otrack_intersection: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.otrack_intersection,
+    perpendicular: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.perpendicular,
+    extension: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.extension,
+    edge: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.edge,
+  },
+  snapCategorySameWeightPx: 5.0,
+  snapCategoryBalconyToBuildingWeightPx: 6.0,
+  snapCategoryBuildingToBoundaryWeightPx: 2.0,
   dimensions: [],
   isDimensionToolActive: false,
   dimensionType: 'linear',
@@ -211,59 +193,30 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   toggleDirectionSnapping: () => set((state) => ({ isDirectionSnappingActive: !state.isDirectionSnappingActive })),
   setIsDirectionSnappingActive: (active) => set({ isDirectionSnappingActive: active }),
 
-  toggleOsnapMode: (mode) =>
-    set((state) => ({
-      osnapModes: {
-        ...state.osnapModes,
-        [mode]: !state.osnapModes[mode],
+  setSnapApertureRadiusPx: (px) => set({ snapApertureRadiusPx: px }),
+  setSnapProjectRadiusMeters: (m) => set({ snapProjectRadiusMeters: m }),
+  setSnapEdgeUcsDeadbandDeg: (deg) => set({ snapEdgeUcsDeadbandDeg: deg }),
+  setSnapTypeWeight: (type, weight) =>
+    set((state) => ({ snapTypeWeights: { ...state.snapTypeWeights, [type]: weight } })),
+  setSnapCategorySameWeightPx: (px) => set({ snapCategorySameWeightPx: px }),
+  setSnapCategoryBalconyToBuildingWeightPx: (px) => set({ snapCategoryBalconyToBuildingWeightPx: px }),
+  setSnapCategoryBuildingToBoundaryWeightPx: (px) => set({ snapCategoryBuildingToBoundaryWeightPx: px }),
+  resetSnapEngineDefaults: () =>
+    set({
+      snapApertureRadiusPx: DEFAULT_SNAP_ENGINE_CONFIG.apertureRadiusPx,
+      snapProjectRadiusMeters: DEFAULT_SNAP_ENGINE_CONFIG.projectRadius,
+      snapEdgeUcsDeadbandDeg: EDGE_UCS_DEADBAND_DEG,
+      snapTypeWeights: {
+        vertex: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.vertex,
+        otrack_intersection: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.otrack_intersection,
+        perpendicular: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.perpendicular,
+        extension: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.extension,
+        edge: DEFAULT_SNAP_ENGINE_CONFIG.typeWeights.edge,
       },
-    })),
-  setOsnapModes: (modes) =>
-    set((state) => ({
-      osnapModes: {
-        ...state.osnapModes,
-        ...modes,
-      },
-    })),
-  setAllOsnapModes: (active) =>
-    set(() => ({
-      osnapModes: {
-        vertex: active,
-        intersection: active,
-        perpendicular: active,
-        edge: active,
-        extension: active,
-      },
-    })),
-
-  toggleOtrackMode: (mode) =>
-    set((state) => ({
-      otrackModes: {
-        ...state.otrackModes,
-        [mode]: !state.otrackModes[mode],
-      },
-    })),
-  setOtrackModes: (modes) =>
-    set((state) => ({
-      otrackModes: {
-        ...state.otrackModes,
-        ...modes,
-      },
-    })),
-  setAllOtrackModes: (active) =>
-    set(() => ({
-      otrackModes: {
-        ortho: active,
-        dominant: active,
-        relative: active,
-        dualIntersection: active,
-      },
-    })),
-
-  setNoisePercentileCutoff: (cutoff) => set({ noisePercentileCutoff: Math.max(0, Math.min(80, cutoff)) }),
-  setSnapRadiusPx: (radius) => set({ snapRadiusPx: Math.max(6, Math.min(30, radius)) }),
-  setDebugSnapHpfOverlayEnabled: (active) => set({ debugSnapHpfOverlayEnabled: active }),
-  toggleDebugSnapHpfOverlay: () => set((state) => ({ debugSnapHpfOverlayEnabled: !state.debugSnapHpfOverlayEnabled })),
+      snapCategorySameWeightPx: 5.0,
+      snapCategoryBalconyToBuildingWeightPx: 6.0,
+      snapCategoryBuildingToBoundaryWeightPx: 2.0,
+    }),
 
   setDimensions: (updater) => {
     set((state) => ({

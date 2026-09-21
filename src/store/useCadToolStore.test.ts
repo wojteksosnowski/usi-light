@@ -1,85 +1,55 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useCadToolStore } from './useCadToolStore';
 
-describe('useCadToolStore - Snapping & HPF Filter', () => {
+// OSNAP i OTRACK są wyłącznie flagami grupowymi (isOsnapActive / isDirectionSnappingActive) —
+// nie istnieje już per-typu wybór (OsnapModes/OtrackModes, toggleOsnapMode/toggleOtrackMode itd.
+// zostały usunięte z CadToolState przez uproszczenie silnika snapowania, patrz
+// src/engine/snapping/types.ts OSNAP_TYPES/OTRACK_TYPES). Każda z dwóch grup działa w całości
+// albo wcale, niezależnie od drugiej.
+describe('useCadToolStore - Snapping (grupowe flagi OSNAP/OTRACK)', () => {
   beforeEach(() => {
     useCadToolStore.setState({
       isOsnapActive: true,
       isDirectionSnappingActive: true,
-      osnapModes: {
-        vertex: true,
-        intersection: true,
-        perpendicular: true,
-        edge: true,
-        extension: true,
-      },
-      otrackModes: {
-        ortho: true,
-        dominant: true,
-        relative: true,
-        dualIntersection: true,
-      },
-      noisePercentileCutoff: 20,
     });
   });
 
-  it('toggles individual osnap modes correctly', () => {
-    expect(useCadToolStore.getState().osnapModes.intersection).toBe(true);
-
-    useCadToolStore.getState().toggleOsnapMode('intersection');
-    expect(useCadToolStore.getState().osnapModes.intersection).toBe(false);
-
-    useCadToolStore.getState().toggleOsnapMode('intersection');
-    expect(useCadToolStore.getState().osnapModes.intersection).toBe(true);
+  it('toggleOsnap przełącza wyłącznie grupową flagę isOsnapActive', () => {
+    expect(useCadToolStore.getState().isOsnapActive).toBe(true);
+    useCadToolStore.getState().toggleOsnap();
+    expect(useCadToolStore.getState().isOsnapActive).toBe(false);
+    useCadToolStore.getState().toggleOsnap();
+    expect(useCadToolStore.getState().isOsnapActive).toBe(true);
   });
 
-  it('sets all osnap modes at once', () => {
-    useCadToolStore.getState().setAllOsnapModes(false);
-    expect(useCadToolStore.getState().osnapModes).toEqual({
-      vertex: false,
-      intersection: false,
-      perpendicular: false,
-      edge: false,
-      extension: false,
-    });
-
-    useCadToolStore.getState().setAllOsnapModes(true);
-    expect(useCadToolStore.getState().osnapModes).toEqual({
-      vertex: true,
-      intersection: true,
-      perpendicular: true,
-      edge: true,
-      extension: true,
-    });
+  it('toggleDirectionSnapping przełącza wyłącznie grupową flagę isDirectionSnappingActive', () => {
+    expect(useCadToolStore.getState().isDirectionSnappingActive).toBe(true);
+    useCadToolStore.getState().toggleDirectionSnapping();
+    expect(useCadToolStore.getState().isDirectionSnappingActive).toBe(false);
+    useCadToolStore.getState().toggleDirectionSnapping();
+    expect(useCadToolStore.getState().isDirectionSnappingActive).toBe(true);
   });
 
-  it('toggles otrack modes correctly', () => {
-    expect(useCadToolStore.getState().otrackModes.ortho).toBe(true);
+  it('isOsnapActive i isDirectionSnappingActive są w pełni niezależne (dowolna kombinacja)', () => {
+    useCadToolStore.getState().setIsOsnapActive(true);
+    useCadToolStore.getState().setIsDirectionSnappingActive(false);
+    expect(useCadToolStore.getState().isOsnapActive).toBe(true);
+    expect(useCadToolStore.getState().isDirectionSnappingActive).toBe(false);
 
-    useCadToolStore.getState().toggleOtrackMode('ortho');
-    expect(useCadToolStore.getState().otrackModes.ortho).toBe(false);
-
-    useCadToolStore.getState().setAllOtrackModes(false);
-    expect(useCadToolStore.getState().otrackModes).toEqual({
-      ortho: false,
-      dominant: false,
-      relative: false,
-      dualIntersection: false,
-    });
+    useCadToolStore.getState().setIsOsnapActive(false);
+    useCadToolStore.getState().setIsDirectionSnappingActive(true);
+    expect(useCadToolStore.getState().isOsnapActive).toBe(false);
+    expect(useCadToolStore.getState().isDirectionSnappingActive).toBe(true);
   });
 
-  it('sets noise percentile cutoff for high pass filtering', () => {
-    expect(useCadToolStore.getState().noisePercentileCutoff).toBe(20);
-
-    useCadToolStore.getState().setNoisePercentileCutoff(35);
-    expect(useCadToolStore.getState().noisePercentileCutoff).toBe(35);
-
-    // Clamping 0 - 80
-    useCadToolStore.getState().setNoisePercentileCutoff(-10);
-    expect(useCadToolStore.getState().noisePercentileCutoff).toBe(0);
-
-    useCadToolStore.getState().setNoisePercentileCutoff(100);
-    expect(useCadToolStore.getState().noisePercentileCutoff).toBe(80);
+  it('nie eksponuje już per-typu API (OsnapModes/OtrackModes usunięte)', () => {
+    const state = useCadToolStore.getState() as unknown as Record<string, unknown>;
+    expect(state.osnapModes).toBeUndefined();
+    expect(state.otrackModes).toBeUndefined();
+    expect(state.toggleOsnapMode).toBeUndefined();
+    expect(state.setAllOsnapModes).toBeUndefined();
+    expect(state.toggleOtrackMode).toBeUndefined();
+    expect(state.setAllOtrackModes).toBeUndefined();
   });
 });
 

@@ -92,7 +92,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const fitRequest = useCadToolStore((s) => s.fitRequest);
   const isInteracting = useCadToolStore((s) => s.isInteracting);
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
-  const noisePercentileCutoff = useCadToolStore((s) => s.noisePercentileCutoff);
 
   // Solar Analysis Store
   const settings = useSolarAnalysisStore((s) => s.settings);
@@ -118,10 +117,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const analysisResults = analysisOutput?.results || [];
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
 
-  // Segment statistics with user-configurable High Pass Filter (HPF)
+  // Segment statistics with the default High Pass Filter (HPF) cutoff
   const rawSegmentStats = useMemo(
-    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff, viewAngleDeg: viewRotationDeg }),
-    [buildings, noisePercentileCutoff, viewRotationDeg]
+    () => analyzeSegmentsStatistics(buildings, { viewAngleDeg: viewRotationDeg }),
+    [buildings, viewRotationDeg]
   );
   const segmentStats = useStableWhileInteracting(rawSegmentStats, isInteracting);
 

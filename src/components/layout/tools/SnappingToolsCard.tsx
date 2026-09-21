@@ -1,7 +1,6 @@
 import React from 'react';
-import { Magnet, SlidersHorizontal } from 'lucide-react';
-import { useCadToolStore, useSceneStore } from '../../../store';
-import { OsnapModes, OtrackModes } from '../../../store/useCadToolStore';
+import { Magnet } from 'lucide-react';
+import { useCadToolStore } from '../../../store';
 import {
   SnapEndpointIcon,
   SnapIntersectionIcon,
@@ -13,74 +12,62 @@ import {
   SnapRelativeIcon,
   SnapDualIntersectionIcon,
 } from '../../common/CustomCadIcons';
-import { analyzeSegmentsStatistics } from '../../../utils/segmentStatistics';
 
-interface SnapOptionItem<T> {
-  key: T;
+interface SnapInfoItem {
   label: string;
   title: string;
   Icon: React.ComponentType<{ size?: number; color?: string; style?: React.CSSProperties }>;
 }
 
-const OSNAP_ITEMS: SnapOptionItem<keyof OsnapModes>[] = [
-  {
-    key: 'vertex',
-    label: 'Wierzchołek',
-    title: 'Wierzchołek (Endpoint): przyciągaj do narożników i końców ścian',
-    Icon: SnapEndpointIcon,
-  },
-  {
-    key: 'intersection',
-    label: 'Przecięcie',
-    title: 'Przecięcie (Intersection): przyciągaj do przecięć ścian i krawędzi',
-    Icon: SnapIntersectionIcon,
-  },
-  {
-    key: 'perpendicular',
-    label: 'Prostopadły',
-    title: 'Rzut prostopadły (Perpendicular): dociągaj pod kątem prostym do ścian',
-    Icon: SnapPerpendicularIcon,
-  },
-  {
-    key: 'edge',
-    label: 'Krawędź',
-    title: 'Punkt na krawędzi (Nearest): przyciągaj bezpośrednio do obrysu ściany',
-    Icon: SnapNearestIcon,
-  },
-  {
-    key: 'extension',
-    label: 'Przedłużenie',
-    title: 'Przedłużenie (Extension): śledź prostą przedłużenia istniejącej ściany',
-    Icon: SnapExtensionIcon,
-  },
+// Punkty/prowadnice wchodzące w skład grupy OSNAP/OTRACK — informacyjne, nie da się
+// wyłączyć pojedynczego typu: cała grupa działa razem albo wcale (patrz SnapContext.isOsnapActive /
+// isDirectionSnappingActive w src/engine/snapping/types.ts, OSNAP_TYPES/OTRACK_TYPES).
+const OSNAP_ITEMS: SnapInfoItem[] = [
+  { label: 'Wierzchołek', title: 'Wierzchołek (Endpoint): przyciąganie do narożników i końców ścian', Icon: SnapEndpointIcon },
+  { label: 'Przecięcie', title: 'Przecięcie (Intersection): przyciąganie do przecięć ścian i krawędzi', Icon: SnapIntersectionIcon },
+  { label: 'Prostopadły', title: 'Rzut prostopadły (Perpendicular): dociąganie pod kątem prostym do ścian', Icon: SnapPerpendicularIcon },
+  { label: 'Krawędź', title: 'Punkt na krawędzi (Nearest): przyciąganie bezpośrednio do obrysu ściany', Icon: SnapNearestIcon },
+  { label: 'Przedłużenie', title: 'Przedłużenie (Extension): śledzenie prostej przedłużenia istniejącej ściany', Icon: SnapExtensionIcon },
 ];
 
-const OTRACK_ITEMS: SnapOptionItem<keyof OtrackModes>[] = [
-  {
-    key: 'ortho',
-    label: 'Kardynalne 0°/90°',
-    title: 'Osie kardynalne (Ortho): śledzenie kierunków głównych 0°, 90°, 180°, 270°',
-    Icon: SnapOrthoIcon,
-  },
-  {
-    key: 'dominant',
-    label: 'Siatka projektu',
-    title: 'Siatka dominująca: śledzenie dominujących kierunków wyznaczonych z analizy ścian',
-    Icon: SnapDominantIcon,
-  },
-  {
-    key: 'relative',
-    label: 'Kąty ścian (|| / ⊥)',
-    title: 'Kąty względne: prowadnice równoległe i prostopadłe do wskazywanych ścian i polilinii',
-    Icon: SnapRelativeIcon,
-  },
-  {
-    key: 'dualIntersection',
-    label: 'Przecięcia osi',
-    title: 'Przecięcia prowadnic (Dual-Guide): dociągaj do punktów przecięcia dwóch osi śledzenia',
-    Icon: SnapDualIntersectionIcon,
-  },
+const OTRACK_ITEMS: SnapInfoItem[] = [
+  { label: 'Kardynalne 0°/90°', title: 'Osie kardynalne (Ortho): śledzenie kierunków głównych 0°, 90°, 180°, 270°', Icon: SnapOrthoIcon },
+  { label: 'Siatka projektu', title: 'Siatka dominująca: śledzenie dominujących kierunków wyznaczonych z analizy ścian', Icon: SnapDominantIcon },
+  { label: 'Kąty ścian (|| / ⊥)', title: 'Kąty względne: prowadnice równoległe i prostopadłe do wskazywanych ścian i polilinii', Icon: SnapRelativeIcon },
+  { label: 'Przecięcia osi', title: 'Przecięcia prowadnic (Dual-Guide): dociąganie do punktów przecięcia dwóch osi śledzenia', Icon: SnapDualIntersectionIcon },
 ];
+
+interface SliderSpec {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  format?: (v: number) => string;
+}
+
+const SnapSlider: React.FC<SliderSpec> = ({ label, value, onChange, min, max, step, unit, format }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--text-secondary)' }}>
+      <span>{label}</span>
+      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+        {format ? format(value) : value}
+        {unit}
+      </span>
+    </div>
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(e) => onChange(parseFloat(e.target.value))}
+      style={{ width: '100%', accentColor: 'var(--accent-emerald)', cursor: 'pointer' }}
+    />
+  </div>
+);
 
 export const SnappingToolsCard: React.FC = () => {
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
@@ -88,35 +75,24 @@ export const SnappingToolsCard: React.FC = () => {
   const isDirectionSnappingActive = useCadToolStore((s) => s.isDirectionSnappingActive);
   const toggleDirectionSnapping = useCadToolStore((s) => s.toggleDirectionSnapping);
 
-  const osnapModes = useCadToolStore((s) => s.osnapModes);
-  const toggleOsnapMode = useCadToolStore((s) => s.toggleOsnapMode);
-  const setAllOsnapModes = useCadToolStore((s) => s.setAllOsnapModes);
+  // Parametry silnika SNAP zgodne ze spec §5 (SnapEngineConfig) i K_cat (spec §3) —
+  // wcześniej zahardkodowane w SnapCoordinator.ts / types.ts, teraz sterowalne z UI.
+  const snapApertureRadiusPx = useCadToolStore((s) => s.snapApertureRadiusPx);
+  const setSnapApertureRadiusPx = useCadToolStore((s) => s.setSnapApertureRadiusPx);
+  const snapProjectRadiusMeters = useCadToolStore((s) => s.snapProjectRadiusMeters);
+  const setSnapProjectRadiusMeters = useCadToolStore((s) => s.setSnapProjectRadiusMeters);
+  const snapEdgeUcsDeadbandDeg = useCadToolStore((s) => s.snapEdgeUcsDeadbandDeg);
+  const setSnapEdgeUcsDeadbandDeg = useCadToolStore((s) => s.setSnapEdgeUcsDeadbandDeg);
+  const snapTypeWeights = useCadToolStore((s) => s.snapTypeWeights);
+  const setSnapTypeWeight = useCadToolStore((s) => s.setSnapTypeWeight);
+  const snapCategorySameWeightPx = useCadToolStore((s) => s.snapCategorySameWeightPx);
+  const setSnapCategorySameWeightPx = useCadToolStore((s) => s.setSnapCategorySameWeightPx);
+  const snapCategoryBalconyToBuildingWeightPx = useCadToolStore((s) => s.snapCategoryBalconyToBuildingWeightPx);
+  const setSnapCategoryBalconyToBuildingWeightPx = useCadToolStore((s) => s.setSnapCategoryBalconyToBuildingWeightPx);
+  const snapCategoryBuildingToBoundaryWeightPx = useCadToolStore((s) => s.snapCategoryBuildingToBoundaryWeightPx);
+  const setSnapCategoryBuildingToBoundaryWeightPx = useCadToolStore((s) => s.setSnapCategoryBuildingToBoundaryWeightPx);
 
-  const otrackModes = useCadToolStore((s) => s.otrackModes);
-  const toggleOtrackMode = useCadToolStore((s) => s.toggleOtrackMode);
-  const setAllOtrackModes = useCadToolStore((s) => s.setAllOtrackModes);
-
-  const noisePercentileCutoff = useCadToolStore((s) => s.noisePercentileCutoff);
-  const setNoisePercentileCutoff = useCadToolStore((s) => s.setNoisePercentileCutoff);
-
-  const snapRadiusPx = useCadToolStore((s) => s.snapRadiusPx);
-  const setSnapRadiusPx = useCadToolStore((s) => s.setSnapRadiusPx);
-
-  const debugSnapHpfOverlayEnabled = useCadToolStore((s) => s.debugSnapHpfOverlayEnabled);
-  const toggleDebugSnapHpfOverlay = useCadToolStore((s) => s.toggleDebugSnapHpfOverlay);
-
-  const buildings = useSceneStore((s) => s.buildings);
-
-  // Wyliczenie aktualnego progu długości w metrach dla filtru HPF
-  const stats = React.useMemo(
-    () => analyzeSegmentsStatistics(buildings, { noisePercentileCutoff }),
-    [buildings, noisePercentileCutoff]
-  );
-
-  const allOsnapOn = Object.values(osnapModes).every(Boolean);
-  const allOtrackOn = Object.values(otrackModes).every(Boolean);
-
-  const magnetismPercentage = Math.round((snapRadiusPx / 14) * 100);
+  const resetSnapEngineDefaults = useCadToolStore((s) => s.resetSnapEngineDefaults);
 
   return (
     <div className="ui-card">
@@ -158,7 +134,7 @@ export const SnappingToolsCard: React.FC = () => {
           </span>
         </button>
 
-        {/* 1. SEKCJA OSNAP (Punkty charakterystyczne) */}
+        {/* 1. SEKCJA OSNAP (Punkty charakterystyczne) — grupowy przełącznik, bez wyboru per-typu */}
         <div
           style={{
             padding: '8px',
@@ -171,56 +147,50 @@ export const SnappingToolsCard: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span>OSNAP (Punkty)</span>
-            </span>
-
+            <span style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-primary)' }}>OSNAP (Punkty)</span>
             <button
               type="button"
-              onClick={() => setAllOsnapModes(!allOsnapOn)}
+              onClick={toggleOsnap}
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                fontSize: '9.5px',
+                fontSize: '9px',
+                padding: '1px 5px',
+                borderRadius: '4px',
+                border: isOsnapActive ? '1px solid var(--accent-emerald)' : '1px solid var(--border-light)',
+                backgroundColor: isOsnapActive ? 'var(--status-emerald-bg)' : 'transparent',
+                color: isOsnapActive ? 'var(--accent-emerald)' : 'var(--text-muted)',
                 cursor: 'pointer',
-                padding: '2px 4px',
-                fontWeight: 600,
+                fontWeight: 700,
               }}
-              title="Włącz lub wyłącz wszystkie tryby OSNAP"
+              title="Włącz / wyłącz cały OSNAP naraz — poszczególne typy punktów działają wyłącznie razem"
             >
-              {allOsnapOn ? 'Odznacz wszystkie' : 'Zaznacz wszystkie'}
+              {isOsnapActive ? 'WŁ' : 'WYŁ'}
             </button>
           </div>
 
-          {/* Siatka 3 kolumny z monochromatycznymi ikonami */}
+          {/* Informacyjna siatka typów punktów wchodzących w skład OSNAP (bez interakcji) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-            {OSNAP_ITEMS.map((item) => {
-              const active = isOsnapActive && osnapModes[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => toggleOsnapMode(item.key)}
-                  className={`btn-tile ${active ? 'active-emerald' : 'inactive'}`}
-                  style={{
-                    padding: '5px 4px',
-                    fontSize: '9.5px',
-                    justifyContent: 'center',
-                    gap: '4px',
-                    opacity: isOsnapActive ? 1 : 0.5,
-                  }}
-                  title={item.title}
-                >
-                  <item.Icon size={12} color={active ? 'var(--accent-emerald)' : 'var(--text-secondary)'} />
-                  <span style={{ fontWeight: active ? 700 : 500 }}>{item.label}</span>
-                </button>
-              );
-            })}
+            {OSNAP_ITEMS.map((item) => (
+              <div
+                key={item.label}
+                className={`btn-tile ${isOsnapActive ? 'active-emerald' : 'inactive'}`}
+                style={{
+                  padding: '5px 4px',
+                  fontSize: '9.5px',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  opacity: isOsnapActive ? 1 : 0.5,
+                  cursor: 'default',
+                }}
+                title={item.title}
+              >
+                <item.Icon size={12} color={isOsnapActive ? 'var(--accent-emerald)' : 'var(--text-secondary)'} />
+                <span style={{ fontWeight: isOsnapActive ? 700 : 500 }}>{item.label}</span>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* 2. SEKCJA OTRACK (Śledzenie biegunowe / prowadnice kierunków) */}
+        {/* 2. SEKCJA OTRACK (Śledzenie biegunowe / prowadnice kierunków) — grupowy przełącznik */}
         <div
           style={{
             padding: '8px',
@@ -233,208 +203,190 @@ export const SnappingToolsCard: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                OTRACK (Prowadnice)
-              </span>
-              <button
-                type="button"
-                onClick={toggleDirectionSnapping}
-                style={{
-                  fontSize: '9px',
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                  border: isDirectionSnappingActive ? '1px solid var(--accent-emerald)' : '1px solid var(--border-light)',
-                  backgroundColor: isDirectionSnappingActive ? 'var(--status-emerald-bg)' : 'transparent',
-                  color: isDirectionSnappingActive ? 'var(--accent-emerald)' : 'var(--text-muted)',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                }}
-                title="Włącz / wyłącz śledzenie biegunowe OTRACK"
-              >
-                {isDirectionSnappingActive ? 'WŁ' : 'WYŁ'}
-              </button>
-            </div>
-
+            <span style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-primary)' }}>OTRACK (Prowadnice)</span>
             <button
               type="button"
-              onClick={() => setAllOtrackModes(!allOtrackOn)}
+              onClick={toggleDirectionSnapping}
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                fontSize: '9.5px',
+                fontSize: '9px',
+                padding: '1px 5px',
+                borderRadius: '4px',
+                border: isDirectionSnappingActive ? '1px solid var(--accent-emerald)' : '1px solid var(--border-light)',
+                backgroundColor: isDirectionSnappingActive ? 'var(--status-emerald-bg)' : 'transparent',
+                color: isDirectionSnappingActive ? 'var(--accent-emerald)' : 'var(--text-muted)',
                 cursor: 'pointer',
-                padding: '2px 4px',
-                fontWeight: 600,
+                fontWeight: 700,
               }}
-              title="Włącz lub wyłącz wszystkie tryby OTRACK"
+              title="Włącz / wyłącz cały OTRACK naraz — poszczególne prowadnice działają wyłącznie razem"
             >
-              {allOtrackOn ? 'Odznacz wszystkie' : 'Zaznacz wszystkie'}
+              {isDirectionSnappingActive ? 'WŁ' : 'WYŁ'}
             </button>
           </div>
 
-          {/* Siatka 2 kolumny z monochromatycznymi ikonami OTRACK */}
+          {/* Informacyjna siatka prowadnic wchodzących w skład OTRACK (bez interakcji) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px' }}>
-            {OTRACK_ITEMS.map((item) => {
-              const active = isDirectionSnappingActive && otrackModes[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => toggleOtrackMode(item.key)}
-                  className={`btn-tile ${active ? 'active-emerald' : 'inactive'}`}
-                  style={{
-                    padding: '5px 6px',
-                    fontSize: '9.5px',
-                    justifyContent: 'flex-start',
-                    gap: '5px',
-                    opacity: isDirectionSnappingActive ? 1 : 0.5,
-                  }}
-                  title={item.title}
-                >
-                  <item.Icon size={12} color={active ? 'var(--accent-emerald)' : 'var(--text-secondary)'} />
-                  <span style={{ fontWeight: active ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {item.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 3. SIŁA PRZYCIĄGANIA (MAGNETYCZNOŚĆ SNAP) */}
-        <div
-          style={{
-            padding: '8px',
-            borderRadius: '8px',
-            backgroundColor: 'var(--bg-input)',
-            border: '1px solid var(--border-light)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '5px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10.5px' }}>
-            <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Magnet size={12} color="var(--accent-emerald)" />
-              <span>Magnetyczność (Siła przyciągania)</span>
-            </span>
-            <span style={{ color: 'var(--accent-emerald)', fontWeight: 700, fontFamily: 'monospace' }}>
-              {snapRadiusPx}px ({magnetismPercentage}%)
-            </span>
-          </div>
-
-          <input
-            type="range"
-            min={6}
-            max={30}
-            step={1}
-            value={snapRadiusPx}
-            onChange={(e) => setSnapRadiusPx(Number(e.target.value))}
-            style={{
-              width: '100%',
-              accentColor: 'var(--accent-emerald)',
-              cursor: 'pointer',
-              height: '4px',
-              margin: '3px 0',
-            }}
-            title="Regulacja promienia łapania punktów i siły dociągania krawędzi oraz prowadnic"
-          />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'var(--text-muted)' }}>
-            <span>Precyzyjny (6px)</span>
-            <span>Standard (14px)</span>
-            <span>Mocny (30px)</span>
-          </div>
-        </div>
-
-        {/* 4. FILTR GÓRNOPRZEPUSTOWY (HPF - High Pass Filter) */}
-        <div
-          style={{
-            padding: '8px',
-            borderRadius: '8px',
-            backgroundColor: 'var(--bg-input)',
-            border: '1px solid var(--border-light)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '5px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10.5px' }}>
-            <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <SlidersHorizontal size={12} color="var(--text-secondary)" />
-              <span>Filtr szumu osi (HPF)</span>
-            </span>
-            <span style={{ color: 'var(--accent-amber)', fontWeight: 700, fontFamily: 'monospace' }}>
-              {noisePercentileCutoff}% ({stats.lengthCutoffMeters.toFixed(2)}m)
-            </span>
-          </div>
-
-          <input
-            type="range"
-            min={0}
-            max={50}
-            step={5}
-            value={noisePercentileCutoff}
-            onChange={(e) => setNoisePercentileCutoff(Number(e.target.value))}
-            style={{
-              width: '100%',
-              accentColor: 'var(--accent-amber)',
-              cursor: 'pointer',
-              height: '4px',
-              margin: '3px 0',
-            }}
-            title="Odrzuca najkrótsze odcinki i mniejszościowe kierunki przy wyznaczaniu siatki projektu"
-          />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: 'var(--text-muted)' }}>
-            <span>Wszystkie ścianki (0%)</span>
-            <span>Eliminuj szum DXF (50%)</span>
-          </div>
-        </div>
-
-        {/* 5. DEV: PODGLĄD FILTRA HPF KRAWĘDZI SNAP (tylko tryb deweloperski) */}
-        {import.meta.env.DEV && (
-          <div
-            style={{
-              padding: '8px',
-              borderRadius: '8px',
-              backgroundColor: 'var(--bg-input)',
-              border: '1px dashed var(--accent-amber)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '5px',
-            }}
-          >
-            <button
-              type="button"
-              onClick={toggleDebugSnapHpfOverlay}
-              className={`btn-tile ${debugSnapHpfOverlayEnabled ? 'active-emerald' : 'inactive'}`}
-              style={{ padding: '6px 8px', justifyContent: 'space-between', width: '100%' }}
-              title="Podświetla na canvasie krawędzie-kandydatów do dociągania: zielone przeszły filtr górnoprzepustowy (HPF) EdgeSnapStrategy, czerwone zostały odrzucone"
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span
-                  style={{
-                    fontSize: '8.5px',
-                    padding: '1px 5px',
-                    borderRadius: '4px',
-                    backgroundColor: 'var(--accent-amber)',
-                    color: '#1a1a1a',
-                    fontWeight: 800,
-                  }}
-                >
-                  DEV
+            {OTRACK_ITEMS.map((item) => (
+              <div
+                key={item.label}
+                className={`btn-tile ${isDirectionSnappingActive ? 'active-emerald' : 'inactive'}`}
+                style={{
+                  padding: '5px 6px',
+                  fontSize: '9.5px',
+                  justifyContent: 'flex-start',
+                  gap: '5px',
+                  opacity: isDirectionSnappingActive ? 1 : 0.5,
+                  cursor: 'default',
+                }}
+                title={item.title}
+              >
+                <item.Icon size={12} color={isDirectionSnappingActive ? 'var(--accent-emerald)' : 'var(--text-secondary)'} />
+                <span style={{ fontWeight: isDirectionSnappingActive ? 700 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {item.label}
                 </span>
-                <span style={{ fontWeight: 600, fontSize: '10.5px' }}>Podświetl filtr HPF krawędzi</span>
               </div>
-              <span style={{ fontSize: '10px', fontWeight: 700 }}>
-                {debugSnapHpfOverlayEnabled ? 'WŁ' : 'WYŁ'}
-              </span>
-            </button>
+            ))}
           </div>
-        )}
+        </div>
+
+        {/* 3. Silnik SNAP — parametry ze specyfikacji algorytmicznej (SnapEngineConfig + K_cat) */}
+        <div
+          style={{
+            padding: '8px',
+            borderRadius: '8px',
+            backgroundColor: 'var(--bg-input)',
+            border: '1px solid var(--border-light)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <span style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-primary)' }}>Silnik SNAP — parametry</span>
+
+          <SnapSlider
+            label="Apertura (R_aperture)"
+            value={snapApertureRadiusPx}
+            onChange={setSnapApertureRadiusPx}
+            min={4}
+            max={40}
+            step={1}
+            unit=" px"
+          />
+          <SnapSlider
+            label="Promień normalizacji krawędzi (R_proj)"
+            value={snapProjectRadiusMeters}
+            onChange={setSnapProjectRadiusMeters}
+            min={10}
+            max={150}
+            step={5}
+            unit=" m"
+          />
+          <SnapSlider
+            label="Deadband EDGE_UCS"
+            value={snapEdgeUcsDeadbandDeg}
+            onChange={setSnapEdgeUcsDeadbandDeg}
+            min={0.5}
+            max={10}
+            step={0.5}
+            unit="°"
+            format={(v) => v.toFixed(1)}
+          />
+
+          <span style={{ fontSize: '9.5px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '2px' }}>
+            Wagi hierarchii węzłów (M_type)
+          </span>
+          <SnapSlider
+            label="Wierzchołek"
+            value={snapTypeWeights.vertex ?? 1.5}
+            onChange={(v) => setSnapTypeWeight('vertex', v)}
+            min={0.1}
+            max={2.0}
+            step={0.05}
+            unit=""
+            format={(v) => v.toFixed(2)}
+          />
+          <SnapSlider
+            label="Przecięcie / OTRACK"
+            value={snapTypeWeights.otrack_intersection ?? 1.3}
+            onChange={(v) => setSnapTypeWeight('otrack_intersection', v)}
+            min={0.1}
+            max={2.0}
+            step={0.05}
+            unit=""
+            format={(v) => v.toFixed(2)}
+          />
+          <SnapSlider
+            label="Prostopadły"
+            value={snapTypeWeights.perpendicular ?? 1.0}
+            onChange={(v) => setSnapTypeWeight('perpendicular', v)}
+            min={0.1}
+            max={2.0}
+            step={0.05}
+            unit=""
+            format={(v) => v.toFixed(2)}
+          />
+          <SnapSlider
+            label="Przedłużenie"
+            value={snapTypeWeights.extension ?? 0.8}
+            onChange={(v) => setSnapTypeWeight('extension', v)}
+            min={0.1}
+            max={2.0}
+            step={0.05}
+            unit=""
+            format={(v) => v.toFixed(2)}
+          />
+          <SnapSlider
+            label="Krawędź"
+            value={snapTypeWeights.edge ?? 0.75}
+            onChange={(v) => setSnapTypeWeight('edge', v)}
+            min={0.1}
+            max={2.0}
+            step={0.05}
+            unit=""
+            format={(v) => v.toFixed(2)}
+          />
+
+          <span style={{ fontSize: '9.5px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '2px' }}>
+            Powinowactwo kategorii (K_cat)
+          </span>
+          <SnapSlider
+            label="Ta sama kategoria"
+            value={snapCategorySameWeightPx}
+            onChange={setSnapCategorySameWeightPx}
+            min={0}
+            max={10}
+            step={0.5}
+            unit=" px"
+          />
+          <SnapSlider
+            label="Balkon → Budynek"
+            value={snapCategoryBalconyToBuildingWeightPx}
+            onChange={setSnapCategoryBalconyToBuildingWeightPx}
+            min={0}
+            max={10}
+            step={0.5}
+            unit=" px"
+          />
+          <SnapSlider
+            label="Budynek → Granica działki"
+            value={snapCategoryBuildingToBoundaryWeightPx}
+            onChange={setSnapCategoryBuildingToBoundaryWeightPx}
+            min={0}
+            max={10}
+            step={0.5}
+            unit=" px"
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={resetSnapEngineDefaults}
+          className="btn-tile inactive"
+          style={{ padding: '6px 10px', justifyContent: 'center', width: '100%', fontSize: '10px', fontWeight: 700 }}
+          title="Przywróć domyślne wartości parametrów OSNAP/OTRACK"
+        >
+          Przywróć domyślne
+        </button>
+
       </div>
     </div>
   );

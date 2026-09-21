@@ -8,6 +8,8 @@ import {
 } from '../../utils/lineBufferEngine';
 import { isIdExcluded } from './strategies/snapExclusionUtils';
 import { SpatialLineIndex } from './SpatialLineIndex';
+import { buildExtendedGuideline, buildCenteredGuideline } from './guidelineUtils';
+import { computeAABB } from './aabbUtils';
 
 interface ViewportBounds {
   minX: number;
@@ -79,9 +81,6 @@ export function evaluateCollinearAndParallelLock(
 
 export type BuildingDragSnapRelation =
   | 'vertex_to_vertex'
-  | 'vertex_to_midpoint'
-  | 'midpoint_to_vertex'
-  | 'midpoint_to_midpoint'
   | 'vertex_to_edge'
   | 'edge_to_vertex'
   | 'edge_to_edge_collinear'
@@ -120,6 +119,34 @@ export interface EvaluateBuildingDragSnapOptions {
 }
 
 /**
+ * Znajduje najbliższe dopasowanie punkt-do-punktu pomiędzy zbiorem punktów źródłowych
+ * a wierzchołkami (p1/p2) zbioru krawędzi referencyjnych, w granicach `maxDist`.
+ */
+function findNearestPointMatch(
+  sourcePoints: Point2D[],
+  candidateEdges: CachedLineEquation[],
+  maxDist: number,
+  build: (source: Point2D, target: Point2D, refEdge: CachedLineEquation, dist: number) => BuildingDragSnapResult
+): BuildingDragSnapResult | null {
+  let best: BuildingDragSnapResult | null = null;
+  let minDist = maxDist;
+
+  for (const source of sourcePoints) {
+    for (const refEdge of candidateEdges) {
+      for (const target of [refEdge.p1, refEdge.p2]) {
+        const dist = Math.hypot(source.x - target.x, source.y - target.y);
+        if (dist <= minDist) {
+          minDist = dist;
+          best = build(source, target, refEdge, dist);
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+/**
  * Wielorelacyjne dociąganie podczas przesuwania obiektów CAD:
  * 1. Punkt do punktu (Vertex-to-Vertex / Corner lock)
  * 2. Punkt do krawędzi (Vertex-to-Edge projection)
@@ -151,20 +178,8 @@ export function evaluateBuildingDragMultiSnap(
   const withinViewport = (e: CachedLineEquation) => edgeWithinViewport(e, viewportBounds);
 
   // AABB Culling: Wyznacz bounding box przemieszczanej bryły rozszerzony o próg snapowania
-  let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
-  for (const v of movingVertices) {
-    if (v.x < bMinX) bMinX = v.x;
-    if (v.x > bMaxX) bMaxX = v.x;
-    if (v.y < bMinY) bMinY = v.y;
-    if (v.y > bMaxY) bMaxY = v.y;
-  }
   const pad = distanceThresholdMeters * 2 + 0.5;
-  const aabb = {
-    minX: bMinX - pad,
-    maxX: bMaxX + pad,
-    minY: bMinY - pad,
-    maxY: bMaxY + pad,
-  };
+  const aabb = computeAABB(movingVertices, pad);
 
   // otherBuffer: pełny zbiór kandydatów (wykluczenia + viewport), używany tam gdzie odległość
   // do krawędzi liczona jest wzdłuż nośnika prostej (collinear lock, linia ~233) i realna
@@ -190,29 +205,21 @@ export function evaluateBuildingDragMultiSnap(
   }
 
   // 1. Punkt do Punktu (Vertex-to-Vertex / Corner Lock)
-  let bestV2V: BuildingDragSnapResult | null = null;
-  let minV2VDist = distanceThresholdMeters;
-
-  for (const vMove of movingVertices) {
-    for (const refEdge of nearbyRefBuffer) {
-      for (const vRef of [refEdge.p1, refEdge.p2]) {
-        const dist = Math.hypot(vMove.x - vRef.x, vMove.y - vRef.y);
-        if (dist <= minV2VDist) {
-          minV2VDist = dist;
-          bestV2V = {
-            relation: 'vertex_to_vertex',
-            deltaX: vRef.x - vMove.x,
-            deltaY: vRef.y - vMove.y,
-            distanceMeters: dist,
-            label: 'Narożnik do narożnika',
-            sourcePoint: { ...vMove },
-            targetPoint: { ...vRef },
-            referenceEdge: refEdge,
-          };
-        }
-      }
-    }
-  }
+  const bestV2V = findNearestPointMatch(
+    movingVertices,
+    nearbyRefBuffer,
+    distanceThresholdMeters,
+    (vMove, vRef, refEdge, dist) => ({
+      relation: 'vertex_to_vertex',
+      deltaX: vRef.x - vMove.x,
+      deltaY: vRef.y - vMove.y,
+      distanceMeters: dist,
+      label: 'Narożnik do narożnika',
+      sourcePoint: { ...vMove },
+      targetPoint: { ...vRef },
+      referenceEdge: refEdge,
+    })
+  );
 
   if (bestV2V) {
     return bestV2V;
@@ -251,16 +258,12 @@ export function evaluateBuildingDragMultiSnap(
           const t2 = (p2.x - refEdge.p1.x) * refEdge.uX + (p2.y - refEdge.p1.y) * refEdge.uY;
           const isExtension = (t1 < 0 && t2 < 0) || (t1 > refEdge.length && t2 > refEdge.length);
 
-          const guideline = {
-            p1: {
-              x: refEdge.p1.x - guidelineLengthMeters * refEdge.uX,
-              y: refEdge.p1.y - guidelineLengthMeters * refEdge.uY,
-            },
-            p2: {
-              x: refEdge.p2.x + guidelineLengthMeters * refEdge.uX,
-              y: refEdge.p2.y + guidelineLengthMeters * refEdge.uY,
-            },
-          };
+          const guideline = buildExtendedGuideline(
+            refEdge.p1,
+            refEdge.p2,
+            { x: refEdge.uX, y: refEdge.uY },
+            guidelineLengthMeters
+          );
 
           collinearMatches.push({
             movingEdgeIdx: i,
@@ -308,100 +311,7 @@ export function evaluateBuildingDragMultiSnap(
     }
   }
 
-  // 3. Punkt do Środka Krawędzi (Vertex-to-Midpoint)
-  let bestV2M: BuildingDragSnapResult | null = null;
-  let minV2MDist = distanceThresholdMeters;
-
-  for (const vMove of movingVertices) {
-    for (const refEdge of nearbyRefBuffer) {
-      const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
-      const dist = Math.hypot(vMove.x - midRef.x, vMove.y - midRef.y);
-      if (dist <= minV2MDist) {
-        minV2MDist = dist;
-        bestV2M = {
-          relation: 'vertex_to_midpoint',
-          deltaX: midRef.x - vMove.x,
-          deltaY: midRef.y - vMove.y,
-          distanceMeters: dist,
-          label: 'Narożnik do środka ściany',
-          sourcePoint: { ...vMove },
-          targetPoint: midRef,
-          referenceEdge: refEdge,
-        };
-      }
-    }
-  }
-
-  if (bestV2M) {
-    return bestV2M;
-  }
-
-  // 4. Środek Krawędzi do Punktu (Midpoint-to-Vertex)
-  let bestM2V: BuildingDragSnapResult | null = null;
-  let minM2VDist = distanceThresholdMeters;
-
-  for (let i = 0; i < n; i++) {
-    const p1 = movingVertices[i];
-    const p2 = movingVertices[(i + 1) % n];
-    const midMove = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-
-    for (const refEdge of nearbyRefBuffer) {
-      for (const vRef of [refEdge.p1, refEdge.p2]) {
-        const dist = Math.hypot(midMove.x - vRef.x, midMove.y - vRef.y);
-        if (dist <= minM2VDist) {
-          minM2VDist = dist;
-          bestM2V = {
-            relation: 'midpoint_to_vertex',
-            deltaX: vRef.x - midMove.x,
-            deltaY: vRef.y - midMove.y,
-            distanceMeters: dist,
-            label: 'Środek ściany do narożnika',
-            sourcePoint: midMove,
-            targetPoint: { ...vRef },
-            referenceEdge: refEdge,
-          };
-        }
-      }
-    }
-  }
-
-  if (bestM2V) {
-    return bestM2V;
-  }
-
-  // 5. Środek Krawędzi do Środka Krawędzi (Midpoint-to-Midpoint)
-  let bestM2M: BuildingDragSnapResult | null = null;
-  let minM2MDist = distanceThresholdMeters;
-
-  for (let i = 0; i < n; i++) {
-    const p1 = movingVertices[i];
-    const p2 = movingVertices[(i + 1) % n];
-    const midMove = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-
-    for (const refEdge of nearbyRefBuffer) {
-      const midRef = { x: (refEdge.p1.x + refEdge.p2.x) / 2, y: (refEdge.p1.y + refEdge.p2.y) / 2 };
-      const dist = Math.hypot(midMove.x - midRef.x, midMove.y - midRef.y);
-      if (dist <= minM2MDist) {
-        minM2MDist = dist;
-        bestM2M = {
-          relation: 'midpoint_to_midpoint',
-          deltaX: midRef.x - midMove.x,
-          deltaY: midRef.y - midMove.y,
-          distanceMeters: dist,
-          label: 'Środek ściany do środka ściany',
-          sourcePoint: midMove,
-          targetPoint: midRef,
-          referenceEdge: refEdge,
-        };
-      }
-    }
-  }
-
-  if (bestM2M) {
-    return bestM2M;
-  }
-
-  // 6. Punkt do Krawędzi (Vertex-to-Edge)
+  // 3. Punkt do Krawędzi (Vertex-to-Edge)
   let bestV2E: BuildingDragSnapResult | null = null;
   let minV2EDist = distanceThresholdMeters;
 
@@ -428,7 +338,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestV2E;
   }
 
-  // 7. Krawędź przesuwanego obiektu do Punktu referencyjnego (Edge-to-Vertex)
+  // 4. Krawędź przesuwanego obiektu do Punktu referencyjnego (Edge-to-Vertex)
   let bestE2V: BuildingDragSnapResult | null = null;
   let minE2VDist = distanceThresholdMeters;
 
@@ -462,7 +372,7 @@ export function evaluateBuildingDragMultiSnap(
     return bestE2V;
   }
 
-  // 8. Pojedyncze wyrównanie kolinearne (Single Collinear Snap)
+  // 5. Pojedyncze wyrównanie kolinearne (Single Collinear Snap)
   let bestCollinear: BuildingDragSnapResult | null = null;
   let minCollinearDist = distanceThresholdMeters;
 
@@ -567,11 +477,7 @@ export function evaluateEdgeDragSnap(
 
   let otherBuffer: CachedLineEquation[];
   if (spatialIndex) {
-    const pad = guidelineLengthMeters;
-    const minX = Math.min(edgeP1.x, edgeP2.x) - pad;
-    const maxX = Math.max(edgeP1.x, edgeP2.x) + pad;
-    const minY = Math.min(edgeP1.y, edgeP2.y) - pad;
-    const maxY = Math.max(edgeP1.y, edgeP2.y) + pad;
+    const { minX, minY, maxX, maxY } = computeAABB([edgeP1, edgeP2], guidelineLengthMeters);
     const queried = spatialIndex.queryBBox(minX, minY, maxX, maxY);
     otherBuffer = queried.filter((e) => !isExcludedEdge(e) && withinViewport(e));
   } else {
@@ -612,16 +518,12 @@ export function evaluateEdgeDragSnap(
           const t2 = (tentP2.x - refEdge.p1.x) * refEdge.uX + (tentP2.y - refEdge.p1.y) * refEdge.uY;
           const isExtension = (t1 < 0 && t2 < 0) || (t1 > refEdge.length && t2 > refEdge.length);
 
-          const guideline = {
-            p1: {
-              x: refEdge.p1.x - guidelineLengthMeters * refEdge.uX,
-              y: refEdge.p1.y - guidelineLengthMeters * refEdge.uY,
-            },
-            p2: {
-              x: refEdge.p2.x + guidelineLengthMeters * refEdge.uX,
-              y: refEdge.p2.y + guidelineLengthMeters * refEdge.uY,
-            },
-          };
+          const guideline = buildExtendedGuideline(
+            refEdge.p1,
+            refEdge.p2,
+            { x: refEdge.uX, y: refEdge.uY },
+            guidelineLengthMeters
+          );
 
           minDiff = absDist;
           bestSnap = {
@@ -663,10 +565,7 @@ export function evaluateEdgeDragSnap(
             label: 'Ściana do narożnika',
             targetPoint: { ...vRef },
             referenceEdge: refEdge,
-            guideline: {
-              p1: { x: vRef.x - guidelineLengthMeters * uX, y: vRef.y - guidelineLengthMeters * uY },
-              p2: { x: vRef.x + guidelineLengthMeters * uX, y: vRef.y + guidelineLengthMeters * uY },
-            },
+            guideline: buildCenteredGuideline(vRef, { x: uX, y: uY }, guidelineLengthMeters),
           };
         }
       }

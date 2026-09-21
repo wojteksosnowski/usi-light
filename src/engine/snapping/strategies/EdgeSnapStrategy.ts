@@ -1,43 +1,33 @@
 import { Point2D } from '../../../types/geometry';
-import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
+import { projectPointToLine } from '../../../utils/lineBufferEngine';
 import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus, computeEdgeScore } from '../types';
-import { filterCandidateLines } from './snapExclusionUtils';
+import { resolveCandidateEdges, computeHysteresisAdjustedDist, findSnapFromAll, screenDistance, computeCategoryAndHoverBonus } from './strategyHelpers';
+import { buildExtendedGuideline } from '../guidelineUtils';
 
 export class EdgeSnapStrategy implements SnapStrategy {
   readonly name = 'EdgeSnapStrategy';
   readonly priority = 50; // Niższy priorytet niż punkty charakterystyczne
 
   findSnap(point: Point2D, context: SnapContext): SnapResult | null {
-    const snaps = this.findAllSnaps(point, context);
-    return snaps.length > 0 ? snaps[0] : null;
+    return findSnapFromAll(this, point, context);
   }
 
   findAllSnaps(point: Point2D, context: SnapContext): SnapResult[] {
     if (!context.isOsnapActive) return [];
 
-    const allowNearest = !context.activeSnapTypes || context.activeSnapTypes.nearest !== false;
-    const allowExtension = !context.activeSnapTypes || context.activeSnapTypes.extension !== false;
-    if (!allowNearest && !allowExtension) return [];
-
     const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context);
 
-    let candidateEdges: CachedLineEquation[];
-    if (context.spatialIndex) {
-      const queried = context.spatialIndex.queryBBox(
-        point.x - snapRadiusWorld,
-        point.y - snapRadiusWorld,
-        point.x + snapRadiusWorld,
-        point.y + snapRadiusWorld
-      );
-      candidateEdges = filterCandidateLines(queried, context);
-    } else {
-      candidateEdges = filterCandidateLines(context.lineBuffer, context);
-    }
+    const candidateEdges = resolveCandidateEdges(
+      context,
+      point.x - snapRadiusWorld,
+      point.y - snapRadiusWorld,
+      point.x + snapRadiusWorld,
+      point.y + snapRadiusWorld
+    );
 
     if (candidateEdges.length === 0) return [];
 
     const results: SnapResult[] = [];
-    const hysteresisBonus = context.hysteresisBonusPx ?? 3.5;
 
     for (const edge of candidateEdges) {
       if (context.excludeSegmentIndices && context.excludeBuildingId === edge.objectId) {
@@ -45,16 +35,12 @@ export class EdgeSnapStrategy implements SnapStrategy {
       }
 
       const proj = projectPointToLine(point, edge);
-      const sProj = context.worldToScreen(proj.projectedPoint.x, proj.projectedPoint.y);
-      const distPx = Math.hypot(context.mouseScreen.sx - sProj.sx, context.mouseScreen.sy - sProj.sy);
+      const distPx = screenDistance(context, proj.projectedPoint);
 
       if (distPx <= thresholdPx) {
-        if (proj.isOnSegment && !allowNearest) continue;
-        if (!proj.isOnSegment && !allowExtension) continue;
-
         // Jeśli kursor jest w pobliżu wierzchołków tej krawędzi (strefa ±8px),
         // ustępujemy pierwszeństwa dyskretnym punktom charakterystycznym (Vertex)
-        if (proj.isOnSegment && allowNearest) {
+        if (proj.isOnSegment) {
           const sP1 = context.worldToScreen(edge.p1.x, edge.p1.y);
           const sP2 = context.worldToScreen(edge.p2.x, edge.p2.y);
           const dP1 = Math.hypot(context.mouseScreen.sx - sP1.sx, context.mouseScreen.sy - sP1.sy);
@@ -68,29 +54,18 @@ export class EdgeSnapStrategy implements SnapStrategy {
         const isExt = !proj.isOnSegment;
         const priorityPenalty = isExt ? 0.0 : 4.0; // Kara odległościowa dla ciągłej krawędzi
 
-        let effDist = distPx + priorityPenalty;
-        if (
-          edge.objectId &&
-          (edge.objectId === context.hoveredBuildingId || edge.objectId === context.selectedBuildingId)
-        ) {
-          effDist -= 2.0;
-        }
-
         const catBonus = computeCategoryAffinityBonus(
           edge.category,
           context.activeCategory,
           context.categoryAffinityWeights
         );
-        effDist -= catBonus;
+        let effDist = distPx + priorityPenalty - computeCategoryAndHoverBonus(edge, context, catBonus);
 
-        if (
-          context.previousSnapResult &&
-          (context.previousSnapResult.type === 'edge' || context.previousSnapResult.type === 'extension')
-        ) {
-          if (context.previousSnapResult.sourceBuildingId === edge.objectId) {
-            effDist -= hysteresisBonus;
-          }
-        }
+        effDist = computeHysteresisAdjustedDist(
+          effDist,
+          context,
+          (prev) => (prev.type === 'edge' || prev.type === 'extension') && prev.sourceBuildingId === edge.objectId
+        );
 
         effDist = Math.max(0, effDist);
 
@@ -98,14 +73,7 @@ export class EdgeSnapStrategy implements SnapStrategy {
         const guideLines = isExt
           ? [
               {
-                p1: {
-                  x: edge.p1.x - guideExtLength * edge.uX,
-                  y: edge.p1.y - guideExtLength * edge.uY,
-                },
-                p2: {
-                  x: edge.p2.x + guideExtLength * edge.uX,
-                  y: edge.p2.y + guideExtLength * edge.uY,
-                },
+                ...buildExtendedGuideline(edge.p1, edge.p2, { x: edge.uX, y: edge.uY }, guideExtLength),
                 type: 'extension' as const,
                 isStatistical: false,
               },
@@ -120,7 +88,8 @@ export class EdgeSnapStrategy implements SnapStrategy {
           snapRadiusWorld,
           edge.category,
           context.activeCategory,
-          context.config?.projectRadius ?? 50
+          context.config?.projectRadius ?? 50,
+          context.categoryAffinityWeights
         );
         results.push({
           point: { ...proj.projectedPoint },
@@ -142,10 +111,12 @@ export class EdgeSnapStrategy implements SnapStrategy {
       }
     }
 
-    // Filtr górnoprzepustowy (spec Faza 1): odrzuca dolne 50% kandydatów wg tego samego
+    // SNAPfiltr (spec Faza 1): odrzuca dolne 50% kandydatów węzłów SNAP wg tego samego
     // multiplikatywnego Score_edge = computeEdgeScore(...), który napędza końcowy ranking
     // d_eff w SnapCoordinator — pruning i scoring są teraz spójne. Pomijany przy małej
     // liczbie kandydatów, gdzie percentyl nie ma sensu i mógłby wyzerować wynik.
+    // Filtr niezależny od OTROfiltra w src/utils/segmentStatistics.ts (ten działa na statystyce
+    // segmentów fasad dla wyznaczenia kierunku dominującego OTRACK — inny algorytm, inne dane wejściowe).
     const MIN_CANDIDATES_FOR_CUTOFF = 5;
     let filtered = results;
     if (results.length >= MIN_CANDIDATES_FOR_CUTOFF) {
@@ -155,6 +126,8 @@ export class EdgeSnapStrategy implements SnapStrategy {
       filtered = results.filter((r) => (r.metadata!.edgeScore as number) >= cutoff);
     }
 
+    // DEV-only: podgląd wyników SNAPfiltra (które kandydaty przeszły/odrzucone), zbierany tylko
+    // gdy debugCollectEdgeHpf jest true (patrz EdgeSnapStrategy.medianPruning.test.ts).
     if (context.debugCollectEdgeHpf) {
       const passedSet = new Set(filtered);
       context.debugEdgeHpfCandidates = results.map((r) => ({ point: r.point, passed: passedSet.has(r) }));

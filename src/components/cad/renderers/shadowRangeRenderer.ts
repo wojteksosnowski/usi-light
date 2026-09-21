@@ -23,17 +23,24 @@ export function renderShadowRange(
     const effectiveAlpha = Math.max(0.005, Math.min(0.2, APP_CONFIG.shadowFill.fillAlpha * Math.min(1.0, step)));
     ctx.fillStyle = `rgba(129, 140, 248, ${effectiveAlpha})`;
     for (const hourly of hourlyShadows) {
+      // Wszystkie pierścienie danej godziny (obrys zewnętrzny + ewentualne dziury zwrócone
+      // przez differencePolygonLoops/intersectionPolygonLoops jako część tej samej płaskiej
+      // listy) muszą trafić do JEDNEJ ścieżki i być wypełnione RAZEM regułą 'evenodd' —
+      // inaczej dziura (przeciwnie nawinięty pierścień) jest malowana jako osobny, pełny
+      // kształt zamiast wycinać prześwit.
+      ctx.beginPath();
+      let hasSubpath = false;
       for (const poly of hourly.polygons) {
         if (poly.length < 3) continue;
-        ctx.beginPath();
         poly.forEach((v, idx) => {
           const { sx, sy } = worldToScreen(v.x, v.y);
           if (idx === 0) ctx.moveTo(sx, sy);
           else ctx.lineTo(sx, sy);
         });
         ctx.closePath();
-        ctx.fill();
+        hasSubpath = true;
       }
+      if (hasSubpath) ctx.fill('evenodd');
     }
   }
 

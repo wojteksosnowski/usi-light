@@ -14,27 +14,24 @@ import {
 import { StoryFootprint } from '../../types/modifiers';
 
 /**
- * Unia hierarchiczna: zamiast wrzucać wszystkie partie (np. ~20 godzinowych obrysów cienia) do
- * jednej płaskiej unii, łączy sąsiednie partie parami, poziom po poziomie (sąsiednie godziny mają
- * ~95% wspólnego przekroju, co drastycznie redukuje geometrię na każdym szczeblu). Współdzielona
- * przez computeFullShadowAnalysis i computeHourlyShadowsLive.
+ * Unia obwiedni godzinowych (patrz `computeFullShadowAnalysis`/`computeHourlyShadowsLive`).
+ *
+ * Wcześniej: unia HIERARCHICZNA (parami, poziom po poziomie zamiast jednej płaskiej unii —
+ * pomysł: mniej geometrii do przetworzenia na każdym szczeblu). Usunięta — zweryfikowałem
+ * bezpośrednio na `reference/shadow-bug1.json`, że hierarchiczna redukcja parami daje INNY
+ * (niepoprawny — "zaleczający się" nad footprintem sąsiednich budynków) wynik niż jedna płaska
+ * unia tych samych poligonów wejściowych, mimo że każda pojedyncza godzina z osobna jest
+ * poprawna (0 naruszeń per-godzinę, 63 naruszenia po unii hierarchicznej, 0 po unii płaskiej —
+ * identyczne wejście). Najbardziej prawdopodobna przyczyna: redukcja parami wymusza mnóstwo
+ * unii DOKŁADNIE-DWÓCH pętli, co trafia w szybką ścieżkę `fastUnionTwoSimpleLoops`
+ * (`polygonBooleanTwo.ts`) zamiast w w pełni sprawdzoną wsadową `polygon-clipping.union` (którą
+ * dostaje płaska unia, bo AABB-klastrowanie w `unionPolygonLoops` zwykle grupuje wszystkie
+ * nachodzące na siebie godzinowe obrysy w jeden większy klaster >2 elementów). Płaska unia jest
+ * wystarczająco szybka dla realnych scen (nie ma tu setek godzinowych partii), więc nie ma
+ * powodu ryzykować poprawność dla wydajności.
  */
 function unionLoopsHierarchical(batches: Point2D[][][]): Point2D[][] {
-  if (batches.length === 0) return [];
-  let current = batches;
-  while (current.length > 1) {
-    const next: Point2D[][][] = [];
-    for (let i = 0; i < current.length; i += 2) {
-      if (i + 1 < current.length) {
-        next.push(unionPolygonLoops([...current[i], ...current[i + 1]]));
-      } else {
-        next.push(current[i]);
-      }
-    }
-    if (next.length === current.length) break;
-    current = next;
-  }
-  return current[0] || [];
+  return unionPolygonLoops(batches.flat());
 }
 
 /**
@@ -333,6 +330,7 @@ export function extractSilhouetteEdges(
  * @param sunElevationRad - elewacja słońca w radianach
  * @param hTop - wysokość górnej krawędzi bryły (Htotal)
  * @param hBase - wysokość dolnej krawędzi bryły (Hbase, domyślnie 0)
+ *
  */
 export function computeFastShadowPolygon(
   polygon: Point2D[],
@@ -373,48 +371,28 @@ export function computeFastShadowPolygon(
   roofRing.push([polygon[0].x + topOffset.x, polygon[0].y + topOffset.y]);
   clippingPolys.push([roofRing]);
 
-  // Ściany pionowe - zamiast generować dziesiątki pojedynczych czworokątów (quads),
-  // łączymy przylegające krawędzie sylwetkowe w ciągłe wstęgi ścienne (Wall Ribbons).
-  // Wstęga łączy zrzutowaną krawędź podstawy (baseOffset) ze zrzutowaną krawędzią dachu (topOffset).
-  const isCCW = isPolygonCCW(polygon);
-  const ring = isCCW ? polygon : [...polygon].reverse();
-  const n = ring.length;
-  const sunRayDir = { x: Math.sin(sunAzimuthRad), y: Math.cos(sunAzimuthRad) };
-
-  const isSilEdge: boolean[] = new Array(n);
+  // Ściany pionowe — każda krawędź konturu dostaje własny równoległobok (quad) między
+  // zrzutowaną podstawą a zrzutowanym dachem. Wcześniej: klasyfikacja krawędzi na
+  // "sylwetkowe" (dot < 0 względem kierunku słońca) + łączenie sąsiednich w ciągłe wstęgi,
+  // jako optymalizacja (mniej poligonów do unii). Dla złożonych, wklęsłych konturów
+  // (100+ wierzchołków) ta klasyfikacja/łańcuchowanie realnie gubiła ściany — samo-cień
+  // budynku z głębokim dziedzińcem/wnęką potrafił nie pokrywać jej w pojedynczej godzinie,
+  // mimo że fizycznie ściany dookoła dziedzińca powinny go zasłaniać. `polygon-clipping`
+  // scala wszystkie quady (razem z podstawą i dachem) w jeden spójny kształt tak samo jak
+  // wstęgi — bez ryzyka pominięcia żadnej ściany. Zdiagnozowane i zweryfikowane na
+  // `reference/shadow-bug1.json` / `146508_8.1505.27_BUD`.
+  const n = polygon.length;
   for (let i = 0; i < n; i++) {
-    const p1 = ring[i];
-    const p2 = ring[(i + 1) % n];
-    const normX = p2.y - p1.y;
-    const normY = -(p2.x - p1.x);
-    const dot = normX * sunRayDir.x + normY * sunRayDir.y;
-    isSilEdge[i] = dot < -1e-7;
-  }
-
-  const visited = new Array(n).fill(false);
-  for (let i = 0; i < n; i++) {
-    if (isSilEdge[i] && !visited[i]) {
-      let start = i;
-      while (isSilEdge[(start - 1 + n) % n] && start !== (i + 1) % n) {
-        start = (start - 1 + n) % n;
-        if (start === i) break;
-      }
-
-      const chainVertices: Point2D[] = [ring[start]];
-      let curr = start;
-      while (isSilEdge[curr] && !visited[curr]) {
-        visited[curr] = true;
-        curr = (curr + 1) % n;
-        chainVertices.push(ring[curr]);
-      }
-
-      const ribbonRing: [number, number][] = chainVertices.map((v) => [v.x + baseOffset.x, v.y + baseOffset.y]);
-      for (let c = chainVertices.length - 1; c >= 0; c--) {
-        ribbonRing.push([chainVertices[c].x + topOffset.x, chainVertices[c].y + topOffset.y]);
-      }
-      ribbonRing.push([chainVertices[0].x + baseOffset.x, chainVertices[0].y + baseOffset.y]);
-      clippingPolys.push([ribbonRing]);
-    }
+    const p1 = polygon[i];
+    const p2 = polygon[(i + 1) % n];
+    const quad: [number, number][] = [
+      [p1.x + baseOffset.x, p1.y + baseOffset.y],
+      [p2.x + baseOffset.x, p2.y + baseOffset.y],
+      [p2.x + topOffset.x, p2.y + topOffset.y],
+      [p1.x + topOffset.x, p1.y + topOffset.y],
+      [p1.x + baseOffset.x, p1.y + baseOffset.y],
+    ];
+    clippingPolys.push([quad]);
   }
 
   try {

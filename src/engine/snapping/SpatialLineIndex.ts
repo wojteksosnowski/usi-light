@@ -1,6 +1,7 @@
 import RBush from 'rbush';
 import { CachedLineEquation } from '../../utils/lineBufferEngine';
 import { PerfMonitor } from '../perf/PerfMonitor';
+import { computeAABB } from './aabbUtils';
 
 interface IndexedEdgeItem {
   minX: number;
@@ -24,10 +25,7 @@ export class SpatialLineIndex {
 
     const rebuildStart = performance.now();
     const items: IndexedEdgeItem[] = lineBuffer.map((edge) => ({
-      minX: Math.min(edge.p1.x, edge.p2.x),
-      minY: Math.min(edge.p1.y, edge.p2.y),
-      maxX: Math.max(edge.p1.x, edge.p2.x),
-      maxY: Math.max(edge.p1.y, edge.p2.y),
+      ...computeAABB([edge.p1, edge.p2]),
       edge,
     }));
 
