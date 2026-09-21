@@ -75,6 +75,7 @@ export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
     isTested,
     isIncluded,
     isLocked,
+    isAccompanyingInvestment,
     category,
     areaType,
     buildingType,
@@ -94,7 +95,7 @@ export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
     layer,
     vertices: vertices ? vertices.map((v) => ({ x: v.x, y: v.y })) : [],
     holes: holes ? holes.map((h) => h.map((v) => ({ x: v.x, y: v.y }))) : undefined,
-    modifiers: modifiers && modifiers.length > 0 ? JSON.parse(JSON.stringify(modifiers)) : undefined,
+    modifiers: modifiers && modifiers.length > 0 ? structuredClone(modifiers) : undefined,
     sweepPath: sweepPath ? sweepPath.map((v) => ({ x: v.x, y: v.y })) : undefined,
     sweepWidth,
     sweepAlignment,
@@ -107,6 +108,7 @@ export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
     isTested,
     isIncluded,
     isLocked,
+    isAccompanyingInvestment,
     category,
     areaType,
     buildingType,
@@ -212,7 +214,8 @@ export const MAX_STORED_PROJECTS = 25;
  */
 export function saveProjectToStorage(
   projectPayload: Omit<StoredProjectData, 'id' | 'createdAt' | 'updatedAt' | 'buildingsCount'>,
-  existingId?: string | null
+  existingId?: string | null,
+  options?: { buildingsAlreadySanitized?: boolean }
 ): StoredProjectData {
   if (typeof window === 'undefined' || !window.localStorage) {
     throw new Error('Pamięć lokalna przeglądarki jest niedostępna.');
@@ -234,7 +237,9 @@ export function saveProjectToStorage(
   const existingIndex = list.findIndex((p) => p.id === id);
 
   const rawBuildings = projectPayload.scene?.buildings || [];
-  const sanitizedBuildings = rawBuildings.map(sanitizeBuildingForStorage);
+  const sanitizedBuildings = options?.buildingsAlreadySanitized
+    ? rawBuildings
+    : rawBuildings.map(sanitizeBuildingForStorage);
 
   const fullRecord: StoredProjectData = {
     ...projectPayload,

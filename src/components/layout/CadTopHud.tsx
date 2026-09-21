@@ -15,6 +15,7 @@ import {
   DraftingCompass,
   Check,
   CloudUpload,
+  Cloud,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 import { useLicenseStore } from '../../store/useLicenseStore';
@@ -170,7 +171,7 @@ export const CadTopHud: React.FC = () => {
           padding: '4px 8px',
           borderRadius: '6px',
           fontSize: '11px',
-          color: isDirty ? 'var(--text-secondary)' : 'var(--status-emerald-text)',
+          color: isDirty || !lastSavedAt ? 'var(--text-secondary)' : 'var(--status-emerald-text)',
           whiteSpace: 'nowrap',
           flexShrink: 0,
         }}
@@ -182,8 +183,10 @@ export const CadTopHud: React.FC = () => {
               : 'Brak zapisanych zmian'
         }
       >
-        {isDirty ? <CloudUpload size={13} /> : <Check size={13} />}
-        <span className="hud-btn-label">{isDirty ? 'Zapisywanie...' : 'Zapisano'}</span>
+        {isDirty ? <CloudUpload size={13} /> : lastSavedAt ? <Check size={13} /> : <Cloud size={13} />}
+        <span className="hud-btn-label">
+          {isDirty ? 'Zapisywanie...' : lastSavedAt ? 'Zapisano' : 'Niezapisano'}
+        </span>
       </div>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />

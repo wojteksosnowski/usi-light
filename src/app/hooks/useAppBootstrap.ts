@@ -17,6 +17,29 @@ import { extractLicenseKeyFromUrl, stripLicenseFromUrl } from '@/utils/licenseUr
 
 export const SCENE_STORAGE_KEY = 'usi-light.scene.v1';
 
+/**
+ * Stosuje wczytaną scenę (z localStorage lub pliku) do storów Zustand.
+ * Wydzielone z efektu load-on-mount, żeby dało się to przetestować bez renderowania hooka/komponentu.
+ */
+export function hydrateSceneIntoStores(
+  scene: SavedSceneData,
+  actions: {
+    loadSceneData: (scene: Partial<SavedSceneData>) => void;
+    setSettings: (settings: any) => void;
+    setPinnedPoints: (points: any[]) => void;
+    setActivePinnedPointId: (id: string | null) => void;
+    setViewRotationDeg: (deg: number) => void;
+    setSavedViewRotationDeg: (deg: number) => void;
+  }
+) {
+  actions.loadSceneData(scene);
+  if (scene.settings) actions.setSettings(scene.settings);
+  if (scene.pinnedPoints) actions.setPinnedPoints(scene.pinnedPoints);
+  if (scene.activePinnedPointId) actions.setActivePinnedPointId(scene.activePinnedPointId);
+  if (typeof scene.viewRotationDeg === 'number') actions.setViewRotationDeg(scene.viewRotationDeg);
+  if (typeof scene.savedViewRotationDeg === 'number') actions.setSavedViewRotationDeg(scene.savedViewRotationDeg);
+}
+
 export function useAppBootstrap() {
   // License & Stripe Checkout
   const initializeLicense = useLicenseStore((s) => s.initializeLicense);
@@ -82,6 +105,8 @@ export function useAppBootstrap() {
   const dimensions = useCadToolStore((s) => s.dimensions);
   const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
+  const setViewRotationDeg = useCadToolStore((s) => s.setViewRotationDeg);
+  const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
   const setShowModifiersPanel = useCadToolStore((s) => s.setShowModifiersPanel);
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
@@ -174,15 +199,26 @@ export function useAppBootstrap() {
       if (!scene || scene.version !== 1) return;
       normalizeLegacyBuildingTypes(scene.buildings);
 
-      loadSceneData(scene);
-      if (scene.settings) setSettings(scene.settings);
-      if (scene.pinnedPoints) setPinnedPoints(scene.pinnedPoints);
-      if (scene.activePinnedPointId) setActivePinnedPointId(scene.activePinnedPointId);
+      hydrateSceneIntoStores(scene, {
+        loadSceneData,
+        setSettings,
+        setPinnedPoints,
+        setActivePinnedPointId,
+        setViewRotationDeg,
+        setSavedViewRotationDeg,
+      });
       sceneHydratedRef.current = true;
     } catch (err) {
       console.warn('Nie udało się wczytać zapisanej sceny:', err);
     }
-  }, [loadSceneData, setSettings, setPinnedPoints, setActivePinnedPointId]);
+  }, [
+    loadSceneData,
+    setSettings,
+    setPinnedPoints,
+    setActivePinnedPointId,
+    setViewRotationDeg,
+    setSavedViewRotationDeg,
+  ]);
 
   // LocalStorage Persistence (Debounced Save on update, skipping when isInteracting)
   // Uruchamiane przy każdej zmianie geometrii/undo-history (buildings, layerSettings) oraz,
@@ -196,9 +232,10 @@ export function useAppBootstrap() {
     useUiStore.getState().markDirty();
 
     const timer = setTimeout(() => {
+      const sanitizedBuildings = buildings.map(sanitizeBuildingForStorage);
       const scene: SavedSceneData = {
         version: 1,
-        buildings: buildings.map(sanitizeBuildingForStorage),
+        buildings: sanitizedBuildings,
         selectedBuildingId,
         pinnedPoints,
         activePinnedPointId,
@@ -229,7 +266,7 @@ export function useAppBootstrap() {
               name: projectName.trim() || `Projekt ${selectedCity || 'Światło'}`,
               version: 1,
               scene: {
-                buildings,
+                buildings: sanitizedBuildings,
                 selectedBuildingId,
                 layerSettings,
                 pinnedPoints,
@@ -258,7 +295,8 @@ export function useAppBootstrap() {
                 savedViewRotationDeg,
               },
             },
-            currentProjectId
+            currentProjectId,
+            { buildingsAlreadySanitized: true }
           );
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('usi-projects-updated'));
