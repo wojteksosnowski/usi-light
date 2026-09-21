@@ -221,7 +221,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       .filter(Boolean) as AnalysisPointResult[];
   }, [pinnedPoints, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
 
-  const pinnedPointResults = useStableWhileInteracting(rawPinnedPointResults, isInteracting);
+  const pinnedPointResults = rawPinnedPointResults;
 
   const setPinnedPointResults = useSolarAnalysisStore((s) => s.setPinnedPointResults);
   useEffect(() => {
