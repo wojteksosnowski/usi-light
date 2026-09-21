@@ -25,7 +25,7 @@ export const GESUT_CITY_SOURCES: WmsCityOverride[] = [
   {
     name: 'Poznań',
     bbox: POZNAN_BBOX,
-    baseUrl: 'https://portal.geopoz.poznan.pl/wmsgesut',
+    baseUrl: '/api/wms-poznan?target=gesut',
     layers:
       'siec_wodociagowa,siec_kanalizacyjna,siec_gazowa,siec_elektroenergetyczna,siec_cieplownicza,siec_telekomunikacyjna,siec_specjalna,siec_niezidentyfikowana,inne_urzadzenia_towarzyszace_linie,inne_urzadzenia_towarzyszace_punkty',
   },
@@ -35,7 +35,7 @@ export const BDOT_CITY_SOURCES: WmsCityOverride[] = [
   {
     name: 'Poznań',
     bbox: POZNAN_BBOX,
-    baseUrl: 'https://portal.geopoz.poznan.pl/wmsbdot',
+    baseUrl: '/api/wms-poznan?target=bdot',
     layers:
       'rzezba_terenu,wody,sport_i_rekreacja,zagospodarowanie_terenu,komunikacja,ogrodzenia,budowle,budynki',
   },

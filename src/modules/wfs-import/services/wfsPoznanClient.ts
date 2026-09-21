@@ -41,7 +41,9 @@ import { parseWfsPolygonGml } from './wfsGmlUtils';
 
 const POZNAN_EGIB_WFS_URL = '/api/wfs?target=poznan-egib';
 
-const WFS_REQUEST_TIMEOUT_MS = 10000;
+// 10s (jak dla Krakowa) było za ciasne dla wolniejszego silnika GeoMedia Poznania + dodatkowy
+// przeskok przez /api/wfs — powodowało niepotrzebnie częsty fallback na mniej precyzyjny ULDK.
+const WFS_REQUEST_TIMEOUT_MS = 20000;
 
 async function fetchPoznanEgibLayer(typeName: string, bbox: WfsBbox): Promise<string> {
   const params = new URLSearchParams({

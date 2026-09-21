@@ -62,9 +62,20 @@ export default defineConfig(({ mode }) => {
                   body = rawBody;
                 }
               }
-              const query: Record<string, string> = {};
+              // Klucz powtórzony w query string (np. WCS `subset=x(...)&subset=y(...)`) musi
+              // trafić do handlera jako tablica — dokładnie tak, jak parsuje to VercelRequest.query
+              // w produkcji. Zwykłe nadpisywanie tego samego klucza gubiłoby wszystkie powtórzenia
+              // poza ostatnim.
+              const query: Record<string, string | string[]> = {};
               parsedUrl.searchParams.forEach((val, key) => {
-                query[key] = val;
+                const existing = query[key];
+                if (existing === undefined) {
+                  query[key] = val;
+                } else if (Array.isArray(existing)) {
+                  existing.push(val);
+                } else {
+                  query[key] = [existing, val];
+                }
               });
 
               const vercelReq: any = Object.assign(req, {

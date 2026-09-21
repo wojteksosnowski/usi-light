@@ -22,18 +22,16 @@ import {
 import { parseOsmHeight } from './osmLanduseClient';
 import { WfsBbox } from './wfsWarsawClient';
 
-export const OVERPASS_ENDPOINTS = [
-  'http://overpass-api.de/api/interpreter',
-  'https://overpass-api.de/api/interpreter',
-  'http://lz4.overpass-api.de/api/interpreter',
-  'https://lz4.overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-];
+// Zapytanie idzie przez serverless proxy `/api/osm-overpass` (api/osm-overpass.ts) zamiast
+// bezpośrednio z przeglądarki do mirrorów Overpass — omija to CORS/timeouty/lokalne blokady
+// sieciowe, które potrafią wystąpić tylko na niektórych maszynach/sieciach deweloperskich,
+// mimo identycznego kodu klienta w dev i w produkcji.
+const OVERPASS_PROXY_URL = '/api/osm-overpass';
 
 // 8s było za mało dla gęstych centrów miast (np. Poznań — dużo relacji building:part
 // fasada/dach) — mirrory Overpass potrafią potrzebować bliżej deklarowanego serwerowi
 // [timeout:25] (patrz zapytanie niżej), więc timeout klienta musi mieć na to margines.
-const OVERPASS_REQUEST_TIMEOUT_MS = 20000;
+const OVERPASS_REQUEST_TIMEOUT_MS = 25000;
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
@@ -741,41 +739,32 @@ export async function fetchOsmBuildings(
   `.trim();
 
   let responseData: OverpassResponse | null = null;
-  let lastError: Error | null = null;
 
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': 'application/json',
-          'User-Agent': 'USILightCAD/2.5D (https://github.com/usi-light)',
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: controller.signal,
-      });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(OVERPASS_PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Accept': 'application/json',
+      },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
 
-      if (res.ok) {
-        const text = await res.text();
-        if (text.startsWith('{')) {
-          responseData = JSON.parse(text) as OverpassResponse;
-          break;
-        }
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-    } finally {
-      clearTimeout(timer);
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => null);
+      throw new Error(errorBody?.error || `Proxy Overpass zwrócił błąd (HTTP ${res.status}).`);
     }
+
+    responseData = (await res.json()) as OverpassResponse;
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!responseData) {
-    throw new Error(
-      `Nie udało się pobrać budynków z OpenStreetMap (Overpass API): ${lastError?.message || 'Błąd połączenia'}`
-    );
+    throw new Error('Nie udało się pobrać budynków z OpenStreetMap (Overpass API): Błąd połączenia');
   }
 
   return parseOverpassBuildingsResponse(responseData, projectCenter, projectCrs, radiusMeters);

@@ -234,6 +234,7 @@ export const useProjectGeoSync = () => {
       }
 
       // 2c. Wzbogacenie o wysokości LiDAR NMT/NMPT dla budynków bez precyzyjnych kondygnacji
+      let heightSourceWarning: string | null = null;
       if (importedBuildings.length > 0) {
         const needsLidarHeights = importedBuildings.some((b) => b.heightSource === 'default');
         if (needsLidarHeights || effectiveBuildingsSource?.hasStoreyHeights === false) {
@@ -254,6 +255,13 @@ export const useProjectGeoSync = () => {
                 segments: b.segments.map((s) => ({ ...s, hTop: realHeight, hBase: groundElevation })),
               };
             });
+            // Próbka DSM/DTM potrafi trafić w NODATA tylko dla części budynków (brzeg siatki,
+            // dziura w pokryciu LiDAR) — te po cichu zostają przy starym heightSource (OSM/domyślny),
+            // podczas gdy reszta partii dostaje 'lidar-nmt'. Bez tej notatki użytkownik nie miałby
+            // żadnej wskazówki, że część wysokości w scenie pochodzi z innego źródła niż reszta.
+            if (terrainResults.length > 0 && terrainResults.length < importedBuildings.length) {
+              heightSourceWarning = `Wysokości NMT: ${terrainResults.length}/${importedBuildings.length} budynków, reszta z OSM/domyślnych`;
+            }
           } catch (terrainErr) {
             console.warn('Nie udało się dobrać wysokości budynków z NMT/NMPT — pozostawiono wartości domyślne/OSM:', terrainErr);
           }
@@ -270,17 +278,23 @@ export const useProjectGeoSync = () => {
       const combined = [...existingUserAndTestedBuildings, ...parcels, ...importedBuildings];
       setBuildings(combined);
 
+      const infoParts = [
+        buildingsFetchError ? `Budynki: ${buildingsFetchError}` : null,
+        heightSourceWarning,
+      ].filter((part): part is string => part != null);
+
       setStatus({
         isFetching: false,
         stage: 'done',
         error: null,
-        info: buildingsFetchError ? `Budynki: ${buildingsFetchError}` : null,
+        info: infoParts.length > 0 ? infoParts.join(' | ') : null,
         parcelsCount: parcels.length,
         buildingsCount: importedBuildings.length,
       });
       setSyncFeedback(
         `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków (${buildingsSourceLabel})` +
-        (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '')
+        (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '') +
+        (heightSourceWarning ? ` (ℹ️ ${heightSourceWarning})` : '')
       );
 
       // 4. Prefetch kafelków satelitarnych oraz automatyczne wczytanie kontekstu drogowego/zagospodarowania OSM
