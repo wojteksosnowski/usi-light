@@ -8,7 +8,6 @@ export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexE
 
 export interface OsnapModes {
   vertex: boolean;
-  midpoint: boolean;
   intersection: boolean;
   perpendicular: boolean;
   edge: boolean;
@@ -48,6 +47,8 @@ interface CadToolState {
   otrackModes: OtrackModes;
   noisePercentileCutoff: number;
   snapRadiusPx: number;
+  // DEV-only: podgląd krawędzi, które przeszły/odrzucone przez filtr górnoprzepustowy EdgeSnapStrategy
+  debugSnapHpfOverlayEnabled: boolean;
 
   // Dimensions
   dimensions: DimensionItem[];
@@ -101,6 +102,8 @@ interface CadToolState {
 
   setNoisePercentileCutoff: (cutoff: number) => void;
   setSnapRadiusPx: (radius: number) => void;
+  setDebugSnapHpfOverlayEnabled: (active: boolean) => void;
+  toggleDebugSnapHpfOverlay: () => void;
 
   // Dimension actions
   setDimensions: (dims: DimensionItem[] | ((prev: DimensionItem[]) => DimensionItem[])) => void;
@@ -154,7 +157,6 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   isOsnapActive: APP_CONFIG.osnap?.enabledDefault ?? true,
   osnapModes: {
     vertex: true,
-    midpoint: true,
     intersection: true,
     perpendicular: true,
     edge: true,
@@ -168,6 +170,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   },
   noisePercentileCutoff: APP_CONFIG.statistics?.defaultNoisePercentile ?? 20,
   snapRadiusPx: APP_CONFIG.osnap?.snapRadiusPx ?? 14,
+  debugSnapHpfOverlayEnabled: false,
 
   dimensions: [],
   isDimensionToolActive: false,
@@ -226,7 +229,6 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
     set(() => ({
       osnapModes: {
         vertex: active,
-        midpoint: active,
         intersection: active,
         perpendicular: active,
         edge: active,
@@ -260,6 +262,8 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   setNoisePercentileCutoff: (cutoff) => set({ noisePercentileCutoff: Math.max(0, Math.min(80, cutoff)) }),
   setSnapRadiusPx: (radius) => set({ snapRadiusPx: Math.max(6, Math.min(30, radius)) }),
+  setDebugSnapHpfOverlayEnabled: (active) => set({ debugSnapHpfOverlayEnabled: active }),
+  toggleDebugSnapHpfOverlay: () => set((state) => ({ debugSnapHpfOverlayEnabled: !state.debugSnapHpfOverlayEnabled })),
 
   setDimensions: (updater) => {
     set((state) => ({

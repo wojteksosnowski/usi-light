@@ -4,7 +4,6 @@ import { useCadToolStore, useSceneStore } from '../../../store';
 import { OsnapModes, OtrackModes } from '../../../store/useCadToolStore';
 import {
   SnapEndpointIcon,
-  SnapMidpointIcon,
   SnapIntersectionIcon,
   SnapPerpendicularIcon,
   SnapNearestIcon,
@@ -29,12 +28,6 @@ const OSNAP_ITEMS: SnapOptionItem<keyof OsnapModes>[] = [
     label: 'Wierzchołek',
     title: 'Wierzchołek (Endpoint): przyciągaj do narożników i końców ścian',
     Icon: SnapEndpointIcon,
-  },
-  {
-    key: 'midpoint',
-    label: 'Środek',
-    title: 'Środek odcinka (Midpoint): przyciągaj do środków krawędzi',
-    Icon: SnapMidpointIcon,
   },
   {
     key: 'intersection',
@@ -108,6 +101,9 @@ export const SnappingToolsCard: React.FC = () => {
 
   const snapRadiusPx = useCadToolStore((s) => s.snapRadiusPx);
   const setSnapRadiusPx = useCadToolStore((s) => s.setSnapRadiusPx);
+
+  const debugSnapHpfOverlayEnabled = useCadToolStore((s) => s.debugSnapHpfOverlayEnabled);
+  const toggleDebugSnapHpfOverlay = useCadToolStore((s) => s.toggleDebugSnapHpfOverlay);
 
   const buildings = useSceneStore((s) => s.buildings);
 
@@ -397,6 +393,48 @@ export const SnappingToolsCard: React.FC = () => {
             <span>Eliminuj szum DXF (50%)</span>
           </div>
         </div>
+
+        {/* 5. DEV: PODGLĄD FILTRA HPF KRAWĘDZI SNAP (tylko tryb deweloperski) */}
+        {import.meta.env.DEV && (
+          <div
+            style={{
+              padding: '8px',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px dashed var(--accent-amber)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '5px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={toggleDebugSnapHpfOverlay}
+              className={`btn-tile ${debugSnapHpfOverlayEnabled ? 'active-emerald' : 'inactive'}`}
+              style={{ padding: '6px 8px', justifyContent: 'space-between', width: '100%' }}
+              title="Podświetla na canvasie krawędzie-kandydatów do dociągania: zielone przeszły filtr górnoprzepustowy (HPF) EdgeSnapStrategy, czerwone zostały odrzucone"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span
+                  style={{
+                    fontSize: '8.5px',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    backgroundColor: 'var(--accent-amber)',
+                    color: '#1a1a1a',
+                    fontWeight: 800,
+                  }}
+                >
+                  DEV
+                </span>
+                <span style={{ fontWeight: 600, fontSize: '10.5px' }}>Podświetl filtr HPF krawędzi</span>
+              </div>
+              <span style={{ fontSize: '10px', fontWeight: 700 }}>
+                {debugSnapHpfOverlayEnabled ? 'WŁ' : 'WYŁ'}
+              </span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

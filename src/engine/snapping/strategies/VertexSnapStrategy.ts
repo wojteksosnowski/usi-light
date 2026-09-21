@@ -16,7 +16,7 @@ export class VertexSnapStrategy implements SnapStrategy {
     if (!context.isOsnapActive) return [];
     if (context.activeSnapTypes && context.activeSnapTypes.vertex === false) return [];
 
-    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
+    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context);
 
     let candidateEdges: CachedLineEquation[];
     if (context.spatialIndex) {

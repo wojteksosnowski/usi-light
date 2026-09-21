@@ -357,6 +357,8 @@ export function useCanvasInteraction({
   // Advanced OSNAP & OTRACK state
   const snapCoordinatorRef = useRef<SnapCoordinator>(new SnapCoordinator());
   const [activeOsnapSnap, setActiveOsnapSnap] = useState<OsnapSnapResult | null>(null);
+  // DEV-only: kandydaci krawędzi z filtra HPF, niezależni od tego, czy wygrywa OSNAP czy OTRACK/guide snap
+  const [activeDebugHpfCandidates, setActiveDebugHpfCandidates] = useState<{ point: Point2D; passed: boolean }[] | null>(null);
   const [activeBuildingDragSnap, setActiveBuildingDragSnap] = useState<BuildingDragSnapResult | EdgeDragSnapResult | null>(null);
   const [activeRotateAngleSnap, setActiveRotateAngleSnap] = useState<{ angleDeg: number; isCardinal?: boolean; label?: string } | null>(null);
 
@@ -461,14 +463,15 @@ export function useCanvasInteraction({
     return flattenLineBuffer(map);
   }, [buildings, layerSettings]);
 
-  // Bufor linii Ax + By + C = 0 ograniczony do obiektów widocznych w aktualnym viewportcie (z 10% marginesem)
+  // Bufor linii Ax + By + C = 0 ograniczony do obiektów widocznych w aktualnym viewportcie (bez marginesu —
+  // nie snapujemy do niczego, co nie jest faktycznie widoczne na ekranie)
   const visibleLineBuffer = useMemo<CachedLineEquation[]>(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     const width = canvas?.width ?? container?.clientWidth ?? 1000;
     const height = canvas?.height ?? container?.clientHeight ?? 800;
 
-    const vp = viewportWorldBounds({ width, height, screenToWorld }, 0.1);
+    const vp = viewportWorldBounds({ width, height, screenToWorld }, 0);
 
     return lineBuffer
       .filter((edge) => {
@@ -479,10 +482,9 @@ export function useCanvasInteraction({
         return eMaxX >= vp.minX && eMinX <= vp.maxX && eMaxY >= vp.minY && eMinY <= vp.maxY;
       })
       // Ścisły cull w przestrzeni ekranu — odrzuca krawędzie, które przeszły zgrubny filtr
-      // world-space (margines %), ale przy obróconym widoku wciąż leżą poza faktycznym oknem
-      // canvasu. Margines w px = promień snapowania, by nie ucinać krawędzi tuż przy brzegu.
-      .filter((edge) => edgeIntersectsScreenRect(edge.p1, edge.p2, worldToScreen, width, height, snapRadiusPx));
-  }, [lineBuffer, screenToWorld, worldToScreen, containerRef, canvasRef, viewState, snapRadiusPx]);
+      // world-space, ale przy obróconym widoku wciąż leżą poza faktycznym oknem canvasu.
+      .filter((edge) => edgeIntersectsScreenRect(edge.p1, edge.p2, worldToScreen, width, height, 0));
+  }, [lineBuffer, screenToWorld, worldToScreen, containerRef, canvasRef, viewState]);
 
   const handleDeleteSelectedVertex = useCallback(() => {
     if (selectedVertexIndex === null || !selectedBuildingId) return;
@@ -1413,8 +1415,9 @@ export function useCanvasInteraction({
                 ? buildings.filter((b) => b.groupId === selBldg.groupId).map((b) => b.id)
                 : [selBldg.id];
 
+              let debugEdgeHpfCandidates: { point: Point2D; passed: boolean }[] | undefined;
               if (isOsnapActive) {
-                osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
+                const snapEval = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
                   mouseWorld: targetPt,
                   lineBuffer: visibleLineBuffer,
                   worldToScreen,
@@ -1427,7 +1430,10 @@ export function useCanvasInteraction({
                   originPoint: (draggedVertexIndex > 0 && isSweep) ? baseVerts[draggedVertexIndex - 1] : (!isSweep && baseVerts.length > 0 ? baseVerts[(draggedVertexIndex - 1 + baseVerts.length) % baseVerts.length] : null),
                   candidateIndex,
                   activeSnapTypes: osnapModes,
+                  debug: import.meta.env.DEV && useCadToolStore.getState().debugSnapHpfOverlayEnabled,
                 });
+                osnap = snapEval.osnap;
+                debugEdgeHpfCandidates = snapEval.debugEdgeHpfCandidates;
               }
 
               const n = baseVerts.length;
@@ -1490,10 +1496,11 @@ export function useCanvasInteraction({
                 });
               }
 
+              setActiveDebugHpfCandidates(debugEdgeHpfCandidates ?? null);
+
               if (
                 osnap &&
                 (osnap.type === 'endpoint' ||
-                  osnap.type === 'midpoint' ||
                   osnap.type === 'otrack_intersection' ||
                   osnap.type === 'perpendicular')
               ) {
@@ -1781,8 +1788,9 @@ export function useCanvasInteraction({
       const drawingCategory = useCadToolStore.getState().drawingCategory ?? 'building';
       const activeCat = selectedBuildingId ? (buildings.find((b) => b.id === selectedBuildingId)?.category ?? drawingCategory) : drawingCategory;
 
+      let debugEdgeHpfCandidates: { point: Point2D; passed: boolean }[] | undefined;
       if (isOsnapActive) {
-        osnap = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
+        const snapEval = evaluateOsnapSnapWithCoordinator(snapCoordinatorRef.current, {
           mouseWorld: mousePos,
           lineBuffer: visibleLineBuffer,
           worldToScreen,
@@ -1794,7 +1802,10 @@ export function useCanvasInteraction({
           originPoint: origin,
           candidateIndex,
           activeSnapTypes: osnapModes,
+          debug: import.meta.env.DEV && useCadToolStore.getState().debugSnapHpfOverlayEnabled,
         });
+        osnap = snapEval.osnap;
+        debugEdgeHpfCandidates = snapEval.debugEdgeHpfCandidates;
       }
 
       let dirSnap: DirectionSnapResult | null = null;
@@ -1832,10 +1843,11 @@ export function useCanvasInteraction({
           });
         }
 
+        setActiveDebugHpfCandidates(debugEdgeHpfCandidates ?? null);
+
         if (
           osnap &&
           (osnap.type === 'endpoint' ||
-            osnap.type === 'midpoint' ||
             osnap.type === 'otrack_intersection' ||
             osnap.type === 'perpendicular')
         ) {
@@ -1865,6 +1877,7 @@ export function useCanvasInteraction({
     } else {
       if (activeDirectionSnap) setActiveDirectionSnap(null);
       if (activeOsnapSnap) setActiveOsnapSnap(null);
+      if (activeDebugHpfCandidates) setActiveDebugHpfCandidates(null);
     }
 
     if (facadePointMode) {
@@ -2202,6 +2215,9 @@ export function useCanvasInteraction({
     if (activeOsnapSnap) {
       setActiveOsnapSnap(null);
     }
+    if (activeDebugHpfCandidates) {
+      setActiveDebugHpfCandidates(null);
+    }
     if (activeBuildingDragSnap) {
       setActiveBuildingDragSnap(null);
     }
@@ -2379,6 +2395,7 @@ export function useCanvasInteraction({
     currentMouseWorld,
     activeDirectionSnap,
     activeOsnapSnap,
+    activeDebugHpfCandidates,
     activeBuildingDragSnap,
     activeRotateAngleSnap,
     selectedVertexIndex,

@@ -8,7 +8,6 @@ describe('useCadToolStore - Snapping & HPF Filter', () => {
       isDirectionSnappingActive: true,
       osnapModes: {
         vertex: true,
-        midpoint: true,
         intersection: true,
         perpendicular: true,
         edge: true,
@@ -25,20 +24,19 @@ describe('useCadToolStore - Snapping & HPF Filter', () => {
   });
 
   it('toggles individual osnap modes correctly', () => {
-    expect(useCadToolStore.getState().osnapModes.midpoint).toBe(true);
+    expect(useCadToolStore.getState().osnapModes.intersection).toBe(true);
 
-    useCadToolStore.getState().toggleOsnapMode('midpoint');
-    expect(useCadToolStore.getState().osnapModes.midpoint).toBe(false);
+    useCadToolStore.getState().toggleOsnapMode('intersection');
+    expect(useCadToolStore.getState().osnapModes.intersection).toBe(false);
 
-    useCadToolStore.getState().toggleOsnapMode('midpoint');
-    expect(useCadToolStore.getState().osnapModes.midpoint).toBe(true);
+    useCadToolStore.getState().toggleOsnapMode('intersection');
+    expect(useCadToolStore.getState().osnapModes.intersection).toBe(true);
   });
 
   it('sets all osnap modes at once', () => {
     useCadToolStore.getState().setAllOsnapModes(false);
     expect(useCadToolStore.getState().osnapModes).toEqual({
       vertex: false,
-      midpoint: false,
       intersection: false,
       perpendicular: false,
       edge: false,
@@ -48,7 +46,6 @@ describe('useCadToolStore - Snapping & HPF Filter', () => {
     useCadToolStore.getState().setAllOsnapModes(true);
     expect(useCadToolStore.getState().osnapModes).toEqual({
       vertex: true,
-      midpoint: true,
       intersection: true,
       perpendicular: true,
       edge: true,

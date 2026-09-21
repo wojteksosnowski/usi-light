@@ -13,7 +13,7 @@ const MAX_MAX_EXTENSION_METERS = 8.0;
 /**
  * PerpendicularSnapStrategy - Wykrywa punkt rzutu prostopadłego z punktu bazowego
  * rysowania (originPoint) na krawędź obiektu.
- * Priorytet 35 (pomiędzy Midpoint a Nearest Edge).
+ * Priorytet 35 (pomiędzy Intersection a Nearest Edge).
  */
 export class PerpendicularSnapStrategy implements SnapStrategy {
   readonly name = 'PerpendicularSnapStrategy';
@@ -30,7 +30,7 @@ export class PerpendicularSnapStrategy implements SnapStrategy {
     if (!context.originPoint) return [];
 
     const origin = context.originPoint;
-    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
+    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context);
 
     // Ograniczenie przestrzenne kandydatów: zamiast pełnego skanu całej sceny (co pozwalało
     // odległym, niepowiązanym ścianom "widmowo" przechwytywać kursor swoim nośnikiem prostej —

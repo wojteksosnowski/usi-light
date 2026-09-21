@@ -88,6 +88,8 @@ export interface CadRenderFrameContext {
   readonly activeDirectionSnap?: DirectionSnapResult | null;
   readonly selectedVertexIndex?: number | null;
   readonly activeOsnapSnap?: OsnapSnapResult | null;
+  /** DEV-only: kandydaci krawędzi z filtra HPF, niezależni od wygranej gałęzi OSNAP/OTRACK. */
+  readonly activeDebugHpfCandidates?: { point: Point2D; passed: boolean }[] | null;
   readonly activeBuildingDragSnap?: BuildingDragSnapResult | EdgeDragSnapResult | null;
   readonly sweepWidth?: number;
   readonly sweepAlignment?: SweepAlignment;

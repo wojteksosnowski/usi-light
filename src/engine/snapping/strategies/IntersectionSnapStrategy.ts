@@ -21,7 +21,7 @@ export class IntersectionSnapStrategy implements SnapStrategy {
     if (!context.isOsnapActive) return [];
     if (context.activeSnapTypes && context.activeSnapTypes.intersection === false) return [];
 
-    const { worldRadius, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
+    const { worldRadius, thresholdPx } = computeClampedWorldTolerance(point, context);
 
     let candidateEdges: CachedLineEquation[];
     if (context.spatialIndex) {

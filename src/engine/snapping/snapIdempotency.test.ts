@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { SnapCoordinator } from './SnapCoordinator';
-import { SnapContext } from './types';
-import { buildLineBufferForPolygon, flattenLineBuffer, CachedLineEquation } from '../../utils/lineBufferEngine';
+import { SnapContext, EDGE_UCS_DEADBAND_DEG, DEFAULT_SNAP_ENGINE_CONFIG } from './types';
+import { buildLineBufferForPolygon, flattenLineBuffer, createCachedLineEquation, CachedLineEquation } from '../../utils/lineBufferEngine';
 import { Point2D } from '../../types/geometry';
+import { angularSeparationMod90Deg } from '../../utils/segmentStatistics';
 
 const PX_PER_METER = 20;
 
@@ -73,5 +74,43 @@ describe('SnapCoordinator idempotency (fixed point)', () => {
     const result = coordinator.evaluate(cursor, makeContext(cursor, lineBuffer));
     expect(result.snapped).toBe(true);
     expect(Math.hypot(result.point.x - cursor.x, result.point.y - cursor.y)).toBeLessThan(0.5);
+  });
+});
+
+describe('SnapEngineConfig wiring (spec §5)', () => {
+  // A vertex and an on-segment edge candidate placed at the exact same world distance from
+  // the cursor, with equal-length source edges and no category — so Score_edge is virtually
+  // identical for both and only SNAP_TYPE_WEIGHTS can decide the winner.
+  const vertexEdge = createCachedLineEquation('a_edge_0', 'obj-a', 0, { x: 0.15, y: 0 }, { x: 0.15, y: -10 });
+  const nearestEdge = createCachedLineEquation('b_edge_0', 'obj-b', 0, { x: -5, y: 0.15 }, { x: 5, y: 0.15 });
+  const lineBuffer = [vertexEdge, nearestEdge];
+  const cursor: Point2D = { x: 0, y: 0 };
+
+  it('prefers the vertex candidate under default typeWeights', () => {
+    const coordinator = new SnapCoordinator();
+    const result = coordinator.evaluate(cursor, makeContext(cursor, lineBuffer));
+    expect(result.snapped).toBe(true);
+    expect(result.type).toBe('vertex');
+  });
+
+  it('switches the winner to the edge candidate when config.typeWeights is overridden', () => {
+    const coordinator = new SnapCoordinator(undefined, {
+      typeWeights: { ...DEFAULT_SNAP_ENGINE_CONFIG.typeWeights, vertex: 0.1, edge: 5.0 },
+    });
+    const result = coordinator.evaluate(cursor, makeContext(cursor, lineBuffer));
+    expect(result.snapped).toBe(true);
+    expect(result.type).toBe('edge');
+  });
+});
+
+describe('EDGE_UCS_DEADBAND_DEG (spec §2.2 separation rule)', () => {
+  it('rejects an EDGE_UCS within the deadband of ACTIVE_UCS', () => {
+    const dominantAngle = 1.9; // < 2.0° from view axis (0°)
+    expect(angularSeparationMod90Deg(dominantAngle, 0)).toBeLessThan(EDGE_UCS_DEADBAND_DEG);
+  });
+
+  it('accepts an EDGE_UCS outside the deadband of ACTIVE_UCS', () => {
+    const dominantAngle = 2.1; // > 2.0° from view axis (0°)
+    expect(angularSeparationMod90Deg(dominantAngle, 0)).toBeGreaterThanOrEqual(EDGE_UCS_DEADBAND_DEG);
   });
 });

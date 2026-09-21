@@ -24,7 +24,8 @@ export function renderDrawingToolPreview(
   sweepAlignment: SweepAlignment = 'center',
   allBuildings?: BuildingLoop[],
   alignPendingRef?: { buildingId: string; segmentId: string } | null,
-  alignHoveredEdge?: { buildingId: string; segmentId: string } | null
+  alignHoveredEdge?: { buildingId: string; segmentId: string } | null,
+  debugHpfCandidates?: { point: Point2D; passed: boolean }[] | null
 ) {
   const { ctx, worldToScreen } = rc;
 
@@ -110,6 +111,21 @@ export function renderDrawingToolPreview(
     ctx.restore();
   }
 
+  // DEV-only: podgląd krawędzi kandydatów przed/po filtrze górnoprzepustowym EdgeSnapStrategy.
+  // Niezależne od osnapSnapResult, żeby dots nie znikały gdy wygrywa OTRACK/guide snap.
+  if (import.meta.env.DEV && debugHpfCandidates) {
+    ctx.save();
+    for (const candidate of debugHpfCandidates) {
+      const p = worldToScreen(candidate.point.x, candidate.point.y);
+      if (!Number.isFinite(p.sx) || !Number.isFinite(p.sy)) continue;
+      ctx.beginPath();
+      ctx.arc(p.sx, p.sy, candidate.passed ? 4 : 3, 0, Math.PI * 2);
+      ctx.fillStyle = candidate.passed ? 'rgba(16, 185, 129, 0.85)' : 'rgba(239, 68, 68, 0.55)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // 1. Render Advanced OSNAP / OTRACK Snap Result (Priority 1..6)
   if (osnapSnapResult) {
     const pSnap = worldToScreen(osnapSnapResult.snappedPoint.x, osnapSnapResult.snappedPoint.y);
@@ -161,8 +177,6 @@ export function renderDrawingToolPreview(
       ctx.fillStyle =
         osnapSnapResult.type === 'endpoint'
           ? 'rgba(16, 185, 129, 0.18)'
-          : osnapSnapResult.type === 'midpoint'
-          ? 'rgba(6, 182, 212, 0.18)'
           : osnapSnapResult.type === 'otrack_intersection'
           ? 'rgba(244, 63, 94, 0.18)'
           : 'rgba(56, 189, 248, 0.15)';
@@ -223,18 +237,6 @@ export function renderDrawingToolPreview(
         ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
         ctx.fill();
         ctx.strokeStyle = APP_CONFIG.osnap?.endpointColor || '#10b981';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      } else if (snapType === 'midpoint') {
-        // Triangle glyph (Cyan)
-        ctx.beginPath();
-        ctx.moveTo(pSnap.sx, pSnap.sy - halfG - 1);
-        ctx.lineTo(pSnap.sx + halfG + 1, pSnap.sy + halfG);
-        ctx.lineTo(pSnap.sx - halfG - 1, pSnap.sy + halfG);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(6, 182, 212, 0.3)';
-        ctx.fill();
-        ctx.strokeStyle = APP_CONFIG.osnap?.midpointColor || '#06b6d4';
         ctx.lineWidth = 2;
         ctx.stroke();
       } else if (snapType === 'otrack_intersection') {
@@ -333,16 +335,6 @@ export function renderDrawingToolPreview(
             ctx.lineWidth = 1.5;
             ctx.setLineDash([2, 2]);
             ctx.stroke();
-          } else if (secSnap.type === 'midpoint') {
-            ctx.beginPath();
-            ctx.moveTo(pSec.sx, pSec.sy - halfSec);
-            ctx.lineTo(pSec.sx + halfSec, pSec.sy + halfSec);
-            ctx.lineTo(pSec.sx - halfSec, pSec.sy + halfSec);
-            ctx.closePath();
-            ctx.strokeStyle = APP_CONFIG.osnap?.midpointColor || '#06b6d4';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([2, 2]);
-            ctx.stroke();
           } else if (secSnap.type === 'perpendicular') {
             ctx.beginPath();
             ctx.moveTo(pSec.sx - halfSec, pSec.sy - halfSec);
@@ -368,8 +360,6 @@ export function renderDrawingToolPreview(
       const badgeBorder =
         snapType === 'endpoint'
           ? '#10b981'
-          : snapType === 'midpoint'
-          ? '#06b6d4'
           : snapType === 'otrack_intersection'
           ? '#f43f5e'
           : snapType === 'extension' || !isStatGuide

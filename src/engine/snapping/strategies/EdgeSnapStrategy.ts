@@ -1,6 +1,6 @@
 import { Point2D } from '../../../types/geometry';
 import { CachedLineEquation, projectPointToLine } from '../../../utils/lineBufferEngine';
-import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus } from '../types';
+import { SnapContext, SnapResult, SnapStrategy, computeClampedWorldTolerance, computeCategoryAffinityBonus, computeEdgeScore } from '../types';
 import { filterCandidateLines } from './snapExclusionUtils';
 
 export class EdgeSnapStrategy implements SnapStrategy {
@@ -19,7 +19,7 @@ export class EdgeSnapStrategy implements SnapStrategy {
     const allowExtension = !context.activeSnapTypes || context.activeSnapTypes.extension !== false;
     if (!allowNearest && !allowExtension) return [];
 
-    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context, 12);
+    const { worldRadius: snapRadiusWorld, thresholdPx } = computeClampedWorldTolerance(point, context);
 
     let candidateEdges: CachedLineEquation[];
     if (context.spatialIndex) {
@@ -52,17 +52,15 @@ export class EdgeSnapStrategy implements SnapStrategy {
         if (proj.isOnSegment && !allowNearest) continue;
         if (!proj.isOnSegment && !allowExtension) continue;
 
-        // Jeśli kursor jest w pobliżu wierzchołków lub środka tej krawędzi (strefa ±8px),
-        // ustępujemy pierwszeństwa dyskretnym punktom charakterystycznym (Vertex/Midpoint)
+        // Jeśli kursor jest w pobliżu wierzchołków tej krawędzi (strefa ±8px),
+        // ustępujemy pierwszeństwa dyskretnym punktom charakterystycznym (Vertex)
         if (proj.isOnSegment && allowNearest) {
           const sP1 = context.worldToScreen(edge.p1.x, edge.p1.y);
           const sP2 = context.worldToScreen(edge.p2.x, edge.p2.y);
-          const sMid = context.worldToScreen((edge.p1.x + edge.p2.x) / 2, (edge.p1.y + edge.p2.y) / 2);
           const dP1 = Math.hypot(context.mouseScreen.sx - sP1.sx, context.mouseScreen.sy - sP1.sy);
           const dP2 = Math.hypot(context.mouseScreen.sx - sP2.sx, context.mouseScreen.sy - sP2.sy);
-          const dMid = Math.hypot(context.mouseScreen.sx - sMid.sx, context.mouseScreen.sy - sMid.sy);
 
-          if (dP1 <= 8.0 || dP2 <= 8.0 || dMid <= 8.0) {
+          if (dP1 <= 8.0 || dP2 <= 8.0) {
             continue;
           }
         }
@@ -115,7 +113,15 @@ export class EdgeSnapStrategy implements SnapStrategy {
           : undefined;
 
         const displayName = edge.objectName || edge.objectId;
-        const lengthOverDistance = edge.length / Math.max(distPx, 1e-6);
+        const worldDist = Math.hypot(point.x - proj.projectedPoint.x, point.y - proj.projectedPoint.y);
+        const edgeScore = computeEdgeScore(
+          edge.length,
+          worldDist,
+          snapRadiusWorld,
+          edge.category,
+          context.activeCategory,
+          context.config?.projectRadius ?? 50
+        );
         results.push({
           point: { ...proj.projectedPoint },
           snapped: true,
@@ -131,22 +137,27 @@ export class EdgeSnapStrategy implements SnapStrategy {
           sourceEdgeIndex: edge.edgeIndex,
           cachedEdge: edge,
           guideLines,
-          metadata: { effDistPx: effDist, lengthOverDistance },
+          metadata: { effDistPx: effDist, edgeScore },
         });
       }
     }
 
-    // Filtr górnoprzepustowy: odrzuca dolne 20% kandydatów wg length/distance (te same
-    // dwie wielkości, które napędzają computeEdgeScore w SnapCoordinator), żeby małe
-    // i odległe krawędzie nie zaśmiecały dalszego scoringu. Pomijany przy małej liczbie
-    // kandydatów, gdzie percentyl nie ma sensu i mógłby wyzerować wynik.
+    // Filtr górnoprzepustowy (spec Faza 1): odrzuca dolne 50% kandydatów wg tego samego
+    // multiplikatywnego Score_edge = computeEdgeScore(...), który napędza końcowy ranking
+    // d_eff w SnapCoordinator — pruning i scoring są teraz spójne. Pomijany przy małej
+    // liczbie kandydatów, gdzie percentyl nie ma sensu i mógłby wyzerować wynik.
     const MIN_CANDIDATES_FOR_CUTOFF = 5;
     let filtered = results;
     if (results.length >= MIN_CANDIDATES_FOR_CUTOFF) {
-      const sortedMetrics = results.map((r) => r.metadata!.lengthOverDistance as number).sort((a, b) => a - b);
-      const cutoffIndex = Math.floor(0.2 * sortedMetrics.length);
-      const cutoff = sortedMetrics[cutoffIndex];
-      filtered = results.filter((r) => (r.metadata!.lengthOverDistance as number) >= cutoff);
+      const sortedScores = results.map((r) => r.metadata!.edgeScore as number).sort((a, b) => a - b);
+      const cutoffIndex = Math.floor(0.5 * sortedScores.length);
+      const cutoff = sortedScores[cutoffIndex];
+      filtered = results.filter((r) => (r.metadata!.edgeScore as number) >= cutoff);
+    }
+
+    if (context.debugCollectEdgeHpf) {
+      const passedSet = new Set(filtered);
+      context.debugEdgeHpfCandidates = results.map((r) => ({ point: r.point, passed: passedSet.has(r) }));
     }
 
     filtered.sort((a, b) => ((a.metadata?.effDistPx as number) ?? 0) - ((b.metadata?.effDistPx as number) ?? 0));

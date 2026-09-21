@@ -1,12 +1,15 @@
 import { Point2D, BuildingLoop, ObjectCategory } from '../../types/geometry';
 import { CachedLineEquation } from '../../utils/lineBufferEngine';
-import { DominantDirection } from '../../utils/segmentStatistics';
+import { DominantDirection, EDGE_UCS_DEADBAND_DEG, EDGE_UCS_DEADBAND_RAD } from '../../utils/segmentStatistics';
 import { SpatialLineIndex } from './SpatialLineIndex';
+
+// Re-eksport wagowego progu deadbandu EDGE_UCS/OTRACK (spec §2.2), żeby konsumenci
+// warstwy snappingu i testy mogli go importować z jednego, oczywistego miejsca.
+export { EDGE_UCS_DEADBAND_DEG, EDGE_UCS_DEADBAND_RAD };
 
 export type SnapType =
   | 'vertex'
   | 'intersection'
-  | 'midpoint'
   | 'perpendicular'
   | 'edge'
   | 'extension'
@@ -90,6 +93,8 @@ export interface SnapResult {
   secondarySnap?: SnapResult;
   secondaryGuideLines?: SnapGuideLine[];
   metadata?: Record<string, unknown>;
+  /** DEV-only: surowi kandydaci krawędzi z flagą, czy przeszli filtr HPF. */
+  debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[];
 }
 
 export interface SnapContext {
@@ -132,6 +137,12 @@ export interface SnapContext {
   /** Indeks przestrzenny (rbush) nad lineBuffer, wstrzykiwany przez SnapCoordinator.
    *  Gdy undefined, strategie korzystają z liniowego skanu (kompatybilność wsteczna). */
   spatialIndex?: SpatialLineIndex;
+  /** Rozwiązana konfiguracja silnika (spec §5), wstrzykiwana przez SnapCoordinator.evaluate(). */
+  config?: SnapEngineConfig;
+  /** DEV-only: żądanie zebrania surowych kandydatów krawędzi (przed/po filtrze HPF) do podglądu debugowego. */
+  debugCollectEdgeHpf?: boolean;
+  /** DEV-only: wypełniane przez EdgeSnapStrategy, gdy debugCollectEdgeHpf jest true. */
+  debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[];
 }
 
 export interface SnapStrategy {
@@ -151,7 +162,6 @@ export const SNAP_TYPE_WEIGHTS: Record<SnapType, number> = {
   vertex: 1.5,
   intersection: 1.3,
   otrack_intersection: 1.3,
-  midpoint: 1.25,
   perpendicular: 1.0,
   extension: 0.8,
   edge: 0.75,
@@ -160,6 +170,29 @@ export const SNAP_TYPE_WEIGHTS: Record<SnapType, number> = {
   nearest: 0.75,
   grid: 0.5,
   none: 0.01,
+};
+
+/**
+ * Konfiguracja silnika SNAP/OSNAP/OTRACK (spec §5, `SnapEngineConfig`). Zbiera w jednym,
+ * wstrzykiwalnym obiekcie to, co dotąd było rozproszonymi stałymi modułowymi i literałami
+ * powtórzonymi w każdej strategii.
+ */
+export interface SnapEngineConfig {
+  /** Domyślna apertura w px, gdy SnapContext.thresholdPx nie został podany. */
+  apertureRadiusPx: number;
+  /** R_proj (metry) — promień normalizacji długości krawędzi w computeEdgeScore. */
+  projectRadius: number;
+  /** Kopia progu deadbandu EDGE_UCS/OTRACK (spec §2.2), nadpisywalna per-instancja. */
+  edgeUcsDeadbandRad: number;
+  /** Wagi hierarchii typów punktów SNAP używane do globalnego porównania d_eff. */
+  typeWeights: Record<SnapType, number>;
+}
+
+export const DEFAULT_SNAP_ENGINE_CONFIG: SnapEngineConfig = {
+  apertureRadiusPx: 12,
+  projectRadius: 50,
+  edgeUcsDeadbandRad: EDGE_UCS_DEADBAND_RAD,
+  typeWeights: SNAP_TYPE_WEIGHTS,
 };
 
 /**
@@ -219,7 +252,7 @@ export function computeClampedWorldTolerance(
   minMeters = 0.05,
   maxMeters = 3.0
 ): { worldRadius: number; pxPerMeter: number; thresholdPx: number } {
-  const thresholdPx = context.thresholdPx ?? defaultScreenPx;
+  const thresholdPx = context.thresholdPx ?? context.config?.apertureRadiusPx ?? defaultScreenPx;
   const s0 = context.worldToScreen(point.x, point.y);
   const s1 = context.worldToScreen(point.x + 1, point.y);
   const pxPerMeter = Math.hypot(s1.sx - s0.sx, s1.sy - s0.sy) || 20;
@@ -236,7 +269,6 @@ export type OsnapSnapType =
   | 'otrack_intersection'
   | 'perpendicular'
   | 'otrack_ray'
-  | 'midpoint'
   | 'nearest'
   | 'extension'
   | 'parallel_lock'
@@ -264,6 +296,8 @@ export interface OsnapSnapResult {
   secondarySnap?: OsnapSnapResult;
   secondaryRayLine?: { p1: Point2D; p2: Point2D };
   secondaryType?: OsnapSnapType;
+  /** DEV-only: surowi kandydaci krawędzi z flagą, czy przeszli filtr HPF (patrz debugCollectEdgeHpf). */
+  debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[];
 }
 
 export interface DirectionSnapResult {

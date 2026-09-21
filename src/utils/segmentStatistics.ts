@@ -70,6 +70,14 @@ export interface AnalyzeSegmentsOptions {
 }
 
 /**
+ * Domyślny próg deadbandu EDGE_UCS/OTRACK (spec §2.2): poniżej tej różnicy kątowej wobec
+ * ACTIVE_UCS, EDGE_UCS jest uznawany za nierozróżnialny od widoku i odrzucany, by uniknąć
+ * niestabilności numerycznej i niemal równoległych osi śledzenia.
+ */
+export const EDGE_UCS_DEADBAND_DEG = 2.0;
+export const EDGE_UCS_DEADBAND_RAD = (EDGE_UCS_DEADBAND_DEG * Math.PI) / 180;
+
+/**
  * Minimalny kąt różnicy między dwoma kątami modulo 90°, wg reguły separacji OTRACK (spec §2.2):
  * Δθ = min_k |θ_edge - θ_view - k*90°|
  */
@@ -231,7 +239,7 @@ export function analyzeSegmentsStatistics(
     // od kąta widoku (Δθ < próg, domyślnie 2.0°), EDGE_UCS jest ignorowany — zapobiega to
     // nakładaniu się niemal równoległych osi śledzenia i migotaniu interfejsu.
     const viewAngleDeg = options?.viewAngleDeg ?? 0;
-    const separationDeg = options?.edgeUcsSeparationDeg ?? 2.0;
+    const separationDeg = options?.edgeUcsSeparationDeg ?? EDGE_UCS_DEADBAND_DEG;
     const isIndistinctFromView = angularSeparationMod90Deg(exactAngle, viewAngleDeg) < separationDeg;
 
     if (percentage >= 15.0 || totalSegments <= 4) {

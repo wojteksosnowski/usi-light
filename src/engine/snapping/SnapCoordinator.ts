@@ -1,8 +1,7 @@
 import { Point2D } from '../../types/geometry';
-import { SnapContext, SnapResult, SnapStrategy, ActiveSnapState, SNAP_TYPE_WEIGHTS, computeEdgeScore, computeClampedWorldTolerance } from './types';
+import { SnapContext, SnapResult, SnapStrategy, ActiveSnapState, SNAP_TYPE_WEIGHTS, SnapEngineConfig, DEFAULT_SNAP_ENGINE_CONFIG, computeEdgeScore, computeClampedWorldTolerance } from './types';
 import { VertexSnapStrategy } from './strategies/VertexSnapStrategy';
 import { IntersectionSnapStrategy } from './strategies/IntersectionSnapStrategy';
-import { MidpointSnapStrategy } from './strategies/MidpointSnapStrategy';
 import { PerpendicularSnapStrategy } from './strategies/PerpendicularSnapStrategy';
 import { EdgeSnapStrategy } from './strategies/EdgeSnapStrategy';
 import { DirectionSnapStrategy } from './strategies/DirectionSnapStrategy';
@@ -10,6 +9,49 @@ import { OtrackSnapStrategy } from './strategies/OtrackSnapStrategy';
 import { GridSnapStrategy } from './strategies/GridSnapStrategy';
 import { SpatialLineIndex } from './SpatialLineIndex';
 import { PerfMonitor } from '../perf/PerfMonitor';
+
+/**
+ * Wyznacza dEff kandydata `target` tak, jakby kursor znajdował się w punkcie `cursorPoint`
+ * zamiast rzeczywistej pozycji myszy — użyteczne do testu punktu stałego (fixed-point).
+ */
+function computeDEffFrom(
+  cursorPoint: Point2D,
+  target: SnapResult,
+  edgeScore: number,
+  context: SnapContext
+): number {
+  const cursorScreen = context.worldToScreen(cursorPoint.x, cursorPoint.y);
+  const targetScreen = context.worldToScreen(target.point.x, target.point.y);
+  const distPx = Math.hypot(cursorScreen.sx - targetScreen.sx, cursorScreen.sy - targetScreen.sy);
+  const weight = (context.config?.typeWeights ?? SNAP_TYPE_WEIGHTS)[target.type] ?? 0.5;
+  return distPx / Math.max(1e-6, weight * edgeScore);
+}
+
+/**
+ * Test zbieżności punktu stałego (spec §4, "Idempotent Fixed-Point"): dla każdego kandydata
+ * w kolejności malejącej jakości sprawdza, czy pozostałby globalnym zwycięzcą, gdyby kursor
+ * znalazł się dokładnie w jego punkcie. Zwraca pierwszego zbieżnego kandydata, a gdy żaden nie
+ * jest zbieżny — null (wołający ma wtedy zachować surową pozycję kursora, zgodnie ze spec).
+ */
+function selectFixedPointCandidate(
+  scoredResults: { result: SnapResult; dEff: number; edgeScore: number }[],
+  context: SnapContext
+): SnapResult | null {
+  for (let i = 0; i < scoredResults.length; i++) {
+    const candidate = scoredResults[i];
+    let winnerIdx = 0;
+    let winnerDEff = Infinity;
+    for (let j = 0; j < scoredResults.length; j++) {
+      const dEff = computeDEffFrom(candidate.result.point, scoredResults[j].result, scoredResults[j].edgeScore, context);
+      if (dEff < winnerDEff) {
+        winnerDEff = dEff;
+        winnerIdx = j;
+      }
+    }
+    if (winnerIdx === i) return candidate.result;
+  }
+  return null;
+}
 
 /**
  * SnapCoordinator - Centralny punkt wejścia podsystemu Snappingu.
@@ -20,8 +62,10 @@ export class SnapCoordinator {
   private strategies: SnapStrategy[] = [];
   private spatialIndex = new SpatialLineIndex();
   private activeSnapState: ActiveSnapState | null = null;
+  private readonly config: SnapEngineConfig;
 
-  constructor(customStrategies?: SnapStrategy[]) {
+  constructor(customStrategies?: SnapStrategy[], config?: Partial<SnapEngineConfig>) {
+    this.config = { ...DEFAULT_SNAP_ENGINE_CONFIG, ...config };
     if (customStrategies !== undefined) {
       this.strategies = [...customStrategies];
       this.sortStrategies();
@@ -34,7 +78,6 @@ export class SnapCoordinator {
     this.strategies = [
       new VertexSnapStrategy(), // Priorytet 10
       new IntersectionSnapStrategy(), // Priorytet 20
-      new MidpointSnapStrategy(), // Priorytet 30
       new PerpendicularSnapStrategy(), // Priorytet 35
       new EdgeSnapStrategy(), // Priorytet 40
       new OtrackSnapStrategy(), // Priorytet 55 (akwizycja Hover Dwell + promienie śledzenia)
@@ -87,10 +130,23 @@ export class SnapCoordinator {
   public evaluate(point: Point2D, context: SnapContext): SnapResult {
     const evalStart = performance.now();
     this.spatialIndex.rebuildIfStale(context.lineBuffer);
-    const contextWithIndex: SnapContext = { ...context, spatialIndex: this.spatialIndex };
+    const contextWithIndex: SnapContext = { ...context, spatialIndex: this.spatialIndex, config: this.config };
 
     const captureRadiusPx = context.thresholdPx ?? 12;
     const releaseRadiusPx = captureRadiusPx * 1.5;
+
+    // DEV-only: wymuś obliczenie kandydatów HPF od razu, niezależnie od tego, którą ścieżką
+    // (sticky / candidate-cycling / scoring / brak dopasowania) zakończy się ta ewaluacja —
+    // inaczej debugEdgeHpfCandidates nigdy nie dotrze do UI, gdy wygrywa sticky snap lub gdy
+    // żadna strategia nie znajdzie dopasowania.
+    if (context.debugCollectEdgeHpf) {
+      const edgeStrategy = this.strategies.find((s): s is EdgeSnapStrategy => s instanceof EdgeSnapStrategy);
+      edgeStrategy?.findAllSnaps(point, contextWithIndex);
+    }
+    const withDebug = <T extends SnapResult>(result: T): T =>
+      contextWithIndex.debugEdgeHpfCandidates
+        ? { ...result, debugEdgeHpfCandidates: contextWithIndex.debugEdgeHpfCandidates }
+        : result;
 
     // 1. Sprawdzenie dwuetapowej histerezy (Sticky Snap State)
     if (this.activeSnapState && context.isOsnapActive) {
@@ -110,10 +166,10 @@ export class SnapCoordinator {
         );
         if (!isExcluded) {
           PerfMonitor.mark('snap.evaluate.sticky', performance.now() - evalStart);
-          return {
+          return withDebug({
             ...this.activeSnapState.candidate,
             screenDistancePx: distFromActivePx,
-          };
+          });
         }
       } else {
         // Kursor opuścił strefę podtrzymania
@@ -144,10 +200,10 @@ export class SnapCoordinator {
           acquiredAt: performance.now(),
         };
         PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
-        return {
+        return withDebug({
           ...selected,
           metadata: { ...selected.metadata, candidateCount: allCandidates.length },
-        };
+        });
       }
     }
 
@@ -156,7 +212,7 @@ export class SnapCoordinator {
     // typami snapu, zamiast sztywnej hierarchii priorytetów strategii (priority-tier winner-takes-all).
     const { worldRadius: apertureWorld } = computeClampedWorldTolerance(point, context);
 
-    const scoredResults: { result: SnapResult; dEff: number }[] = [];
+    const scoredResults: { result: SnapResult; dEff: number; edgeScore: number }[] = [];
     for (const strategy of this.strategies) {
       const result = PerfMonitor.time(`snap.strategy.${strategy.name}`, () =>
         strategy.findSnap(point, contextWithIndex)
@@ -170,18 +226,24 @@ export class SnapCoordinator {
               Math.hypot(point.x - result.point.x, point.y - result.point.y),
               apertureWorld,
               edge.category,
-              context.activeCategory
+              context.activeCategory,
+              this.config.projectRadius
             )
           : 1;
-        const weight = SNAP_TYPE_WEIGHTS[result.type] ?? 0.5;
+        const weight = this.config.typeWeights[result.type] ?? 0.5;
         const dEff = distPx / Math.max(1e-6, weight * edgeScore);
-        scoredResults.push({ result, dEff });
+        scoredResults.push({ result, dEff, edgeScore });
       }
     }
 
     scoredResults.sort((a, b) => a.dEff - b.dEff);
 
-    let primaryResult: SnapResult | null = scoredResults.length > 0 ? scoredResults[0].result : null;
+    // Fixed-point/idempotency test (spec §4): potwierdza, że gdyby kursor znalazł się
+    // dokładnie w punkcie zwycięzcy, ten sam kandydat nadal wygrałby globalne porównanie
+    // d_eff. Chroni to przed drżeniem (jitter) między dwoma niemal pokrywającymi się węzłami
+    // różnych typów (np. vertex vs. edge w tym samym miejscu) — w typowym przypadku zwycięzca
+    // zbiega trywialnie (odległość do siebie samego = 0), więc koszt dodatkowy jest pomijalny.
+    let primaryResult: SnapResult | null = selectFixedPointCandidate(scoredResults, contextWithIndex);
     let secondaryResult: SnapResult | null = null;
     if (primaryResult) {
       for (let i = 1; i < scoredResults.length; i++) {
@@ -206,8 +268,8 @@ export class SnapCoordinator {
         };
       }
 
-      // Zapisz stan do automatu histerezy jeśli to snap dyskretny (Vertex / Intersection / Midpoint / Perpendicular)
-      if (['vertex', 'intersection', 'midpoint', 'perpendicular'].includes(primaryResult.type)) {
+      // Zapisz stan do automatu histerezy jeśli to snap dyskretny (Vertex / Intersection / Perpendicular)
+      if (['vertex', 'intersection', 'perpendicular'].includes(primaryResult.type)) {
         this.activeSnapState = {
           candidate: primaryResult,
           screenPos: { ...context.mouseScreen },
@@ -217,17 +279,17 @@ export class SnapCoordinator {
         };
       }
       PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
-      return primaryResult;
+      return withDebug(primaryResult);
     }
 
     // Brak dopasowania — zerowanie stanu
     this.activeSnapState = null;
     PerfMonitor.mark('snap.evaluate.total', performance.now() - evalStart);
-    return {
+    return withDebug({
       point: { ...point },
       snapped: false,
       type: 'none',
-    };
+    });
   }
 }
 
@@ -251,8 +313,10 @@ export function evaluateOsnapSnapWithCoordinator(
     originPoint?: Point2D | null;
     candidateIndex?: number;
     activeSnapTypes?: Partial<Record<import('./types').SnapType, boolean>>;
+    /** DEV-only: gdy true, zbiera surowych kandydatów krawędzi (przed/po filtrze HPF) do podglądu debugowego. */
+    debug?: boolean;
   }
-): import('./types').OsnapSnapResult | null {
+): { osnap: import('./types').OsnapSnapResult | null; debugEdgeHpfCandidates?: { point: Point2D; passed: boolean }[] } {
   const mouseScreen = options.worldToScreen(options.mouseWorld.x, options.mouseWorld.y);
   const snapRes = coordinator.evaluate(options.mouseWorld, {
     mouseWorld: options.mouseWorld,
@@ -273,18 +337,19 @@ export function evaluateOsnapSnapWithCoordinator(
     activeCategory: options.activeCategory,
     categoryAffinityWeights: options.categoryAffinityWeights,
     activeSnapTypes: options.activeSnapTypes,
+    debugCollectEdgeHpf: options.debug,
   });
 
+  const debugEdgeHpfCandidates = snapRes.debugEdgeHpfCandidates;
+
   if (!snapRes.snapped || snapRes.type === 'none' || snapRes.type === 'grid' || snapRes.type === 'direction') {
-    return null;
+    return { osnap: null, debugEdgeHpfCandidates };
   }
 
   const osnapType: import('./types').OsnapSnapType = snapRes.type === 'vertex'
     ? 'endpoint'
     : snapRes.type === 'intersection' || snapRes.type === 'otrack_intersection'
     ? 'otrack_intersection'
-    : snapRes.type === 'midpoint'
-    ? 'midpoint'
     : snapRes.type === 'perpendicular'
     ? 'perpendicular'
     : snapRes.type === 'extension'
@@ -297,7 +362,6 @@ export function evaluateOsnapSnapWithCoordinator(
     vertex: 1,
     intersection: 2,
     otrack_intersection: 2,
-    midpoint: 3,
     perpendicular: 4,
     edge: 5,
     extension: 5,
@@ -311,8 +375,6 @@ export function evaluateOsnapSnapWithCoordinator(
       ? 'endpoint'
       : sec.type === 'intersection' || sec.type === 'otrack_intersection'
       ? 'otrack_intersection'
-      : sec.type === 'midpoint'
-      ? 'midpoint'
       : sec.type === 'perpendicular'
       ? 'perpendicular'
       : sec.type === 'extension'
@@ -338,23 +400,27 @@ export function evaluateOsnapSnapWithCoordinator(
   }
 
   return {
-    priority: priorityMap[snapRes.type] ?? 5,
-    type: osnapType,
-    snappedPoint: snapRes.point,
-    screenDistancePx: snapRes.screenDistancePx ?? 0,
-    label: snapRes.label ?? 'OSNAP',
-    description: snapRes.description ?? '',
-    sourcePoint: snapRes.sourcePoint,
-    sourceBuildingId: snapRes.sourceBuildingId,
-    sourceCategory: snapRes.sourceCategory,
-    sourceName: snapRes.sourceName,
-    sourceEdgeIndex: snapRes.sourceEdgeIndex,
-    cachedEdge: snapRes.cachedEdge,
-    rayLine: snapRes.guideLines && snapRes.guideLines.length > 0 ? { p1: snapRes.guideLines[0].p1, p2: snapRes.guideLines[0].p2 } : undefined,
-    activeRays: snapRes.activeRays,
-    intersectingAnchors: snapRes.intersectingAnchors,
-    secondarySnap: secondaryOsnap,
-    secondaryRayLine: secondaryOsnap?.rayLine,
-    secondaryType: secondaryOsnap?.type,
+    osnap: {
+      priority: priorityMap[snapRes.type] ?? 5,
+      type: osnapType,
+      snappedPoint: snapRes.point,
+      screenDistancePx: snapRes.screenDistancePx ?? 0,
+      label: snapRes.label ?? 'OSNAP',
+      description: snapRes.description ?? '',
+      sourcePoint: snapRes.sourcePoint,
+      sourceBuildingId: snapRes.sourceBuildingId,
+      sourceCategory: snapRes.sourceCategory,
+      sourceName: snapRes.sourceName,
+      sourceEdgeIndex: snapRes.sourceEdgeIndex,
+      cachedEdge: snapRes.cachedEdge,
+      rayLine: snapRes.guideLines && snapRes.guideLines.length > 0 ? { p1: snapRes.guideLines[0].p1, p2: snapRes.guideLines[0].p2 } : undefined,
+      activeRays: snapRes.activeRays,
+      intersectingAnchors: snapRes.intersectingAnchors,
+      secondarySnap: secondaryOsnap,
+      secondaryRayLine: secondaryOsnap?.rayLine,
+      secondaryType: secondaryOsnap?.type,
+      debugEdgeHpfCandidates,
+    },
+    debugEdgeHpfCandidates,
   };
 }

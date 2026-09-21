@@ -138,9 +138,10 @@ export class OtrackManager {
       // 2. Promienie dominanty sceny jeśli dostępne
       if (context.dominantDirections && context.dominantDirections.length > 0) {
         const dom = context.dominantDirections[0];
-        // Zsynchronizowane z regułą separacji EDGE_UCS/OTRACK (segmentStatistics.ts, spec §2.2):
-        // gdy dominanta jest nierozróżnialna od widoku, isTrackingActive===false i promienie
-        // dominanty są pomijane (uniknięcie duplikatu z promieniami ortho 0°/90° powyżej).
+        // Zsynchronizowane z regułą separacji EDGE_UCS/OTRACK (segmentStatistics.ts, spec §2.2,
+        // próg EDGE_UCS_DEADBAND_DEG, domyślnie 2°): gdy dominanta jest nierozróżnialna od widoku,
+        // isTrackingActive===false i promienie dominanty są pomijane (uniknięcie duplikatu
+        // z promieniami ortho 0°/90° powyżej).
         if (dom.isTrackingActive !== false && dom.angleDeg !== 0 && dom.angleDeg !== 90) {
           const rad1 = (dom.angleDeg * Math.PI) / 180;
           const rad2 = (dom.orthogonalDeg * Math.PI) / 180;
