@@ -222,6 +222,9 @@ export interface FastUnionTelemetry {
   multipleOuterComponentsExits: number;
   emptyLoopsExits: number;
   caughtExceptionExits: number;
+  // How many calls were preempted by arePolygonsDefinitelyDisjoint before the
+  // (expensive) graph-trace path even started.
+  preemptedDisjointExits: number;
 }
 
 const EMPTY_TELEMETRY: FastUnionTelemetry = {
@@ -234,7 +237,61 @@ const EMPTY_TELEMETRY: FastUnionTelemetry = {
   multipleOuterComponentsExits: 0,
   emptyLoopsExits: 0,
   caughtExceptionExits: 0,
+  preemptedDisjointExits: 0,
 };
+
+/**
+ * Cheap, exact test for "these two simple polygon loops do not overlap at all"
+ * (bounding boxes may still overlap — e.g. two adjacent buildings whose shadow-reach
+ * AABBs touch but whose actual footprints never do). Used to short-circuit callers
+ * (e.g. masterplanSpatial's hierarchical union) away from the expensive
+ * fastUnionTwoSimpleLoops graph-trace *and* the polygon-clipping fallback it would
+ * otherwise reach via a "multiple outer components" result — both of which end up
+ * concluding exactly this on real data (see umbraA456.benchmark.test.ts telemetry:
+ * ~82% of fastUnionTwoSimpleLoops fallbacks on warszawa.json are this exact case).
+ *
+ * Correctness: no edge of A crosses any edge of B, and neither loop's vertex set is
+ * contained in the other → by the Jordan curve theorem the two simple polygons are
+ * disjoint. Returns false (not proven disjoint) on any ambiguity, leaving the caller
+ * to fall through to the normal (slower but authoritative) union path.
+ */
+export function arePolygonsDefinitelyDisjoint(polyA: Point2D[], polyB: Point2D[]): boolean {
+  if (!polyA || polyA.length < 3 || !polyB || polyB.length < 3) return false;
+
+  const boxA = computePointsBoundingBox(polyA);
+  const boxB = computePointsBoundingBox(polyB);
+  if (
+    boxA.maxX < boxB.minX - LEN_TOL ||
+    boxA.minX > boxB.maxX + LEN_TOL ||
+    boxA.maxY < boxB.minY - LEN_TOL ||
+    boxA.minY > boxB.maxY + LEN_TOL
+  ) {
+    return true; // AABB-disjoint already implies polygon-disjoint
+  }
+
+  const loopA = isPolygonCCW(polyA) ? polyA : [...polyA].reverse();
+  const loopB = isPolygonCCW(polyB) ? polyB : [...polyB].reverse();
+  const nA = loopA.length;
+  const nB = loopB.length;
+
+  // Any real edge-edge intersection means they're not disjoint (or at least not
+  // cheaply provable as such) — bail out to let the authoritative path decide.
+  for (let i = 0; i < nA; i++) {
+    const a1 = loopA[i];
+    const a2 = loopA[(i + 1) % nA];
+    for (let j = 0; j < nB; j++) {
+      const b1 = loopB[j];
+      const b2 = loopB[(j + 1) % nB];
+      if (findSegmentIntersection(a1, a2, b1, b2)) return false;
+    }
+  }
+
+  // No edge crossings: either fully disjoint or one fully contains the other.
+  if (isPointInPolygon(loopA[0], loopB, SNAP_TOL)) return false;
+  if (isPointInPolygon(loopB[0], loopA, SNAP_TOL)) return false;
+
+  return true;
+}
 
 let globalTelemetry: FastUnionTelemetry = { ...EMPTY_TELEMETRY };
 

@@ -170,13 +170,19 @@ export function clusterTiersByShadowOverlap(
   return [...groups.values()];
 }
 
-import { fastUnionTwoSimpleLoops } from '@/utils/math2d/polygonBooleanTwo';
+import { fastUnionTwoSimpleLoops, arePolygonsDefinitelyDisjoint } from '@/utils/math2d/polygonBooleanTwo';
 
 function fastUnionPair(p1: PolygonWithHoles, p2: PolygonWithHoles): PolygonWithHoles[] {
   if ((!p1.holes || p1.holes.length === 0) && (!p2.holes || p2.holes.length === 0)) {
     const box1 = computePointsBoundingBox(p1.outer);
     const box2 = computePointsBoundingBox(p2.outer);
     if (!boundsOverlap(box1, box2)) {
+      return [p1, p2];
+    }
+    // Bounding boxes overlap but the actual footprints may still not (common for
+    // adjacent tiers whose shadow-reach AABBs touch) — cheaply prove that before
+    // paying for the full graph-trace union and its polygon-clipping fallback.
+    if (arePolygonsDefinitelyDisjoint(p1.outer, p2.outer)) {
       return [p1, p2];
     }
     const fastRes = fastUnionTwoSimpleLoops(p1.outer, p2.outer);
