@@ -9,6 +9,7 @@ import { OsmLanduseFeature, OsmLanduseLayerConfig } from '../store/useOsmLanduse
 export class OsmLanduseVectorLayer implements CadRenderLayer {
   readonly id = 'wfs_osm_landuse_vector';
   readonly zIndex = 4;
+  readonly tier = 'background' as const;
 
   private features: OsmLanduseFeature[] = [];
   private layers: OsmLanduseLayerConfig[] = [];

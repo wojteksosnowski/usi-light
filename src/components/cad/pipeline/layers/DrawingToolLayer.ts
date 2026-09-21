@@ -5,6 +5,7 @@ import { renderDrawingToolPreview } from '../../renderers/drawingToolRenderer';
 export class DrawingToolLayer implements CadRenderLayer {
   readonly id = 'drawing_tool_overlay';
   readonly zIndex = 90;
+  readonly tier = 'hud' as const;
 
   private groupVerticesCache: { buildings: unknown; targetGroupId: string | undefined; vertices: Point2D[] } | null = null;
 

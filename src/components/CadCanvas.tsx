@@ -9,9 +9,11 @@ import { useCadViewport } from './cad/hooks/useCadViewport';
 import { useCadHotkeys } from './cad/hooks/useCadHotkeys';
 import { useCanvasInteraction, isBuildingLocked, getBuildingTopElevation } from './cad/hooks/useCanvasInteraction';
 import { useDemoRecorder } from '../hooks/useDemoRecorder';
+import { useActionRecorderStore } from '../modules/action-recorder/useActionRecorderStore';
 import { RecorderOverlay, SessionCatalogModal } from '../modules/action-recorder';
 import { Recording3DPipWindow } from './preview/Recording3DPipWindow';
 import { CadRenderPipeline } from './cad/pipeline/CadRenderPipeline';
+import { SceneBuffer } from './cad/pipeline/SceneBuffer';
 import { getBuildingLabelScreenAnchor } from './cad/renderers/buildingsRenderer';
 import { getMasterplanLabelScreenAnchor } from './cad/masterplan/masterplanLabels';
 import { BuildingLabelMiniPanel } from './cad/BuildingLabelMiniPanel';
@@ -80,12 +82,50 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   } = props;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const backgroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sceneBufferRef = useRef<SceneBuffer | null>(null);
 
   const openGroupId = useSceneStore((s) => s.openGroupId);
 
-  useDemoRecorder(canvasRef, containerRef);
+  // Action Recorder używa `canvas.captureStream()`, więc potrzebuje JEDNEGO canvasu ze
+  // wszystkimi trzema warstwami złożonymi razem (tło + scena + HUD) — tego samego widoku, jaki
+  // widzi użytkownik. Osobny canvas kompozytowy, odświeżany przez rAF tylko podczas nagrywania,
+  // pozwala uniknąć powiązania tego z pętlami tła/sceny/HUD (patrz Loop A/B/C poniżej).
+  const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  useDemoRecorder(compositeCanvasRef, containerRef);
+
+  const isRecorderActive = useActionRecorderStore(
+    (s) => s.isRecording || s.replayerStatus.isPlaying || s.isCountingDown
+  );
+
+  useEffect(() => {
+    if (!isRecorderActive) return;
+    let rafId: number;
+    const tick = () => {
+      const composite = compositeCanvasRef.current;
+      const bg = backgroundCanvasRef.current;
+      const scene = canvasRef.current;
+      const hud = overlayCanvasRef.current;
+      if (composite && bg && scene && hud) {
+        if (composite.width !== scene.width || composite.height !== scene.height) {
+          composite.width = scene.width;
+          composite.height = scene.height;
+        }
+        const ctx = composite.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, composite.width, composite.height);
+          ctx.drawImage(bg, 0, 0);
+          ctx.drawImage(scene, 0, 0);
+          ctx.drawImage(hud, 0, 0);
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [isRecorderActive]);
 
   const [expandedLabelBuildingId, setExpandedLabelBuildingId] = useState<string | null>(null);
   const handleLabelClick = (id: string | null) => {
@@ -93,7 +133,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   };
 
   // Menedżery kafelków satelitarnych (Google i HERE) — instancjonowane oba, aktywny wybierany przez satelliteProvider
-  const latestRenderFrameContextRef = useRef<CadRenderFrameContext | null>(null);
+  // Ostatni kontekst warstwy tła (kafle/siatka) — używany przez `scheduleTileRedraw` do przerysowania
+  // WYŁĄCZNIE warstwy tła (bez dotykania bufora sceny) po załadowaniu kafla / przełączeniu warstwy geo.
+  const latestBackgroundFrameContextRef = useRef<CadRenderFrameContext | null>(null);
+  // Ostatni kontekst warstwy sceny — używany tylko w trybie masterplan (poza zakresem podziału na
+  // tiery, patrz plan wdrożenia buforowania warstw), gdzie tło i scena renderują się razem.
+  const latestSceneFrameContextRef = useRef<CadRenderFrameContext | null>(null);
   const tileManagerRef = useRef<GoogleTileManager | null>(null);
   const hereTileManagerRef = useRef<HereTileManager | null>(null);
   const satelliteProvider = useSolarAnalysisStore((s) => s.satelliteProvider);
@@ -105,11 +150,16 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     if (tileRafIdRef.current !== null) return;
     tileRafIdRef.current = requestAnimationFrame(() => {
       tileRafIdRef.current = null;
-      if (latestRenderFrameContextRef.current) {
-        if (useUiStore.getState().viewMode2D === 'masterplan_white') {
-          MasterplanRenderPipeline.render(latestRenderFrameContextRef.current);
-        } else {
-          CadRenderPipeline.renderMain(latestRenderFrameContextRef.current);
+      if (useUiStore.getState().viewMode2D === 'masterplan_white') {
+        // Tryb masterplan nie jest (jeszcze) podzielony na tiery — renderuje tło+scenę razem.
+        if (latestSceneFrameContextRef.current) {
+          MasterplanRenderPipeline.render(latestSceneFrameContextRef.current);
+        }
+      } else if (latestBackgroundFrameContextRef.current) {
+        const canvas = backgroundCanvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (ctx) {
+          CadRenderPipeline.renderBackground(latestBackgroundFrameContextRef.current, ctx);
         }
       }
     });
@@ -438,7 +488,127 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     });
   }, [propPinnedPointResults, pinnedPoints, buildings, selectedPointResult, layerSettings]);
 
-  // 1. Base Render Loop
+  // Kontekst wspólny dla warstw tła/sceny — budowany na nowo przy każdym renderze komponentu
+  // (celowo NIE opakowany w useCallback: memoizacja funkcji budującej pełny kontekst, obejmujący
+  // zarówno pola tła jak i pola drag/hover, wymuszałaby nową referencję przy każdej zmianie
+  // interakcji, co unieważniałoby oba bufory tła i sceny na każdy mousemove — dokładnie problem,
+  // który ten podział ma rozwiązać). Efekty renderujące referencjonują tę funkcję z domknięcia i
+  // same kontrolują częstotliwość przerysowań przez własne, przycięte tablice zależności.
+  const buildLegacyFrameContext = (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number
+  ): CadRenderFrameContext => {
+    const renderContext: CadRenderContext = {
+        ctx,
+        width,
+        height,
+        viewState,
+        viewRotationDeg,
+        viewportMatrix,
+        invViewportMatrix,
+        worldToScreen,
+        screenToWorld,
+        latitude,
+        longitude,
+        equinoxDate,
+        sunlightMethod,
+        masterplanHourFraction,
+        isInteracting: interaction.effectiveIsInteracting,
+      };
+
+      return {
+        renderContext,
+        buildings,
+        selectedBuildingId,
+        selectedBuildingIds,
+        openGroupId,
+        hoveredBuildingId: interaction.hoveredBuildingId,
+        hoveredLabelBuildingId: interaction.hoveredLabelBuildingId,
+        hoveredEdge: interaction.hoveredEdge,
+        isEditMode,
+        showNormals,
+        analysisResults,
+        selectedPointResult,
+        activePointMode,
+        isLinkingMode,
+        linkingSourceId,
+        layerSettings,
+        editingEdgeLength: interaction.editingEdgeLength,
+        hoveredEdgeLengthBadge: interaction.hoveredEdgeLengthBadge,
+        pinnedPointResults,
+        activePinnedPointId,
+        liveFacadeSnap: interaction.liveFacadeSnap,
+        facadePointMode,
+        drawingMode,
+        hideOtherLabelsInLinkingMode: useCadToolStore.getState().hideOtherLabelsInLinkingMode,
+        showAnalysisPoints,
+        showShadowRange,
+        showShadowFill,
+        showShadowingLines,
+        showSunlightLines,
+        shadowRangeLoopsToRender,
+        hourlyShadowsToRender,
+        visibleBuildings,
+        dimensions,
+        isDimensionMode,
+        dimensionPendingRef,
+        dimHoveredEdge: interaction.dimHoveredEdge,
+        dimensionType,
+        rotationHover: interaction.rotationHover,
+        viewRotationMode,
+        showSatelliteLayer,
+        satelliteOpacity,
+        tileManager: activeTileManager,
+        crsInfo,
+        draggedVertexIndex: interaction.draggedVertexIndex,
+        dragVertexPreviewPt: interaction.dragVertexPreviewPt,
+        projectCirclePulse,
+        projectRadius,
+      };
+    };
+
+  // 1a. Background Render Loop (tier: background) — kafle satelitarne/WMS, siatka CAD.
+  // Przerysowywana tylko przy zmianie viewportu/rozmiaru, budynków (wpływają na zasięg siatki),
+  // widoczności warstw geo lub interakcji obrotu widoku — NIE przy hover/drag wierzchołka.
+  useEffect(() => {
+    if (viewMode2D === 'masterplan_white') return; // masterplan renderuje tło+scenę razem (Loop B)
+    const canvas = backgroundCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvasDimensions.width;
+    const height = canvasDimensions.height;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    const frameContext = buildLegacyFrameContext(ctx, width, height);
+    latestBackgroundFrameContextRef.current = frameContext;
+    CadRenderPipeline.renderBackground(frameContext, ctx);
+  }, [
+    viewMode2D,
+    canvasDimensions,
+    buildings,
+    viewState,
+    viewRotationDeg,
+    crsInfo,
+    showSatelliteLayer,
+    satelliteOpacity,
+    activeTileManager,
+    interaction.rotationHover,
+    viewRotationMode,
+    projectCirclePulse,
+    projectRadius,
+  ]);
+
+  // 1b. Scene Render Loop (tier: scene) — budynki, cienie, pasma analizy.
+  // Renderuje do `SceneBuffer` (OffscreenCanvas) i kopiuje bitmapę na `canvasRef` przez `drawImage`,
+  // zamiast rysować bezpośrednio — dzięki temu bufor pozostaje ważny między klatkami HUD.
+  // Świadomie NIE zawiera `draggedVertexIndex`/`dragVertexPreviewPt` w zależnościach: podgląd
+  // przeciąganego wierzchołka rysuje osobna warstwa HUD (`BuildingsDragPreviewLayer`).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -447,88 +617,35 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     const width = canvasDimensions.width;
     const height = canvasDimensions.height;
-
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
     }
 
-    const renderContext: CadRenderContext = {
-      ctx,
-      width,
-      height,
-      viewState,
-      viewRotationDeg,
-      viewportMatrix,
-      invViewportMatrix,
-      worldToScreen,
-      screenToWorld,
-      latitude,
-      longitude,
-      equinoxDate,
-      sunlightMethod,
-      masterplanHourFraction,
-      isInteracting: interaction.effectiveIsInteracting,
-    };
-
-    const frameContext: CadRenderFrameContext = {
-      renderContext,
-      buildings,
-      selectedBuildingId,
-      selectedBuildingIds,
-      openGroupId,
-      hoveredBuildingId: interaction.hoveredBuildingId,
-      hoveredLabelBuildingId: interaction.hoveredLabelBuildingId,
-      hoveredEdge: interaction.hoveredEdge,
-      isEditMode,
-      showNormals,
-      analysisResults,
-      selectedPointResult,
-      activePointMode,
-      isLinkingMode,
-      linkingSourceId,
-      layerSettings,
-      editingEdgeLength: interaction.editingEdgeLength,
-      hoveredEdgeLengthBadge: interaction.hoveredEdgeLengthBadge,
-      pinnedPointResults,
-      activePinnedPointId,
-      liveFacadeSnap: interaction.liveFacadeSnap,
-      facadePointMode,
-      drawingMode,
-      hideOtherLabelsInLinkingMode: useCadToolStore.getState().hideOtherLabelsInLinkingMode,
-      showAnalysisPoints,
-      showShadowRange,
-      showShadowFill,
-      showShadowingLines,
-      showSunlightLines,
-      shadowRangeLoopsToRender,
-      hourlyShadowsToRender,
-      visibleBuildings,
-      dimensions,
-      isDimensionMode,
-      dimensionPendingRef,
-      dimHoveredEdge: interaction.dimHoveredEdge,
-      dimensionType,
-      rotationHover: interaction.rotationHover,
-      viewRotationMode,
-      showSatelliteLayer,
-      satelliteOpacity,
-      tileManager: activeTileManager,
-      crsInfo,
-      draggedVertexIndex: interaction.draggedVertexIndex,
-      dragVertexPreviewPt: interaction.dragVertexPreviewPt,
-      projectCirclePulse,
-      projectRadius,
-    };
-
-    latestRenderFrameContextRef.current = frameContext;
     if (viewMode2D === 'masterplan_white') {
+      const frameContext = buildLegacyFrameContext(ctx, width, height);
+      latestSceneFrameContextRef.current = frameContext;
       MasterplanRenderPipeline.render(frameContext);
-    } else {
-      CadRenderPipeline.renderMain(frameContext);
+      return;
     }
+
+    if (!sceneBufferRef.current) {
+      sceneBufferRef.current = new SceneBuffer();
+    }
+    const sceneBuffer = sceneBufferRef.current;
+    sceneBuffer.resize(width, height);
+
+    const frameContext = buildLegacyFrameContext(sceneBuffer.ctx, width, height);
+    CadRenderPipeline.renderScene(frameContext, sceneBuffer.ctx);
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(sceneBuffer.source, 0, 0);
+    ctx.restore();
   }, [
     viewMode2D,
+    canvasDimensions,
     buildings,
     selectedBuildingId,
     selectedBuildingIds,
@@ -552,7 +669,6 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     dimensionType,
     interaction.dimHoveredEdge,
     viewState,
-    canvasDimensions,
     drawingMode,
     interaction.editingEdgeLength,
     interaction.hoveredEdgeLengthBadge,
@@ -563,26 +679,16 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     isLinkingMode,
     linkingSourceId,
     isEditMode,
-    viewRotationMode,
-    viewRotationDeg,
-    interaction.rotationHover,
     analysisResults,
     layerSettings,
     shadowRangeLoopsToRender,
     hourlyShadowsToRender,
     showShadowFill,
-    interaction.effectiveIsInteracting,
     worldToScreen,
     screenToWorld,
     visibleBuildings,
-    showSatelliteLayer,
-    satelliteOpacity,
     showAnalysisPoints,
-    activeTileManager,
     crsInfo,
-    interaction.draggedVertexIndex,
-    interaction.dragVertexPreviewPt,
-    projectCirclePulse,
     projectRadius,
   ]);
 
@@ -778,6 +884,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       }}
     >
       <canvas
+        ref={backgroundCanvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          pointerEvents: 'none',
+        }}
+      />
+      <canvas
         ref={canvasRef}
         onMouseDown={interaction.handleMouseDown}
         onDoubleClick={interaction.handleDoubleClick}
@@ -808,6 +926,8 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           pointerEvents: 'none',
         }}
       />
+      {/* Canvas kompozytowy (tło+scena+HUD) dla Action Recordera — poza ekranem, nie renderowany bezpośrednio */}
+      <canvas ref={compositeCanvasRef} style={{ position: 'absolute', left: '-99999px', top: 0, pointerEvents: 'none' }} />
       {/* Nakładka Demo / Action Recorder (Odliczanie, Replay Bar) */}
       <RecorderOverlay />
       {/* Pływające okno podglądu 3D Picture-in-Picture */}

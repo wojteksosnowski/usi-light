@@ -4,6 +4,7 @@ import { renderSunlightVisualization } from '../../renderers/sunlightRenderer';
 export class SunlightLayer implements CadRenderLayer {
   readonly id = 'sunlight_visualization';
   readonly zIndex = 70;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     if (!context.showAnalysisPoints || context.activePointMode !== 'sunlight') {

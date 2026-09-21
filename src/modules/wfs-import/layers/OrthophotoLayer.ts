@@ -5,6 +5,7 @@ import { WmsTileManager } from '../renderers/wmsTileManager';
 export class OrthophotoLayer implements CadRenderLayer {
   readonly id = 'wfs_orthophoto';
   readonly zIndex = 0;
+  readonly tier = 'background' as const;
 
   private tileManager: WmsTileManager | null = null;
   private opacity = 0.85;

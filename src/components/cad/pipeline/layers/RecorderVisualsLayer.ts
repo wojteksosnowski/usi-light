@@ -7,6 +7,7 @@ import { useActionRecorderStore } from '../../../../modules/action-recorder/useA
 export class RecorderVisualsLayer implements CadRenderLayer {
   readonly id = 'recorder_visuals';
   readonly zIndex = 999; // Najwyższa warstwa w potoku, aby była widoczna na nagraniu
+  readonly tier = 'hud' as const;
 
   shouldRender(_context: CadRenderFrameContext): boolean {
     const state = useActionRecorderStore.getState();

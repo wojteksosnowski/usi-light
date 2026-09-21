@@ -9,6 +9,7 @@ import { LandCoverFeature } from '../store/useWfsStore';
 export class LandCoverVectorLayer implements CadRenderLayer {
   readonly id = 'wfs_land_cover_vector';
   readonly zIndex = 4;
+  readonly tier = 'background' as const;
 
   private units: LandCoverFeature[] = [];
   private showUnits = false;

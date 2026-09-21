@@ -4,6 +4,7 @@ import { renderPlaygroundSunlightVisualizations } from '../../renderers/playgrou
 export class PlaygroundLayer implements CadRenderLayer {
   readonly id = 'playground_analysis';
   readonly zIndex = 50;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     return Boolean(context.showAnalysisPoints && context.buildings && context.buildings.length > 0);

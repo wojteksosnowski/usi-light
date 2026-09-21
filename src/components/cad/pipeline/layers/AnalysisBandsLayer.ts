@@ -4,6 +4,7 @@ import { renderAnalysisBands } from '../../renderers/analysisBandsRenderer';
 export class AnalysisBandsLayer implements CadRenderLayer {
   readonly id = 'analysis_bands';
   readonly zIndex = 40;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     return Boolean(

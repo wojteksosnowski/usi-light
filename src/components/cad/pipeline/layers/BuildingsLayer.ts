@@ -1,10 +1,15 @@
-import { Point2D } from '../../../../types/geometry';
 import { CadRenderLayer, CadRenderFrameContext } from '../types';
 import { renderBuildings } from '../../renderers/buildingsRenderer';
 
+/**
+ * Renderuje rzeczywistą (persystentną) geometrię budynków — warstwa "scene", buforowana.
+ * Podgląd przeciąganego wierzchołka jest rysowany osobno przez `BuildingsDragPreviewLayer`
+ * (warstwa HUD), aby przeciąganie wierzchołka nie unieważniało bufora sceny.
+ */
 export class BuildingsLayer implements CadRenderLayer {
   readonly id = 'buildings';
   readonly zIndex = 60;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     return Boolean(context.buildings && context.buildings.length > 0);
@@ -36,28 +41,11 @@ export class BuildingsLayer implements CadRenderLayer {
       facadePointMode = false,
       drawingMode = 'none',
       showAnalysisPoints = false,
-      draggedVertexIndex = null,
-      dragVertexPreviewPt = null,
     } = context;
-
-    const effectiveBuildings =
-      draggedVertexIndex !== null && dragVertexPreviewPt && selectedBuildingId
-        ? buildings.map((bldg) => {
-            if (bldg.id !== selectedBuildingId) return bldg;
-            const isSweep = Array.isArray(bldg.sweepPath) && bldg.sweepPath.length >= 2;
-            const verts = isSweep ? bldg.sweepPath! : bldg.vertices;
-            const updatedVerts = verts.map((v: Point2D, idx: number) =>
-              idx === draggedVertexIndex ? dragVertexPreviewPt : v
-            );
-            return isSweep
-              ? { ...bldg, sweepPath: updatedVerts }
-              : { ...bldg, vertices: updatedVerts };
-          })
-        : buildings;
 
     renderBuildings(
       renderContext,
-      effectiveBuildings,
+      buildings,
       selectedBuildingId,
       hoveredBuildingId,
       hoveredEdge,

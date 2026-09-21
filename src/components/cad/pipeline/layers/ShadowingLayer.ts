@@ -4,6 +4,7 @@ import { renderShadowingVisualization } from '../../renderers/shadowingRenderer'
 export class ShadowingLayer implements CadRenderLayer {
   readonly id = 'shadowing_visualization';
   readonly zIndex = 30;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     if (!context.showAnalysisPoints || context.activePointMode !== 'shadowing') {

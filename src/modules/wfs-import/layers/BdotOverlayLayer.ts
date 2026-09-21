@@ -5,6 +5,7 @@ import { WmsTileManager } from '../renderers/wmsTileManager';
 export class BdotOverlayLayer implements CadRenderLayer {
   readonly id = 'wfs_bdot_overlay';
   readonly zIndex = 6;
+  readonly tier = 'background' as const;
 
   private tileManager: WmsTileManager | null = null;
   private opacity = 0.6;

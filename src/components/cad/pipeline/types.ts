@@ -93,11 +93,24 @@ export interface CadRenderFrameContext {
   readonly sweepAlignment?: SweepAlignment;
 }
 
+/**
+ * Warstwa bufora renderowania, do którego trafia dana `CadRenderLayer`:
+ * - `background`: treść statyczna (kafle satelitarne/WMS, siatka) — przerysowywana tylko
+ *   przy zmianie viewportu, załadowaniu kafla lub przełączeniu widoczności warstwy geo.
+ * - `scene`: geometria sceny (budynki, cienie, pasma analizy) — przerysowywana przy zmianie
+ *   danych sceny, nie przy samym hover/drag.
+ * - `hud`: nakładka interaktywna (kursor, snapping, podgląd przeciągania) — przerysowywana
+ *   przy każdej zmianie stanu interakcji.
+ */
+export type CadRenderTier = 'background' | 'scene' | 'hud';
+
 export interface CadRenderLayer {
   /** Unikalny identyfikator warstwy (np. 'grid', 'buildings', 'shadows') */
   readonly id: string;
   /** Kolejność rysowania (im mniejsza wartość, tym niżej na stosie) */
   readonly zIndex: number;
+  /** Bufor renderowania, do którego należy warstwa (patrz {@link CadRenderTier}) */
+  readonly tier: CadRenderTier;
   /** Warunek uruchomienia renderera (np. sprawdzanie widoczności warstwy) */
   shouldRender(context: CadRenderFrameContext): boolean;
   /** Właściwa logika rysowania na Canvas 2D */

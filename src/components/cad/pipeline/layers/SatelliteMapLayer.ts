@@ -4,6 +4,7 @@ import { renderSatelliteMap } from '../../renderers/satelliteMapRenderer';
 export class SatelliteMapLayer implements CadRenderLayer {
   readonly id = 'satellite_map';
   readonly zIndex = 0;
+  readonly tier = 'background' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     return Boolean(context.showSatelliteLayer && context.tileManager);

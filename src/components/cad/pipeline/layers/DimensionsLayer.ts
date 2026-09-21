@@ -4,6 +4,7 @@ import { renderDimensions } from '../../renderers/dimensionsRenderer';
 export class DimensionsLayer implements CadRenderLayer {
   readonly id = 'dimensions';
   readonly zIndex = 80;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     return Boolean(

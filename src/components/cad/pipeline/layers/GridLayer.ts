@@ -4,6 +4,7 @@ import { renderCadGrid } from '../../renderers/gridRenderer';
 export class GridLayer implements CadRenderLayer {
   readonly id = 'grid';
   readonly zIndex = 10;
+  readonly tier = 'background' as const;
 
   shouldRender(_context: CadRenderFrameContext): boolean {
     return true;

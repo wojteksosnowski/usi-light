@@ -11,6 +11,7 @@ import {
   SunlightLayer,
   DimensionsLayer,
   DrawingToolLayer,
+  BuildingsDragPreviewLayer,
   RecorderVisualsLayer,
 } from './layers';
 
@@ -44,22 +45,23 @@ export class CadRenderPipeline {
 
   private registerDefaultMainLayers(): void {
     this.mainLayers = [
-      new SatelliteMapLayer(),     // zIndex: 0
-      new GridLayer(),             // zIndex: 10
-      new ShadowRangeLayer(),      // zIndex: 20
-      new ShadowingLayer(),        // zIndex: 30
-      new AnalysisBandsLayer(),    // zIndex: 40
-      new PlaygroundLayer(),       // zIndex: 50
-      new BuildingsLayer(),        // zIndex: 60
-      new SunlightLayer(),         // zIndex: 70
-      new DimensionsLayer(),       // zIndex: 80
-      new RecorderVisualsLayer(),   // zIndex: 999
+      new SatelliteMapLayer(),     // zIndex: 0,  tier: background
+      new GridLayer(),             // zIndex: 10, tier: background
+      new ShadowRangeLayer(),      // zIndex: 20, tier: scene
+      new ShadowingLayer(),        // zIndex: 30, tier: scene
+      new AnalysisBandsLayer(),    // zIndex: 40, tier: scene
+      new PlaygroundLayer(),       // zIndex: 50, tier: scene
+      new BuildingsLayer(),        // zIndex: 60, tier: scene
+      new SunlightLayer(),         // zIndex: 70, tier: scene
+      new DimensionsLayer(),       // zIndex: 80, tier: scene
     ].sort((a, b) => a.zIndex - b.zIndex);
   }
 
   private registerDefaultOverlayLayers(): void {
     this.overlayLayers = [
-      new DrawingToolLayer(),      // zIndex: 90
+      new DrawingToolLayer(),        // zIndex: 90,  tier: hud
+      new BuildingsDragPreviewLayer(), // zIndex: 95,  tier: hud
+      new RecorderVisualsLayer(),    // zIndex: 999, tier: hud (najwyżej, widoczna na nagraniu)
     ].sort((a, b) => a.zIndex - b.zIndex);
   }
 
@@ -101,26 +103,17 @@ export class CadRenderPipeline {
     }
   }
 
-  /**
-   * Renderuje główny stos warstw sceny CAD (0..80)
-   */
-  public renderMain(context: CadRenderFrameContext): void {
-    const mainStart = performance.now();
-    const { renderContext } = context;
-    const { ctx, width, height } = renderContext;
-
-    // 1. Podstawowe czyszczenie płótna pod spodem wszystkich warstw
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#020617';
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-
-    for (const layer of this.mainLayers) {
+  private runLayers(
+    layers: CadRenderLayer[],
+    context: CadRenderFrameContext,
+    ctx: CanvasRenderingContext2D,
+    markPrefix: string
+  ): void {
+    for (const layer of layers) {
       if (layer.shouldRender(context)) {
         try {
           ctx.save();
-          PerfMonitor.time(`render.layer.${layer.id}`, () => layer.render(context));
+          PerfMonitor.time(`${markPrefix}.${layer.id}`, () => layer.render(context));
         } catch (err) {
           console.error(`[CadRenderPipeline] Błąd podczas renderowania warstwy [${layer.id}]:`, err);
         } finally {
@@ -128,9 +121,61 @@ export class CadRenderPipeline {
         }
       }
     }
+  }
 
-    PerfMonitor.mark('render.main.total', performance.now() - mainStart);
+  /**
+   * Renderuje warstwę tła (kafle satelitarne/WMS, siatka CAD) — tier `background`.
+   * Wołane tylko przy zmianie viewportu, załadowaniu kafla lub przełączeniu widoczności warstwy geo.
+   */
+  public renderBackground(context: CadRenderFrameContext, targetCtx?: CanvasRenderingContext2D): void {
+    const start = performance.now();
+    const { renderContext } = context;
+    const ctx = targetCtx ?? renderContext.ctx;
+    const { width, height } = renderContext;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+
+    const backgroundLayers = this.mainLayers.filter((l) => l.tier === 'background');
+    this.runLayers(backgroundLayers, context, ctx, 'render.layer');
+
+    PerfMonitor.mark('render.background.total', performance.now() - start);
+  }
+
+  /**
+   * Renderuje geometrię sceny (budynki, cienie, pasma analizy) — tier `scene`.
+   * Wołane przy zmianie danych sceny (buildings/analysis/shadow), nie przy samym hover/drag.
+   * Bufor docelowy (`targetCtx`) jest zwykle OffscreenCanvas (`SceneBuffer`) — patrz `SceneBuffer.ts`.
+   */
+  public renderScene(context: CadRenderFrameContext, targetCtx?: CanvasRenderingContext2D): void {
+    const start = performance.now();
+    const { renderContext } = context;
+    const ctx = targetCtx ?? renderContext.ctx;
+    const { width, height } = renderContext;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.restore();
+
+    const sceneLayers = this.mainLayers.filter((l) => l.tier === 'scene');
+    this.runLayers(sceneLayers, context, ctx, 'render.layer');
+
+    PerfMonitor.mark('render.scene.total', performance.now() - start);
     PerfMonitor.flushIfDue();
+  }
+
+  /**
+   * @deprecated Wrapper zgodności wstecznej łączący `renderBackground` + `renderScene` na
+   * jednym canvasie (0..80). Używany przez `MasterplanRenderPipeline`, który nie jest jeszcze
+   * podzielony na tiery (patrz CLAUDE.md / plan wdrożenia buforowania warstw).
+   */
+  public renderMain(context: CadRenderFrameContext): void {
+    this.renderBackground(context);
+    this.renderScene(context);
   }
 
   /**
@@ -171,6 +216,14 @@ export class CadRenderPipeline {
 
   public static renderMain(context: CadRenderFrameContext): void {
     CadRenderPipeline.defaultPipeline.renderMain(context);
+  }
+
+  public static renderBackground(context: CadRenderFrameContext, targetCtx?: CanvasRenderingContext2D): void {
+    CadRenderPipeline.defaultPipeline.renderBackground(context, targetCtx);
+  }
+
+  public static renderScene(context: CadRenderFrameContext, targetCtx?: CanvasRenderingContext2D): void {
+    CadRenderPipeline.defaultPipeline.renderScene(context, targetCtx);
   }
 
   public static renderOverlay(context: CadRenderFrameContext): void {

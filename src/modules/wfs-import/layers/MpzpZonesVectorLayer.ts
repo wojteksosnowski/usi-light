@@ -10,6 +10,7 @@ import { MpzpZoneFeature, MpzpLineFeature } from '../store/useWfsStore';
 export class MpzpZonesVectorLayer implements CadRenderLayer {
   readonly id = 'wfs_mpzp_zones_vector';
   readonly zIndex = 5;
+  readonly tier = 'background' as const;
 
   private zones: MpzpZoneFeature[] = [];
   private lines: MpzpLineFeature[] = [];

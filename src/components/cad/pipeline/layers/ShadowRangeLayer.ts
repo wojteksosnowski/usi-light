@@ -4,6 +4,7 @@ import { renderShadowRange } from '../../renderers/shadowRangeRenderer';
 export class ShadowRangeLayer implements CadRenderLayer {
   readonly id = 'shadow_range';
   readonly zIndex = 20;
+  readonly tier = 'scene' as const;
 
   shouldRender(context: CadRenderFrameContext): boolean {
     return Boolean(

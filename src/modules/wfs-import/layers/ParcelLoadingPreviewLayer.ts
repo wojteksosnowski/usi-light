@@ -5,6 +5,7 @@ import { BuildingLoop } from '../../../types/geometry';
 export class ParcelLoadingPreviewLayer implements CadRenderLayer {
   readonly id = 'wfs_parcels_loading';
   readonly zIndex = 5;
+  readonly tier = 'background' as const;
 
   private loops: BuildingLoop[] = [];
 

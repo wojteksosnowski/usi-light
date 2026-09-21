@@ -12,6 +12,7 @@ import { OverturePolygonFeature } from '../store/useWfsStore';
 export class OvertureContextLayer implements CadRenderLayer {
   readonly id = 'wfs_overture_context';
   readonly zIndex = 3;
+  readonly tier = 'background' as const;
 
   private greenAreas: OverturePolygonFeature[] = [];
   private showGreenAreas = false;

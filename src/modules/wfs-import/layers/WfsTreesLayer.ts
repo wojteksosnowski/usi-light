@@ -5,6 +5,7 @@ import { WfsTreeFeature } from '../store/useWfsStore';
 export class WfsTreesLayer implements CadRenderLayer {
   readonly id = 'wfs_trees';
   readonly zIndex = 5;
+  readonly tier = 'background' as const;
 
   private trees: WfsTreeFeature[] = [];
   private visible = false;
