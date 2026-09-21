@@ -568,26 +568,63 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       };
     };
 
+  // Koalescencja renderu do requestAnimationFrame: podczas panningu `viewState` potrafi się
+  // zmieniać częściej niż przeglądarka faktycznie maluje klatki (zdarzenia mousemove/pointermove
+  // nie są throttlowane do rAF). Bez koalescencji każda taka zmiana synchronicznie odpala pełny
+  // render Loop A/B (dla sceny z ~370 budynkami zmierzono empirycznie ~8-9ms/wywołanie, PerfMonitor
+  // `render.layer.buildings`), co przy zdarzeniach gęstszych niż budżet klatki (~16ms) powoduje
+  // kolejkowanie się renderów na głównym wątku i odczuwalny bezwład. Efekt zawsze zapisuje
+  // NAJNOWSZĄ funkcję renderującą do refa; faktyczne wywołanie planowane jest przez rAF i
+  // deduplikowane — w obrębie jednej klatki wykonuje się co najwyżej jeden realny render,
+  // zawsze z najświeższym stanem.
+  const bgRenderFnRef = useRef<() => void>(() => {});
+  const bgRafIdRef = useRef<number | null>(null);
+  const sceneRenderFnRef = useRef<() => void>(() => {});
+  const sceneRafIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (bgRafIdRef.current !== null) {
+        cancelAnimationFrame(bgRafIdRef.current);
+        bgRafIdRef.current = null;
+      }
+      if (sceneRafIdRef.current !== null) {
+        cancelAnimationFrame(sceneRafIdRef.current);
+        sceneRafIdRef.current = null;
+      }
+    };
+  }, []);
+
   // 1a. Background Render Loop (tier: background) — kafle satelitarne/WMS, siatka CAD.
   // Przerysowywana tylko przy zmianie viewportu/rozmiaru, budynków (wpływają na zasięg siatki),
   // widoczności warstw geo lub interakcji obrotu widoku — NIE przy hover/drag wierzchołka.
   useEffect(() => {
     if (viewMode2D === 'masterplan_white') return; // masterplan renderuje tło+scenę razem (Loop B)
-    const canvas = backgroundCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
-    const width = canvasDimensions.width;
-    const height = canvasDimensions.height;
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    bgRenderFnRef.current = () => {
+      const canvas = backgroundCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const width = canvasDimensions.width;
+      const height = canvasDimensions.height;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      const frameContext = buildLegacyFrameContext(ctx, width, height);
+      latestBackgroundFrameContextRef.current = frameContext;
+      CadRenderPipeline.renderBackground(frameContext, ctx);
+    };
+
+    if (bgRafIdRef.current === null) {
+      bgRafIdRef.current = requestAnimationFrame(() => {
+        bgRafIdRef.current = null;
+        bgRenderFnRef.current();
+      });
     }
-
-    const frameContext = buildLegacyFrameContext(ctx, width, height);
-    latestBackgroundFrameContextRef.current = frameContext;
-    CadRenderPipeline.renderBackground(frameContext, ctx);
   }, [
     viewMode2D,
     canvasDimensions,
@@ -610,39 +647,48 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   // Świadomie NIE zawiera `draggedVertexIndex`/`dragVertexPreviewPt` w zależnościach: podgląd
   // przeciąganego wierzchołka rysuje osobna warstwa HUD (`BuildingsDragPreviewLayer`).
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    sceneRenderFnRef.current = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    const width = canvasDimensions.width;
-    const height = canvasDimensions.height;
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+      const width = canvasDimensions.width;
+      const height = canvasDimensions.height;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      if (viewMode2D === 'masterplan_white') {
+        const frameContext = buildLegacyFrameContext(ctx, width, height);
+        latestSceneFrameContextRef.current = frameContext;
+        MasterplanRenderPipeline.render(frameContext);
+        return;
+      }
+
+      if (!sceneBufferRef.current) {
+        sceneBufferRef.current = new SceneBuffer();
+      }
+      const sceneBuffer = sceneBufferRef.current;
+      sceneBuffer.resize(width, height);
+
+      const frameContext = buildLegacyFrameContext(sceneBuffer.ctx, width, height);
+      CadRenderPipeline.renderScene(frameContext, sceneBuffer.ctx);
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(sceneBuffer.source, 0, 0);
+      ctx.restore();
+    };
+
+    if (sceneRafIdRef.current === null) {
+      sceneRafIdRef.current = requestAnimationFrame(() => {
+        sceneRafIdRef.current = null;
+        sceneRenderFnRef.current();
+      });
     }
-
-    if (viewMode2D === 'masterplan_white') {
-      const frameContext = buildLegacyFrameContext(ctx, width, height);
-      latestSceneFrameContextRef.current = frameContext;
-      MasterplanRenderPipeline.render(frameContext);
-      return;
-    }
-
-    if (!sceneBufferRef.current) {
-      sceneBufferRef.current = new SceneBuffer();
-    }
-    const sceneBuffer = sceneBufferRef.current;
-    sceneBuffer.resize(width, height);
-
-    const frameContext = buildLegacyFrameContext(sceneBuffer.ctx, width, height);
-    CadRenderPipeline.renderScene(frameContext, sceneBuffer.ctx);
-
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(sceneBuffer.source, 0, 0);
-    ctx.restore();
   }, [
     viewMode2D,
     canvasDimensions,

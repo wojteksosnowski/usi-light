@@ -101,6 +101,9 @@ export class WmsTileManager {
   private invertQueue: { key: string; img: HTMLImageElement }[] = [];
   private invertTimerScheduled = false;
 
+  private persistQueue: { key: string; img: HTMLImageElement }[] = [];
+  private persistTimerScheduled = false;
+
   public resolveTargetZoom(exactZoom: number, minZoom = 2): number {
     return this.zoomHysteresis.resolve(exactZoom, minZoom, this.maxNativeZoom);
   }
@@ -203,6 +206,7 @@ export class WmsTileManager {
     this.invertedCache.clear();
     this.invertPending.clear();
     this.invertQueue = [];
+    this.persistQueue = [];
     this.pending.clear();
     this.prefetchQueue = [];
     this.silentKeys.clear();
@@ -321,9 +325,46 @@ export class WmsTileManager {
     this.updateStatus();
   }
 
+  /** Kolejkuje trwały zapis kafla do IndexedDB na czas bezczynności głównego wątku (ten sam wzorzec
+   * co `scheduleInversionProcess`) — empirycznie (profil CPU z rzeczywistej sesji panningu przy
+   * włączonych GESUT+BDOT) `persistTileToDb`/`canvas.toBlob()` wywoływane synchronicznie w handlerze
+   * `img.onload`, PRZED `finishTileLoad`, sumarycznie zajmowało ~588ms czasu głównego wątku i
+   * opóźniało przerysowanie tła aż do zakończenia tworzenia canvasu/kodowania blob-a przy każdym
+   * nowo załadowanym kaflu — czyli dokładnie przy przeciąganiu widoku w nieodwiedzony wcześniej
+   * obszar mapy. Odłożenie na `requestIdleCallback` usuwa ten koszt z krytycznej ścieżki renderu
+   * bez utraty trwałego cache'u (zapis i tak jest best-effort, nie musi być natychmiastowy). */
+  private schedulePersistToDb(key: string, img: HTMLImageElement) {
+    this.persistQueue.push({ key, img });
+    if (this.persistTimerScheduled) return;
+    this.persistTimerScheduled = true;
+
+    const processOne = () => {
+      this.persistTimerScheduled = false;
+      const item = this.persistQueue.shift();
+      if (item) {
+        this.persistTileToDb(item.key, item.img);
+      }
+      if (this.persistQueue.length > 0) {
+        this.persistTimerScheduled = true;
+        if (typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(processOne, { timeout: 200 });
+        } else {
+          setTimeout(processOne, 16);
+        }
+      }
+    };
+
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(processOne, { timeout: 200 });
+    } else {
+      setTimeout(processOne, 16);
+    }
+  }
+
   /** Best-effort: zapisuje pomyślnie załadowany kafel do trwałego cache'u IndexedDB, żeby przetrwał
-   * zamknięcie przeglądarki. Nigdy nie blokuje renderu — błędy (np. tainted canvas z powodu braku
-   * nagłówków CORS na serwerze WMS) są po cichu ignorowane. */
+   * zamknięcie przeglądarki. Wołane WYŁĄCZNIE przez `schedulePersistToDb` (na bezczynności), nigdy
+   * synchronicznie z `img.onload` — błędy (np. tainted canvas z powodu braku nagłówków CORS na
+   * serwerze WMS) są po cichu ignorowane. */
   private persistTileToDb(key: string, img: HTMLImageElement) {
     try {
       const w = img.naturalWidth || 256;
@@ -411,8 +452,8 @@ export class WmsTileManager {
       if (settled) return; // timeout już zwolnił slot — spóźniona odpowiedź trafia tylko do RAM cache poniżej
       settled = true;
       clearTimeout(timeoutId);
-      this.persistTileToDb(key, img);
       this.finishTileLoad(key, img);
+      this.schedulePersistToDb(key, img);
     };
 
     img.onerror = () => {

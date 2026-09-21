@@ -14,8 +14,22 @@ import {
   resolveScreenLabelPositions,
   ScreenLabelItem,
 } from '@/utils/math2d';
-import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
+import { detectBoundaryMergeGroups, BoundaryMergeGroup } from '@/utils/math2d/boundaryMerging';
 import { isBuildingVariantActive, isBuildingDimmedInGroupMode } from '@/utils/geometrySelectors';
+import { BuildingLoop } from '../../../types/geometry';
+
+// Memoizacja po referencji `buildings` — patrz komentarz przy wywołaniu w `renderBuildings`.
+let boundaryMergeGroupsCacheKey: BuildingLoop[] | null = null;
+let boundaryMergeGroupsCacheValue: BoundaryMergeGroup[] = [];
+
+function getBoundaryMergeGroupsCached(buildings: BuildingLoop[]): BoundaryMergeGroup[] {
+  if (buildings === boundaryMergeGroupsCacheKey) {
+    return boundaryMergeGroupsCacheValue;
+  }
+  boundaryMergeGroupsCacheKey = buildings;
+  boundaryMergeGroupsCacheValue = detectBoundaryMergeGroups(buildings);
+  return boundaryMergeGroupsCacheValue;
+}
 
 export interface EditingEdgeLengthState {
   buildingId: string;
@@ -625,7 +639,11 @@ export function renderBuildings(
   const vpMaxY = Math.max(c1.wy, c2.wy, c3.wy, c4.wy);
 
   // Grupy stykających się obiektów category='boundary' (dzielony areaType) do połączonego renderowania obwiedni.
-  const boundaryMergeGroups = detectBoundaryMergeGroups(buildings);
+  // Memoizowane po referencji `buildings` — `detectBoundaryMergeGroups` jest czystą funkcją zależną
+  // wyłącznie od geometrii budynków (findSharedEdges/polygonsAreAdjacent, O(n²)), a `renderBuildings`
+  // jest wołane na każdy render sceny, w tym podczas panningu, gdzie `buildings` ma tę samą referencję
+  // przez wiele kolejnych klatek — bez memoizacji przeliczane od zera na każdą z nich.
+  const boundaryMergeGroups = getBoundaryMergeGroupsCached(buildings);
   const isBuildingSelected = (id: string) => id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(id));
   const mergeableGroups = boundaryMergeGroups.filter((g) => {
     const selectedFlags = g.buildingIds.map(isBuildingSelected);
