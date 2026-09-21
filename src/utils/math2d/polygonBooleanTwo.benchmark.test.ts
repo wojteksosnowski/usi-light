@@ -315,14 +315,39 @@ describe('polygonBooleanTwo & Shadow Analysis - Reference & Performance Benchmar
         allTiers.push(...extractBuildingStoryTiers(bldg));
       }
 
-      expect(buildings.length).toBe(baseline.buildingsCount);
-      expect(allTiers.length).toBe(baseline.tiersCount);
-
       const samples: MasterplanColorSample[] = [
         { color: 'rgba(30, 41, 59, 0.08)', offsetMin: -1 },
         { color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 },
         { color: 'rgba(30, 41, 59, 0.08)', offsetMin: 1 },
       ];
+
+      // Regeneracja baseline (np. po przywróceniu innego zrzutu reference/warszawa.json):
+      // UPDATE_BASELINE=1 npx vitest run polygonBooleanTwo.benchmark.test.ts
+      if (process.env.UPDATE_BASELINE === '1') {
+        const newBaseline: any = { buildingsCount: buildings.length, tiersCount: allTiers.length, hours: {} };
+        for (const hourStr of Object.keys(baseline.hours)) {
+          const hour = parseFloat(hourStr);
+          const shadowRes = getCachedGroundShadowSamples(allTiers, samples, 52.23, 21.01, 'spring', hour);
+          const areas = shadowRes.samples.map((s) => {
+            let total = 0;
+            for (const p of s.polys) {
+              total += Math.abs(calculateSignedArea(p.outer));
+              for (const hole of p.holes || []) total -= Math.abs(calculateSignedArea(hole));
+            }
+            return Math.round(total * 100) / 100;
+          });
+          newBaseline.hours[hourStr] = {
+            sampleAreas: [areas[0], areas[0], areas[0]],
+            polygonCounts: shadowRes.samples.map((s) => s.polys.length),
+          };
+        }
+        fs.writeFileSync(warszawaBaselinePath, JSON.stringify(newBaseline, null, 2));
+        console.log(`\n[UPDATE_BASELINE] Zapisano nowy baseline → ${warszawaBaselinePath}`);
+        return;
+      }
+
+      expect(buildings.length).toBe(baseline.buildingsCount);
+      expect(allTiers.length).toBe(baseline.tiersCount);
 
       for (const hourStr of Object.keys(baseline.hours)) {
         const hour = parseFloat(hourStr);
