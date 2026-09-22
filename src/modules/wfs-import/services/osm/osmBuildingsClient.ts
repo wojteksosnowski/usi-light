@@ -28,10 +28,11 @@ import { WfsBbox } from '../city/wfsWarsawClient';
 // mimo identycznego kodu klienta w dev i w produkcji.
 const OVERPASS_PROXY_URL = '/api/osm-overpass';
 
-// Proxy (api/osm-overpass.ts) odpytuje mirrory Overpass RÓWNOLEGLE, każdy z timeoutem 50s
-// (dopasowanym do [timeout:45] w zapytaniu niżej + margines na transfer) — timeout klienta
-// musi być WIĘKSZY niż timeout proxy, inaczej fetch() klienta przerywa się (AbortError),
-// zanim proxy zdąży zwrócić wynik lub zgłosić błąd wszystkich mirrorów.
+// Proxy (api/osm-overpass.ts) próbuje głównego endpointu Overpass z budżetem 48s (dopasowanym
+// do [timeout:45] w zapytaniu niżej + margines na transfer), a dopiero po jego awarii —
+// sekwencyjnie, krótkimi próbami — pozostałych mirrorów jako fallback. Timeout klienta musi
+// być WIĘKSZY niż łączny budżet proxy (52s), inaczej fetch() klienta przerywa się (AbortError),
+// zanim proxy zdąży zwrócić wynik lub zgłosić błąd wszystkich endpointów.
 const OVERPASS_REQUEST_TIMEOUT_MS = 55000;
 
 // Runda 2 (patrz `fetchOsmBuildings`) dociąga pełną geometrię TYLKO dla relacji, których
@@ -44,6 +45,18 @@ const ROUND2_RELATION_TIMEOUT_MS = 20000;
 // sekwencyjny dociąg jest z założenia wolniejszy niż równoległy, więc ograniczamy liczbę
 // relacji dociąganych w rundzie 2, zamiast ryzykować bardzo długi całkowity czas importu.
 const ROUND2_MAX_RELATIONS = 8;
+
+// Runda 0 (discovery) poszerza bbox o stały margines ponad zasięg projektu (`radiusMeters`) —
+// Overpass filtruje `relation[...](bbox)` w sposób, który dla relacji złożonych WYŁĄCZNIE z
+// way-członków (bez żadnego bezpośredniego węzła jako członka — schemat "Simple 3D Buildings",
+// np. wieżowiec Intraco, relation/3211736) potrafi w ogóle nie dopasować relacji, mimo że jej
+// way-członkowie leżą w zasięgu — relacja wtedy CAŁKOWICIE znika z wyniku Rundy 1 i nigdy nie
+// trafia do `findIncompleteRelations` (bo ta funkcja widzi tylko relacje, które już są w
+// zbiorze). Runda 0 to tanie zapytanie (`out ids tags bb;`, bez rekursji) na poszerzonym bboxie,
+// które wykrywa takie relacje niezależnie od tego mechanizmu i dorzuca je do tej samej listy co
+// dziś zasila celowany dociąg w Rundzie 2.
+const ROUND0_BBOX_PADDING_METERS = 100;
+const ROUND0_TIMEOUT_MS = 15000;
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
@@ -765,6 +778,11 @@ async function postOverpassQuery(query: string, timeoutMs: number): Promise<Over
  * element zbioru, ale nie zawsze zdąża dociągnąć też jego własne węzły. Takie relacje
  * powinny trafić do celowanego dociągu pełnej geometrii w rundzie 2 (patrz `fetchOsmBuildings`).
  */
+function isBuildingRelationTags(tags: Record<string, string> | undefined): boolean {
+  const t = tags || {};
+  return t.type === 'building' || t.type === 'multipolygon' || !!t.building || !!t['building:part'];
+}
+
 export function findIncompleteRelations(elements: OverpassElement[]): number[] {
   const nodeIds = new Set<number>();
   const ways = new Map<number, OverpassWay>();
@@ -777,10 +795,7 @@ export function findIncompleteRelations(elements: OverpassElement[]): number[] {
 
   const incomplete: number[] = [];
   for (const rel of relations) {
-    const tags = rel.tags || {};
-    const isBuildingRelation =
-      tags.type === 'building' || tags.type === 'multipolygon' || !!tags.building || !!tags['building:part'];
-    if (!isBuildingRelation) continue;
+    if (!isBuildingRelationTags(rel.tags)) continue;
 
     const hasIncompleteMember = rel.members.some((member) => {
       if (member.type !== 'way') return false;
@@ -806,6 +821,88 @@ async function fetchRelationFull(relId: number, timeoutMs: number): Promise<Over
     out body;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
+}
+
+interface OverpassBounds {
+  minlat: number;
+  minlon: number;
+  maxlat: number;
+  maxlon: number;
+}
+
+/** Rozszerza bbox o stały margines w metrach (dla Rundy 0, patrz ROUND0_BBOX_PADDING_METERS). */
+function padBbox(bbox: WfsBbox, paddingMeters: number): WfsBbox {
+  const [west, south, east, north] = bbox;
+  const midLat = (south + north) / 2;
+  const latPad = paddingMeters / 111_320;
+  const lonPad = paddingMeters / (111_320 * Math.cos((midLat * Math.PI) / 180));
+  return [west - lonPad, south - latPad, east + lonPad, north + latPad];
+}
+
+/**
+ * Runda 0: tanie zapytanie discovery (bez rekursji) na poszerzonym bboxie, które zwraca same
+ * ID/tagi/obwiednie relacji budynkowych — używane wyłącznie do wykrycia relacji całkowicie
+ * pominiętych przez ciasny bbox Rundy 1 (patrz ROUND0_BBOX_PADDING_METERS). Błąd/timeout tego
+ * zapytania nie może zablokować importu — łapany i logowany, degradacja do stanu sprzed tej
+ * poprawki (tylko findIncompleteRelations decyduje o Rundzie 2).
+ */
+async function fetchRelationEnvelopes(paddedBbox: WfsBbox): Promise<(OverpassRelation & { bounds?: OverpassBounds })[]> {
+  const [west, south, east, north] = paddedBbox;
+  const query = `
+    [out:json][timeout:20];
+    (
+      relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
+      relation["building:part"]["type"="multipolygon"](${south},${west},${north},${east});
+      relation["type"="building"](${south},${west},${north},${east});
+    );
+    out ids tags bb;
+  `.trim();
+  try {
+    const response = await postOverpassQuery(query, ROUND0_TIMEOUT_MS);
+    return response.elements.filter((el): el is OverpassRelation & { bounds?: OverpassBounds } => el.type === 'relation');
+  } catch (err) {
+    console.warn('Runda 0 (discovery obwiedni relacji OSM) nie powiodła się:', err);
+    return [];
+  }
+}
+
+/**
+ * Z relacji znalezionych w Rundzie 0 wybiera te, które są budynkowe, mieszczą się (obwiednią)
+ * w promieniu projektu i NIE występują w ogóle w elementach Rundy 1 — czyli relacje, których
+ * `findIncompleteRelations` nigdy nie mogła wykryć, bo są całkowicie nieobecne w zbiorze.
+ */
+export function findMissingBuildingRelationIds(
+  envelopes: (OverpassRelation & { bounds?: OverpassBounds })[],
+  round1Elements: OverpassElement[],
+  projectCenter: LatLon,
+  projectCrs: CrsDetectionResult,
+  radiusMeters: number
+): number[] {
+  const round1RelationIds = new Set<number>();
+  for (const el of round1Elements) {
+    if (el.type === 'relation') round1RelationIds.add(el.id);
+  }
+
+  const projectCenterCad = wgs84ToCadPoint(projectCenter, projectCrs, projectCenter);
+
+  const missing: number[] = [];
+  for (const rel of envelopes) {
+    if (!isBuildingRelationTags(rel.tags)) continue;
+    if (round1RelationIds.has(rel.id)) continue;
+    if (!rel.bounds) continue;
+
+    const centerLatLon: LatLon = {
+      lat: (rel.bounds.minlat + rel.bounds.maxlat) / 2,
+      lon: (rel.bounds.minlon + rel.bounds.maxlon) / 2,
+    };
+    const centerCad = wgs84ToCadPoint(centerLatLon, projectCrs, projectCenter);
+    const distance = Math.hypot(centerCad.x - projectCenterCad.x, centerCad.y - projectCenterCad.y);
+    // Tolerancja: bbox relacji może być duży (rozciąga się poza promień), a nas interesuje samo
+    // to, czy w ogóle przecina okrąg promienia — dokładny odcinek robi już
+    // polygonCircleIntersectionRatio w parseOverpassBuildingsResponse po pełnym dociągu geometrii.
+    if (distance <= radiusMeters + ROUND0_BBOX_PADDING_METERS) missing.push(rel.id);
+  }
+  return missing;
 }
 
 /**
@@ -843,6 +940,13 @@ export async function fetchOsmBuildings(
   // wykrycie niekompletnych relacji po rundzie 1 i celowany, sekwencyjny dociąg TYLKO
   // dla nich w drugiej rundzie — patrz `fetchOsmBuildings` niżej.
 
+  // Runda 0 (discovery, patrz fetchRelationEnvelopes) biegnie RÓWNOLEGLE z Rundą 1 — są od
+  // siebie niezależne, a bez znanego promienia (radiusMeters) nie ma referencji do paddingu,
+  // więc w takim wypadku pomijamy Rundę 0 (zachowanie identyczne jak przed tą poprawką).
+  const envelopesPromise = radiusMeters
+    ? fetchRelationEnvelopes(padBbox(bbox, radiusMeters + ROUND0_BBOX_PADDING_METERS))
+    : Promise.resolve([]);
+
   let responseData = await postOverpassQuery(query, OVERPASS_REQUEST_TIMEOUT_MS);
 
   // Serwer Overpass zwraca HTTP 200 nawet gdy przekroczy własny budżet czasowy zapytania —
@@ -860,7 +964,17 @@ export async function fetchOsmBuildings(
   // sekwencyjnie (nie równolegle), żeby nie zwiększać nagle obciążenia mirrorów Overpass,
   // i tylko dla wykrytych relacji, żeby dla typowego obszaru bez złożonych zagnieżdżonych
   // budynków (większość lokalizacji) nie było żadnych dodatkowych zapytań.
-  const incompleteRelationIds = findIncompleteRelations(responseData.elements).slice(0, ROUND2_MAX_RELATIONS);
+  // Runda 0 uzupełnia listę o relacje CAŁKOWICIE nieobecne w Rundzie 1 (patrz komentarz przy
+  // ROUND0_BBOX_PADDING_METERS) — findIncompleteRelations same z siebie nigdy by ich nie
+  // znalazła, bo skanuje tylko relacje już obecne w zbiorze.
+  const envelopes = await envelopesPromise;
+  const missingRelationIds = radiusMeters
+    ? findMissingBuildingRelationIds(envelopes, responseData.elements, projectCenter, projectCrs, radiusMeters)
+    : [];
+
+  const incompleteRelationIds = Array.from(
+    new Set([...findIncompleteRelations(responseData.elements), ...missingRelationIds])
+  ).slice(0, ROUND2_MAX_RELATIONS);
   if (incompleteRelationIds.length > 0) {
     const merged = new Map<string, OverpassElement>();
     for (const el of responseData.elements) merged.set(`${el.type}:${el.id}`, el);

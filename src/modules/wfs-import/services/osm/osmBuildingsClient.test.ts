@@ -1,13 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   resolveBuildingType,
   extractOsmBuildingElevation,
   formatOsmBuildingName,
   parseOverpassBuildingsResponse,
   findIncompleteRelations,
+  findMissingBuildingRelationIds,
+  fetchOsmBuildings,
   OverpassResponse,
 } from './osmBuildingsClient';
+import { latLonToBbox } from '../shared/geocoding';
 import { CrsDetectionResult } from '../../../../utils/geoTransform';
+import { WfsBbox } from '../city/wfsWarsawClient';
 
 const EPSG_2180: CrsDetectionResult = {
   crs: 'EPSG:2180',
@@ -903,6 +907,46 @@ describe('osmBuildingsClient', () => {
       });
     });
 
+    // Regresja: relacja Intraco (type=building, bez własnego tagu building, tylko way-członkowie)
+    // potrafi w ogóle nie zostać dopasowana przez filtr bbox Rundy 1 — wtedy findIncompleteRelations
+    // nigdy jej nie zobaczy (patrz komentarz przy ROUND0_BBOX_PADDING_METERS w osmBuildingsClient.ts).
+    // findMissingBuildingRelationIds wykrywa taki przypadek na podstawie obwiedni z Rundy 0.
+    describe('findMissingBuildingRelationIds (Runda 0 — relacje całkowicie nieobecne w Rundzie 1)', () => {
+      const intracoBounds = { minlat: 52.2536, minlon: 20.9958, maxlat: 52.2556, maxlon: 20.9978 };
+      const intracoEnvelope = {
+        type: 'relation' as const,
+        id: 3211736,
+        members: [],
+        tags: { name: 'Intraco', type: 'building' },
+        bounds: intracoBounds,
+      };
+
+      it('flags a building relation found only in the round-0 envelope discovery, missing entirely from round-1 elements', () => {
+        expect(
+          findMissingBuildingRelationIds([intracoEnvelope], [], mockProjectCenter, EPSG_2180, 300)
+        ).toEqual([3211736]);
+      });
+
+      it('does not flag a relation already present in round-1 elements (avoids duplicating findIncompleteRelations candidates)', () => {
+        const round1WithRelation: OverpassResponse['elements'] = [
+          { type: 'relation', id: 3211736, members: [], tags: { name: 'Intraco', type: 'building' } },
+        ];
+        expect(
+          findMissingBuildingRelationIds([intracoEnvelope], round1WithRelation, mockProjectCenter, EPSG_2180, 300)
+        ).toEqual([]);
+      });
+
+      it('does not flag a relation whose envelope lies far outside the requested radius', () => {
+        const farAway = { ...intracoEnvelope, id: 999, bounds: { minlat: 53.5, minlon: 22.0, maxlat: 53.51, maxlon: 22.01 } };
+        expect(findMissingBuildingRelationIds([farAway], [], mockProjectCenter, EPSG_2180, 300)).toEqual([]);
+      });
+
+      it('ignores non-building relations (e.g. a route relation) even if missing from round-1', () => {
+        const routeRelation = { ...intracoEnvelope, id: 555, tags: { type: 'route' } };
+        expect(findMissingBuildingRelationIds([routeRelation], [], mockProjectCenter, EPSG_2180, 300)).toEqual([]);
+      });
+    });
+
     it('end-to-end: merging an incomplete round-1 result with a round-2 relation detail fetch recovers the full tower geometry', () => {
       // Runda 1 "niekompletna": way 238291407 obecny, ale bez węzłów (jak przy pojedynczej
       // rekursji, gdy Overpass nie zdążył dociągnąć jego geometrii przez relację) — dokładnie
@@ -934,5 +978,158 @@ describe('osmBuildingsClient', () => {
       expect(tower!.defaultHeight).toBeGreaterThan(90);
       expect(tower!.vertices.length).toBeGreaterThanOrEqual(3);
     });
+  });
+
+  describe('fetchOsmBuildings — fidelity to proxy response (regresja: 939 vs 243 budynków dla tego samego bboxa)', () => {
+    // Dwa eksporty sceny użytkownika z tej samej lokalizacji (reference/osm-error6.json: 939
+    // budynków OSM, reference/osm-error7.json: 243 budynki OSM) ujawniły, że powtórzony import
+    // identycznego bboxa dawał skrajnie różne wyniki — przyczyna leżała w api/osm-overpass.ts
+    // (raceForNonEmpty wybierał PIERWSZY niepusty mirror zamiast najpełniejszego, patrz
+    // api/osm-overpass.test.ts). Ten test pinuje kontrakt po stronie klienta: fetchOsmBuildings
+    // musi wiernie odzwierciedlać to, co zwróci proxy — bez własnego cache'owania/tłumienia,
+    // które mogłoby maskować taką niespójność między kolejnymi wywołaniami zamiast ją ujawniać.
+    const mockProjectCenter = { lat: 52.2545839, lon: 20.996694 };
+    const bbox: WfsBbox = [20.995, 52.251, 20.999, 52.256];
+
+    function buildOverpassPayload(buildingCount: number): OverpassResponse {
+      const elements: OverpassResponse['elements'] = [];
+      for (let i = 0; i < buildingCount; i++) {
+        const base = 20.9955 + i * 0.0001;
+        const nodeIds = [i * 4 + 1, i * 4 + 2, i * 4 + 3, i * 4 + 4];
+        elements.push(
+          { type: 'node', id: nodeIds[0], lat: 52.2521, lon: base },
+          { type: 'node', id: nodeIds[1], lat: 52.2521, lon: base + 0.00005 },
+          { type: 'node', id: nodeIds[2], lat: 52.2526, lon: base + 0.00005 },
+          { type: 'node', id: nodeIds[3], lat: 52.2526, lon: base },
+          {
+            type: 'way',
+            id: 500000 + i,
+            nodes: [...nodeIds, nodeIds[0]],
+            tags: { building: 'yes' },
+          }
+        );
+      }
+      return { elements };
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('two sequential fetchOsmBuildings calls for the identical bbox surface exactly what the proxy returned each time (939 then 243)', async () => {
+      let call = 0;
+      const responses = [buildOverpassPayload(939), buildOverpassPayload(243)];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          const payload = responses[call];
+          call++;
+          return { ok: true, json: async () => payload } as Response;
+        })
+      );
+
+      const first = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180);
+      const second = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180);
+
+      expect(first.length).toBe(939);
+      expect(second.length).toBe(243);
+    });
+  });
+
+  describe('Intraco tower — live radius sweep (diagnostic)', () => {
+    // Diagnostyka, NIE regresja: zgłoszenie mówi, że wieża Intraco (relacja 3211736) znika
+    // z importu, ale nie wiadomo na pewno DLACZEGO — czy relacja w ogóle nie jest dopasowywana
+    // przez filtr bbox Rundy 1 przy małym promieniu (za ciasny bbox), czy jest dopasowywana ale
+    // pojedyncza rekursja daje niekompletną geometrię niewykrywaną przez findIncompleteRelations
+    // (mirror-zależność / kształt niekompletności), czy geometria jest poprawnie dociągnięta w
+    // rundzie 2, ale coś ją odrzuca później w parseOverpassBuildingsResponse (np. reguła 85%
+    // pokrycia envelope-vs-parts). Ten test sprawdza żywe dane Overpass dla rosnącego promienia
+    // i loguje tabelę faktów, zamiast zakładać z góry, która hipoteza jest prawdziwa — wynik
+    // steruje wyborem właściwej poprawki (patrz plan). Nigdy w domyślnym `npm test`.
+    const RUN_LIVE = process.env.OSM_LIVE_TEST === '1';
+    const INTRACO_RELATION_ID = 3211736;
+    const mockProjectCenter = { lat: 52.2545839, lon: 20.996694 };
+
+    async function fetchRound1Raw(bbox: [number, number, number, number]): Promise<OverpassResponse> {
+      const [west, south, east, north] = bbox;
+      const query = `
+        [out:json][timeout:45];
+        (
+          way["building"](${south},${west},${north},${east});
+          way["building:part"](${south},${west},${north},${east});
+          relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
+          relation["building:part"]["type"="multipolygon"](${south},${west},${north},${east});
+          relation["type"="building"](${south},${west},${north},${east});
+        );
+        out body;
+        >;
+        out skel qt;
+      `.trim();
+      const res = await fetch('http://localhost:3000/api/osm-overpass', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Accept': 'application/json' },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!res.ok) throw new Error(`round-1 fetch failed: HTTP ${res.status}`);
+      return (await res.json()) as OverpassResponse;
+    }
+
+    // Wymaga uruchomionego `npm run dev` (localhost:3000) — `fetchOsmBuildings` woła produkcyjny
+    // relatywny URL `/api/osm-overpass`, który pod Node/vitest (bez bazowego URL) nie zadziała
+    // bez lokalnego serwera dev obsługującego middleware `/api/**` (patrz CLAUDE.md).
+    (RUN_LIVE ? it : it.skip)(
+      'sweeps radius 100/200/300/500m against live Overpass and reports where the tower does/does not survive each stage',
+      async () => {
+        const { fetchOsmBuildings } = await import('./osmBuildingsClient');
+
+        // `fetchOsmBuildings` woła produkcyjny relatywny URL `/api/osm-overpass` — pod
+        // Node/vitest (brak `document.baseURI`) taki fetch rzuca `Invalid URL`, więc na czas
+        // tego testu podmieniamy global fetch, żeby dopisywał bazowy adres dev-serwera tylko
+        // dla żądań zaczynających się od "/".
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+          if (typeof input === 'string' && input.startsWith('/')) {
+            return originalFetch(`http://localhost:3000${input}`, init);
+          }
+          return originalFetch(input, init);
+        }) as typeof fetch;
+
+        const radii = [100, 200, 300, 500];
+        const rows: Array<{
+          radius: number;
+          matchedInRound1: boolean;
+          flaggedIncomplete: boolean;
+          finalHasTower: boolean;
+        }> = [];
+
+        try {
+          for (const radius of radii) {
+            const bbox = latLonToBbox(mockProjectCenter.lat, mockProjectCenter.lon, radius);
+
+            const round1 = await fetchRound1Raw(bbox);
+            const matchedInRound1 = round1.elements.some(
+              (el) => el.type === 'relation' && el.id === INTRACO_RELATION_ID
+            );
+            const flaggedIncomplete = matchedInRound1 && findIncompleteRelations(round1.elements).includes(INTRACO_RELATION_ID);
+
+            const buildings = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, radius);
+            const finalHasTower = buildings.some((b) => b.defaultHeight > 90);
+
+            rows.push({ radius, matchedInRound1, flaggedIncomplete, finalHasTower });
+
+            // Sanity check logiki testu (nie systemu pod testem): budynek nie może pojawić się w
+            // finalnym wyniku, jeśli relacja w ogóle nie została dopasowana w rundzie 1 i nie
+            // została dociągnięta przez rundę 2 — czyli finalHasTower=>matchedInRound1.
+            if (finalHasTower) expect(matchedInRound1).toBe(true);
+          }
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+
+        // eslint-disable-next-line no-console
+        console.table(rows);
+      },
+      300000
+    );
   });
 });
