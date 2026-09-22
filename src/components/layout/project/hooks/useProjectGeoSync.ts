@@ -228,6 +228,14 @@ export const useProjectGeoSync = () => {
         }
       }
 
+      // 2d. Nieudany fetch (np. wszystkie mirrory Overpass padły) nie może pogarszać stanu
+      // sceny względem tego, co już w niej było — bez tego nieudana PONOWNA próba dogrania
+      // budynków dla tego samego obszaru czyściła te już poprawnie zaimportowane wcześniej
+      // (patrz filtr `existingUserAndTestedBuildings` niżej, który je pomija jako "stare OSM/WFS").
+      if (buildingsFetchError && importedBuildings.length === 0 && existingImportedBuildings.length > 0) {
+        importedBuildings = existingImportedBuildings;
+      }
+
       // 3. Inteligentna synchronizacja do sceny (Smart Updater)
       // Zachowujemy:
       // - Wszystkie obiekty oznaczone jako projektowane (isTested: true)

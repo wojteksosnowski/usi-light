@@ -9,13 +9,20 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ];
 
-// Każdy mirror dostaje osobny timeout dopasowany do [timeout:N] w samym zapytaniu Overpass
-// (patrz osmBuildingsClient.ts) plus margines na transfer odpowiedzi. Mirrory odpytujemy
-// RÓWNOLEGLE (nie sekwencyjnie) — sekwencyjne próby sumowały się do ~60s, co przekraczało
-// budżet czasowy klienta (AbortError) zanim dotarliśmy nawet do drugiego mirrora.
-const OVERPASS_REQUEST_TIMEOUT_MS = 50000;
+// Mirrory odpytujemy RÓWNOLEGLE (nie sekwencyjnie) — sekwencyjne próby sumowały się do
+// ~60s, co przekraczało budżet czasowy klienta (AbortError) zanim dotarliśmy nawet do
+// drugiego mirrora. Pierwsza runda dostaje większość budżetu (30s/mirror); jeśli WSZYSTKIE
+// mirrory zawiodą (częste przy chwilowym przeciążeniu/rate-limicie publicznych instancji),
+// druga runda próbuje ponownie po krótkiej przerwie z krótszym timeoutem — łączny budżet
+// (30s + 2s + 15s = 47s) musi zostać poniżej timeoutu klienta (55s, patrz
+// OVERPASS_REQUEST_TIMEOUT_MS w osmBuildingsClient.ts).
+const FIRST_ROUND_TIMEOUT_MS = 30000;
+const RETRY_ROUND_TIMEOUT_MS = 15000;
+const RETRY_DELAY_MS = 2000;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -41,11 +48,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Nieprawidłowe ciało żądania Overpass.' });
   }
 
-  const errors: Error[] = [];
-
-  const attemptEndpoint = async (endpoint: string): Promise<string> => {
+  const attemptEndpoint = async (endpoint: string, timeoutMs: number): Promise<string> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const upstreamRes = await fetch(endpoint, {
         method: 'POST',
@@ -72,22 +77,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   // Promise.any zwraca pierwszy sukces; jeśli WSZYSTKIE mirrory zawiodą, rzuca AggregateError.
-  try {
-    const text = await Promise.any(
-      OVERPASS_ENDPOINTS.map((endpoint) =>
-        attemptEndpoint(endpoint).catch((err) => {
-          errors.push(err instanceof Error ? err : new Error(String(err)));
-          throw err;
-        })
-      )
-    );
+  const runRound = async (timeoutMs: number): Promise<{ text: string } | { errors: Error[] }> => {
+    const errors: Error[] = [];
+    try {
+      const text = await Promise.any(
+        OVERPASS_ENDPOINTS.map((endpoint) =>
+          attemptEndpoint(endpoint, timeoutMs).catch((err) => {
+            errors.push(err instanceof Error ? err : new Error(String(err)));
+            throw err;
+          })
+        )
+      );
+      return { text };
+    } catch {
+      return { errors };
+    }
+  };
+
+  const firstRound = await runRound(FIRST_ROUND_TIMEOUT_MS);
+  if ('text' in firstRound) {
     res.setHeader('Content-Type', 'application/json');
-    return res.status(200).send(text);
-  } catch {
-    const lastError = errors[errors.length - 1] || null;
-    console.error('Błąd proxy Overpass (wszystkie mirrory zawiodły):', errors.map((e) => e.message));
-    return res.status(502).json({
-      error: `Nie udało się pobrać budynków z OpenStreetMap (Overpass API): ${lastError?.message || 'Błąd połączenia'}`,
-    });
+    return res.status(200).send(firstRound.text);
   }
+
+  // Wszystkie mirrory zawiodły za pierwszym razem — częsty objaw chwilowego
+  // przeciążenia/rate-limitu publicznych instancji Overpass, który zwykle ustępuje w
+  // ciągu kilku sekund. Jedna dodatkowa, krótsza runda zanim poddamy się i zwrócimy 502.
+  await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+  const secondRound = await runRound(RETRY_ROUND_TIMEOUT_MS);
+  if ('text' in secondRound) {
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).send(secondRound.text);
+  }
+
+  const lastError = secondRound.errors[secondRound.errors.length - 1] || firstRound.errors[firstRound.errors.length - 1] || null;
+  console.error(
+    'Błąd proxy Overpass (wszystkie mirrory zawiodły, obie rundy):',
+    [...firstRound.errors, ...secondRound.errors].map((e) => e.message)
+  );
+  return res.status(502).json({
+    error: `Nie udało się pobrać budynków z OpenStreetMap (Overpass API): ${lastError?.message || 'Błąd połączenia'}`,
+  });
 }
