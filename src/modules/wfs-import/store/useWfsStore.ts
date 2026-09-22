@@ -137,7 +137,6 @@ export interface WfsImportOptions {
   buildings: boolean;
   parcels: boolean;
   trees: boolean;
-  terrainShading: boolean;
 }
 
 export type ProjectRadius = 100 | 200 | 300 | 500;
@@ -175,8 +174,6 @@ interface WfsState {
   showMpzpLayer: boolean;
   mpzpOpacity: number;
   mpzpInvertColors: boolean;
-  showTerrainLayer: boolean;
-  terrainOpacity: number;
   showTreesLayer: boolean;
 
   // Warstwa kontekstowa Overture Maps (zieleń / zagospodarowanie)
@@ -234,8 +231,6 @@ interface WfsState {
   setShowMpzpLayer: (show: boolean) => void;
   setMpzpOpacity: (val: number) => void;
   setMpzpInvertColors: (invert: boolean) => void;
-  setShowTerrainLayer: (show: boolean) => void;
-  setTerrainOpacity: (val: number) => void;
   setShowTreesLayer: (show: boolean) => void;
 
   setOvertureGreenAreas: (features: OverturePolygonFeature[]) => void;
@@ -306,7 +301,6 @@ let geoLayersSnapshot: { kiut: boolean; bdot: boolean } | null = null;
 /** Migawka indywidualnych stanów warstw planistycznych, kontekstowych i ukształtowania terenu, przywracana przy ponownym włączeniu master toggle'a Plany. */
 let plansLayersSnapshot: {
   mpzp: boolean;
-  terrain: boolean;
   overture: boolean;
   mpzpZones: boolean;
   landCover: boolean;
@@ -321,7 +315,6 @@ export const useWfsStore = create<WfsState>()(
         buildings: true,
         parcels: true,
         trees: false,
-        terrainShading: false,
       },
 
       projectRadius: 200,
@@ -343,8 +336,6 @@ export const useWfsStore = create<WfsState>()(
       bdotInvertColors: true,
       geoOverlayOpacity: 0.65,
       geoOverlayInvertColors: true,
-      showTerrainLayer: false,
-      terrainOpacity: 0.35,
       showTreesLayer: false,
 
   overtureGreenAreas: [],
@@ -469,8 +460,7 @@ export const useWfsStore = create<WfsState>()(
       plansLayersSnapshot = null;
       set({
         showPlansOverlayGroup: true,
-        showMpzpLayer: snapshot?.mpzp ?? (state.showMpzpLayer || (!state.showTerrainLayer && !state.showOvertureGreenAreas && !state.showMpzpZonesLayer && !state.showLandCoverLayer)),
-        showTerrainLayer: snapshot?.terrain ?? state.showTerrainLayer,
+        showMpzpLayer: snapshot?.mpzp ?? (state.showMpzpLayer || (!state.showOvertureGreenAreas && !state.showMpzpZonesLayer && !state.showLandCoverLayer)),
         showOvertureGreenAreas: snapshot?.overture ?? state.showOvertureGreenAreas,
         showMpzpZonesLayer: snapshot?.mpzpZones ?? state.showMpzpZonesLayer,
         showLandCoverLayer: snapshot?.landCover ?? state.showLandCoverLayer,
@@ -478,7 +468,6 @@ export const useWfsStore = create<WfsState>()(
     } else {
       plansLayersSnapshot = {
         mpzp: state.showMpzpLayer,
-        terrain: state.showTerrainLayer,
         overture: state.showOvertureGreenAreas,
         mpzpZones: state.showMpzpZonesLayer,
         landCover: state.showLandCoverLayer,
@@ -486,7 +475,6 @@ export const useWfsStore = create<WfsState>()(
       set({
         showPlansOverlayGroup: false,
         showMpzpLayer: false,
-        showTerrainLayer: false,
         showOvertureGreenAreas: false,
         showMpzpZonesLayer: false,
         showLandCoverLayer: false,
@@ -507,8 +495,6 @@ export const useWfsStore = create<WfsState>()(
   setShowMpzpLayer: (show) => set({ showMpzpLayer: show }),
   setMpzpOpacity: (val) => set({ mpzpOpacity: val }),
   setMpzpInvertColors: (invert) => set({ mpzpInvertColors: invert }),
-  setShowTerrainLayer: (show) => set({ showTerrainLayer: show }),
-  setTerrainOpacity: (val) => set({ terrainOpacity: val }),
   setShowTreesLayer: (show) => set({ showTreesLayer: show }),
 
   setOvertureGreenAreas: (features) => set({ overtureGreenAreas: features }),
@@ -538,7 +524,6 @@ export const useWfsStore = create<WfsState>()(
         geoOverlayInvertColors: state.geoOverlayInvertColors,
         mpzpOpacity: state.mpzpOpacity,
         mpzpInvertColors: state.mpzpInvertColors,
-        terrainOpacity: state.terrainOpacity,
         projectRadius: state.projectRadius,
         buildingSource: state.buildingSource,
       }),

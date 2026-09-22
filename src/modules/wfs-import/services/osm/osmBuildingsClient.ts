@@ -28,10 +28,11 @@ import { WfsBbox } from '../city/wfsWarsawClient';
 // mimo identycznego kodu klienta w dev i w produkcji.
 const OVERPASS_PROXY_URL = '/api/osm-overpass';
 
-// 8s było za mało dla gęstych centrów miast (np. Poznań — dużo relacji building:part
-// fasada/dach) — mirrory Overpass potrafią potrzebować bliżej deklarowanego serwerowi
-// [timeout:25] (patrz zapytanie niżej), więc timeout klienta musi mieć na to margines.
-const OVERPASS_REQUEST_TIMEOUT_MS = 25000;
+// Proxy (api/osm-overpass.ts) odpytuje mirrory Overpass RÓWNOLEGLE, każdy z timeoutem 50s
+// (dopasowanym do [timeout:45] w zapytaniu niżej + margines na transfer) — timeout klienta
+// musi być WIĘKSZY niż timeout proxy, inaczej fetch() klienta przerywa się (AbortError),
+// zanim proxy zdąży zwrócić wynik lub zgłosić błąd wszystkich mirrorów.
+const OVERPASS_REQUEST_TIMEOUT_MS = 55000;
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
@@ -70,6 +71,12 @@ type OverpassElement = OverpassNode | OverpassWay | OverpassRelation;
 
 export interface OverpassResponse {
   elements: OverpassElement[];
+  /** Overpass ustawia to pole, gdy własny budżet czasowy zapytania ([timeout:N] w Overpass QL —
+   * limit wykonania PO STRONIE SERWERA Overpass, niezależny od timeoutów AbortController po
+   * stronie klienta/proxy) zostanie przekroczony w trakcie liczenia — serwer i tak odpowiada
+   * HTTP 200 z tym, co zdążył policzyć do tego momentu, więc bez sprawdzenia tego pola taka
+   * ucięta odpowiedź wygląda jak pełny sukces. */
+  remark?: string;
 }
 
 /**
@@ -725,7 +732,7 @@ export async function fetchOsmBuildings(
   const [west, south, east, north] = bbox;
 
   const query = `
-    [out:json][timeout:25];
+    [out:json][timeout:45];
     (
       way["building"](${south},${west},${north},${east});
       way["building:part"](${south},${west},${north},${east});
@@ -765,6 +772,16 @@ export async function fetchOsmBuildings(
 
   if (!responseData) {
     throw new Error('Nie udało się pobrać budynków z OpenStreetMap (Overpass API): Błąd połączenia');
+  }
+
+  // Serwer Overpass zwraca HTTP 200 nawet gdy przekroczy własny budżet czasowy zapytania —
+  // `remark` w takim wypadku opisuje ucięcie (np. "runtime error: Query timed out ...") i wynik
+  // zawiera tylko część elementów. Traktujemy to jak błąd (nie jak sukces z niekompletnym
+  // wynikiem), żeby taki fetch nie został oznaczony jako "pokryty" (isBuildingsFetchCovered)
+  // i użytkownik dostał czytelny komunikat zamiast cichego, wiecznie identycznego niedoboru
+  // budynków przy kolejnych próbach na tym samym obszarze.
+  if (responseData.remark && /timeout|timed out/i.test(responseData.remark)) {
+    throw new Error(`Serwer Overpass przerwał zapytanie z powodu przekroczenia czasu wykonania: ${responseData.remark}`);
   }
 
   return parseOverpassBuildingsResponse(responseData, projectCenter, projectCrs, radiusMeters);

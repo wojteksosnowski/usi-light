@@ -27,7 +27,6 @@ import { fetchOvertureBase } from '../../../../modules/wfs-import/services/overt
 import { findMpzpSource } from '../../../../modules/wfs-import/services/reference/mpzpSources';
 import { fetchLandCoverUnits } from '../../../../modules/wfs-import/services/reference/wfsLcvClient';
 import { EPSG_2180 } from '../../../../modules/wfs-import/services/national/wfsEgibClient';
-import { analyzeBuildingHeights } from '../../../../modules/wfs-import/services/elevation/terrainAnalyzer';
 import { latLonToBbox } from '../../../../modules/wfs-import/services/shared/geocoding';
 import { detectCoordinateSystem, CrsDetectionResult, LatLon, wgs84ToCadPoint } from '../../../../utils/geoTransform';
 import { translateBuildingGeometry } from '../../../../store/useSceneStore';
@@ -189,9 +188,6 @@ export const useProjectGeoSync = () => {
       let importedBuildings: BuildingLoop[] = [];
       let buildingsFetchError: string | null = null;
       let buildingsSourceLabel = citySource?.name || 'WFS';
-      // Faktyczne źródło po ewentualnym fallbacku krajowym (patrz fetchBuildingsWithFallback) —
-      // używane m.in. do decyzji o dogrzaniu wysokości z LiDAR (`hasStoreyHeights`).
-      let effectiveBuildingsSource = citySource;
 
       setStatus({ stage: 'buildings', progressDone: 0, progressTotal: 0 });
 
@@ -207,7 +203,6 @@ export const useProjectGeoSync = () => {
             const res = importBuildingsFromGeoJson(fetched.geojson, fetched.source.sourceCrs, projectCrs, projectCenter, radius);
             importedBuildings = res.buildings;
             buildingsSourceLabel = fetched.source.name;
-            effectiveBuildingsSource = fetched.source;
             wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: `wfs:${fetched.source.name}` });
           }
         } catch (err) {
@@ -233,41 +228,6 @@ export const useProjectGeoSync = () => {
         }
       }
 
-      // 2c. Wzbogacenie o wysokości LiDAR NMT/NMPT dla budynków bez precyzyjnych kondygnacji
-      let heightSourceWarning: string | null = null;
-      if (importedBuildings.length > 0) {
-        const needsLidarHeights = importedBuildings.some((b) => b.heightSource === 'default');
-        if (needsLidarHeights || effectiveBuildingsSource?.hasStoreyHeights === false) {
-          try {
-            const terrainResults = await analyzeBuildingHeights(importedBuildings, projectCrs, undefined, projectCenter);
-            const resultById: Record<string, typeof terrainResults[number]> = {};
-            terrainResults.forEach((r) => { resultById[r.buildingId] = r; });
-            importedBuildings = importedBuildings.map((b) => {
-              const result = resultById[b.id];
-              if (result == null) return b;
-              const realHeight = result.estimatedHeight;
-              const groundElevation = result.relativeElevation ?? 0;
-              return {
-                ...b,
-                defaultHeight: realHeight,
-                heightSource: 'lidar-nmt',
-                elevation: groundElevation,
-                segments: b.segments.map((s) => ({ ...s, hTop: realHeight, hBase: groundElevation })),
-              };
-            });
-            // Próbka DSM/DTM potrafi trafić w NODATA tylko dla części budynków (brzeg siatki,
-            // dziura w pokryciu LiDAR) — te po cichu zostają przy starym heightSource (OSM/domyślny),
-            // podczas gdy reszta partii dostaje 'lidar-nmt'. Bez tej notatki użytkownik nie miałby
-            // żadnej wskazówki, że część wysokości w scenie pochodzi z innego źródła niż reszta.
-            if (terrainResults.length > 0 && terrainResults.length < importedBuildings.length) {
-              heightSourceWarning = `Wysokości NMT: ${terrainResults.length}/${importedBuildings.length} budynków, reszta z OSM/domyślnych`;
-            }
-          } catch (terrainErr) {
-            console.warn('Nie udało się dobrać wysokości budynków z NMT/NMPT — pozostawiono wartości domyślne/OSM:', terrainErr);
-          }
-        }
-      }
-
       // 3. Inteligentna synchronizacja do sceny (Smart Updater)
       // Zachowujemy:
       // - Wszystkie obiekty oznaczone jako projektowane (isTested: true)
@@ -280,7 +240,6 @@ export const useProjectGeoSync = () => {
 
       const infoParts = [
         buildingsFetchError ? `Budynki: ${buildingsFetchError}` : null,
-        heightSourceWarning,
       ].filter((part): part is string => part != null);
 
       setStatus({
@@ -293,8 +252,7 @@ export const useProjectGeoSync = () => {
       });
       setSyncFeedback(
         `Zsynchronizowano: ${parcels.length} działek, ${importedBuildings.length} budynków (${buildingsSourceLabel})` +
-        (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '') +
-        (heightSourceWarning ? ` (ℹ️ ${heightSourceWarning})` : '')
+        (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '')
       );
 
       // 4. Prefetch kafelków satelitarnych oraz automatyczne wczytanie kontekstu drogowego/zagospodarowania OSM

@@ -18,8 +18,6 @@ import { detectCoordinateSystem } from '../../../utils/geoTransform';
 import { BuildingLoop } from '../../../types/geometry';
 
 import { useOsmLanduseStore } from '../store/useOsmLanduseStore';
-import { useWmsStatusStore } from '../store/useWmsStatusStore';
-import { WmsStatusIcon } from './WmsStatusIcon';
 
 const RADIUS_OPTIONS = [100, 200, 300, 500];
 
@@ -31,8 +29,6 @@ export const WfsImportPanel: React.FC = () => {
   const setStatus = useWfsStore((s) => s.setStatus);
   const setTrees = useWfsStore((s) => s.setTrees);
   const setShowTreesLayer = useWfsStore((s) => s.setShowTreesLayer);
-  const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
-  const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
   const showTreesLayer = useWfsStore((s) => s.showTreesLayer);
   const options = useWfsStore((s) => s.options);
   const setOptions = useWfsStore((s) => s.setOptions);
@@ -48,7 +44,6 @@ export const WfsImportPanel: React.FC = () => {
   const osmFeatures = useOsmLanduseStore((s) => s.features);
   const showOsmLanduseGroup = useOsmLanduseStore((s) => s.showOsmLanduseGroup);
   const setShowOsmLanduseGroup = useOsmLanduseStore((s) => s.setShowOsmLanduseGroup);
-  const terrainStatus = useWmsStatusStore((s) => s.statuses.terrain);
 
   const [radius, setRadius] = useState(200);
   const [selectedLocation, setSelectedLocation] = useState<GeocodingResult | null>(null);
@@ -159,20 +154,7 @@ export const WfsImportPanel: React.FC = () => {
 
       setLastImportBbox(bbox);
 
-      if (!citySource) {
-        setShowTerrainLayer(true);
-        setStatus({
-          isFetching: false,
-          stage: 'done',
-          error: null,
-          info: 'Brak lokalnego serwisu WFS dla tej lokalizacji — włączono podkład krajowy (NMT)',
-          buildingsCount: 0,
-          parcelsCount: 0,
-          treesCount: 0,
-        });
-      } else {
-        setStatus({ isFetching: false, stage: 'done', error: null, info: null, buildingsCount, parcelsCount, treesCount });
-      }
+      setStatus({ isFetching: false, stage: 'done', error: null, info: null, buildingsCount, parcelsCount, treesCount });
     } catch (err) {
       setStatus({
         isFetching: false,
@@ -184,7 +166,7 @@ export const WfsImportPanel: React.FC = () => {
         treesCount: 0,
       });
     }
-  }, [selectedLocation, radius, options, settings, buildingSource, addBuilding, setStatus, setTrees, setShowTreesLayer, setShowTerrainLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup, isParcelsFetchCovered, isBuildingsFetchCovered, setParcelsFetchCoverage, setBuildingsFetchCoverage]);
+  }, [selectedLocation, radius, options, settings, buildingSource, addBuilding, setStatus, setTrees, setShowTreesLayer, setLastImportBbox, fetchOsmLanduseOption, fetchOsmLanduseAction, setShowOsmLanduseGroup, isParcelsFetchCovered, isBuildingsFetchCovered, setParcelsFetchCoverage, setBuildingsFetchCoverage]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -248,9 +230,6 @@ export const WfsImportPanel: React.FC = () => {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Podkłady mapowe:</span>
-        <ToggleRow label="Cieniowanie terenu (NMT)" active={showTerrainLayer}
-          onToggle={() => setShowTerrainLayer(!showTerrainLayer)}
-          icon={<WmsStatusIcon status={terrainStatus} />} />
         <ToggleRow label="Drzewa (wizualizacja)" active={showTreesLayer}
           onToggle={() => setShowTreesLayer(!showTreesLayer)} />
         {osmFeatures.length > 0 && (

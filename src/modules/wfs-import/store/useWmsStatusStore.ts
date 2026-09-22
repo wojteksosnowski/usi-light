@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { WmsLayerStatus } from '../renderers/wmsTileManager';
 
-export type WmsServiceKey = 'orthophoto' | 'kiut' | 'bdot' | 'mpzp' | 'terrain';
+export type WmsServiceKey = 'orthophoto' | 'kiut' | 'bdot' | 'mpzp';
 
 interface WmsStatusState {
   statuses: Record<WmsServiceKey, WmsLayerStatus>;
@@ -22,7 +22,6 @@ export const useWmsStatusStore = create<WmsStatusState>((set) => ({
     kiut: 'idle',
     bdot: 'idle',
     mpzp: 'idle',
-    terrain: 'idle',
   },
   setStatus: (key, status) =>
     set((state) => ({ statuses: { ...state.statuses, [key]: status } })),

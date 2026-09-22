@@ -9,7 +9,7 @@ export type FeatureFlag = 'geoImport' | 'dxfExport' | 'geoOverlays';
 export const FEATURE_FLAGS: Record<FeatureFlag, { pro: boolean; label: string }> = {
   geoImport: { pro: true, label: 'Import działek geodezyjnych i obrysów budynków (ULDK/WFS)' },
   dxfExport: { pro: true, label: 'Eksport geometrii do DXF' },
-  geoOverlays: { pro: true, label: 'Podkłady geodezyjne i plany (GESUT, BDOT10k, MPZP, NMT, Overture, Pokrycie terenu)' },
+  geoOverlays: { pro: true, label: 'Podkłady geodezyjne i plany (GESUT, BDOT10k, MPZP, Overture, Pokrycie terenu)' },
 };
 
 export function isFeaturePro(feature: FeatureFlag): boolean {

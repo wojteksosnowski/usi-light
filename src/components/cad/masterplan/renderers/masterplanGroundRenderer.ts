@@ -61,7 +61,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   ctx.fillRect(0, 0, width, height);
   ctx.restore();
 
-  // 1.1 Renderowanie aktywnych warstw podkładowych (Satelita, Ortofotomapa, GESUT, BDOT, MPZP, NMT, Wektory, Drzewa)
+  // 1.1 Renderowanie aktywnych warstw podkładowych (Satelita, Ortofotomapa, GESUT, BDOT, MPZP, Wektory, Drzewa)
   const pipeline = CadRenderPipeline.getDefault();
   const mainLayers = pipeline.getMainLayers();
   for (const layer of mainLayers) {

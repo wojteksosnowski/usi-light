@@ -307,7 +307,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   // lub poziomu zoomu, prefetchuje kafle wokół bieżącej skali, dzięki czemu przejścia
   // między progami całkowitymi (np. 18.01, 19.02, 20.02) korzystają z kafli już obecnych w RAM.
   const activeGeoLayersKey = useWfsStore(
-    (s) => `${s.showOrthophotoLayer}|${s.showKiutLayer}|${s.showMpzpLayer}|${s.showBdotLayer}|${s.showTerrainLayer}`
+    (s) => `${s.showOrthophotoLayer}|${s.showKiutLayer}|${s.showMpzpLayer}|${s.showBdotLayer}`
   );
 
   useEffect(() => {

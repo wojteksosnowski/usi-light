@@ -4,7 +4,6 @@ import { OrthophotoLayer } from './layers/OrthophotoLayer';
 import { KiutOverlayLayer } from './layers/KiutOverlayLayer';
 import { MpzpOverlayLayer } from './layers/MpzpOverlayLayer';
 import { BdotOverlayLayer } from './layers/BdotOverlayLayer';
-import { TerrainShadingLayer } from './layers/TerrainShadingLayer';
 import { WfsTreesLayer } from './layers/WfsTreesLayer';
 import { ParcelLoadingPreviewLayer } from './layers/ParcelLoadingPreviewLayer';
 import { OvertureContextLayer } from './layers/OvertureContextLayer';
@@ -26,7 +25,6 @@ const KIUT_LAYERS = 'gesut,przewod_wodociagowy,przewod_kanalizacyjny,przewod_gaz
 const MPZP_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego';
 const BDOT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaBazDanychObiektowTopograficznych';
 const BDOT_LAYERS = 'bdot';
-const NMT_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief';
 
 let renderRafPending = false;
 const triggerRender = () => {
@@ -58,7 +56,6 @@ const orthophotoLayer = new OrthophotoLayer();
 const kiutLayer = new KiutOverlayLayer();
 const mpzpLayer = new MpzpOverlayLayer();
 const bdotLayer = new BdotOverlayLayer();
-const terrainLayer = new TerrainShadingLayer();
 const treesLayer = new WfsTreesLayer();
 const parcelLoadingPreviewLayer = new ParcelLoadingPreviewLayer();
 const overtureContextLayer = new OvertureContextLayer();
@@ -98,19 +95,10 @@ const bdotTileManager = new WmsTileManager({
   maxNativeZoom: 21,
 }, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('bdot', status));
 
-const terrainTileManager = new WmsTileManager({
-  baseUrl: NMT_WMS_URL,
-  layers: 'Raster',
-  format: 'image/png',
-  crs: 'EPSG:3857',
-  maxNativeZoom: 20,
-}, 200, triggerRender, (status) => useWmsStatusStore.getState().setStatus('terrain', status));
-
 orthophotoLayer.setTileManager(orthophotoTileManager);
 kiutLayer.setTileManager(kiutTileManager);
 mpzpLayer.setTileManager(mpzpTileManager);
 bdotLayer.setTileManager(bdotTileManager);
-terrainLayer.setTileManager(terrainTileManager);
 
 /** Wszystkie serwisy WMS aplikacji. Kolejność wyznacza sekwencję startowego warm-upu bufora. */
 const WMS_TILE_MANAGERS: WmsTileManager[] = [
@@ -118,7 +106,6 @@ const WMS_TILE_MANAGERS: WmsTileManager[] = [
   kiutTileManager,
   mpzpTileManager,
   bdotTileManager,
-  terrainTileManager,
 ];
 
 /**
@@ -133,7 +120,6 @@ export function prefetchActiveGeoLayersInRadius(lat: number, lon: number, radius
   if (state.showKiutLayer) kiutTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
   if (state.showMpzpLayer) mpzpTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
   if (state.showBdotLayer) bdotTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
-  if (state.showTerrainLayer) terrainTileManager.prefetchTilesInRadius(lat, lon, radiusMeters, currentZoom);
 }
 
 /**
@@ -174,8 +160,6 @@ export function registerGeoLayers(): () => void {
   let prevShowBdot = false;
   let prevBdotOpacity = 0.6;
   let prevBdotInvert = true;
-  let prevShowTerrain = false;
-  let prevTerrainOpacity = 0.35;
   let prevShowTrees = false;
   let prevTreesLen = 0;
   let prevLoadingParcelsLen = 0;
@@ -225,8 +209,6 @@ export function registerGeoLayers(): () => void {
       showBdotLayer,
       bdotOpacity,
       bdotInvertColors,
-      showTerrainLayer,
-      terrainOpacity,
       showTreesLayer,
       trees,
       loadingParcels,
@@ -278,11 +260,6 @@ export function registerGeoLayers(): () => void {
     prevShowBdot = activeBdot;
     prevBdotOpacity = bdotOpacity;
     prevBdotInvert = bdotInvertColors;
-
-    // 5. Cieniowanie NMT (PRO)
-    const activeTerrain = isPro && showTerrainLayer;
-    if (toggleMainLayer(pipeline, terrainLayer, 'wfs_terrain_shading', activeTerrain, prevShowTerrain)) changed = true;
-    prevShowTerrain = activeTerrain;
 
     // 7. Drzewa
     treesLayer.setTrees(trees);
@@ -383,7 +360,6 @@ export function registerGeoLayers(): () => void {
     pipeline.unregisterMainLayer('wfs_kiut_overlay');
     pipeline.unregisterMainLayer('wfs_mpzp_overlay');
     pipeline.unregisterMainLayer('wfs_bdot_overlay');
-    pipeline.unregisterMainLayer('wfs_terrain_shading');
     pipeline.unregisterMainLayer('wfs_trees');
     pipeline.unregisterMainLayer('wfs_parcels_loading');
     pipeline.unregisterMainLayer('wfs_overture_context');

@@ -1,18 +1,10 @@
 import { DxfWriter, LWPolylineFlags } from '@tarikjabiri/dxf';
 import { AnalysisPointResult, BuildingLoop, HourlyShadowLoop, PinnedFacadePoint } from '../types/geometry';
-import { CrsDetectionResult, LatLon } from './geoTransform';
-import { buildTerrainMeshDxfEntities } from '../modules/wfs-import/utils/terrainMeshDxf';
 import { buildFacadeComplianceBands, buildFacadePointAnalysisEntities, DXF_ANALYSIS_LAYERS } from './dxf/analysisGeometryBuilder';
 
 interface DxfExportParams {
   buildings: BuildingLoop[];
   pinnedPoints: PinnedFacadePoint[];
-  /** Jeśli podane, do eksportu dołączana jest siatka rzeźby terenu (NMT, GUGiK WCS). */
-  terrain?: {
-    projectCenter: LatLon;
-    radiusMeters: number;
-    projectCrs: CrsDetectionResult;
-  };
   /** Obrysy zakresu cienia z krokami co 1h (obwiednia + pośrednie godziny), na osobnej warstwie. */
   hourlyShadows?: HourlyShadowLoop[];
   /** Wyniki analiz §12/§56 dla wszystkich przypiętych punktów fasady (P1/P2/P3) — źródło łuku (§12)
@@ -39,7 +31,7 @@ export function buildDxfLines({
   pinnedPointResults,
   analysisResults,
   dxf = new DxfWriter(),
-}: Omit<DxfExportParams, 'terrain'> & { dxf?: DxfWriter }): string[] {
+}: DxfExportParams & { dxf?: DxfWriter }): string[] {
   dxf.addLayer('BUDYNKI', 7, 'CONTINUOUS');
   dxf.addLayer('GRANICE', 1, 'CONTINUOUS');
   dxf.addLayer('PUNKTY_POMIARU', 3, 'CONTINUOUS');
@@ -118,18 +110,11 @@ export function buildDxfLines({
 export async function exportSceneToDxf({
   buildings,
   pinnedPoints,
-  terrain,
   hourlyShadows,
   pinnedPointResults,
   analysisResults,
-}: DxfExportParams): Promise<{ terrainWarning: string | null }> {
-  let terrainWarning: string | null = null;
+}: DxfExportParams): Promise<void> {
   const dxf = new DxfWriter();
-
-  if (terrain) {
-    const result = await buildTerrainMeshDxfEntities(dxf, terrain.projectCenter, terrain.radiusMeters, terrain.projectCrs);
-    terrainWarning = result.warning;
-  }
 
   const lines = buildDxfLines({
     buildings,
@@ -148,6 +133,4 @@ export async function exportSceneToDxf({
   link.download = `usi-light-export-${new Date().toISOString().slice(0, 10)}.dxf`;
   link.click();
   URL.revokeObjectURL(url);
-
-  return { terrainWarning };
 }

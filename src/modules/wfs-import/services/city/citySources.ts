@@ -15,8 +15,8 @@ export interface CitySource {
   /**
    * Czy serwis realnie wypełnia atrybut KONDYGNACJE_NADZIEMNE (liczba wysokość budynku).
    * Domyślnie `true`. Ogólnopolski fallback EGiB zwraca to pole jako puste (`None`) dla
-   * większości powiatów, więc dla niego ustawiamy `false` — wysokość trzeba dobrać inną
-   * metodą (LiDAR NMPT−NMT, patrz `terrainAnalyzer.ts`) zamiast ufać stałej wartości domyślnej.
+   * większości powiatów, więc dla niego ustawiamy `false` — informacyjne, budynki bez tego
+   * atrybutu dostają stałą wartość domyślną (moduł LiDAR NMT/NMPT został usunięty).
    */
   hasStoreyHeights?: boolean;
 }

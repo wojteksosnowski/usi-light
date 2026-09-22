@@ -185,10 +185,6 @@ export const APP_CONFIG = {
     wmsWarmupStaggerMs: 250,
     // Debounce warm-upu: od ostatniej zmiany środka/promienia projektu (i hydratacji sceny).
     wmsWarmupDelayMs: 1200,
-    // Liczba równoległych zapytań do NMT REST API (GUGiK) przy pobieraniu rzędnych terenu
-    nmtConcurrency: 8,
-    // Fallback NMT: użyj Open-Elevation SRTM jeśli GUGiK niedostępny
-    nmtFallbackEnabled: true,
   },
 
   // Wypełnienie cienia godzinowego (warstwa Zakres cienia)

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { fetchOsmBuildings } from './osmBuildingsClient';
+import { latLonToBbox } from '../shared/geocoding';
 import type { WfsBbox } from '../city/wfsWarsawClient';
 import type { CrsDetectionResult } from '../../../../utils/geoTransform';
 import osmOverpassProxyHandler from '../../../../../api/osm-overpass';
@@ -92,6 +93,26 @@ describe.skipIf(!LIVE)('testy live OSM/Overpass (budynki) — prawdziwy serwer, 
         expect(b.vertices.length).toBeGreaterThanOrEqual(3);
         expect(b.segments.length).toBeGreaterThanOrEqual(3);
       }
-    }, 45000);
+    }, 65000);
   }
+
+  // Regresja dla zgłoszenia: import przy 500m całkowicie się nie udawał, przy 300m dawał
+  // niekompletny wynik, a po "poprawce" osm-error2.json zwrócił dokładnie te same 53 budynki
+  // co osm-error1.json (dowód, że fetch nigdy się nie zmienił — patrz remark-detection w
+  // osmBuildingsClient.ts). Odtwarzamy dokładny bbox produkcyjny przez `latLonToBbox`,
+  // sprawdzamy monotoniczność (więcej budynków przy większym promieniu) i nietrywialny próg —
+  // same testy "> 0" przechodziły nawet dla ucinanych przez Overpass odpowiedzi.
+  const bugReportCenter = { lat: 52.2545839, lon: 20.996694 };
+  it('lokalizacja z bug reportu: liczba budynków rośnie (lub nie maleje) wraz z promieniem 300m -> 500m', async () => {
+    const bbox300 = latLonToBbox(bugReportCenter.lat, bugReportCenter.lon, 300) as WfsBbox;
+    const bbox500 = latLonToBbox(bugReportCenter.lat, bugReportCenter.lon, 500) as WfsBbox;
+
+    const buildings300 = await fetchOsmBuildings(bbox300, bugReportCenter, localCrs, 300);
+    const buildings500 = await fetchOsmBuildings(bbox500, bugReportCenter, localCrs, 500);
+
+    expect(buildings500.length).toBeGreaterThanOrEqual(buildings300.length);
+    // Gęsto zabudowana część Warszawy (Bonifraterska/Muranów) — próg dobrany z realnego
+    // eksportu referencyjnego (reference/osm-error1.json miał 53 budynki przy tym obszarze).
+    expect(buildings500.length).toBeGreaterThanOrEqual(20);
+  }, 90000);
 });

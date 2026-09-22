@@ -47,7 +47,6 @@ describe('useWfsStore - shiftVectorLayers and group toggles', () => {
       showKiutLayer: false,
       showBdotLayer: false,
       showMpzpLayer: false,
-      showTerrainLayer: false,
       showOvertureGreenAreas: false,
       showMpzpZonesLayer: false,
       showLandCoverLayer: false,

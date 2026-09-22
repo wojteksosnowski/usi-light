@@ -23,8 +23,6 @@ export const ProjectOverlaysCard: React.FC = () => {
   const setShowBdotLayer = useWfsStore((s) => s.setShowBdotLayer);
   const geoOverlayOpacity = useWfsStore((s) => s.geoOverlayOpacity);
   const setGeoOverlayOpacity = useWfsStore((s) => s.setGeoOverlayOpacity);
-  const showTerrainLayer = useWfsStore((s) => s.showTerrainLayer);
-  const setShowTerrainLayer = useWfsStore((s) => s.setShowTerrainLayer);
   const showGeoOverlayGroup = useWfsStore((s) => s.showGeoOverlayGroup);
   const setShowGeoOverlayGroup = useWfsStore((s) => s.setShowGeoOverlayGroup);
   const showPlansOverlayGroup = useWfsStore((s) => s.showPlansOverlayGroup);
@@ -161,7 +159,7 @@ export const ProjectOverlaysCard: React.FC = () => {
         )}
       </div>
 
-      {/* 8. Plany (PRO) — MPZP, Strefy MPZP, NMT, Overture, Pokrycie terenu */}
+      {/* 8. Plany (PRO) — MPZP, Strefy MPZP, Overture, Pokrycie terenu */}
       <div className={`project-toggle-card ${showPlansOverlayGroup ? 'active-cyan' : ''}`}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

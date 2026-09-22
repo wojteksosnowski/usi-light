@@ -411,7 +411,7 @@ export const CadTopHud: React.FC = () => {
             }}
             activeBg="var(--status-cyan-bg)"
             activeColor="var(--status-cyan-text)"
-            title="Włącz / wyłącz warstwy planistyczne i ukształtowania terenu (MPZP / NMT / Overture / Pokrycie terenu) [Wersja PRO]"
+            title="Włącz / wyłącz warstwy planistyczne i ukształtowania terenu (MPZP / Overture / Pokrycie terenu) [Wersja PRO]"
             icon={<Map size={13} />}
             label="Plany"
           />

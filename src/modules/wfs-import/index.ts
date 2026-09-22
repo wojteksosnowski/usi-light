@@ -19,18 +19,6 @@ export {
 export type { WfsBbox, RawTreeFeature } from './services/city/wfsWarsawClient';
 
 export {
-  fetchDsmBbox,
-  fetchDtmBbox,
-  parseAaigrid,
-} from './services/elevation/wcsGugikClient';
-export type { AaigridData } from './services/elevation/wcsGugikClient';
-
-export {
-  analyzeBuildingHeights,
-} from './services/elevation/terrainAnalyzer';
-export type { TerrainAnalysisResult } from './services/elevation/terrainAnalyzer';
-
-export {
   importBuildingsFromGeoJson,
   importParcelsFromGeoJson,
   importTrees,
