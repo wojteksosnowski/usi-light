@@ -56,7 +56,19 @@ const ROUND2_MAX_RELATIONS = 8;
 // które wykrywa takie relacje niezależnie od tego mechanizmu i dorzuca je do tej samej listy co
 // dziś zasila celowany dociąg w Rundzie 2.
 const ROUND0_BBOX_PADDING_METERS = 100;
-const ROUND0_TIMEOUT_MS = 15000;
+
+// Runda 0 biegnie RÓWNOLEGLE z zapytaniem głównym (Rundą 1, patrz `fetchOsmBuildings`), więc jej
+// timeout musi respektować DOKŁADNIE to samo ograniczenie co `OVERPASS_REQUEST_TIMEOUT_MS` wyżej:
+// proxy (`api/osm-overpass.ts`) celowo ufa głównemu endpointowi Overpass i daje mu do 48s
+// (PRIMARY_TIMEOUT_MS), zanim w ogóle rozważy fallback — to świadomy wybór (patrz komentarz w
+// tym pliku), bo główny endpoint w normalnych warunkach regularnie odpowiada dopiero po 15-40s.
+// Wcześniejszy krótszy timeout (15s) był krótszy niż PRIMARY_TIMEOUT_MS proxy, więc Runda 0
+// przerywała się (AbortError) niemal ZAWSZE, zanim proxy zdążyło zwrócić realną odpowiedź —
+// czyniąc ją bezużyteczną właśnie dla przypadku, do którego została stworzona (relacje typu
+// "Simple 3D Buildings" całkowicie pomijane przez bbox Rundy 1, np. wieżowiec Intraco,
+// relation/3211736). Skoro obie rundy biegną równolegle, wydłużenie tego timeoutu do tej samej
+// wartości co `OVERPASS_REQUEST_TIMEOUT_MS` nie wydłuża całkowitego czasu importu.
+const ROUND0_TIMEOUT_MS = OVERPASS_REQUEST_TIMEOUT_MS;
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
