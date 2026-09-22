@@ -742,8 +742,16 @@ export async function fetchOsmBuildings(
     );
     out body;
     >;
+    >;
     out skel qt;
   `.trim();
+  // Podwójna rekursja `>;>;` (zamiast pojedynczej) — zabezpieczenie na wypadek
+  // zagnieżdżenia, w którym pojedynczy krok w dół nie dociągnąłby węzłów way'a
+  // dodanego do zbioru WYŁĄCZNIE przez rekursję z relacji (np. relacja zawierająca
+  // inną relację `type=building`). Bezpieczne/idempotentne, jeśli nic nowego nie ma
+  // do dodania — regresja: zgłoszenie "brakujący budynek mimo istnienia w OSM"
+  // (relacja Simple 3D Buildings bez własnego tagu building, np. wieżowiec Intraco,
+  // relation/3211736 w Warszawie).
 
   let responseData: OverpassResponse | null = null;
 
