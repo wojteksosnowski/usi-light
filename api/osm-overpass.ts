@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Nieprawidłowe ciało żądania Overpass.' });
   }
 
-  const attemptEndpoint = async (endpoint: string, timeoutMs: number): Promise<string> => {
+  const attemptEndpoint = async (endpoint: string, timeoutMs: number): Promise<{ text: string; elementsCount: number }> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -70,29 +70,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!text.startsWith('{')) {
         throw new Error(`Mirror ${endpoint} zwrócił nieoczekiwaną odpowiedź.`);
       }
-      return text;
+      let elementsCount = 0;
+      try {
+        elementsCount = JSON.parse(text)?.elements?.length ?? 0;
+      } catch {
+        throw new Error(`Mirror ${endpoint} zwrócił niepoprawny JSON.`);
+      }
+      return { text, elementsCount };
     } finally {
       clearTimeout(timer);
     }
   };
 
-  // Promise.any zwraca pierwszy sukces; jeśli WSZYSTKIE mirrory zawiodą, rzuca AggregateError.
-  const runRound = async (timeoutMs: number): Promise<{ text: string } | { errors: Error[] }> => {
-    const errors: Error[] = [];
-    try {
-      const text = await Promise.any(
-        OVERPASS_ENDPOINTS.map((endpoint) =>
-          attemptEndpoint(endpoint, timeoutMs).catch((err) => {
+  // Nie wystarczy wziąć pierwszej udanej (HTTP 200 + poprawny JSON) odpowiedzi (jak robił
+  // dawniej Promise.any) — część publicznych mirrorów (zwłaszcza mniej znane, dodane niedawno:
+  // overpass.osm.ch, overpass.private.coffee) potrafi zwrócić poprawny, ale PUSTY wynik
+  // (`elements: []`) dla obszaru, w którym inne mirrory mają pełne dane — np. przez replication
+  // lag albo węższy zasięg regionalny tej instancji. Taka pusta-ale-"poprawna" odpowiedź, gdyby
+  // wygrała wyścig, cicho udawałaby "brak budynków w tym miejscu" zamiast prawdziwego wyniku.
+  // Dlatego: rozstrzygamy na rzecz PIERWSZEGO NIEPUSTEGO wyniku (szybka ścieżka przy sukcesie),
+  // ale pusty wynik nie kończy wyścigu — czekamy na resztę mirrorów i tylko jeśli WSZYSTKIE dadzą
+  // 0 elementów (albo błąd), uznajemy to za faktycznie pusty obszar / awarię.
+  const raceForNonEmpty = (
+    endpoints: string[],
+    timeoutMs: number
+  ): Promise<{ text: string } | { errors: Error[] }> =>
+    new Promise((resolve) => {
+      let remaining = endpoints.length;
+      let emptyText: string | null = null;
+      const errors: Error[] = [];
+      let settled = false;
+
+      const finishIfDone = () => {
+        if (settled || remaining > 0) return;
+        settled = true;
+        resolve(emptyText !== null ? { text: emptyText } : { errors });
+      };
+
+      for (const endpoint of endpoints) {
+        attemptEndpoint(endpoint, timeoutMs).then(
+          (result) => {
+            remaining--;
+            if (settled) return;
+            if (result.elementsCount > 0) {
+              settled = true;
+              resolve({ text: result.text });
+              return;
+            }
+            if (emptyText === null) emptyText = result.text;
+            finishIfDone();
+          },
+          (err) => {
+            remaining--;
+            if (settled) return;
             errors.push(err instanceof Error ? err : new Error(String(err)));
-            throw err;
-          })
-        )
-      );
-      return { text };
-    } catch {
-      return { errors };
-    }
-  };
+            finishIfDone();
+          }
+        );
+      }
+    });
+
+  const runRound = (timeoutMs: number) => raceForNonEmpty(OVERPASS_ENDPOINTS, timeoutMs);
 
   const firstRound = await runRound(FIRST_ROUND_TIMEOUT_MS);
   if ('text' in firstRound) {
