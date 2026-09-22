@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseWktToPolygonParts } from '../src/modules/wfs-import/services/uldkClient';
+import { parseWktToPolygonParts } from '../src/modules/wfs-import/services/national/uldkClient';
 
 describe('ULDK Client & WKT Parser', () => {
   it('parses standard 2D POLYGON from ULDK', () => {

@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Point2D } from '../../../types/geometry';
 import { LatLon, CrsDetectionResult } from '../../../utils/geoTransform';
-import { fetchOsmLanduse, OsmBbox } from '../services/osmLanduseClient';
+import { fetchOsmLanduse, OsmBbox } from '../services/osm/osmLanduseClient';
 import { WfsTreeFeature, useWfsStore } from './useWfsStore';
 
 export interface OsmLanduseFeature {

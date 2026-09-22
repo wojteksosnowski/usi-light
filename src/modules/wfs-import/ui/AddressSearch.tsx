@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Search, MapPin } from 'lucide-react';
-import { geocodeAddressDebounced, GeocodingResult } from '../services/geocoding';
+import { geocodeAddressDebounced, GeocodingResult } from '../services/shared/geocoding';
 
 interface AddressSearchProps {
   onSelect: (result: GeocodingResult) => void;

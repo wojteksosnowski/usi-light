@@ -21,8 +21,8 @@
  *   odfiltrować, inaczej `Number("brak_uprawnień")` daje NaN i psuje wysokość budynku.
  */
 
-import { GeoJsonFeatureCollection, WfsBbox, wgs84BboxToEpsg2178Bounds } from './wfsWarsawClient';
-import { parseWfsPolygonGml } from './wfsGmlUtils';
+import { GeoJsonFeatureCollection, WfsBbox, wgs84BboxToEpsg2178Bounds } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml } from '../shared/wfsGmlUtils';
 
 const KRAKOW_WFS_URL = '/api/wfs?target=krakow-wfs';
 

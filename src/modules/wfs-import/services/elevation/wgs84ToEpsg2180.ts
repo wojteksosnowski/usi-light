@@ -1,4 +1,4 @@
-import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
+import { wgs84ToCadPoint, CrsDetectionResult } from '../../../../utils/geoTransform';
 
 const EPSG_2180: CrsDetectionResult = {
   crs: 'EPSG:2180',

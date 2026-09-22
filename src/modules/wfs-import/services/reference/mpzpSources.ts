@@ -6,8 +6,8 @@
  * z serwisów miejskich (Warszawa, Kraków, Wrocław, Poznań, Gdynia) oraz usług krajowych.
  */
 
-import { CrsDetectionResult } from '../../../utils/geoTransform';
-import { WfsBbox, EPSG_2178, EPSG_2177 } from './wfsWarsawClient';
+import { CrsDetectionResult } from '../../../../utils/geoTransform';
+import { WfsBbox, EPSG_2178, EPSG_2177 } from '../city/wfsWarsawClient';
 import { fetchWarsawMpzpZones, MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 import { fetchKrakowMpzp } from './wfsMpzpKrakowClient';
 import { fetchWroclawMpzp } from './wfsMpzpWroclawClient';

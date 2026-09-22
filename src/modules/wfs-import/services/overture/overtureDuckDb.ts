@@ -28,7 +28,7 @@
  * z surowych partycji Overture (`theme=transportation/type=segment`, `theme=base/type=water`).
  */
 
-import { GeoJsonFeatureCollection } from './wfsWarsawClient';
+import { GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
 
 // Nazwa aktualnego wydania Overture — zweryfikowana listingiem S3 (`?list-type=2&prefix=release/`).
 // Overture wypuszcza nowe wydania co ok. miesiąc; tę wartość trzeba wtedy zbumpować.

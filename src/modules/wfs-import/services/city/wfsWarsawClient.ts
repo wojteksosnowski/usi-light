@@ -10,7 +10,7 @@ const TREES_WFS_URL = 'https://wfs.um.warszawa.pl/serwis';
 /** Bbox w EPSG:4326: [west, south, east, north] */
 export type WfsBbox = [number, number, number, number];
 
-import { wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
+import { wgs84ToCadPoint, CrsDetectionResult } from '../../../../utils/geoTransform';
 
 export const EPSG_2178: CrsDetectionResult = {
   crs: 'EPSG:2178',

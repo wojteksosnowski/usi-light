@@ -1,9 +1,9 @@
 import { DxfWriter, PolylineFlags } from '@tarikjabiri/dxf';
 import { cadPointToWgs84, wgs84ToCadPoint, CrsDetectionResult, LatLon } from '../../../utils/geoTransform';
-import { fetchDtmBbox } from '../services/wcsGugikClient';
-import { EPSG_2180 } from '../services/wfsEgibClient';
-import { wgs84ToEpsg2180 } from './wgs84ToEpsg2180';
-import { sampleGrid } from './terrainAnalyzer';
+import { fetchDtmBbox } from '../services/elevation/wcsGugikClient';
+import { EPSG_2180 } from '../services/national/wfsEgibClient';
+import { wgs84ToEpsg2180 } from '../services/elevation/wgs84ToEpsg2180';
+import { sampleGrid } from '../services/elevation/terrainAnalyzer';
 
 /** Docelowa liczba węzłów siatki na bok — trzymamy eksport DXF w rozsądnym rozmiarze. */
 const TARGET_GRID_DIM = 100;

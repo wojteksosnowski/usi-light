@@ -11,7 +11,7 @@ import {
   estimateTreeDimensions,
   getPseudoRandomSeed,
 } from './osmLanduseClient';
-import { DEFAULT_OSM_LANDUSE_LAYERS } from '../store/useOsmLanduseStore';
+import { DEFAULT_OSM_LANDUSE_LAYERS } from '../../store/useOsmLanduseStore';
 
 describe('osmLanduseClient tag matching', () => {
   it('matches trees and tree rows correctly', () => {

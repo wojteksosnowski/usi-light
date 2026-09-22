@@ -10,8 +10,8 @@
  * proxy `/api/wfs?target=lcv-wfs` (patrz `api/wfs.ts`), odpowiedź to GML parsowany ręcznie.
  */
 
-import { GeoJsonFeatureCollection, WfsBbox } from './wfsWarsawClient';
-import { parseWfsPolygonGmlWithHoles } from './wfsGmlUtils';
+import { GeoJsonFeatureCollection, WfsBbox } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGmlWithHoles } from '../shared/wfsGmlUtils';
 
 const LCV_WFS_URL = '/api/wfs?target=lcv-wfs';
 

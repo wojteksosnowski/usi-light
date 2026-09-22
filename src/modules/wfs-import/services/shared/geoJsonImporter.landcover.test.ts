@@ -1,7 +1,7 @@
 // Plik testowy sprawdzający import pokrycia terenu i parsowanie współrzędnych
 import { describe, it, expect } from 'vitest';
 import { importLandCoverFromGeoJson } from './geoJsonImporter';
-import { GeoJsonFeatureCollection } from './wfsWarsawClient';
+import { GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
 import { parseWktPolygonCoordinates } from './wfsGmlUtils';
 
 const projectCenter = { lat: 52.4064, lon: 16.9252 };

@@ -1,7 +1,7 @@
-import { BuildingLoop, Point2D } from '../../../types/geometry';
-import { cadPointToWgs84, CrsDetectionResult, LatLon } from '../../../utils/geoTransform';
+import { BuildingLoop, Point2D } from '../../../../types/geometry';
+import { cadPointToWgs84, CrsDetectionResult, LatLon } from '../../../../utils/geoTransform';
 import { wgs84ToEpsg2180 } from './wgs84ToEpsg2180';
-import { AaigridData, fetchDsmBbox, fetchDtmBbox } from '../services/wcsGugikClient';
+import { AaigridData, fetchDsmBbox, fetchDtmBbox } from './wcsGugikClient';
 
 export function sampleGrid(grid: AaigridData, x: number, y: number): number {
   const col = Math.round((x - grid.xllcorner) / grid.cellsize);
@@ -52,6 +52,16 @@ export interface TerrainAnalysisResult {
  * z chmury punktów LiDAR GUGiK. Jeśli podano `referencePoint` (zwykle środek projektu), zwraca też
  * rzędną terenu każdego budynku względem tego punktu (do posadowienia), próbkowaną z tej samej siatki DTM.
  */
+// Pojedynczy budynek szerszy/wyższy niż to w EPSG:2180 to niemal na pewno błędne dane
+// wejściowe (np. źle otagowana / nieprzycięta relacja OSM zwrócona przez Overpass dla
+// zapytania bbox — Overpass dociąga WSZYSTKIE węzły pasującej drogi/relacji, nawet te
+// leżące daleko poza żądanym bboxem), a nie realny obiekt do analizy wysokości.
+const MAX_SINGLE_BUILDING_SPAN_M = 300;
+// LiDAR NMT/NMPT ma sens tylko lokalnie wokół projektu — budynek dalej niż to od punktu
+// odniesienia (środka projektu) też odrzucamy z obwiedni, żeby jeden odstający rekord
+// (patrz wyżej) nie rozdymał zapytania WCS do rozmiaru całego kraju i nie wywoływał 400.
+const MAX_DISTANCE_FROM_REFERENCE_M = 3000;
+
 export async function analyzeBuildingHeights(
   buildings: BuildingLoop[],
   crsInfo: CrsDetectionResult,
@@ -60,17 +70,31 @@ export async function analyzeBuildingHeights(
 ): Promise<TerrainAnalysisResult[]> {
   if (buildings.length === 0) return [];
 
+  const referenceEpsg = referencePoint ? wgs84ToEpsg2180(referencePoint.lat, referencePoint.lon) : null;
+
   let globalMinX = Infinity, globalMinY = Infinity;
   let globalMaxX = -Infinity, globalMaxY = -Infinity;
+  let includedCount = 0;
   for (const b of buildings) {
     const bb = computeBuildingBbox(b, crsInfo);
+    const spanX = bb.maxX - bb.minX;
+    const spanY = bb.maxY - bb.minY;
+    if (spanX > MAX_SINGLE_BUILDING_SPAN_M || spanY > MAX_SINGLE_BUILDING_SPAN_M) continue;
+    if (referenceEpsg) {
+      const cx = (bb.minX + bb.maxX) / 2;
+      const cy = (bb.minY + bb.maxY) / 2;
+      const distance = Math.hypot(cx - referenceEpsg.x, cy - referenceEpsg.y);
+      if (distance > MAX_DISTANCE_FROM_REFERENCE_M) continue;
+    }
     globalMinX = Math.min(globalMinX, bb.minX);
     globalMinY = Math.min(globalMinY, bb.minY);
     globalMaxX = Math.max(globalMaxX, bb.maxX);
     globalMaxY = Math.max(globalMaxY, bb.maxY);
+    includedCount++;
   }
 
-  const referenceEpsg = referencePoint ? wgs84ToEpsg2180(referencePoint.lat, referencePoint.lon) : null;
+  if (includedCount === 0) return [];
+
   if (referenceEpsg) {
     globalMinX = Math.min(globalMinX, referenceEpsg.x);
     globalMinY = Math.min(globalMinY, referenceEpsg.y);

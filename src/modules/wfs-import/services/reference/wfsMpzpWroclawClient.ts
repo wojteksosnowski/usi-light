@@ -4,8 +4,8 @@
  * Upstream: http://gis1.um.wroc.pl/arcgis/services/ogc/OGC_mpzp/MapServer/WFSServer
  */
 
-import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
-import { parseWfsPolygonGml, parseWfsLineStringGml } from './wfsGmlUtils';
+import { WfsBbox, wgs84BboxToEpsg2177 } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml, parseWfsLineStringGml } from '../shared/wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
 const WROCLAW_WFS_URL = '/api/wfs?target=wroclaw-mpzp-wfs';

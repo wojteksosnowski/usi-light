@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sampleGrid, polygonCentroid } from '../src/modules/wfs-import/utils/terrainAnalyzer';
-import { AaigridData } from '../src/modules/wfs-import/services/wcsGugikClient';
+import { sampleGrid, polygonCentroid } from '../src/modules/wfs-import/services/elevation/terrainAnalyzer';
+import { AaigridData } from '../src/modules/wfs-import/services/elevation/wcsGugikClient';
 
 describe('Terrain Analyzer LiDAR Grid Logic', () => {
   const dummyGrid: AaigridData = {

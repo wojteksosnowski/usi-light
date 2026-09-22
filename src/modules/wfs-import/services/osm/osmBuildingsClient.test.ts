@@ -6,7 +6,7 @@ import {
   parseOverpassBuildingsResponse,
   OverpassResponse,
 } from './osmBuildingsClient';
-import { CrsDetectionResult } from '../../../utils/geoTransform';
+import { CrsDetectionResult } from '../../../../utils/geoTransform';
 
 const EPSG_2180: CrsDetectionResult = {
   crs: 'EPSG:2180',

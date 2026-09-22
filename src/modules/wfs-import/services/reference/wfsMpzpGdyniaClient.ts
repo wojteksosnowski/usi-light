@@ -4,8 +4,8 @@
  * Upstream: https://geo.bppmg.pl/server/services/MPZP/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer
  */
 
-import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
-import { parseWfsPolygonGml } from './wfsGmlUtils';
+import { WfsBbox, wgs84BboxToEpsg2177 } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml } from '../shared/wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
 const GDYNIA_WFS_URL = '/api/wfs?target=gdynia-mpzp-wfs';

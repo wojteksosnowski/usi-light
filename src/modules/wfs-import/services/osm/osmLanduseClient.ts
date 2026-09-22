@@ -6,10 +6,10 @@
  * parsowaniem geometrii (ways, relacje multipolygon z otworami) oraz transformacją do współrzędnych sceny CAD.
  */
 
-import { Point2D } from '../../../types/geometry';
-import { LatLon, wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
-import { OsmLanduseFeature } from '../store/useOsmLanduseStore';
-import { WfsTreeFeature } from '../store/useWfsStore';
+import { Point2D } from '../../../../types/geometry';
+import { LatLon, wgs84ToCadPoint, CrsDetectionResult } from '../../../../utils/geoTransform';
+import { OsmLanduseFeature } from '../../store/useOsmLanduseStore';
+import { WfsTreeFeature } from '../../store/useWfsStore';
 
 /** Bbox [west, south, east, north] */
 export type OsmBbox = [number, number, number, number];

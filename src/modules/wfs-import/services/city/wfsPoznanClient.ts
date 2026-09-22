@@ -36,8 +36,8 @@
  * poprawnie zwraca budynki (potwierdzone bezpośrednim testem `curl`).
  */
 
-import { GeoJsonFeatureCollection, WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
-import { parseWfsPolygonGml } from './wfsGmlUtils';
+import { GeoJsonFeatureCollection, WfsBbox, wgs84BboxToEpsg2177 } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml } from '../shared/wfsGmlUtils';
 
 const POZNAN_EGIB_WFS_URL = '/api/wfs?target=poznan-egib';
 

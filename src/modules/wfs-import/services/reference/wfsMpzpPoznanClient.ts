@@ -4,8 +4,8 @@
  * Upstream: https://gis.mpu.pl/server/services/Hosted/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer
  */
 
-import { WfsBbox, wgs84BboxToEpsg2177 } from './wfsWarsawClient';
-import { parseWfsPolygonGml, parseWfsLineStringGml } from './wfsGmlUtils';
+import { WfsBbox, wgs84BboxToEpsg2177 } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml, parseWfsLineStringGml } from '../shared/wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
 const POZNAN_WFS_URL = '/api/wfs?target=poznan-mpzp-wfs';

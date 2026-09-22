@@ -1,8 +1,8 @@
-import { CrsDetectionResult } from '../../../utils/geoTransform';
-import { GeoJsonFeatureCollection, WfsBbox, fetchWarsawBuildings, EPSG_2177, EPSG_2178 } from './wfsWarsawClient';
+import { CrsDetectionResult } from '../../../../utils/geoTransform';
+import { GeoJsonFeatureCollection, WfsBbox, fetchWarsawBuildings, EPSG_2177, EPSG_2178 } from '../city/wfsWarsawClient';
 import { fetchKrakowBuildings, fetchKrakowParcels } from './wfsKrakowClient';
 import { fetchPoznanBuildings, fetchPoznanParcels } from './wfsPoznanClient';
-import { fetchEgibBuildings, EPSG_2180 } from './wfsEgibClient';
+import { fetchEgibBuildings, EPSG_2180 } from '../national/wfsEgibClient';
 
 export interface CitySource {
   name: string;

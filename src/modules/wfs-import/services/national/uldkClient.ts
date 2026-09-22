@@ -6,20 +6,20 @@
  * dla obszaru CAŁEJ POLSKI bez ograniczeń CORS (Access-Control-Allow-Origin: *).
  */
 
-import { Point2D, Vector2D, BuildingLoop, ObjectCategory } from '../../../types/geometry';
-import { sanitizePolygon } from '../../../utils/importers/geometrySanitizer';
+import { Point2D, Vector2D, BuildingLoop, ObjectCategory } from '../../../../types/geometry';
+import { sanitizePolygon } from '../../../../utils/importers/geometrySanitizer';
 import {
   cadPointToWgs84,
   wgs84ToCadPoint,
   CrsDetectionResult,
   LatLon,
-} from '../../../utils/geoTransform';
-import { wgs84ToEpsg2180 } from '../utils/wgs84ToEpsg2180';
-import { polygonCircleIntersectionRatio, isPolygonCCW, isPointInPolygon, computePointsBoundingBox, getPolygonCentroid } from '../../../utils/math2d/polygons';
-import { calculateOutwardNormal } from '../../../utils/math2d/vec2';
-import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
-import { ensureOppositeWinding } from '../../../utils/ringSegments';
-import { fetchKiegParcelDetails } from './kiegEnricherService';
+} from '../../../../utils/geoTransform';
+import { wgs84ToEpsg2180 } from '../elevation/wgs84ToEpsg2180';
+import { polygonCircleIntersectionRatio, isPolygonCCW, isPointInPolygon, computePointsBoundingBox, getPolygonCentroid } from '../../../../utils/math2d/polygons';
+import { calculateOutwardNormal } from '../../../../utils/math2d/vec2';
+import { rebuildBuildingSegments } from '../../../../utils/segmentStatistics';
+import { ensureOppositeWinding } from '../../../../utils/ringSegments';
+import { fetchKiegParcelDetails } from '../shared/kiegEnricherService';
 
 
 const ULDK_BASE_URL = 'https://uldk.gugik.gov.pl/';

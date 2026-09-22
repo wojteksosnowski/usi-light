@@ -5,7 +5,7 @@
  * trzeba parsować ręcznie z GML, tak jak dla drzew warszawskich (parseTreesGml).
  */
 
-import { GeoJsonFeatureCollection } from './wfsWarsawClient';
+import { GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
 
 /** Bezpieczne parsowanie liczby z tekstu atrybutu GML — niektóre atrybuty bywają
  * niedostępne publicznie i wracają jako tekst (np. "brak_uprawnień") zamiast liczby. */

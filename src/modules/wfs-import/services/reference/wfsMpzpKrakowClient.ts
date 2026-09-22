@@ -4,8 +4,8 @@
  * Upstream: https://msip3.um.krakow.pl/server/services/Pobieranie/BP_MPZP_POBIERANIE/MapServer/WFSServer
  */
 
-import { WfsBbox, wgs84BboxToEpsg2178 } from './wfsWarsawClient';
-import { parseWfsPolygonGml } from './wfsGmlUtils';
+import { WfsBbox, wgs84BboxToEpsg2178 } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml } from '../shared/wfsGmlUtils';
 import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
 
 const KRAKOW_WFS_URL = '/api/wfs?target=krakow-mpzp-wfs';

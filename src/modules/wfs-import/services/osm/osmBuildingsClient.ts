@@ -7,20 +7,20 @@
  * ekstrakcją kondygnacji, wysokości, funkcji oraz transformacją do lokalnego układu CAD.
  */
 
-import { BuildingLoop, Point2D, BuildingType } from '../../../types/geometry';
-import { LatLon, wgs84ToCadPoint, CrsDetectionResult } from '../../../utils/geoTransform';
-import { sanitizePolygon } from '../../../utils/importers/geometrySanitizer';
-import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
-import { ensureOppositeWinding } from '../../../utils/ringSegments';
+import { BuildingLoop, Point2D, BuildingType } from '../../../../types/geometry';
+import { LatLon, wgs84ToCadPoint, CrsDetectionResult } from '../../../../utils/geoTransform';
+import { sanitizePolygon } from '../../../../utils/importers/geometrySanitizer';
+import { rebuildBuildingSegments } from '../../../../utils/segmentStatistics';
+import { ensureOppositeWinding } from '../../../../utils/ringSegments';
 import {
   polygonCircleIntersectionRatio,
   isPolygonCCW,
   computePolygonArea,
   intersectionPolygonLoops,
   isPointInPolygon,
-} from '../../../utils/math2d/polygons';
+} from '../../../../utils/math2d/polygons';
 import { parseOsmHeight } from './osmLanduseClient';
-import { WfsBbox } from './wfsWarsawClient';
+import { WfsBbox } from '../city/wfsWarsawClient';
 
 // Zapytanie idzie przez serverless proxy `/api/osm-overpass` (api/osm-overpass.ts) zamiast
 // bezpośrednio z przeglądarki do mirrorów Overpass — omija to CORS/timeouty/lokalne blokady

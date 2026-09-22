@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { fetchWarsawBuildings, fetchWarsawParcels, wgs84BboxToEpsg2178Bounds, wgs84BboxToEpsg2177Bounds, type WfsBbox } from './wfsWarsawClient';
-import wfsProxyHandler from '../../../../api/wfs';
+import { fetchWarsawBuildings, fetchWarsawParcels, wgs84BboxToEpsg2178Bounds, wgs84BboxToEpsg2177Bounds, type WfsBbox } from '../city/wfsWarsawClient';
+import wfsProxyHandler from '../../../../../api/wfs';
 
 /**
  * TESTY LIVE — bez żadnych mocków. Każdy `it` poniżej wykonuje prawdziwe zapytanie sieciowe

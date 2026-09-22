@@ -18,7 +18,7 @@ import { useLicenseStore } from '../../store/useLicenseStore';
 import { useSolarAnalysisStore } from '../../store/useSolarAnalysisStore';
 import { useWmsStatusStore } from './store/useWmsStatusStore';
 import { APP_CONFIG } from '../../config/appConfig';
-import { GESUT_CITY_SOURCES, BDOT_CITY_SOURCES, findWmsCityOverride } from './services/wmsCitySources';
+import { GESUT_CITY_SOURCES, BDOT_CITY_SOURCES, findWmsCityOverride } from './services/city/wmsCitySources';
 
 const ORTO_WMS_URL = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolutionTime';
 const KIUT_WMS_URL = 'https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu';

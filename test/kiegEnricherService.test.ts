@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseKiegFeatureInfoHtml, classifyLandUseType } from '../src/modules/wfs-import/services/kiegEnricherService';
+import { parseKiegFeatureInfoHtml, classifyLandUseType } from '../src/modules/wfs-import/services/shared/kiegEnricherService';
 
 describe('kiegEnricherService', () => {
   it('poprawnie klasyfikuje oznaczenia klasoużytków EGiB', () => {

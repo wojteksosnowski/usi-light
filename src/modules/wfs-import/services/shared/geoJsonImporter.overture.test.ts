@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { importOvertureLines, importOverturePolygons, classifyOvertureFeature } from './geoJsonImporter';
-import { GeoJsonFeatureCollection } from './wfsWarsawClient';
+import { GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
 
 // Środek projektu w Poznaniu (ten sam punkt co reference/topoexport) — CRS lokalny CAD.
 const projectCenter = { lat: 52.4064, lon: 16.9252 };

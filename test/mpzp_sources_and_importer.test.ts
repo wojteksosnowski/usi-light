@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { findMpzpSource, MPZP_SOURCES } from '../src/modules/wfs-import/services/mpzpSources';
-import { importMpzpZonesFromGeoJson, importMpzpLinesFromGeoJson } from '../src/modules/wfs-import/services/geoJsonImporter';
-import { EPSG_2178, EPSG_2177 } from '../src/modules/wfs-import/services/wfsWarsawClient';
-import { MpzpZoneRawFeature, MpzpLineRawFeature } from '../src/modules/wfs-import/services/wfsMpzpWarsawClient';
+import { findMpzpSource, MPZP_SOURCES } from '../src/modules/wfs-import/services/reference/mpzpSources';
+import { importMpzpZonesFromGeoJson, importMpzpLinesFromGeoJson } from '../src/modules/wfs-import/services/shared/geoJsonImporter';
+import { EPSG_2178, EPSG_2177 } from '../src/modules/wfs-import/services/city/wfsWarsawClient';
+import { MpzpZoneRawFeature, MpzpLineRawFeature } from '../src/modules/wfs-import/services/reference/wfsMpzpWarsawClient';
 
 describe('mpzpSources & geoJsonImporter MPZP', () => {
   it('rozpoznaje źródła MPZP dla różnych miast po współrzędnych', () => {

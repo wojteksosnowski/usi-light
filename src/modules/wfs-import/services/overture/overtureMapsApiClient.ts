@@ -12,8 +12,8 @@
  * na overturemapsapi.com — ustawiony w `APP_CONFIG.overtureMapsApi.apiKey`.
  */
 
-import { GeoJsonFeatureCollection } from './wfsWarsawClient';
-import { APP_CONFIG } from '../../../config/appConfig';
+import { GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
+import { APP_CONFIG } from '../../../../config/appConfig';
 
 const OVERTURE_MAPS_API_BASE_URL = 'https://api.overturemapsapi.com';
 

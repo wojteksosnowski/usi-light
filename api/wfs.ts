@@ -8,11 +8,6 @@ interface WfsTargetConfig {
 
 export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   // GUGiK EGiB
-  egib: {
-    upstreamUrl: 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/EGIB/WFS/UslugaZbiorcza',
-    allowedTypeNames: new Set(['ms:budynki', 'ms:dzialki']),
-    typeNameParam: 'typeNames',
-  },
   'egib-wfs': {
     upstreamUrl: 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/EGIB/WFS/UslugaZbiorcza',
     allowedTypeNames: new Set(['ms:budynki', 'ms:dzialki']),
@@ -20,11 +15,6 @@ export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   },
 
   // Kraków EGiB
-  krakow: {
-    upstreamUrl: 'https://geodezja.eco.um.krakow.pl/krakow-egib',
-    allowedTypeNames: new Set(['ms:budynki', 'ms:dzialki']),
-    typeNameParam: 'TYPENAME',
-  },
   'krakow-wfs': {
     upstreamUrl: 'https://geodezja.eco.um.krakow.pl/krakow-egib',
     allowedTypeNames: new Set(['ms:budynki', 'ms:dzialki']),
@@ -32,11 +22,6 @@ export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   },
 
   // GUGiK Pokrycie Terenu (LCV)
-  lcv: {
-    upstreamUrl: 'https://mapy.geoportal.gov.pl/wss/service/wfsLCV/guest',
-    allowedTypeNames: new Set(['lcv:LandCoverUnit']),
-    typeNameParam: 'typeName',
-  },
   'lcv-wfs': {
     upstreamUrl: 'https://mapy.geoportal.gov.pl/wss/service/wfsLCV/guest',
     allowedTypeNames: new Set(['lcv:LandCoverUnit']),
@@ -44,16 +29,6 @@ export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   },
 
   // Gdynia MPZP
-  gdynia: {
-    upstreamUrl: 'https://geo.bppmg.pl/server/services/MPZP/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer',
-    allowedTypeNames: new Set(['MPZP_ZbiorDanychPrzestrzennychMPZP:AktPlanowaniaPrzestrzennego.MPZP']),
-    typeNameParam: 'TYPENAME',
-  },
-  'gdynia-mpzp': {
-    upstreamUrl: 'https://geo.bppmg.pl/server/services/MPZP/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer',
-    allowedTypeNames: new Set(['MPZP_ZbiorDanychPrzestrzennychMPZP:AktPlanowaniaPrzestrzennego.MPZP']),
-    typeNameParam: 'TYPENAME',
-  },
   'gdynia-mpzp-wfs': {
     upstreamUrl: 'https://geo.bppmg.pl/server/services/MPZP/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer',
     allowedTypeNames: new Set(['MPZP_ZbiorDanychPrzestrzennychMPZP:AktPlanowaniaPrzestrzennego.MPZP']),
@@ -61,16 +36,6 @@ export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   },
 
   // Kraków MPZP
-  'krakow-mpzp': {
-    upstreamUrl: 'https://msip3.um.krakow.pl/server/services/Pobieranie/BP_MPZP_POBIERANIE/MapServer/WFSServer',
-    allowedTypeNames: new Set([
-      'BP_MPZP_POBIERANIE:Przeznaczenia_MPZP',
-      'BP_MPZP_POBIERANIE:Plany_obowiązujące',
-      'BP_MPZP_POBIERANIE:Plany_sporządzane',
-      'BP_MPZP_POBIERANIE:Plany_uchwalone_-_przed_wejściem_w_życie',
-    ]),
-    typeNameParam: 'TYPENAME',
-  },
   'krakow-mpzp-wfs': {
     upstreamUrl: 'https://msip3.um.krakow.pl/server/services/Pobieranie/BP_MPZP_POBIERANIE/MapServer/WFSServer',
     allowedTypeNames: new Set([
@@ -83,24 +48,6 @@ export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   },
 
   // Poznań MPZP
-  poznan: {
-    upstreamUrl: 'https://gis.mpu.pl/server/services/Hosted/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer',
-    allowedTypeNames: new Set([
-      'ZbiorDanychPrzestrzennychMPZP:app.WydzieleniePlanistyczne.MPZP',
-      'ZbiorDanychPrzestrzennychMPZP:app.LinieZabudowy.MPZP',
-      'ZbiorDanychPrzestrzennychMPZP:app.AktPlanowaniaPrzestrzennego.MPZP',
-    ]),
-    typeNameParam: 'TYPENAME',
-  },
-  'poznan-mpzp': {
-    upstreamUrl: 'https://gis.mpu.pl/server/services/Hosted/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer',
-    allowedTypeNames: new Set([
-      'ZbiorDanychPrzestrzennychMPZP:app.WydzieleniePlanistyczne.MPZP',
-      'ZbiorDanychPrzestrzennychMPZP:app.LinieZabudowy.MPZP',
-      'ZbiorDanychPrzestrzennychMPZP:app.AktPlanowaniaPrzestrzennego.MPZP',
-    ]),
-    typeNameParam: 'TYPENAME',
-  },
   'poznan-mpzp-wfs': {
     upstreamUrl: 'https://gis.mpu.pl/server/services/Hosted/ZbiorDanychPrzestrzennychMPZP/MapServer/WFSServer',
     allowedTypeNames: new Set([
@@ -119,28 +66,6 @@ export const WFS_TARGETS: Record<string, WfsTargetConfig> = {
   },
 
   // Wrocław MPZP
-  wroclaw: {
-    upstreamUrl: 'http://gis1.um.wroc.pl/arcgis/services/ogc/OGC_mpzp/MapServer/WFSServer',
-    allowedTypeNames: new Set([
-      'OGC_mpzp:tereny',
-      'OGC_mpzp:przeznaczenie_terenu_-_uproszczona_klasyfikacja',
-      'OGC_mpzp:linie_zabudowy',
-      'OGC_mpzp:linie_rozgraniczajace',
-      'OGC_mpzp:obowiazujace_plany_miejscowe',
-    ]),
-    typeNameParam: 'TYPENAME',
-  },
-  'wroclaw-mpzp': {
-    upstreamUrl: 'http://gis1.um.wroc.pl/arcgis/services/ogc/OGC_mpzp/MapServer/WFSServer',
-    allowedTypeNames: new Set([
-      'OGC_mpzp:tereny',
-      'OGC_mpzp:przeznaczenie_terenu_-_uproszczona_klasyfikacja',
-      'OGC_mpzp:linie_zabudowy',
-      'OGC_mpzp:linie_rozgraniczajace',
-      'OGC_mpzp:obowiazujace_plany_miejscowe',
-    ]),
-    typeNameParam: 'TYPENAME',
-  },
   'wroclaw-mpzp-wfs': {
     upstreamUrl: 'http://gis1.um.wroc.pl/arcgis/services/ogc/OGC_mpzp/MapServer/WFSServer',
     allowedTypeNames: new Set([
@@ -170,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const targetKey = (req.query.target as string) || (req.query.service_type as string);
   if (!targetKey || !WFS_TARGETS[targetKey]) {
     return res.status(400).json({
-      error: `Nieznany cel WFS: "${targetKey}". Dostępne: ${Object.keys(WFS_TARGETS).filter((k) => !k.endsWith('-wfs')).join(', ')}`,
+      error: `Nieznany cel WFS: "${targetKey}". Dostępne: ${Object.keys(WFS_TARGETS).join(', ')}`,
     });
   }
 

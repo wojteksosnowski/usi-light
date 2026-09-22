@@ -13,8 +13,8 @@ import {
   formatWfsProgress,
   WFS_IMPORT_CONTINUE_HINT,
 } from '../../../../modules/wfs-import/store/useWfsStore';
-import { fetchParcelsInRadius } from '../../../../modules/wfs-import/services/uldkClient';
-import { findCitySource, fetchBuildingsWithFallback } from '../../../../modules/wfs-import/services/citySources';
+import { fetchParcelsInRadius } from '../../../../modules/wfs-import/services/national/uldkClient';
+import { findCitySource, fetchBuildingsWithFallback } from '../../../../modules/wfs-import/services/city/citySources';
 import {
   importBuildingsFromGeoJson,
   importParcelsFromGeoJson,
@@ -22,18 +22,18 @@ import {
   importMpzpZonesFromGeoJson,
   importMpzpLinesFromGeoJson,
   importLandCoverFromGeoJson,
-} from '../../../../modules/wfs-import/services/geoJsonImporter';
-import { fetchOvertureBase } from '../../../../modules/wfs-import/services/overtureMapsApiClient';
-import { findMpzpSource } from '../../../../modules/wfs-import/services/mpzpSources';
-import { fetchLandCoverUnits } from '../../../../modules/wfs-import/services/wfsLcvClient';
-import { EPSG_2180 } from '../../../../modules/wfs-import/services/wfsEgibClient';
-import { analyzeBuildingHeights } from '../../../../modules/wfs-import/utils/terrainAnalyzer';
-import { latLonToBbox } from '../../../../modules/wfs-import/services/geocoding';
+} from '../../../../modules/wfs-import/services/shared/geoJsonImporter';
+import { fetchOvertureBase } from '../../../../modules/wfs-import/services/overture/overtureMapsApiClient';
+import { findMpzpSource } from '../../../../modules/wfs-import/services/reference/mpzpSources';
+import { fetchLandCoverUnits } from '../../../../modules/wfs-import/services/reference/wfsLcvClient';
+import { EPSG_2180 } from '../../../../modules/wfs-import/services/national/wfsEgibClient';
+import { analyzeBuildingHeights } from '../../../../modules/wfs-import/services/elevation/terrainAnalyzer';
+import { latLonToBbox } from '../../../../modules/wfs-import/services/shared/geocoding';
 import { detectCoordinateSystem, CrsDetectionResult, LatLon, wgs84ToCadPoint } from '../../../../utils/geoTransform';
 import { translateBuildingGeometry } from '../../../../store/useSceneStore';
 import { parseGoogleMapsCoordinates } from '../../../../utils/geoParser';
 import { BuildingLoop } from '../../../../types/geometry';
-import { fetchOsmBuildings } from '../../../../modules/wfs-import/services/osmBuildingsClient';
+import { fetchOsmBuildings } from '../../../../modules/wfs-import/services/osm/osmBuildingsClient';
 
 import { useOsmLanduseStore } from '../../../../modules/wfs-import/store/useOsmLanduseStore';
 

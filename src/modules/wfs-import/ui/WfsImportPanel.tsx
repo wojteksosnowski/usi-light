@@ -5,15 +5,15 @@ import { useSceneStore } from '../../../store';
 import { useWfsStore } from '../store/useWfsStore';
 import { AddressSearch } from './AddressSearch';
 import { ImportStatus } from './ImportStatus';
-import { GeocodingResult, latLonToBbox } from '../services/geocoding';
-import { fetchWarsawTrees, EPSG_2178 } from '../services/wfsWarsawClient';
-import { findCitySource, fetchBuildingsWithFallback } from '../services/citySources';
+import { GeocodingResult, latLonToBbox } from '../services/shared/geocoding';
+import { fetchWarsawTrees, EPSG_2178 } from '../services/city/wfsWarsawClient';
+import { findCitySource, fetchBuildingsWithFallback } from '../services/city/citySources';
 import {
   importBuildingsFromGeoJson,
   importParcelsFromGeoJson,
   importTrees,
-} from '../services/geoJsonImporter';
-import { fetchOsmBuildings } from '../services/osmBuildingsClient';
+} from '../services/shared/geoJsonImporter';
+import { fetchOsmBuildings } from '../services/osm/osmBuildingsClient';
 import { detectCoordinateSystem } from '../../../utils/geoTransform';
 import { BuildingLoop } from '../../../types/geometry';
 

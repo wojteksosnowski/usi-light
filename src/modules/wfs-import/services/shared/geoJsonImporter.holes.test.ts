@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { importBuildingsFromGeoJson, importParcelsFromGeoJson } from './geoJsonImporter';
-import { GeoJsonFeatureCollection } from './wfsWarsawClient';
+import { GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
 
 const projectCenter = { lat: 52.4064, lon: 16.9252 };
 const localCrs = {

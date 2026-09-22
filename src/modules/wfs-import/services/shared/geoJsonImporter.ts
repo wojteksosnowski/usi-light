@@ -1,12 +1,12 @@
-import { BuildingLoop, Point2D, ObjectCategory } from '../../../types/geometry';
-import { sanitizePolygon } from '../../../utils/importers/geometrySanitizer';
+import { BuildingLoop, Point2D, ObjectCategory } from '../../../../types/geometry';
+import { sanitizePolygon } from '../../../../utils/importers/geometrySanitizer';
 import {
   cadPointToWgs84,
   wgs84ToCadPoint,
   CrsDetectionResult,
   LatLon,
-} from '../../../utils/geoTransform';
-import { RawTreeFeature, GeoJsonFeatureCollection } from './wfsWarsawClient';
+} from '../../../../utils/geoTransform';
+import { RawTreeFeature, GeoJsonFeatureCollection } from '../city/wfsWarsawClient';
 import {
   WfsTreeFeature,
   OvertureLineFeature,
@@ -15,11 +15,11 @@ import {
   MpzpLineFeature,
   MpzpLineType,
   LandCoverFeature,
-} from '../store/useWfsStore';
-import { MpzpZoneRawFeature, MpzpLineRawFeature } from './wfsMpzpWarsawClient';
-import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../utils/math2d/polygons';
-import { rebuildBuildingSegments } from '../../../utils/segmentStatistics';
-import { ensureOppositeWinding } from '../../../utils/ringSegments';
+} from '../../store/useWfsStore';
+import { MpzpZoneRawFeature, MpzpLineRawFeature } from '../reference/wfsMpzpWarsawClient';
+import { polygonCircleIntersectionRatio, isPolygonCCW } from '../../../../utils/math2d/polygons';
+import { rebuildBuildingSegments } from '../../../../utils/segmentStatistics';
+import { ensureOppositeWinding } from '../../../../utils/ringSegments';
 
 
 const DEFAULT_FLOOR_HEIGHT = 3.0;
@@ -437,7 +437,7 @@ const OVERTURE_INFRASTRUCTURE_CLASSES = new Set([
  * Klasyfikuje obiekt Overture Maps (temat `base`, typy `land_use`, `land_cover`, `land`, `water`, `infrastructure`)
  * do jednej z głównych kategorii funkcjonalnych.
  */
-export function classifyOvertureFeature(props: Record<string, unknown> | null | undefined): import('../store/useWfsStore').OvertureLandUseCategory {
+export function classifyOvertureFeature(props: Record<string, unknown> | null | undefined): import('../../store/useWfsStore').OvertureLandUseCategory {
   if (!props) return 'other';
   const rawClass = typeof props.class === 'string' ? props.class.toLowerCase().trim() : '';
   const subtype = typeof props.subtype === 'string' ? props.subtype.toLowerCase().trim() : '';

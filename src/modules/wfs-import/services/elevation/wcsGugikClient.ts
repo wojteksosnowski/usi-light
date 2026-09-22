@@ -54,6 +54,23 @@ export function parseAaigrid(rawText: string): AaigridData {
 
 const WCS_DEFAULT_TIMEOUT_MS = 10000;
 
+// Zabezpieczenie przed regresją, gdzie błędna obwiednia (np. odstający budynek z importu
+// OSM/WFS) rozdyma zapytanie do rozmiaru całego kraju — serwer WCS GUGiK i tak odrzuca
+// takie żądania 400-tką, ale wtedy błąd jest nieczytelny; tu odrzucamy go wcześniej,
+// z jasnym komunikatem, zamiast wysyłać je w ogóle.
+const MAX_WCS_BBOX_SPAN_M = 5000;
+
+function assertReasonableBboxSpan(minX: number, minY: number, maxX: number, maxY: number): void {
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  if (spanX > MAX_WCS_BBOX_SPAN_M || spanY > MAX_WCS_BBOX_SPAN_M) {
+    throw new Error(
+      `Obwiednia zapytania WCS jest zbyt duża (${Math.round(spanX)}m × ${Math.round(spanY)}m, limit ${MAX_WCS_BBOX_SPAN_M}m) — ` +
+      'prawdopodobnie błędne dane wejściowe (np. odstający obiekt z importu).'
+    );
+  }
+}
+
 function createCombinedSignal(userSignal?: AbortSignal, timeoutMs = WCS_DEFAULT_TIMEOUT_MS): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -88,6 +105,7 @@ export async function fetchDsmBbox(
   coverageId: 'DSM_PL-KRON86-NH' | 'DSM_PL-EVRF2007-NH' = 'DSM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
+  assertReasonableBboxSpan(minX, minY, maxX, maxY);
   const params = new URLSearchParams({
     service: 'WCS',
     version: '2.0.1',
@@ -121,6 +139,7 @@ export async function fetchDtmBbox(
   coverageId: 'DTM_PL-KRON86-NH' | 'DTM_PL-EVRF2007-NH' = 'DTM_PL-KRON86-NH',
   signal?: AbortSignal
 ): Promise<AaigridData> {
+  assertReasonableBboxSpan(minX, minY, maxX, maxY);
   const params = new URLSearchParams({
     service: 'WCS',
     version: '2.0.1',

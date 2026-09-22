@@ -25,9 +25,9 @@
  * u Krakowa/drzew warszawskich.
  */
 
-import { GeoJsonFeatureCollection, WfsBbox } from './wfsWarsawClient';
-import { parseWfsPolygonGml } from './wfsGmlUtils';
-import { CrsDetectionResult } from '../../../utils/geoTransform';
+import { GeoJsonFeatureCollection, WfsBbox } from '../city/wfsWarsawClient';
+import { parseWfsPolygonGml } from '../shared/wfsGmlUtils';
+import { CrsDetectionResult } from '../../../../utils/geoTransform';
 
 const EGIB_WFS_URL = '/api/wfs?target=egib-wfs';
 
