@@ -781,4 +781,92 @@ describe('osmBuildingsClient', () => {
       30000
     );
   });
+
+  describe('Intraco tower (real OSM fixture, relation 3211736 + way 238291407)', () => {
+    // Dane pobrane na żywo z `api.openstreetmap.org/api/0.6/map` (nie Overpass — mirrory
+    // Overpass były niedostępne z tej sieci w momencie diagnozy) dla obwiedni 300 m wokół
+    // 52.2545839, 20.996694 — regresja dla zgłoszenia: wieżowiec "Intraco" (relacja
+    // `type=building` BEZ własnego tagu `building`, schemat "Simple 3D Buildings") całkowicie
+    // znikał z importu, mimo że dane źródłowe w OSM są kompletne i budynek leży ~35-47 m od
+    // środka zapytania. Way 238291407 (`building:part=yes`, `height=107`, `building:min_level=2`)
+    // to właściwa 107-metrowa wieża; way 238291404 to niski (2-kondygnacyjny) cokół/outline;
+    // way 238560043 to niska część boczna; way 238291406 (fragment dachu) jest otagowany
+    // `building=roof` zamiast `building:part=yes` i celowo NIE jest tu asercjonowany (osobny,
+    // niżej priorytetowy przypadek nietypowego tagowania w samym OSM).
+    const intracoRawElements: OverpassResponse['elements'] = [
+      { type: 'node', id: 2461386125, lat: 52.2542311, lon: 20.9966531 },
+      { type: 'node', id: 2461386127, lat: 52.2542335, lon: 20.9963084 },
+      { type: 'node', id: 2461386128, lat: 52.254246, lon: 20.9968322 },
+      { type: 'node', id: 2461386129, lat: 52.2542607, lon: 20.9966344 },
+      { type: 'node', id: 2461386130, lat: 52.2542617, lon: 20.9966463 },
+      { type: 'node', id: 2461386131, lat: 52.2542788, lon: 20.9968249 },
+      { type: 'node', id: 2461386132, lat: 52.2542799, lon: 20.9968378 },
+      { type: 'node', id: 2461386135, lat: 52.2543061, lon: 20.9971522 },
+      { type: 'node', id: 2461386139, lat: 52.2543434, lon: 20.9966161 },
+      { type: 'node', id: 2461386142, lat: 52.2543604, lon: 20.99682 },
+      { type: 'node', id: 2461386149, lat: 52.2545056, lon: 20.9963604 },
+      { type: 'node', id: 2461386151, lat: 52.2545577, lon: 20.9970325 },
+      { type: 'node', id: 2461386152, lat: 52.2545596, lon: 20.9963492 },
+      { type: 'node', id: 2461386153, lat: 52.2545615, lon: 20.9963739 },
+      { type: 'node', id: 2461386155, lat: 52.2546142, lon: 20.9963378 },
+      { type: 'node', id: 2461386156, lat: 52.2546161, lon: 20.9963626 },
+      { type: 'node', id: 2461386158, lat: 52.2546178, lon: 20.9969936 },
+      { type: 'node', id: 2461386159, lat: 52.2546199, lon: 20.9970196 },
+      { type: 'node', id: 2461386163, lat: 52.2546633, lon: 20.9969842 },
+      { type: 'node', id: 2461386165, lat: 52.2546652, lon: 20.997009 },
+      { type: 'node', id: 2461386166, lat: 52.2546705, lon: 20.9963262 },
+      { type: 'node', id: 2461386172, lat: 52.2547174, lon: 20.9962012 },
+      { type: 'node', id: 2461386175, lat: 52.2547226, lon: 20.9969971 },
+      { type: 'node', id: 2461386183, lat: 52.2547878, lon: 20.9970454 },
+      { type: 'node', id: 2463824527, lat: 52.2543064, lon: 20.9971511 },
+      { type: 'node', id: 2463824547, lat: 52.2547163, lon: 20.9962029 },
+      { type: 'node', id: 2463824550, lat: 52.2547867, lon: 20.9970445 },
+      { type: 'node', id: 7714820365, lat: 52.254261, lon: 20.9968289 },
+      { type: 'node', id: 7714820372, lat: 52.2543522, lon: 20.9967212 },
+      { type: 'node', id: 11376027723, lat: 52.2542456, lon: 20.9966499 },
+      {
+        type: 'way', id: 238291404,
+        nodes: [2461386127, 2461386129, 2461386139, 7714820372, 2461386142, 2461386132, 2461386135, 2461386183, 2461386172, 2461386127],
+        tags: { building: 'commercial', 'building:levels': '2', name: 'Intraco', old_name: 'Intraco I' },
+      },
+      {
+        type: 'way', id: 238291406,
+        nodes: [2461386130, 11376027723, 2461386125, 2461386128, 7714820365, 2461386131, 2461386132, 2461386142, 7714820372, 2461386139, 2461386129, 2461386130],
+        tags: { building: 'roof', 'roof:shape': 'flat' },
+      },
+      {
+        type: 'way', id: 238291407,
+        nodes: [2461386166, 2461386155, 2461386156, 2461386153, 2461386152, 2461386149, 2461386151, 2461386159, 2461386158, 2461386163, 2461386165, 2461386175, 2461386166],
+        tags: { 'building:part': 'yes', 'building:levels': '39', 'building:min_level': '2', height: '107', 'roof:shape': 'flat' },
+      },
+      {
+        type: 'way', id: 238560043,
+        nodes: [2461386127, 2461386129, 2461386139, 7714820372, 2461386142, 2461386132, 2463824527, 2463824550, 2463824547, 2461386127],
+        tags: { 'building:levels': '2', 'building:part': 'yes', 'roof:shape': 'flat' },
+      },
+      {
+        type: 'relation', id: 3211736,
+        members: [
+          { type: 'way', ref: 238291404, role: 'outline' },
+          { type: 'way', ref: 238560043, role: 'part' },
+          { type: 'way', ref: 238291407, role: 'part' },
+          { type: 'way', ref: 238291406, role: 'part' },
+        ],
+        tags: { name: 'Intraco', type: 'building' },
+      },
+    ];
+    const mockProjectCenter = { lat: 52.2545839, lon: 20.996694 };
+
+    it('imports the tower part (way 238291407, height=107) as a standalone building, not just the low outline', () => {
+      const buildings = parseOverpassBuildingsResponse({ elements: intracoRawElements }, mockProjectCenter, EPSG_2180, 300);
+      const tower = buildings.find((b) => b.id === 'osm-part-238291407');
+      expect(tower).toBeDefined();
+      expect(tower!.defaultHeight).toBeGreaterThan(90);
+    });
+
+    it('does not create a duplicate low building from the relation outline way (238291404)', () => {
+      const buildings = parseOverpassBuildingsResponse({ elements: intracoRawElements }, mockProjectCenter, EPSG_2180, 300);
+      expect(buildings.some((b) => b.id === 'osm-bld-238291404')).toBe(false);
+    });
+  });
 });
