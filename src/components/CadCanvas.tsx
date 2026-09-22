@@ -293,7 +293,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
   }, [buildings, latitude, longitude]);
 
   // Viewport hook
-  const { viewState, setViewState, viewportMatrix, invViewportMatrix, worldToScreen, screenToWorld } = useCadViewport(
+  const { viewState, setViewState, scheduleViewState, viewportMatrix, invViewportMatrix, worldToScreen, screenToWorld } = useCadViewport(
     containerRef,
     buildings,
     viewRotationDeg,
@@ -349,6 +349,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     canvasRef,
     viewState,
     setViewState,
+    scheduleViewState,
     worldToScreen,
     screenToWorld,
     onLabelClick: handleLabelClick,
@@ -857,7 +858,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         zoomFactor = Math.exp(-clampedDelta * 0.0018);
       }
 
-      setViewState((prev) => {
+      scheduleViewState((prev) => {
         const newScale = Math.max(0.001, Math.min(100, prev.scale * zoomFactor));
         if (Math.abs(newScale - prev.scale) < 1e-6) return prev;
         const ratio = newScale / prev.scale;

@@ -220,7 +220,18 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       .filter(Boolean) as AnalysisPointResult[];
   }, [pinnedPoints, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
 
-  const pinnedPointResults = useStableWhileInteracting(rawPinnedPointResults, isInteracting);
+  // Tylko kosztowna analiza (shadowing/sunlight) jest zamrażana podczas interakcji —
+  // pozycja punktu (point/normal) musi być liczona na żywo z każdej klatki, inaczej
+  // marker P1/P2/P3 odrywa się wizualnie od budynku podczas przeciągania/obrotu.
+  const stablePinnedPointResults = useStableWhileInteracting(rawPinnedPointResults, isInteracting);
+  const pinnedPointResults = useMemo<AnalysisPointResult[]>(() => {
+    if (!isInteracting) return rawPinnedPointResults;
+    const stableById = new Map(stablePinnedPointResults.map((r) => [r.id, r]));
+    return rawPinnedPointResults.map((live) => {
+      const stable = stableById.get(live.id);
+      return stable ? { ...live, shadowing: stable.shadowing, sunlight: stable.sunlight } : live;
+    });
+  }, [rawPinnedPointResults, stablePinnedPointResults, isInteracting]);
 
   const setPinnedPointResults = useSolarAnalysisStore((s) => s.setPinnedPointResults);
   useEffect(() => {
