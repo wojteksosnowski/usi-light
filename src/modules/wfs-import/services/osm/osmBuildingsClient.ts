@@ -34,6 +34,17 @@ const OVERPASS_PROXY_URL = '/api/osm-overpass';
 // zanim proxy zdąży zwrócić wynik lub zgłosić błąd wszystkich mirrorów.
 const OVERPASS_REQUEST_TIMEOUT_MS = 55000;
 
+// Runda 2 (patrz `fetchOsmBuildings`) dociąga pełną geometrię TYLKO dla relacji, których
+// way-członkowie wyszli niekompletni z rundy 1 — zapytanie jest małe (jedna relacja), więc
+// dostaje osobny, krótszy budżet niezależny od rundy 1 (nie sumowany z nim w jednym
+// AbortController — kilka relacji sekwencyjnie mogłoby inaczej łatwo przekroczyć budżet
+// klienta, gdyby dzieliły jeden globalny timeout z dużym zapytaniem rundy 1).
+const ROUND2_RELATION_TIMEOUT_MS = 20000;
+// Zabezpieczenie przed nietypowym obszarem z bardzo wieloma złożonymi relacjami —
+// sekwencyjny dociąg jest z założenia wolniejszy niż równoległy, więc ograniczamy liczbę
+// relacji dociąganych w rundzie 2, zamiast ryzykować bardzo długi całkowity czas importu.
+const ROUND2_MAX_RELATIONS = 8;
+
 const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
 const DEFAULT_HEIGHT = 15.0;
@@ -720,6 +731,83 @@ export function parseOverpassBuildingsResponse(
   return buildings;
 }
 
+async function postOverpassQuery(query: string, timeoutMs: number): Promise<OverpassResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(OVERPASS_PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Accept': 'application/json',
+      },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => null);
+      throw new Error(errorBody?.error || `Proxy Overpass zwrócił błąd (HTTP ${res.status}).`);
+    }
+
+    return (await res.json()) as OverpassResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Znajduje relacje "budynkowe" (`type=building`/`multipolygon`, albo z tagiem `building`/
+ * `building:part`) z rundy 1, których way-członkowie mają niekompletną geometrię — way
+ * nieobecny w zbiorze albo brakuje współrzędnych któregoś z jego węzłów. Dzieje się tak,
+ * gdy way trafił do zbioru WYŁĄCZNIE przez pojedynczą rekursję (`>;`) z relacji, a nie
+ * przez bezpośrednie dopasowanie filtra way'ów — pojedyncza rekursja dociąga taki way jako
+ * element zbioru, ale nie zawsze zdąża dociągnąć też jego własne węzły. Takie relacje
+ * powinny trafić do celowanego dociągu pełnej geometrii w rundzie 2 (patrz `fetchOsmBuildings`).
+ */
+export function findIncompleteRelations(elements: OverpassElement[]): number[] {
+  const nodeIds = new Set<number>();
+  const ways = new Map<number, OverpassWay>();
+  const relations: OverpassRelation[] = [];
+  for (const el of elements) {
+    if (el.type === 'node') nodeIds.add(el.id);
+    else if (el.type === 'way') ways.set(el.id, el);
+    else if (el.type === 'relation') relations.push(el);
+  }
+
+  const incomplete: number[] = [];
+  for (const rel of relations) {
+    const tags = rel.tags || {};
+    const isBuildingRelation =
+      tags.type === 'building' || tags.type === 'multipolygon' || !!tags.building || !!tags['building:part'];
+    if (!isBuildingRelation) continue;
+
+    const hasIncompleteMember = rel.members.some((member) => {
+      if (member.type !== 'way') return false;
+      const way = ways.get(member.ref);
+      if (!way) return true;
+      return way.nodes.some((nodeId) => !nodeIds.has(nodeId));
+    });
+    if (hasIncompleteMember) incomplete.push(rel.id);
+  }
+  return incomplete;
+}
+
+/**
+ * Runda 2: celowany dociąg pełnej geometrii JEDNEJ relacji (po ID) z podwójną rekursją —
+ * bezpieczne, bo zakres to tylko ta jedna relacja (nie cała obwiednia), więc koszt
+ * obliczeniowy po stronie Overpass nawet dla złożonej, zagnieżdżonej struktury jest mały.
+ */
+async function fetchRelationFull(relId: number, timeoutMs: number): Promise<OverpassResponse> {
+  const query = `
+    [out:json][timeout:20];
+    relation(${relId});
+    (._;>;>;);
+    out body;
+  `.trim();
+  return postOverpassQuery(query, timeoutMs);
+}
+
 /**
  * Pobiera budynki z OpenStreetMap przez Overpass API dla zadanego BBox i transformuje do układu CAD projektu.
  */
@@ -742,45 +830,20 @@ export async function fetchOsmBuildings(
     );
     out body;
     >;
-    >;
     out skel qt;
   `.trim();
-  // Podwójna rekursja `>;>;` (zamiast pojedynczej) — zabezpieczenie na wypadek
-  // zagnieżdżenia, w którym pojedynczy krok w dół nie dociągnąłby węzłów way'a
-  // dodanego do zbioru WYŁĄCZNIE przez rekursję z relacji (np. relacja zawierająca
-  // inną relację `type=building`). Bezpieczne/idempotentne, jeśli nic nowego nie ma
-  // do dodania — regresja: zgłoszenie "brakujący budynek mimo istnienia w OSM"
-  // (relacja Simple 3D Buildings bez własnego tagu building, np. wieżowiec Intraco,
-  // relation/3211736 w Warszawie).
+  // UWAGA: podwójna rekursja (`>;>;`) była tu testowana jako "bezpieczna" poprawka dla
+  // relacji `type=building` bez własnego tagu building (np. Simple 3D Buildings —
+  // wieżowiec Intraco, relation/3211736), których część way-członków nie miała pełnej
+  // geometrii przy pojedynczej rekursji. NIE jest bezpieczna: dla obszarów z wieloma
+  // złożonymi zagnieżdżonymi relacjami (potwierdzone: ten sam obszar zawiera też
+  // kompleks "North Gate") podwaja koszt obliczeniowy po stronie Overpass na tyle, że
+  // budżet czasowy ([timeout:N]) wyczerpuje się na tych złożonych strukturach kosztem
+  // reszty obwiedni — w testach: 79 obiektów spadło do 11. Właściwe rozwiązanie to
+  // wykrycie niekompletnych relacji po rundzie 1 i celowany, sekwencyjny dociąg TYLKO
+  // dla nich w drugiej rundzie — patrz `fetchOsmBuildings` niżej.
 
-  let responseData: OverpassResponse | null = null;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(OVERPASS_PROXY_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'Accept': 'application/json',
-      },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const errorBody = await res.json().catch(() => null);
-      throw new Error(errorBody?.error || `Proxy Overpass zwrócił błąd (HTTP ${res.status}).`);
-    }
-
-    responseData = (await res.json()) as OverpassResponse;
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!responseData) {
-    throw new Error('Nie udało się pobrać budynków z OpenStreetMap (Overpass API): Błąd połączenia');
-  }
+  let responseData = await postOverpassQuery(query, OVERPASS_REQUEST_TIMEOUT_MS);
 
   // Serwer Overpass zwraca HTTP 200 nawet gdy przekroczy własny budżet czasowy zapytania —
   // `remark` w takim wypadku opisuje ucięcie (np. "runtime error: Query timed out ...") i wynik
@@ -790,6 +853,31 @@ export async function fetchOsmBuildings(
   // budynków przy kolejnych próbach na tym samym obszarze.
   if (responseData.remark && /timeout|timed out/i.test(responseData.remark)) {
     throw new Error(`Serwer Overpass przerwał zapytanie z powodu przekroczenia czasu wykonania: ${responseData.remark}`);
+  }
+
+  // Runda 2: relacje "budynkowe" z niekompletną geometrią way-członków (patrz
+  // findIncompleteRelations) dostają celowany, SEKWENCYJNY dociąg pełnej geometrii —
+  // sekwencyjnie (nie równolegle), żeby nie zwiększać nagle obciążenia mirrorów Overpass,
+  // i tylko dla wykrytych relacji, żeby dla typowego obszaru bez złożonych zagnieżdżonych
+  // budynków (większość lokalizacji) nie było żadnych dodatkowych zapytań.
+  const incompleteRelationIds = findIncompleteRelations(responseData.elements).slice(0, ROUND2_MAX_RELATIONS);
+  if (incompleteRelationIds.length > 0) {
+    const merged = new Map<string, OverpassElement>();
+    for (const el of responseData.elements) merged.set(`${el.type}:${el.id}`, el);
+
+    for (const relId of incompleteRelationIds) {
+      try {
+        const detail = await fetchRelationFull(relId, ROUND2_RELATION_TIMEOUT_MS);
+        for (const el of detail.elements) merged.set(`${el.type}:${el.id}`, el);
+      } catch (err) {
+        // Nieudany dociąg pojedynczej relacji nie może wywalić całego importu — budynek
+        // po prostu zostanie z niekompletną geometrią/domyślną wysokością, tak jak dziś,
+        // zamiast zablokować import reszty (poprawnie już pobranego) obszaru.
+        console.warn(`Nie udało się dociągnąć pełnej geometrii relacji OSM ${relId}:`, err);
+      }
+    }
+
+    responseData = { ...responseData, elements: Array.from(merged.values()) };
   }
 
   return parseOverpassBuildingsResponse(responseData, projectCenter, projectCrs, radiusMeters);

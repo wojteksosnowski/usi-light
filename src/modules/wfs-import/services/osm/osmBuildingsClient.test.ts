@@ -4,6 +4,7 @@ import {
   extractOsmBuildingElevation,
   formatOsmBuildingName,
   parseOverpassBuildingsResponse,
+  findIncompleteRelations,
   OverpassResponse,
 } from './osmBuildingsClient';
 import { CrsDetectionResult } from '../../../../utils/geoTransform';
@@ -867,6 +868,71 @@ describe('osmBuildingsClient', () => {
     it('does not create a duplicate low building from the relation outline way (238291404)', () => {
       const buildings = parseOverpassBuildingsResponse({ elements: intracoRawElements }, mockProjectCenter, EPSG_2180, 300);
       expect(buildings.some((b) => b.id === 'osm-bld-238291404')).toBe(false);
+    });
+
+    // Regresja: zapytanie z podwójną rekursją (`>;>;`) naprawiało brak wieży Intraco, ale
+    // gubiło większość pozostałych budynków w obszarach z wieloma złożonymi zagnieżdżonymi
+    // relacjami (patrz reference/osm-error5.json — 79 obiektów spadło do 11). Właściwe
+    // rozwiązanie: runda 1 z pojedynczą rekursją (kompletność obszaru) + wykrycie
+    // niekompletnych relacji + celowany dociąg TYLKO dla nich w rundzie 2.
+    describe('findIncompleteRelations (wykrywanie kandydatów do rundy 2)', () => {
+      it('returns empty for a fully complete fixture (round 1 already has all member way nodes)', () => {
+        expect(findIncompleteRelations(intracoRawElements)).toEqual([]);
+      });
+
+      it('detects the relation when a member way is present but missing some of its node coordinates', () => {
+        // Symuluje efekt pojedynczej rekursji z realnego Overpass: way 238291407 (wieża)
+        // jest w zbiorze (trafiony bezpośrednio przez filtr way["building:part"]), ale
+        // brakuje mu części węzłów (nie dociągniętych przez pojedynczy krok rekursji).
+        const truncated = intracoRawElements.filter(
+          (el) => !(el.type === 'node' && [2461386166, 2461386155].includes(el.id))
+        );
+        expect(findIncompleteRelations(truncated)).toEqual([3211736]);
+      });
+
+      it('detects the relation when a member way is entirely missing from the set', () => {
+        const truncated = intracoRawElements.filter((el) => !(el.type === 'way' && el.id === 238291407));
+        expect(findIncompleteRelations(truncated)).toEqual([3211736]);
+      });
+
+      it('ignores relations unrelated to buildings (no type=building/multipolygon, no building tag)', () => {
+        const unrelated: OverpassResponse['elements'] = [
+          { type: 'relation', id: 999, members: [{ type: 'way', ref: 111, role: '' }], tags: { type: 'route' } },
+        ];
+        expect(findIncompleteRelations(unrelated)).toEqual([]);
+      });
+    });
+
+    it('end-to-end: merging an incomplete round-1 result with a round-2 relation detail fetch recovers the full tower geometry', () => {
+      // Runda 1 "niekompletna": way 238291407 obecny, ale bez węzłów (jak przy pojedynczej
+      // rekursji, gdy Overpass nie zdążył dociągnąć jego geometrii przez relację) — dokładnie
+      // scenariusz wykrywany przez findIncompleteRelations powyżej.
+      const round1Incomplete = intracoRawElements.filter(
+        (el) => !(el.type === 'node' && [2461386166, 2461386155, 2461386156, 2461386153].includes(el.id))
+      );
+      expect(findIncompleteRelations(round1Incomplete)).toEqual([3211736]);
+
+      // Runda 2 "detail": pełne dane relacji (jak zwróciłoby celowane zapytanie
+      // `relation(3211736);(._;>;>;);out body;`) — tu po prostu cały oryginalny fixture,
+      // bo zawiera komplet węzłów tej relacji.
+      const round2Detail = intracoRawElements;
+
+      // Scalanie identyczne z logiką w fetchOsmBuildings: Map po `${type}:${id}`, runda 2
+      // nadpisuje niekompletne wpisy z rundy 1.
+      const merged = new Map<string, OverpassResponse['elements'][number]>();
+      for (const el of round1Incomplete) merged.set(`${el.type}:${el.id}`, el);
+      for (const el of round2Detail) merged.set(`${el.type}:${el.id}`, el);
+
+      const buildings = parseOverpassBuildingsResponse(
+        { elements: Array.from(merged.values()) },
+        mockProjectCenter,
+        EPSG_2180,
+        300
+      );
+      const tower = buildings.find((b) => b.id === 'osm-part-238291407');
+      expect(tower).toBeDefined();
+      expect(tower!.defaultHeight).toBeGreaterThan(90);
+      expect(tower!.vertices.length).toBeGreaterThanOrEqual(3);
     });
   });
 });
