@@ -3,6 +3,8 @@ import { getOrComputeBuildingGeo } from '../renderers/buildingsRenderer';
 import { MASTERPLAN_COLORS } from './renderers/masterplanGroundRenderer';
 import { filterActiveVariantBuildings } from '@/utils/geometrySelectors';
 import { getCompoundObjectSummary } from '@/utils/compoundObjectPipeline';
+import { Bounds, boundsOverlap } from './masterplanSpatial';
+import { getBuildingAABB } from '@/engine/buildingGeometryCache';
 
 const LABEL_FONT_SIZE = 11;
 const BUILDING_LABEL_TEXT_H = LABEL_FONT_SIZE + 6;
@@ -69,7 +71,8 @@ export function buildMasterplanLabelCandidates(
   selectedBuildingId?: string | null,
   selectedBuildingIds?: string[] | null,
   hoveredBuildingId?: string | null,
-  viewRotationDeg: number = 0
+  viewRotationDeg: number = 0,
+  viewport?: Bounds
 ): MasterplanLabelCandidate[] {
   const candidates: MasterplanLabelCandidate[] = [];
   const viewRotRad = (viewRotationDeg * Math.PI) / 180;
@@ -94,6 +97,10 @@ export function buildMasterplanLabelCandidates(
   for (const [groupId, gBldgs] of groupMap.entries()) {
     const summary = getCompoundObjectSummary(gBldgs);
     if (!summary) continue;
+
+    if (viewport && !boundsOverlap(summary.bbox, viewport)) {
+      continue;
+    }
 
     const isGroupSelected = gBldgs.some(
       (b) => b.id === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(b.id))
@@ -141,11 +148,33 @@ export function buildMasterplanLabelCandidates(
     const bldg = independentBuildings[i];
     if (!bldg.vertices || bldg.vertices.length < 3) continue;
 
-    const geo = getOrComputeBuildingGeo(bldg);
-    if (!geo) continue;
+    if (viewport) {
+      const aabb = getBuildingAABB(bldg);
+      if (aabb && !boundsOverlap(aabb, viewport)) {
+        continue;
+      }
+    }
 
-    const spanX = Math.max(0.1, geo.maxX - geo.minX);
-    const spanY = Math.max(0.1, geo.maxY - geo.minY);
+    let spanX: number;
+    let spanY: number;
+    let labelAnchor: Point2D;
+    let dominantAngleRad: number;
+
+    const labelInfo = bldg.computed?.representation2D?.labelInfo;
+    if (labelInfo) {
+      spanX = labelInfo.spanX;
+      spanY = labelInfo.spanY;
+      labelAnchor = labelInfo.labelAnchor;
+      dominantAngleRad = labelInfo.dominantAngleRad;
+    } else {
+      const geo = getOrComputeBuildingGeo(bldg);
+      if (!geo) continue;
+      spanX = Math.max(0.1, geo.maxX - geo.minX);
+      spanY = Math.max(0.1, geo.maxY - geo.minY);
+      labelAnchor = geo.labelAnchor;
+      dominantAngleRad = geo.dominantAngleRad;
+    }
+
     const maxSpan = Math.max(spanX, spanY);
     const minSpan = Math.min(spanX, spanY);
 
@@ -165,7 +194,7 @@ export function buildMasterplanLabelCandidates(
         continue;
       }
 
-      const pt = worldToScreen(geo.labelAnchor.x, geo.labelAnchor.y);
+      const pt = worldToScreen(labelAnchor.x, labelAnchor.y);
       if (!Number.isFinite(pt.sx) || !Number.isFinite(pt.sy)) continue;
 
       candidates.push({
@@ -195,11 +224,11 @@ export function buildMasterplanLabelCandidates(
         continue;
       }
 
-      const pt = worldToScreen(geo.labelAnchor.x, geo.labelAnchor.y);
+      const pt = worldToScreen(labelAnchor.x, labelAnchor.y);
       if (!Number.isFinite(pt.sx) || !Number.isFinite(pt.sy)) continue;
 
       // Skorygowany kąt obrotu na ekranie z uwzględnieniem odwrócenia osi Y Canvasa (+Y w dół)
-      const angleRad = normalizeReadableAngle(-(geo.dominantAngleRad + viewRotRad));
+      const angleRad = normalizeReadableAngle(-(dominantAngleRad + viewRotRad));
 
       candidates.push({
         id: bldg.id,

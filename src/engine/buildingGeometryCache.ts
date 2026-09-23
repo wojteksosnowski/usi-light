@@ -20,6 +20,10 @@ export interface BuildingAABB {
 export const buildingAabbCache = new WeakMap<BuildingLoop, BuildingAABB>();
 
 export function getBuildingAABB(bldg: BuildingLoop): BuildingAABB | null {
+  if (bldg.computed?.representation2D?.bounds2D) {
+    const b = bldg.computed.representation2D.bounds2D;
+    return { minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y };
+  }
   if (!bldg.vertices || bldg.vertices.length < 3) return null;
   const cached = buildingAabbCache.get(bldg);
   if (cached) return cached;

@@ -52,6 +52,13 @@ export interface CompiledMetrics {
   readonly heightMax: number;
 }
 
+export interface LabelPlacementInfo {
+  readonly labelAnchor: Point2D;
+  readonly dominantAngleRad: number;
+  readonly spanX: number;
+  readonly spanY: number;
+}
+
 export interface CompiledObjectGeometry {
   /** Deterministyczny hash stanu wejściowego (wierzchołki, otwory, wysokości, modyfikatory) */
   readonly geometryHash: string;
@@ -66,6 +73,7 @@ export interface CompiledObjectGeometry {
       readonly min: Point2D;
       readonly max: Point2D;
     };
+    readonly labelInfo?: LabelPlacementInfo;
   };
 
   /** Reprezentacja siatki 3D dla podglądu izometrycznego / perspektywicznego */

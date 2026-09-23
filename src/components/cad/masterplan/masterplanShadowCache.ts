@@ -8,7 +8,7 @@ import {
   polygonFingerprint,
   MasterplanStoryTier,
 } from './masterplanGeometry';
-import { clusterTiersByShadowOverlap, unionPolygonsWithHolesHierarchical, Bounds, polygonsWithHolesBounds } from './masterplanSpatial';
+import { clusterTiersByShadowOverlap, unionPolygonsWithHolesHierarchical, Bounds, polygonsWithHolesBounds, boundsOverlap } from './masterplanSpatial';
 import { getCachedBuildingShadow, makeSunBucketKey, getOrComputeBuildingShadow } from '@/engine/buildingGeometryCache';
 
 export interface MasterplanColorSample {
@@ -43,6 +43,9 @@ function accumulatePolygons(dest: PolygonWithHoles[], src: PolygonWithHoles[]): 
 }
 
 function tierFingerprint(t: MasterplanStoryTier): string {
+  if (t.bldgRef?.computed?.geometryHash) {
+    return `${t.bldgRef.computed.geometryHash}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
+  }
   const holesFingerprint = (t.holes && t.holes.length > 0) ? t.holes.map(polygonFingerprint).join(';') : '';
   return `${t.buildingId}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}:${polygonFingerprint(t.polygon)}#${holesFingerprint}`;
 }
@@ -139,13 +142,22 @@ export function getCachedShadowBoundsForCulling(
   };
 }
 
-/** Rysuje wynik cienia (warstwy próbek) na podanym kontekście. */
+/** Rysuje wynik cienia (warstwy próbek) na podanym kontekście z opcjonalnym szybkim cullingiem AABB. */
 export function drawMasterplanShadowResult(
   ctx: CanvasRenderingContext2D,
-  result: MasterplanShadowRenderResult
+  result: MasterplanShadowRenderResult,
+  viewport?: Bounds
 ): void {
   for (const sample of result.samples) {
-    fillPolys(ctx, sample.polys, sample.color);
+    if (!viewport) {
+      fillPolys(ctx, sample.polys, sample.color);
+    } else {
+      const visiblePolys = sample.polys.filter((p) => {
+        const b = polygonsWithHolesBounds([p]);
+        return b ? boundsOverlap(b, viewport) : true;
+      });
+      fillPolys(ctx, visiblePolys, sample.color);
+    }
   }
 }
 

@@ -170,4 +170,53 @@ describe('masterplanSpatial', () => {
       expect(result).toEqual([]);
     });
   });
+
+  describe('Ground shadow cache and Canonical Precomputed Geometry', () => {
+    it('returns identical cached shadow render result across repeated calls for same scene tiers', async () => {
+      const { getCachedGroundShadowSamples } = await import('./masterplanShadowCache');
+      const tiers = [makeTier('b1', 0, 0, 20, 15), makeTier('b2', 30, 0, 20, 15)];
+      const samples = [{ color: 'rgba(0,0,0,0.2)', offsetMin: 0 }];
+
+      const res1 = getCachedGroundShadowSamples(tiers, samples, 52.23, 21.01, 'spring', 12.0);
+      const res2 = getCachedGroundShadowSamples(tiers, samples, 52.23, 21.01, 'spring', 12.0);
+
+      // Must be same reference (instant O(1) cache hit)
+      expect(res1).toBe(res2);
+      expect(res1.samples.length).toBeGreaterThan(0);
+    });
+
+    it('precomputes labelInfo in GeometryCompiler.bakeBuilding', async () => {
+      const { GeometryCompiler } = await import('@/engine/compiler/GeometryCompiler');
+      const bldg = makeBuilding('test-lbl', 10, 20, 30, 15);
+      const compiled = GeometryCompiler.bakeBuilding(bldg);
+
+      expect(compiled.representation2D.labelInfo).toBeDefined();
+      expect(compiled.representation2D.labelInfo?.labelAnchor).toBeDefined();
+      expect(typeof compiled.representation2D.labelInfo?.dominantAngleRad).toBe('number');
+      expect(compiled.representation2D.labelInfo?.spanX).toBeGreaterThanOrEqual(30);
+      expect(compiled.representation2D.labelInfo?.spanY).toBeGreaterThanOrEqual(30);
+    });
+
+    it('filters out label candidates outside viewport bounds', async () => {
+      const { buildMasterplanLabelCandidates } = await import('./masterplanLabels');
+      const inViewBldg = makeBuilding('in-view', 10, 10, 50, 15);
+      const outOfViewBldg = makeBuilding('out-of-view', 1000, 1000, 50, 15);
+      const viewport = { minX: 0, minY: 0, maxX: 100, maxY: 100 };
+
+      const candidates = buildMasterplanLabelCandidates(
+        [inViewBldg, outOfViewBldg],
+        (x, y) => ({ sx: x, sy: y }),
+        1,
+        null,
+        null,
+        null,
+        0,
+        viewport
+      );
+
+      expect(candidates.some((c) => c.id === 'in-view')).toBe(true);
+      expect(candidates.some((c) => c.id === 'out-of-view')).toBe(false);
+    });
+  });
 });
+

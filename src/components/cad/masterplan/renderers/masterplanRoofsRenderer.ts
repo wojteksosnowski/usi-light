@@ -15,6 +15,7 @@ import {
   viewportWorldBounds,
   cullBuildingsByViewport,
 } from '../masterplanSpatial';
+import { getBuildingAABB } from '@/engine/buildingGeometryCache';
 import { getCachedRoofShadowSamples, getCachedShadowBoundsForCulling, drawMasterplanShadowResult } from '../masterplanShadowCache';
 import {
   buildMasterplanLabelCandidates,
@@ -45,15 +46,11 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
 
   const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
 
-  // Viewport culling: odrzuca budynki, których bryła + szacowany zasięg cienia nie przecinają się
-  // z widocznym obszarem, zanim w ogóle trafią do extractBuildingStoryTiers.
   const viewport = viewportWorldBounds({ width, height, screenToWorld });
-  const getCachedShadowBounds = getCachedShadowBoundsForCulling(method, latitude, longitude, equinoxDate, hourFraction);
-  const culledBldgs = cullBuildingsByViewport(bldgs, viewport, angles, getCachedShadowBounds);
 
-  // 1. Ekstrakcja wszystkich poziomów kondygnacji (w tym z modyfikatorów: uskoków/tarasów/sztycy)
+  // 1. Ekstrakcja wszystkich poziomów kondygnacji z pełnej sceny (cienie ΔH i cache są stabilne w układzie świata)
   const allTiers: MasterplanStoryTier[] = [];
-  for (const bldg of culledBldgs) {
+  for (const bldg of bldgs) {
     allTiers.push(...extractBuildingStoryTiers(bldg, selectedBuildingId, selectedBuildingIds, hoveredBuildingId));
   }
 
@@ -71,6 +68,13 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
   // 3. Pętla po poziomach dachowych od najniższego do najwyższego
   for (let i = 0; i < sortedTiers.length; i++) {
     const tier = sortedTiers[i];
+    const tierBounds: Bounds = sortedTierBounds[i];
+
+    // Culling rysowania: pomiń dachy niewidoczne w aktualnym oknie
+    if (!boundsOverlap(tierBounds, viewport)) {
+      continue;
+    }
+
     const isSelected = tier.isSelected;
     const isHovered = tier.isHovered;
     const isProposed = tier.isProposed;
@@ -113,7 +117,6 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     // 2. Pobierz wszystkie kondygnacje/bryły wyższe (z tego samego budynku - self-shading, oraz z innych budynków - mutual shading)
     // Dokładny filtr przestrzenny: obliczamy realny zasięg cienia dla deltaHTop (a nie pełnego hTop!)
     const currentH = tier.hTop;
-    const tierBounds: Bounds = sortedTierBounds[i];
     const higherTiers = sortedTiers.slice(i + 1).filter((ht, offset) => {
       const deltaHTop = ht.hTop - currentH;
       if (deltaHTop <= 0.05) return false;
@@ -186,7 +189,11 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
 
   // 3. Wizualizacja stref i kondygnacji funkcyjnych (w tym parterów i stref krawędziowych modyfikatora zone_function)
   // Rysowane w przestrzeni świata CAD z zachowaniem hierarchii zakrycia (blur + opacity)
-  renderMasterplanFunctionOverlays(ctx, culledBldgs, viewState.scale, dominantBuildingType);
+  const visibleBldgs = bldgs.filter((b) => {
+    const aabb = getBuildingAABB(b);
+    return aabb ? boundsOverlap(aabb, viewport) : true;
+  });
+  renderMasterplanFunctionOverlays(ctx, visibleBldgs, viewState.scale, dominantBuildingType);
 
   ctx.restore(); // Przywrócenie transformacji sprzed pętli dachów
 
@@ -204,7 +211,8 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     selectedBuildingId,
     selectedBuildingIds,
     hoveredBuildingId,
-    viewRotationDeg
+    viewRotationDeg,
+    viewport
   );
 
   const resolvedLabels = resolveMasterplanLabelCollisions(candidates);

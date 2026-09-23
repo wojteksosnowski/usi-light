@@ -3,15 +3,22 @@ import type {
   CompiledMetrics,
   CompiledObjectGeometry,
   Face3D,
+  LabelPlacementInfo,
   Point3D,
   Polygon2D,
   ShadowCastingEdge,
   StorySlice,
 } from '@/types/compiledGeometry';
 import { applyBuildingModifiers } from '../modifiers/modifierPipeline';
-import { calculateSignedArea, isPolygonCCW, rotatePointAroundPivot } from '@/utils/math2d/polygons';
+import {
+  calculateSignedArea,
+  isPolygonCCW,
+  rotatePointAroundPivot,
+  getPolygonInteriorPoint,
+  computePolygonDominantAngle,
+} from '@/utils/math2d/polygons';
 import { calculateOutwardNormal } from '@/utils/math2d/vec2';
-import { clippingResultToPolygonsWithHoles, polygonsWithHolesToClipping } from '@/utils/math2d/polygons';
+import { clippingResultToPolygonsWithHoles, polygonsWithHolesToClipping, PolygonWithHoles } from '@/utils/math2d/polygons';
 import polygonClipping from 'polygon-clipping';
 
 function computePolygonNetArea(exterior: readonly Point2D[], holes?: readonly (readonly Point2D[])[]): number {
@@ -297,6 +304,21 @@ export class GeometryCompiler {
       heightMax,
     };
 
+    let labelInfo: LabelPlacementInfo | undefined;
+    const baseVerts = (footprintBase.exterior as Point2D[]) || baseVertices;
+    if (baseVerts.length >= 3) {
+      const labelAnchor = getPolygonInteriorPoint(baseVerts);
+      const dominantAngleRad = computePolygonDominantAngle(baseVerts);
+      const spanX = Math.max(0.1, bounds2D.max.x - bounds2D.min.x);
+      const spanY = Math.max(0.1, bounds2D.max.y - bounds2D.min.y);
+      labelInfo = {
+        labelAnchor,
+        dominantAngleRad,
+        spanX,
+        spanY,
+      };
+    }
+
     return {
       geometryHash: hash,
       computedAt: Date.now(),
@@ -305,6 +327,7 @@ export class GeometryCompiler {
         footprintRoof,
         storySlices,
         bounds2D,
+        labelInfo,
       },
       representation3D: {
         faces,
@@ -337,8 +360,8 @@ export class GeometryCompiler {
     }
 
     // 1. Scalenie obrysów 2D (Union)
-    const basePolygonsToUnion = bakedChildren.map((c) => ({
-      exterior: c.representation2D.footprintBase.exterior as Point2D[],
+    const basePolygonsToUnion: PolygonWithHoles[] = bakedChildren.map((c) => ({
+      outer: c.representation2D.footprintBase.exterior as Point2D[],
       holes: (c.representation2D.footprintBase.holes ?? []) as Point2D[][],
     }));
 
@@ -351,7 +374,7 @@ export class GeometryCompiler {
       const parsedUnion = clippingResultToPolygonsWithHoles(unionResult);
 
       if (parsedUnion.length > 0) {
-        mergedExterior = parsedUnion[0].exterior;
+        mergedExterior = parsedUnion[0].outer;
         mergedHoles = parsedUnion[0].holes;
       }
     } catch {
@@ -393,6 +416,20 @@ export class GeometryCompiler {
       { footprintArea: 0, grossFloorArea: 0, volume: 0, perimeter: 0, heightMax: 0 }
     );
 
+    let labelInfo: LabelPlacementInfo | undefined;
+    if (mergedExterior.length >= 3) {
+      const labelAnchor = getPolygonInteriorPoint(mergedExterior);
+      const dominantAngleRad = computePolygonDominantAngle(mergedExterior);
+      const spanX = Math.max(0.1, bounds2D.max.x - bounds2D.min.x);
+      const spanY = Math.max(0.1, bounds2D.max.y - bounds2D.min.y);
+      labelInfo = {
+        labelAnchor,
+        dominantAngleRad,
+        spanX,
+        spanY,
+      };
+    }
+
     return {
       geometryHash: hash,
       computedAt: Date.now(),
@@ -401,6 +438,7 @@ export class GeometryCompiler {
         footprintRoof: footprintBase,
         storySlices: [],
         bounds2D,
+        labelInfo,
       },
       representation3D: {
         faces: aggregatedFaces,
@@ -491,6 +529,15 @@ export class GeometryCompiler {
     const bounds2D = computeBounds2DFromRings(allRings);
     const bounds3D = computeBounds3DFromFaces(transformedFaces);
 
+    const transformedLabelInfo: LabelPlacementInfo | undefined = computed.representation2D.labelInfo
+      ? {
+          labelAnchor: transformPoint2D(computed.representation2D.labelInfo.labelAnchor),
+          dominantAngleRad: computed.representation2D.labelInfo.dominantAngleRad + rotationRad,
+          spanX: Math.max(0.1, bounds2D.max.x - bounds2D.min.x),
+          spanY: Math.max(0.1, bounds2D.max.y - bounds2D.min.y),
+        }
+      : undefined;
+
     return {
       ...computed,
       computedAt: Date.now(),
@@ -499,6 +546,7 @@ export class GeometryCompiler {
         footprintRoof: transformedRoof,
         storySlices: transformedStorySlices,
         bounds2D,
+        labelInfo: transformedLabelInfo,
       },
       representation3D: {
         faces: transformedFaces,
@@ -510,5 +558,19 @@ export class GeometryCompiler {
         simplifiedEnvelope2D: transformedBase,
       },
     };
+  }
+
+  /**
+   * Zwraca zbuforowane granice AABB obiektu 2D z modelu skompilowanego w O(1)
+   * lub z wierzchołków bazowych jako fallback.
+   */
+  public static getBuildingBounds2D(bldg: BuildingLoop): { min: Point2D; max: Point2D } | null {
+    if (bldg.computed?.representation2D?.bounds2D) {
+      return bldg.computed.representation2D.bounds2D;
+    }
+    if (bldg.vertices && bldg.vertices.length >= 3) {
+      return computeBounds2DFromRings([bldg.vertices]);
+    }
+    return null;
   }
 }

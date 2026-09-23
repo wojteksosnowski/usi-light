@@ -61,6 +61,38 @@ export function extractBuildingStoryTiers(
   const totalHeight = bldg.defaultHeight || 0.0;
   const defaultBldgType = bldg.buildingType ?? 'residential';
 
+  if (bldg.computed?.representation2D?.storySlices && bldg.computed.representation2D.storySlices.length > 0) {
+    const slices = bldg.computed.representation2D.storySlices;
+    const tiers: MasterplanStoryTier[] = [];
+    for (const s of slices) {
+      if (!s.footprint.exterior || s.footprint.exterior.length < 3) continue;
+      tiers.push({
+        buildingId: bldg.id,
+        storyIndex: s.storyIndex,
+        polygon: s.footprint.exterior as Point2D[],
+        holes: (s.footprint.holes as Point2D[][]) || [],
+        hBottom: s.elevationBottom,
+        hTop: s.elevationTop,
+        isProposed,
+        isSelected,
+        isHovered,
+        bldgRef: bldg,
+        buildingType: defaultBldgType,
+      });
+    }
+    if (tiers.length > 0) {
+      return collapseIdenticalConsecutiveHeightRuns(
+        tiers,
+        (t) => t.polygon,
+        (t) => t.holes,
+        (t) => t.hBottom,
+        (t) => t.hTop,
+        (last, hBottom, hTop) => ({ ...last, hBottom, hTop }),
+        (t) => t.buildingType
+      );
+    }
+  }
+
   if (Array.isArray(bldg.storyPolygons) && bldg.storyPolygons.length > 0) {
     const tiers: MasterplanStoryTier[] = [];
     for (const sf of bldg.storyPolygons) {

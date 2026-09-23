@@ -220,17 +220,11 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   }
 
   // 3. Pełne Cienie Gruntowe z uwzględnieniem kondygnacji i modyfikatorów (Boolean Union per próbka penumbry)
-  const actualBuildings = bldgs.filter((b: BuildingLoop) => b.category !== 'boundary' && b.defaultHeight > 0);
-
-  // Viewport culling: odrzuca budynki, których bryła + szacowany zasięg cienia nie przecinają się
-  // z widocznym obszarem, zanim w ogóle trafią do extractBuildingStoryTiers/klastrowania.
-  const solarAngles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
-  const viewport = viewportWorldBounds({ width, height, screenToWorld });
-  const getCachedShadowBounds = getCachedShadowBoundsForCulling(method, latitude, longitude, equinoxDate, hourFraction);
-  const culledBuildings = cullBuildingsByViewport(actualBuildings, viewport, solarAngles, getCachedShadowBounds);
+  // Cienie w układzie świata są niezmiennicze względem kamery — liczone raz dla sceny i pozycji słońca.
+  const actualBuildings = (buildings || bldgs).filter((b: BuildingLoop) => b.category !== 'boundary' && b.defaultHeight > 0);
 
   const allTiers: MasterplanStoryTier[] = [];
-  for (const bldg of culledBuildings) {
+  for (const bldg of actualBuildings) {
     allTiers.push(...extractBuildingStoryTiers(bldg));
   }
 
@@ -244,8 +238,9 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
     method
   );
 
+  const viewport = viewportWorldBounds({ width, height, screenToWorld });
   ctx.save();
-  drawMasterplanShadowResult(ctx, shadowResult);
+  drawMasterplanShadowResult(ctx, shadowResult, viewport);
   ctx.restore();
 
   ctx.restore();
