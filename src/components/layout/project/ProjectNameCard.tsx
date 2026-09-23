@@ -227,16 +227,7 @@ export const ProjectNameCard: React.FC = () => {
         <button
           type="button"
           onClick={handleNewProject}
-          className="btn-secondary"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '4px 8px',
-            fontSize: '10.5px',
-            fontWeight: 600,
-            borderRadius: '6px',
-          }}
+          className="project-new-btn"
           title="Rozpocznij nowy projekt (czyści scenę, ustawienia i punkty pomiarowe)"
         >
           <FilePlus2 size={12} />
@@ -279,19 +270,7 @@ export const ProjectNameCard: React.FC = () => {
           <button
             type="button"
             onClick={handleSaveCurrentProject}
-            className="btn-tile active-amber"
-            style={{
-              width: 'auto',
-              padding: '6px 10px',
-              fontSize: '11px',
-              fontWeight: 700,
-              gap: '4px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: '8px',
-              flexShrink: 0,
-            }}
+            className="btn-tile active-amber project-save-btn"
             title={currentProjectId ? 'Zaktualizuj zapisany stan projektu' : 'Zapisz jako nowy projekt w pamięci podręcznej'}
           >
             <Save size={13} />
@@ -304,17 +283,24 @@ export const ProjectNameCard: React.FC = () => {
           <div className="project-list custom-scrollbar">
             {projectsList.map((p) => {
               const isCurrent = currentProjectId === p.id;
-              const dateStr = new Date(p.updatedAt).toLocaleDateString('pl-PL', {
-                day: 'numeric',
-                month: 'numeric',
+              const dateObj = new Date(p.updatedAt);
+              const formattedDate = dateObj.toLocaleDateString('pl-PL', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
               });
+              const formattedTime = dateObj.toLocaleTimeString('pl-PL', {
+                hour: '2-digit',
+                minute: '2-digit',
+              });
+              const dateDisplay = `${formattedDate} ${formattedTime}`;
 
               return (
                 <div
                   key={p.id}
                   onClick={() => handleLoadProject(p.id)}
                   className={`project-list-item ${isCurrent ? 'active' : ''}`}
-                  title={`Wczytaj projekt: ${p.name} (${p.buildingsCount} obiektów)`}
+                  title={`Wczytaj projekt: ${p.name}\nZapisano: ${dateDisplay}\nLiczba obiektów: ${p.buildingsCount}${p.city ? `\nLokalizacja: ${p.city}` : ''}`}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
                     {isCurrent ? (
@@ -326,8 +312,10 @@ export const ProjectNameCard: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                    <span className="project-item-meta" title={`Zmodyfikowano: ${dateStr}`}>
-                      {p.city ? `${p.city} • ` : ''}{p.buildingsCount} ob.
+                    <span className="project-item-meta">
+                      <span className="project-item-date">{dateDisplay}</span>
+                      <span className="project-item-dot">•</span>
+                      <span>{p.buildingsCount} ob.</span>
                     </span>
                     <button
                       type="button"

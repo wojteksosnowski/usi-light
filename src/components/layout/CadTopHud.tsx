@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ChevronRight,
   MapPin,
+  FolderKanban,
   Maximize2,
   RotateCw,
   Move,
@@ -77,6 +78,7 @@ export const CadTopHud: React.FC = () => {
   const lastSavedAt = useUiStore((s) => s.lastSavedAt);
   const saveError = useUiStore((s) => s.saveError);
 
+  const projectName = useSolarAnalysisStore((s) => s.projectName);
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
   const settings = useSolarAnalysisStore((s) => s.settings);
 
@@ -141,25 +143,19 @@ export const CadTopHud: React.FC = () => {
         </button>
       )}
 
-      {/* Selected City Location Badge */}
+      {/* Project Name Badge */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '5px',
-          padding: '4px 8px',
-          borderRadius: '6px',
-          backgroundColor: 'var(--bg-badge)',
-          border: '1px solid var(--border-light)',
-          fontSize: '11px',
-          color: 'var(--text-primary)',
-          whiteSpace: 'nowrap',
-          flexShrink: 0,
-        }}
-        title={`Lokalizacja projektu: ${selectedCity} (${settings.latitude.toFixed(2)}°N, ${settings.longitude.toFixed(2)}°E)`}
+        className="hud-project-badge"
+        title={
+          projectName && projectName.trim()
+            ? `Projekt: ${projectName.trim()} (${selectedCity ? `${selectedCity} • ` : ''}${settings.latitude.toFixed(4)}°N, ${settings.longitude.toFixed(4)}°E)`
+            : `Lokalizacja projektu: ${selectedCity} (${settings.latitude.toFixed(4)}°N, ${settings.longitude.toFixed(4)}°E)`
+        }
       >
-        <MapPin size={13} color="var(--accent-amber)" />
-        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedCity}</span>
+        <FolderKanban size={13} color="var(--accent-amber)" style={{ flexShrink: 0 }} />
+        <span className="hud-project-name">
+          {projectName && projectName.trim() ? projectName.trim() : (selectedCity || 'Nowy projekt')}
+        </span>
       </div>
 
       {/* Wskaźnik zapisu projektu */}

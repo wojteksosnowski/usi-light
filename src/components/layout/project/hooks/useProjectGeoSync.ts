@@ -27,7 +27,7 @@ import { fetchOvertureBase } from '../../../../modules/wfs-import/services/overt
 import { findMpzpSource } from '../../../../modules/wfs-import/services/reference/mpzpSources';
 import { fetchLandCoverUnits } from '../../../../modules/wfs-import/services/reference/wfsLcvClient';
 import { EPSG_2180 } from '../../../../modules/wfs-import/services/national/wfsEgibClient';
-import { latLonToBbox } from '../../../../modules/wfs-import/services/shared/geocoding';
+import { latLonToBbox, reverseGeocodeLocationDebounced } from '../../../../modules/wfs-import/services/shared/geocoding';
 import { detectCoordinateSystem, CrsDetectionResult, LatLon, wgs84ToCadPoint } from '../../../../utils/geoTransform';
 import { translateBuildingGeometry } from '../../../../store/useSceneStore';
 import { parseGoogleMapsCoordinates } from '../../../../utils/geoParser';
@@ -40,6 +40,8 @@ export const useProjectGeoSync = () => {
   const buildings = useSceneStore((s) => s.buildings);
   const setBuildings = useSceneStore((s) => s.setBuildings);
 
+  const projectName = useSolarAnalysisStore((s) => s.projectName);
+  const setProjectName = useSolarAnalysisStore((s) => s.setProjectName);
   const settings = useSolarAnalysisStore((s) => s.settings);
   const setSettings = useSolarAnalysisStore((s) => s.setSettings);
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
@@ -113,9 +115,22 @@ export const useProjectGeoSync = () => {
       const matchingCity = POLISH_CITIES.find(
         (c) => Math.abs(c.lat - parsed.latitude) < 0.05 && Math.abs(c.lon - parsed.longitude) < 0.05
       );
-      const cityName = parsed.label || matchingCity?.name || `Lokalizacja (${parsed.latitude.toFixed(2)}°N)`;
-      setSelectedCity(cityName);
+      const initialCityName = parsed.label || matchingCity?.name || `Lokalizacja (${parsed.latitude.toFixed(2)}°N)`;
+      setSelectedCity(initialCityName);
+      setProjectName(initialCityName);
       updateProjectCenter(parsed.latitude, parsed.longitude);
+
+      // Asynchroniczne reverse geocoding z Nominatim (ekstrakcja: miasto + dzielnica -> 'Warszawa - Wola')
+      reverseGeocodeLocationDebounced(parsed.latitude, parsed.longitude, (result) => {
+        if (result) {
+          if (result.city) {
+            setSelectedCity(result.city);
+          }
+          if (result.formattedProjectName) {
+            setProjectName(result.formattedProjectName);
+          }
+        }
+      });
     } else {
       setMapsParseError(true);
     }
@@ -422,6 +437,8 @@ export const useProjectGeoSync = () => {
   };
 
   return {
+    projectName,
+    setProjectName,
     settings,
     selectedCity,
     setSelectedCity,

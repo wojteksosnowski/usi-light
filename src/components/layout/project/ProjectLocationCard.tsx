@@ -6,6 +6,7 @@ import {
   Lock,
   Unlock,
   Crosshair,
+  ExternalLink,
   RefreshCw,
 } from 'lucide-react';
 import { POLISH_CITIES } from '../../../store';
@@ -16,6 +17,7 @@ export const ProjectLocationCard: React.FC = () => {
     settings,
     selectedCity,
     setSelectedCity,
+    setProjectName,
     mapsInput,
     mapsParseError,
     projectRadius,
@@ -114,6 +116,7 @@ export const ProjectLocationCard: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setSelectedCity(city.name);
+                  setProjectName(city.name);
                   handleMapsInputChange('');
                   updateProjectCenter(city.lat, city.lon);
                 }}
@@ -126,7 +129,7 @@ export const ProjectLocationCard: React.FC = () => {
           })}
         </div>
 
-        {/* Coordinates info pill & Center Action Button */}
+        {/* Coordinates info pill, Center Action Button & Google Maps External Link */}
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           <div className="project-coords-pill">
             <span>Punkt bazowy:</span>
@@ -142,6 +145,15 @@ export const ProjectLocationCard: React.FC = () => {
           >
             <Crosshair size={13} />
           </button>
+          <a
+            href={`https://www.google.com/maps?q=${settings.latitude},${settings.longitude}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="project-map-link-btn"
+            title="Otwórz lokalizację projektu w Google Maps (nowa zakładka)"
+          >
+            <ExternalLink size={13} />
+          </a>
         </div>
 
         {/* Promień zasięgu projektu */}

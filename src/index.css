@@ -261,6 +261,29 @@ html, body, #root {
   display: none;
 }
 
+.hud-project-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: var(--bg-badge);
+  border: 1px solid var(--border-light);
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 220px;
+}
+
+.hud-project-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1280px) {
   .hud-btn-label {
     display: none;
@@ -400,6 +423,50 @@ html, body, #root {
   gap: 16px;
   font-size: 12px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.bottombar-dev-pro-toggle {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  padding: 1px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  background-color: var(--bg-badge);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.bottombar-dev-pro-toggle.is-pro {
+  border-color: var(--status-amber-border);
+}
+
+.bottombar-dev-pro-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 16px;
+  padding: 0 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: transparent;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+
+.bottombar-dev-pro-btn.active-free {
+  background-color: var(--status-indigo-bg);
+  color: var(--status-indigo-text);
+}
+
+.bottombar-dev-pro-btn.active-pro {
+  background-color: var(--status-amber-bg);
+  color: var(--status-amber-text);
 }
 
 /* Inspector Floating Modal */
@@ -821,6 +888,61 @@ html, body, #root {
   background-color: rgba(56, 189, 248, 0.2);
 }
 
+.project-map-link-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background-color: var(--bg-input);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.project-map-link-btn:hover {
+  background-color: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--accent-amber);
+}
+
+.project-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  background-color: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--status-indigo-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.project-new-btn:hover {
+  background-color: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: var(--text-primary);
+}
+
+.project-save-btn {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
 .project-sync-btn {
   margin-top: 4px;
   display: flex;
@@ -966,6 +1088,20 @@ html, body, #root {
   font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-item-date {
+  font-family: monospace;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.project-item-dot {
+  color: var(--text-muted);
+  opacity: 0.5;
 }
 
 .project-delete-btn {

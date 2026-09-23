@@ -201,53 +201,27 @@ export const CadLegendBottom: React.FC = () => {
           <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
 
           <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              borderRadius: '6px',
-              border: `1px solid ${isPro ? 'var(--status-amber-border)' : 'var(--border-light)'}`,
-              overflow: 'hidden',
-              fontSize: '10px',
-              fontWeight: 700,
-            }}
+            className={`bottombar-dev-pro-toggle ${isPro ? 'is-pro' : 'is-free'}`}
             title={
               isPro
-                ? 'Przełącz na wersję darmową (aby przetestować blokady i modale zakupu)'
-                : 'Przełącz na wersję PRO (rozszerz o import geo i eksport DXF)'
+                ? 'DEV: Przełącz na wersję FREE (aby przetestować blokady i modale zakupu)'
+                : 'DEV: Przełącz na wersję PRO (rozszerz o import geo i eksport DXF)'
             }
           >
             <button
               type="button"
               onClick={handleToggleDevPro}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '3px',
-                padding: '3px 8px',
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: isPro ? 'transparent' : 'var(--status-indigo-bg)',
-                color: isPro ? 'var(--text-muted)' : 'var(--status-indigo-text)',
-              }}
+              className={`bottombar-dev-pro-btn ${!isPro ? 'active-free' : ''}`}
             >
-              <Sparkles size={11} />
+              <Sparkles size={10} />
               <span>FREE</span>
             </button>
             <button
               type="button"
               onClick={handleToggleDevPro}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '3px',
-                padding: '3px 8px',
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: isPro ? 'var(--status-amber-bg)' : 'transparent',
-                color: isPro ? 'var(--status-amber-text)' : 'var(--text-muted)',
-              }}
+              className={`bottombar-dev-pro-btn ${isPro ? 'active-pro' : ''}`}
             >
-              <Crown size={11} />
+              <Crown size={10} />
               <span>PRO</span>
             </button>
           </div>
