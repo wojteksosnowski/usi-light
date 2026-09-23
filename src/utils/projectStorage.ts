@@ -3,6 +3,7 @@ import { DxfUnitOption, DxfUnitInfo } from '../utils/dxfParser';
 import { normalizeLegacyBuildingTypes } from './legacyBuildingType';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
 import { rebuildBuildingSegments } from './segmentStatistics';
+import { GeometryCompiler } from '../engine/compiler/GeometryCompiler';
 
 export const LOCAL_STORAGE_PROJECTS_KEY = 'usi_saved_projects_v1';
 
@@ -127,30 +128,32 @@ export function sanitizeBuildingForStorage(bldg: BuildingLoop): BuildingLoop {
 }
 
 /**
- * Rehydratuje budynek odczytany z pamięci masowej, odtwarzając segmenty fasad i modyfikatory.
+ * Rehydratuje budynek odczytany z pamięci masowej, odtwarzając segmenty fasad, modyfikatory oraz zbuforowaną geometrię.
  */
 export function rehydrateBuildingFromStorage(bldg: BuildingLoop): BuildingLoop {
   if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return bldg;
 
+  let rehydrated = bldg;
   if (bldg.modifiers && bldg.modifiers.length > 0) {
     try {
       const modRes = applyBuildingModifiers(bldg);
-      return {
+      rehydrated = {
         ...bldg,
         storyPolygons: modRes.storyPolygons,
         zonePolygons: modRes.zonePolygons,
         segments: modRes.segments,
       };
     } catch {
-      return rebuildBuildingSegments(bldg, bldg.vertices);
+      rehydrated = rebuildBuildingSegments(bldg, bldg.vertices);
     }
+  } else if (!bldg.segments || bldg.segments.length === 0) {
+    rehydrated = rebuildBuildingSegments(bldg, bldg.vertices);
   }
 
-  if (!bldg.segments || bldg.segments.length === 0) {
-    return rebuildBuildingSegments(bldg, bldg.vertices);
-  }
-
-  return bldg;
+  return {
+    ...rehydrated,
+    computed: GeometryCompiler.bakeBuilding(rehydrated),
+  };
 }
 
 /**

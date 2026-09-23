@@ -25,6 +25,19 @@ export interface IsoSolid {
 export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
   const normalize = (pt: Point2D) => pt;
 
+  if (building.computed && building.computed.representation2D.storySlices.length > 0) {
+    return building.computed.representation2D.storySlices
+      .filter((story) => story.footprint.exterior.length >= 3 && story.elevationTop > story.elevationBottom)
+      .map((story) => ({
+        polygon: [...story.footprint.exterior],
+        holes: story.footprint.holes.map((hole) => [...hole]),
+        hBottom: story.elevationBottom,
+        hTop: story.elevationTop,
+        edgeOrigins: story.edgeOrigins,
+        buildingType: building.buildingType ?? 'residential',
+      }));
+  }
+
   if (building.storyPolygons && building.storyPolygons.length > 0) {
     return building.storyPolygons
       .filter((story) => story.polygon.length >= 3 && story.hTop > story.hBottom)

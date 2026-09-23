@@ -6,6 +6,8 @@ import { computeLineEquation, rebuildBuildingSegments } from '../utils/segmentSt
 import { translateLineBuffer, rotateLineBuffer } from '../utils/lineBufferEngine';
 import { offsetPolygonEdge, offsetOpenPolylineEdge, updateBuildingWithNewVertices, booleanUnionBuildings, generateSweepPolygon, getPolygonCentroid, rotatePointAroundPivot } from '@/utils/math2d';
 import { applyBuildingModifiers } from '../engine/modifiers/modifierPipeline';
+import { GeometryCompiler } from '../engine/compiler/GeometryCompiler';
+import { rehydrateBuildingFromStorage } from '../utils/projectStorage';
 import { useUiStore } from './useUiStore';
 
 export interface SavedSceneData {
@@ -164,6 +166,10 @@ export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: nu
     ? translateLineBuffer(bldg.cachedLineEquations, dx, dy)
     : undefined;
 
+  const newComputed = bldg.computed
+    ? GeometryCompiler.transformCompiledGeometry(bldg.computed, dx, dy)
+    : undefined;
+
   return {
     ...bldg,
     vertices: newVertices,
@@ -173,6 +179,7 @@ export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: nu
     zonePolygons: newZonePolygons,
     segments: newSegments,
     cachedLineEquations: newCachedLines,
+    computed: newComputed,
     transform: {
       ...currentTransform,
       tx: (currentTransform.tx || 0) + dx,
@@ -182,6 +189,17 @@ export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: nu
 }
 
 /** Rotates a building's vertices, sweep path, story/zone polygons, and facade segments around a pivot. */
+function applyModifiersAndBake(withMods: BuildingLoop): BuildingLoop {
+  const res = applyBuildingModifiers(withMods);
+  const updated = {
+    ...withMods,
+    storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
+    zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
+    segments: res.segments,
+  };
+  return { ...updated, computed: GeometryCompiler.bakeBuilding(updated) };
+}
+
 function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRad: number): BuildingLoop {
   const deltaDeg = (deltaAngleRad * 180) / Math.PI;
   const rotate = (v: Point2D) => rotatePointAroundPivot(v, pivot, deltaAngleRad);
@@ -230,6 +248,10 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
     ? rotateLineBuffer(bldg.cachedLineEquations, pivot, deltaAngleRad)
     : undefined;
 
+  const newComputed = bldg.computed
+    ? GeometryCompiler.transformCompiledGeometry(bldg.computed, 0, 0, deltaAngleRad, pivot)
+    : undefined;
+
   return {
     ...bldg,
     vertices: newVertices,
@@ -240,6 +262,7 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
     zonePolygons: newZonePolygons,
     segments: newSegments,
     cachedLineEquations: newCachedLines,
+    computed: newComputed,
   };
 }
 
@@ -355,8 +378,9 @@ export const useSceneStore = create<SceneState>()(
   },
 
   addBuilding: (building) => {
+    const baked = building.computed ? building : { ...building, computed: GeometryCompiler.bakeBuilding(building) };
     set((state) => ({
-      buildings: [...state.buildings, building],
+      buildings: [...state.buildings, baked],
       selectedBuildingId: building.id,
       selectedBuildingIds: [building.id],
     }));
@@ -432,6 +456,7 @@ export const useSceneStore = create<SceneState>()(
       sweepPath: newSweepPath,
       groupId: undefined,
     };
+    duplicate.computed = GeometryCompiler.bakeBuilding(duplicate);
 
     set((state) => ({
       buildings: [...state.buildings, duplicate],
@@ -442,7 +467,14 @@ export const useSceneStore = create<SceneState>()(
 
   updateBuilding: (id, patch) => {
     set((state) => ({
-      buildings: state.buildings.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+      buildings: state.buildings.map((b) => {
+        if (b.id !== id) return b;
+        const updated = { ...b, ...patch };
+        return {
+          ...updated,
+          computed: GeometryCompiler.bakeBuilding(updated),
+        };
+      }),
     }));
   },
 
@@ -511,7 +543,10 @@ export const useSceneStore = create<SceneState>()(
           updated.segments = modRes.segments;
         }
 
-        return updated;
+        return {
+          ...updated,
+          computed: GeometryCompiler.bakeBuilding(updated),
+        };
       }),
     }));
   },
@@ -541,7 +576,10 @@ export const useSceneStore = create<SceneState>()(
           updated.zonePolygons = modRes.zonePolygons;
           updated.segments = modRes.segments;
         }
-        return updated;
+        return {
+          ...updated,
+          computed: GeometryCompiler.bakeBuilding(updated),
+        };
       }),
     }));
   },
@@ -560,7 +598,10 @@ export const useSceneStore = create<SceneState>()(
           rebuilt.storyPolygons = undefined;
           rebuilt.zonePolygons = undefined;
         }
-        return rebuilt;
+        return {
+          ...rebuilt,
+          computed: GeometryCompiler.bakeBuilding(rebuilt),
+        };
       }),
     }));
   },
@@ -587,7 +628,10 @@ export const useSceneStore = create<SceneState>()(
           rebuilt.storyPolygons = undefined;
           rebuilt.zonePolygons = undefined;
         }
-        return rebuilt;
+        return {
+          ...rebuilt,
+          computed: GeometryCompiler.bakeBuilding(rebuilt),
+        };
       }),
     }));
   },
@@ -671,7 +715,10 @@ export const useSceneStore = create<SceneState>()(
           rebuilt.zonePolygons = modRes.zonePolygons;
           rebuilt.segments = modRes.segments;
         }
-        return rebuilt;
+        return {
+          ...rebuilt,
+          computed: GeometryCompiler.bakeBuilding(rebuilt),
+        };
       }),
     }));
   },
@@ -725,6 +772,7 @@ export const useSceneStore = create<SceneState>()(
     const res = booleanUnionBuildings(bA, bB);
     if (res.success && res.building) {
       const newBuilding = res.building;
+      newBuilding.computed = GeometryCompiler.bakeBuilding(newBuilding);
       set((state) => ({
         buildings: [
           ...state.buildings.filter((b) => b.id !== bldgIdA && b.id !== bldgIdB),
@@ -747,13 +795,7 @@ export const useSceneStore = create<SceneState>()(
         const currentMods = bldg.modifiers || [];
         const newMods = [...currentMods, modifier];
         const withMods = { ...bldg, modifiers: newMods };
-        const res = applyBuildingModifiers(withMods);
-        return {
-          ...withMods,
-          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
-          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
-          segments: res.segments,
-        };
+        return applyModifiersAndBake(withMods);
       }),
     }));
   },
@@ -765,13 +807,7 @@ export const useSceneStore = create<SceneState>()(
         const currentMods = bldg.modifiers || [];
         const newMods = currentMods.map((m) => (m.id === modifierId ? ({ ...m, ...patch } as Modifier) : m));
         const withMods = { ...bldg, modifiers: newMods };
-        const res = applyBuildingModifiers(withMods);
-        return {
-          ...withMods,
-          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
-          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
-          segments: res.segments,
-        };
+        return applyModifiersAndBake(withMods);
       }),
     }));
   },
@@ -785,19 +821,10 @@ export const useSceneStore = create<SceneState>()(
         const withMods = { ...bldg, modifiers: newMods };
         if (newMods.length === 0) {
           const rebuilt = rebuildBuildingSegments(withMods, withMods.vertices);
-          return {
-            ...rebuilt,
-            storyPolygons: undefined,
-            zonePolygons: undefined,
-          };
+          const updated = { ...rebuilt, storyPolygons: undefined, zonePolygons: undefined };
+          return { ...updated, computed: GeometryCompiler.bakeBuilding(updated) };
         }
-        const res = applyBuildingModifiers(withMods);
-        return {
-          ...withMods,
-          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
-          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
-          segments: res.segments,
-        };
+        return applyModifiersAndBake(withMods);
       }),
     }));
   },
@@ -813,13 +840,7 @@ export const useSceneStore = create<SceneState>()(
         const [moved] = currentMods.splice(fromIndex, 1);
         currentMods.splice(toIndex, 0, moved);
         const withMods = { ...bldg, modifiers: currentMods };
-        const res = applyBuildingModifiers(withMods);
-        return {
-          ...withMods,
-          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
-          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
-          segments: res.segments,
-        };
+        return applyModifiersAndBake(withMods);
       }),
     }));
   },
@@ -831,13 +852,7 @@ export const useSceneStore = create<SceneState>()(
         const currentMods = bldg.modifiers || [];
         const newMods = currentMods.map((m) => (m.id === modifierId ? { ...m, enabled: !m.enabled } : m));
         const withMods = { ...bldg, modifiers: newMods };
-        const res = applyBuildingModifiers(withMods);
-        return {
-          ...withMods,
-          storyPolygons: res.storyPolygons && res.storyPolygons.length > 0 ? res.storyPolygons : undefined,
-          zonePolygons: res.zonePolygons && res.zonePolygons.length > 0 ? res.zonePolygons : undefined,
-          segments: res.segments,
-        };
+        return applyModifiersAndBake(withMods);
       }),
     }));
   },
@@ -1045,26 +1060,7 @@ export const useSceneStore = create<SceneState>()(
 
   loadSceneData: (scene) => {
     const rawBuildings = scene.buildings ?? [];
-    const hydratedBuildings = rawBuildings.map((bldg) => {
-      if (!bldg || !Array.isArray(bldg.vertices) || bldg.vertices.length < 3) return bldg;
-      if (bldg.modifiers && bldg.modifiers.length > 0) {
-        try {
-          const modRes = applyBuildingModifiers(bldg);
-          return {
-            ...bldg,
-            storyPolygons: modRes.storyPolygons,
-            zonePolygons: modRes.zonePolygons,
-            segments: modRes.segments,
-          };
-        } catch {
-          return rebuildBuildingSegments(bldg, bldg.vertices);
-        }
-      }
-      if (!bldg.segments || bldg.segments.length === 0) {
-        return rebuildBuildingSegments(bldg, bldg.vertices);
-      }
-      return bldg;
-    });
+    const hydratedBuildings = rawBuildings.map(rehydrateBuildingFromStorage);
 
     set({
       buildings: hydratedBuildings,

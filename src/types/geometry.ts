@@ -89,7 +89,9 @@ export interface FacadeSegment {
 }
 
 export * from './modifiers';
+export * from './compiledGeometry';
 import { Modifier, StoryFootprint, ZoneFootprint } from './modifiers';
+import type { CompiledObjectGeometry } from './compiledGeometry';
 
 
 export type ObjectCategory = 'building' | 'boundary' | 'balcony' | 'compound';
@@ -165,6 +167,8 @@ export interface BuildingLoop {
   cachedLineEquations?: import('../utils/lineBufferEngine').CachedLineEquation[];
   /** Wykryte osie bazowe/dominanty kierunkowe cache'owane w obiekcie */
   cachedDominantAxes?: import('../utils/segmentStatistics').DominantDirection[];
+  /** Zmaterializowana geometria runtime (Bake on Edit). Pomijana przy serializacji do pliku JSON. */
+  computed?: CompiledObjectGeometry;
   transform: {
     tx: number;
     ty: number;
