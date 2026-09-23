@@ -5,8 +5,7 @@ import { useCadToolStore } from '../../store/useCadToolStore';
 import { useLocalizedBuilding } from '@/hooks/useLocalizedBuilding';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
 import { findSelectedBuilding } from '@/utils/geometrySelectors';
-import { generateSweepPolygon } from '@/utils/math2d/sweep';
-import { applyBuildingModifiers } from '@/engine/modifiers/modifierPipeline';
+import { applyLiveVertexPreviewPatch } from '@/utils/buildingLiveVertexPatch';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
 export const BuildingPreviewPanel: React.FC = React.memo(() => {
@@ -24,41 +23,10 @@ export const BuildingPreviewPanel: React.FC = React.memo(() => {
   // facade segments/R-tree/analysis on every mousemove) - so during a drag, patch in the live
   // in-progress vertex position from the cheap `liveVertexPreview` channel and recompute
   // storyPolygons for the preview, so the 3D preview reflects it on the fly.
-  const patchedSelectedBuilding = React.useMemo(() => {
-    if (
-      !selectedBuilding ||
-      !liveVertexPreview ||
-      liveVertexPreview.buildingId !== selectedBuilding.id
-    ) {
-      return selectedBuilding;
-    }
-    const isSweep = Array.isArray(selectedBuilding.sweepPath) && selectedBuilding.sweepPath.length >= 2;
-    let candidate: BuildingLoop;
-    if (isSweep) {
-      const sweepPath = selectedBuilding.sweepPath!.map((v, idx) =>
-        idx === liveVertexPreview.vertexIndex ? liveVertexPreview.point : v
-      );
-      const sweepPoly = generateSweepPolygon(
-        sweepPath,
-        selectedBuilding.sweepWidth || 12,
-        selectedBuilding.sweepAlignment || 'center'
-      );
-      candidate = { ...selectedBuilding, sweepPath, vertices: sweepPoly };
-    } else {
-      const vertices = selectedBuilding.vertices.map((v, idx) =>
-        idx === liveVertexPreview.vertexIndex ? liveVertexPreview.point : v
-      );
-      candidate = { ...selectedBuilding, vertices };
-    }
-
-    const modRes = applyBuildingModifiers(candidate);
-    return {
-      ...candidate,
-      storyPolygons: modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined,
-      zonePolygons: modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined,
-      segments: modRes.segments,
-    };
-  }, [selectedBuilding, liveVertexPreview]);
+  const patchedSelectedBuilding = React.useMemo(
+    () => applyLiveVertexPreviewPatch(selectedBuilding, liveVertexPreview),
+    [selectedBuilding, liveVertexPreview]
+  );
 
   // Lokalny układ współrzędnych obiektu (patrz useLocalizedBuilding.ts) - anchor pochodzi
   // WYŁĄCZNIE z `selectedBuilding` (ostatnio zatwierdzony w store stan), NIGDY z

@@ -352,7 +352,7 @@ export function getBuildingGeometrySignature(b: BuildingLoop): string {
       .map((s) => `${s.storyIndex}:${s.hBottom}-${s.hTop}:${s.polygon.map((p) => `${p.x},${p.y}`).join(',')}`)
       .join('|')
     : '';
-  const trStr = b.transform ? `${b.transform.rotationDeg}` : '';
+  const trStr = b.transform ? String(b.transform.rotationDeg) : '';
   const flStr = `${b.firstFloorHeight || ''}_${b.typicalFloorHeight || ''}_${b.storeysCount || ''}`;
 
   return `${b.id}:${b.isTested}:${b.buildingType || ''}:${b.defaultHeight}:${b.elevation || 0}:${flStr}:${trStr}:${swStr}:${vStr}:${hStr}:${spStr}:${modStr}:${spolyStr}`;

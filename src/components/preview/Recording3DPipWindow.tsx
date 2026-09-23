@@ -9,8 +9,7 @@ import { useActionRecorderStore } from '../../modules/action-recorder/useActionR
 import { useLocalizedBuilding } from '@/hooks/useLocalizedBuilding';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
 import { filterActiveVariantBuildings, findSelectedBuilding } from '@/utils/geometrySelectors';
-import { generateSweepPolygon } from '@/utils/math2d/sweep';
-import { applyBuildingModifiers } from '@/engine/modifiers/modifierPipeline';
+import { applyLiveVertexPreviewPatch } from '@/utils/buildingLiveVertexPatch';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
 export const Recording3DPipWindow: React.FC = () => {
@@ -43,40 +42,10 @@ export const Recording3DPipWindow: React.FC = () => {
     return activeBuildings.find((b) => b.category !== 'boundary') || null;
   }, [buildings, selectedBuildingId]);
 
-  const patchedActiveBuilding = useMemo(() => {
-    if (
-      !activeBuilding ||
-      !liveVertexPreview ||
-      liveVertexPreview.buildingId !== activeBuilding.id
-    ) {
-      return activeBuilding;
-    }
-    const isSweep = Array.isArray(activeBuilding.sweepPath) && activeBuilding.sweepPath.length >= 2;
-    let candidate = activeBuilding;
-    if (isSweep) {
-      const sweepPath = activeBuilding.sweepPath!.map((v, idx) =>
-        idx === liveVertexPreview.vertexIndex ? liveVertexPreview.point : v
-      );
-      const sweepPoly = generateSweepPolygon(
-        sweepPath,
-        activeBuilding.sweepWidth || 12,
-        activeBuilding.sweepAlignment || 'center'
-      );
-      candidate = { ...activeBuilding, sweepPath, vertices: sweepPoly };
-    } else {
-      const vertices = activeBuilding.vertices.map((v, idx) =>
-        idx === liveVertexPreview.vertexIndex ? liveVertexPreview.point : v
-      );
-      candidate = { ...activeBuilding, vertices };
-    }
-    const modRes = applyBuildingModifiers(candidate);
-    return {
-      ...candidate,
-      storyPolygons: modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined,
-      zonePolygons: modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined,
-      segments: modRes.segments,
-    };
-  }, [activeBuilding, liveVertexPreview]);
+  const patchedActiveBuilding = useMemo(
+    () => applyLiveVertexPreviewPatch(activeBuilding, liveVertexPreview),
+    [activeBuilding, liveVertexPreview]
+  );
 
   const activeHighlight = getActiveHighlightEdgeIndex(
     patchedActiveBuilding?.modifiers,
