@@ -155,11 +155,13 @@ export function translateBuildingGeometry(bldg: BuildingLoop, dx: number, dy: nu
       }))
     : undefined;
 
-  const newSegments = bldg.segments.map((s) => {
-    const p1 = translate(s.p1);
-    const p2 = translate(s.p2);
-    return { ...s, p1, p2, lineEquation: computeLineEquation(p1, p2, s.normal) };
-  });
+  const newSegments = bldg.segments
+    ? bldg.segments.map((s) => {
+        const p1 = translate(s.p1);
+        const p2 = translate(s.p2);
+        return { ...s, p1, p2, lineEquation: computeLineEquation(p1, p2, s.normal) };
+      })
+    : [];
 
   const currentTransform = bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 };
   const newCachedLines = bldg.cachedLineEquations
@@ -225,19 +227,21 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
       }))
     : undefined;
 
-  const newSegments = bldg.segments.map((s) => {
-    const p1 = rotate(s.p1);
-    const p2 = rotate(s.p2);
-    const normal = rotateNormal(s.normal);
-    return {
-      ...s,
-      p1,
-      p2,
-      normal,
-      angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
-      lineEquation: computeLineEquation(p1, p2, normal),
-    };
-  });
+  const newSegments = bldg.segments
+    ? bldg.segments.map((s) => {
+        const p1 = rotate(s.p1);
+        const p2 = rotate(s.p2);
+        const normal = rotateNormal(s.normal);
+        return {
+          ...s,
+          p1,
+          p2,
+          normal,
+          angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
+          lineEquation: computeLineEquation(p1, p2, normal),
+        };
+      })
+    : [];
 
   const updatedTransform = {
     ...(bldg.transform || { tx: 0, ty: 0, rotationDeg: 0 }),

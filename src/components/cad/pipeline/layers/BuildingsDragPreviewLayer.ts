@@ -1,7 +1,10 @@
-import { AnalysisPointResult, Point2D } from '../../../../types/geometry';
+import { AnalysisPointResult, Point2D, DEFAULT_SWEEP_WIDTH } from '../../../../types/geometry';
 import { CadRenderLayer, CadRenderFrameContext } from '../types';
 import { renderBuildings } from '../../renderers/buildingsRenderer';
 import { rebuildBuildingSegments } from '../../../../utils/segmentStatistics';
+import { applyBuildingModifiers } from '../../../../engine/modifiers/modifierPipeline';
+import { GeometryCompiler } from '../../../../engine/compiler/GeometryCompiler';
+import { generateSweepPolygon } from '../../../../utils/math2d/sweep';
 
 /**
  * Rysuje podgląd przeciąganego wierzchołka budynku — warstwa HUD (60 FPS), oddzielona od
@@ -65,16 +68,40 @@ export class BuildingsDragPreviewLayer implements CadRenderLayer {
     const isSweep = Array.isArray(draggedBuilding.sweepPath) && draggedBuilding.sweepPath.length >= 2;
     const verts = isSweep ? draggedBuilding.sweepPath! : draggedBuilding.vertices;
     const updatedVerts = verts.map((v: Point2D, idx: number) => (idx === draggedVertexIndex ? dragVertexPreviewPt : v));
-    const previewBuilding = isSweep
-      ? { ...draggedBuilding, sweepPath: updatedVerts }
-      : { ...draggedBuilding, vertices: updatedVerts };
+
+    let previewBuilding: typeof draggedBuilding;
+    if (isSweep) {
+      const effectiveWidth = draggedBuilding.sweepWidth ?? DEFAULT_SWEEP_WIDTH;
+      const effectiveAlignment = draggedBuilding.sweepAlignment ?? 'center';
+      const sweepVerts = generateSweepPolygon(updatedVerts, effectiveWidth, effectiveAlignment);
+      const rebuilt = rebuildBuildingSegments(draggedBuilding, sweepVerts);
+      rebuilt.sweepPath = updatedVerts;
+      rebuilt.sweepWidth = effectiveWidth;
+      rebuilt.sweepAlignment = effectiveAlignment;
+      if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+        const modRes = applyBuildingModifiers(rebuilt);
+        rebuilt.storyPolygons = modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined;
+        rebuilt.zonePolygons = modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined;
+        rebuilt.segments = modRes.segments;
+      }
+      previewBuilding = { ...rebuilt, computed: GeometryCompiler.bakeBuilding(rebuilt) };
+    } else {
+      const rebuilt = rebuildBuildingSegments(draggedBuilding, updatedVerts);
+      if (rebuilt.modifiers && rebuilt.modifiers.length > 0) {
+        const modRes = applyBuildingModifiers(rebuilt);
+        rebuilt.storyPolygons = modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined;
+        rebuilt.zonePolygons = modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined;
+        rebuilt.segments = modRes.segments;
+      }
+      previewBuilding = { ...rebuilt, computed: GeometryCompiler.bakeBuilding(rebuilt) };
+    }
 
     // Podczas przeciągania wierzchołka `buildings` w store pozostaje nieruszony (commit dopiero
     // na mouseup, patrz komentarz klasy) — więc `pinnedPointResults` z kontekstu wciąż niesie
     // point/normal policzone względem starych, nieprzesuniętych segmentów. Przeliczamy tu na żywo
     // pozycję znaczników P1/P2/P3 należących do przeciąganego budynku względem segmentów preview,
     // zachowując zamrożoną analizę shadowing/sunlight (patrz AGENTS.md §1a).
-    const previewSegments = isSweep ? null : rebuildBuildingSegments(draggedBuilding, updatedVerts).segments;
+    const previewSegments = previewBuilding.segments;
     const livePinnedPointResults: AnalysisPointResult[] = !previewSegments
       ? pinnedPointResults
       : pinnedPointResults.map((ptRes) => {

@@ -538,8 +538,31 @@ export class GeometryCompiler {
         }
       : undefined;
 
+    const vLen = transformedBase.exterior.length;
+    const v0 = vLen > 0 ? `${transformedBase.exterior[0].x.toFixed(4)},${transformedBase.exterior[0].y.toFixed(4)}` : '';
+    const vLast = vLen > 1 ? `${transformedBase.exterior[vLen - 1].x.toFixed(4)},${transformedBase.exterior[vLen - 1].y.toFixed(4)}` : '';
+
+    const tokens = computed.geometryHash.split('|');
+    let updatedHash = computed.geometryHash;
+    if (tokens.length >= 17) {
+      tokens[7] = String(vLen);
+      tokens[8] = v0;
+      tokens[9] = vLast;
+      if (isRotating) {
+        const oldRotStr = tokens[16]?.replace('rot:', '') || '0';
+        const oldRotDeg = parseFloat(oldRotStr) || 0;
+        const deltaDeg = (rotationRad * 180) / Math.PI;
+        const newRotDeg = Number(((((oldRotDeg + deltaDeg) % 360) + 360) % 360).toFixed(2));
+        tokens[16] = `rot:${newRotDeg.toFixed(2)}`;
+      }
+      updatedHash = tokens.join('|');
+    } else {
+      updatedHash = `${computed.geometryHash}|tr:${v0}|rot:${rotationRad.toFixed(4)}`;
+    }
+
     return {
       ...computed,
+      geometryHash: updatedHash,
       computedAt: Date.now(),
       representation2D: {
         footprintBase: transformedBase,

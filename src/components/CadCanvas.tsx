@@ -427,35 +427,28 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     });
   }, [buildings, layerSettings]);
 
-  const shadowRangeLoops = useMemo(() => {
-    if (!showShadowRange) return [];
-    if (shadowAnalysis?.envelopeLoops && shadowAnalysis.envelopeLoops.length > 0) {
-      return shadowAnalysis.envelopeLoops;
-    }
-    if (isInteracting) return [];
-    return computeCombinedShadowEnvelope(visibleBuildings, latitude, equinoxDate, longitude);
-  }, [visibleBuildings, showShadowRange, shadowAnalysis, isInteracting, latitude, equinoxDate, longitude]);
+  const isEffectiveInteracting = isInteracting || interaction.effectiveIsInteracting;
 
   const liveShadowResult = useMemo(() => {
-    if (!showShadowRange || !isInteracting) return null;
+    if (!showShadowRange) return null;
     return computeHourlyShadowsLive(visibleBuildings, latitude, longitude, equinoxDate, 1.0, sunlightMethod);
-  }, [showShadowRange, isInteracting, visibleBuildings, latitude, longitude, equinoxDate, sunlightMethod]);
+  }, [showShadowRange, visibleBuildings, latitude, longitude, equinoxDate, sunlightMethod]);
 
   const hourlyShadowsToRender = useMemo(() => {
     if (!showShadowRange) return [];
-    if (isInteracting && liveShadowResult) {
-      return liveShadowResult.hourlyShadows;
+    if (isEffectiveInteracting || !shadowAnalysis?.hourlyShadows || shadowAnalysis.hourlyShadows.length === 0) {
+      return liveShadowResult?.hourlyShadows ?? [];
     }
-    return shadowAnalysis?.hourlyShadows ?? [];
-  }, [showShadowRange, isInteracting, liveShadowResult, shadowAnalysis]);
+    return shadowAnalysis.hourlyShadows;
+  }, [showShadowRange, isEffectiveInteracting, liveShadowResult, shadowAnalysis]);
 
   const shadowRangeLoopsToRender = useMemo(() => {
     if (!showShadowRange) return [];
-    if (isInteracting && liveShadowResult) {
-      return liveShadowResult.envelopeLoops;
+    if (isEffectiveInteracting || !shadowAnalysis?.envelopeLoops || shadowAnalysis.envelopeLoops.length === 0) {
+      return liveShadowResult?.envelopeLoops ?? [];
     }
-    return shadowRangeLoops;
-  }, [showShadowRange, isInteracting, liveShadowResult, shadowRangeLoops]);
+    return shadowAnalysis.envelopeLoops;
+  }, [showShadowRange, isEffectiveInteracting, liveShadowResult, shadowAnalysis]);
 
   const pinnedPointResults = useMemo(() => {
     if (propPinnedPointResults && propPinnedPointResults.length > 0) {

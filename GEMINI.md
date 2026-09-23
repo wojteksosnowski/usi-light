@@ -39,6 +39,12 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
    - Ścisły zakaz stosowania `useStableWhileInteracting` w panelach podglądu 3D.
    - Podgląd 3D aktualizuje się na bieżąco (60 FPS) przy edycji wierzchołków (`liveVertexPreview` + `applyBuildingModifiers`), obrocie (`rotateBuilding`), przeciąganiu krawędzi i zmianie modyfikatorów.
    - Sygnatura `getBuildingGeometrySignature` ignoruje translację `tx`/`ty`, eliminując jank Three.js przy przesuwaniu obiektu w 2D.
+7. **Canonical Precomputed Geometry (`GeometryCompiler` / `bldg.computed`) i Paradygmat Bake-on-Edit**:
+   - Model `CompiledObjectGeometry` dostarcza w pełni zbuforowane metryki (`metrics.footprintArea`, `volume`, `grossFloorArea`), AABB (`bounds2D`), siatki 3D (`representation3D.faces`) i krawędzie cienia (`analysis.castingEdges`).
+   - Wypiekanie następuje synchronicznie w $O(N)$ wierzchołków podczas edycji geometrii/modyfikatorów (`applyModifiersAndBake`). Obiekt `bldg.computed` jest pomijany przy serializacji do JSON/`.usi` i rehydratowany przy odczycie.
+   - Renderery 2D (`buildingsRenderer.ts`, `masterplanRoofsRenderer.ts`), etykiety (`masterplanLabels.ts`) i silniki cieniowania konsumują gotowe dane w czasie $O(1)$.
+   - Izolacja drzewa UI (`useSceneObjectsList`) z kluczowaniem sygnaturą `treeSig` chroni komponenty Reacta przed re-renderami podczas translacji/obrotu.
+
 
 ---
 
@@ -65,7 +71,8 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
   - `storyPolygons`, `zonePolygons`: wyliczone obrysy 2.5D z modyfikatorów,
   - `groupId`: opcjonalne ID grupy (obiekt logiczny łączący wiele budynków),
   - `transform`: `{ tx: number, ty: number, rotationDeg: number }`,
-  - `isTested`, `isIncluded`, `isLocked`, `isGhosted`, `isCityCentre`.
+  - `isTested`, `isIncluded`, `isLocked`, `isGhosted`, `isCityCentre`,
+  - `computed`: `CompiledObjectGeometry` — zmaterializowana w locie geometria runtime (Bake on Edit).
 - `FacadeSegment`: Reprezentacja pojedynczej ściany / krawędzi budynku (punkty `p1`, `p2`, normalna, `hTop`, `hBase`, `hWindowBottom`, `lineEquation`).
 - `AnalysisPointResult`: Wynik analizy nasłonecznienia dla pojedynczego punktu pomiarowego.
 - `PlaygroundSunlightResult`: Wynik analizy nasłonecznienia placu zabaw (komórki próbkowania, zgodność z normą $\ge 50\%$, czas $\ge 2.0\text{h}$ lub $1.0\text{h}$).
@@ -77,7 +84,17 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
 - `ZoneFootprint`: Obrys strefy buforowej / przesłaniania.
 - Dyspatcz modyfikatorów odbywa się przez rejestr (`src/engine/modifiers/modifierRegistry.ts`) wywoływany z `applyBuildingModifiers` w [`modifierPipeline.ts`](file:///Volumes/Samsam/py/usi-light/src/engine/modifiers/modifierPipeline.ts) — patrz też skill `modifier-architecture-guide`.
 
-### 2.3. [`src/types/license.ts`](file:///Volumes/Samsam/py/usi-light/src/types/license.ts) i [`src/types/sharing.ts`](file:///Volumes/Samsam/py/usi-light/src/types/sharing.ts)
+### 2.3. [`src/types/compiledGeometry.ts`](file:///Volumes/Samsam/py/usi-light/src/types/compiledGeometry.ts)
+- `CompiledObjectGeometry`: Pełny kontrakt zbuforowanej geometrii runtime:
+  - `representation2D`: `{ footprintBase, footprintRoof, storySlices: StorySlice[], bounds2D: { min, max } }`
+  - `representation3D`: `{ faces: Face3D[], bounds3D: { min, max } }`
+  - `analysis`: `{ castingEdges: ShadowCastingEdge[], heightMin, heightMax, simplifiedEnvelope2D }`
+  - `metrics`: `{ footprintArea, grossFloorArea, volume, perimeter, heightMax }`
+- `StorySlice`: Wycięcie pojedynczej kondygnacji (`storyIndex`, `elevationBottom`, `elevationTop`, `height`, `footprint`).
+- `Face3D`: Powierzchnia 3D ściany/dachu/tarasu (`type`, `vertices: Point3D[]`, `normal: Point3D`, `floorIndex`, `zoneFunction`).
+- `ShadowCastingEdge`: Odcinek rzucający cień (`p1: Point3D`, `p2: Point3D`, `isRidgeOrRoofEdge: boolean`, `normal2D`).
+
+### 2.4. [`src/types/license.ts`](file:///Volumes/Samsam/py/usi-light/src/types/license.ts) i [`src/types/sharing.ts`](file:///Volumes/Samsam/py/usi-light/src/types/sharing.ts)
 - Definicje poziomów licencji (`free`, `pro`, `enterprise`), tokenów JWT i mechanizmów szyfrowanego udostępniania scen przez URL.
 
 ---
@@ -128,7 +145,10 @@ Status licencji Pro: `isPro: boolean`, `status`, `daysLeft`, `expiresAt`, cache 
 
 ## 4. Silnik Analityczny i Geometria (`src/engine` i `src/utils/math2d`)
 
-### 4.1. Silnik Obliczeń Nasłonecznienia (`src/engine/`)
+### 4.1. Silnik Obliczeń Nasłonecznienia i Kompilacji Geometrii (`src/engine/`)
+- [`compiler/GeometryCompiler.ts`](file:///Volumes/Samsam/py/usi-light/src/engine/compiler/GeometryCompiler.ts) — kompilator geometrii brył 2.5D/3D (`bakeBuilding`, `bakeBuildingGroup`, `bakeBuildingsBatch`):
+  - Jednoprzebiegowa kompilacja w $O(N)$ wierzchołków.
+  - Wyliczanie `StorySlice[]`, `Face3D[]` dla ścian/stropów/dachów, `ShadowCastingEdge[]` oraz metryk (PUM, kubatura, pole powierzchni).
 - [`analysisEngine.ts`](file:///Volumes/Samsam/py/usi-light/src/engine/analysisEngine.ts) — algorytmy § 12/§ 56: `prefilterShadowingObstacles`, `analyzeShadowingAtPoint`, `analyzeSunlightAtPoint`, `analyzeSunlightAtPointSegments`.
 - [`analysis.worker.ts`](file:///Volumes/Samsam/py/usi-light/src/engine/analysis.worker.ts) + `useAnalysisWorker` hook — Web Worker realizujący analizy w osobnym wątku; automatyczny fallback do main threadu.
 - `buildingGeometryCache.ts` — cache geometrii budynków między klatkami/analizami.
@@ -232,6 +252,7 @@ usi-light/
 ├── src/
 │   ├── types/                         # Definicje typów TypeScript
 │   │   ├── geometry.ts                # BuildingLoop, FacadeSegment, Point2D, Matrix2D
+│   │   ├── compiledGeometry.ts        # CompiledObjectGeometry, StorySlice, Face3D, ShadowCastingEdge
 │   │   ├── modifiers.ts               # Modifier, StoryFootprint, ZoneFootprint
 │   │   └── license.ts / sharing.ts    # Licencje i udostępnianie scen
 │   ├── store/                         # Magazyny stanu Zustand (5 store'ów)
@@ -241,6 +262,7 @@ usi-light/
 │   │   ├── useUiStore.ts              # Stan modali (share/pricing/license/confirm)
 │   │   └── useLicenseStore.ts         # Status licencji Pro (persist do localStorage)
 │   ├── engine/                        # Silnik obliczeniowy i matematyczny
+│   │   ├── compiler/                  # GeometryCompiler (jednoprzebiegowa materializacja 2.5D/3D bldg.computed)
 │   │   ├── analysisEngine.ts          # Algorytmy § 12 / § 56
 │   │   ├── analysis.worker.ts         # Web Worker do analiz w tle
 │   │   ├── modifiers/                 # Nieniszczący stos modyfikatorów 2.5D (registry + pipeline)

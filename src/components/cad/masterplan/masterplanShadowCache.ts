@@ -231,3 +231,12 @@ export function getCachedRoofShadowSamples(
   roofCache.set(currentTierKey, { key, result });
   return result;
 }
+
+/**
+ * Czyści wszystkie bufory pamięci podręcznej cieni Masterplanu (ground, roof).
+ */
+export function clearMasterplanShadowCache(): void {
+  groundLastKey = null;
+  groundLastResult = { samples: [] };
+  roofCache.clear();
+}
