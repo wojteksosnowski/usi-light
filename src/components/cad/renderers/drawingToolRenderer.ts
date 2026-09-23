@@ -512,8 +512,8 @@ export function renderDrawingToolPreview(
     const sinT = Math.sin(theta);
 
     const ux = cosT;
-    const uy = -sinT;
-    const vx = sinT;
+    const uy = sinT;
+    const vx = -sinT;
     const vy = cosT;
 
     const dx = p2.x - p1.x;

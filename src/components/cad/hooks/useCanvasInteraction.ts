@@ -1030,8 +1030,8 @@ export function useCanvasInteraction({
           const cosT = Math.cos(theta);
           const sinT = Math.sin(theta);
           const ux = cosT;
-          const uy = -sinT;
-          const vx = sinT;
+          const uy = sinT;
+          const vx = -sinT;
           const vy = cosT;
 
           const dx = p2.x - p1.x;
@@ -1667,7 +1667,7 @@ export function useCanvasInteraction({
 
             const viewRot = viewRotationDeg || 0;
             if (Math.abs(viewRot) > 0.05) {
-              const baseView = -viewRot;
+              const baseView = viewRot;
               for (let mult = -3; mult <= 3; mult++) {
                 const ang = baseView + mult * 90;
                 targets.push({

@@ -5,6 +5,8 @@ import {
   formatOsmBuildingName,
   parseOverpassBuildingsResponse,
   findIncompleteRelations,
+  findIncompleteBuildingPartsAndRelations,
+  splitBboxIntoQuadrants,
   findMissingBuildingRelationIds,
   fetchOsmBuildings,
   mergeOverpassResponses,
@@ -1152,16 +1154,57 @@ describe('osmBuildingsClient', () => {
     });
   });
 
+  describe('splitBboxIntoQuadrants', () => {
+    it('returns single bbox when dimensions are within tileSize (e.g. 200m x 200m)', () => {
+      // ~200m szerokości i wysokości w Warszawie
+      const smallBbox: WfsBbox = [20.995, 52.251, 20.998, 52.253];
+      const quadrants = splitBboxIntoQuadrants(smallBbox, 400, 100);
+      expect(quadrants.length).toBe(1);
+      expect(quadrants[0]).toEqual(smallBbox);
+    });
+
+    it('splits large bbox into overlapping quadrants with overlap >= 100m', () => {
+      // ~1000m x 1000m
+      const largeBbox: WfsBbox = [20.990, 52.245, 21.005, 52.255];
+      const quadrants = splitBboxIntoQuadrants(largeBbox, 400, 100);
+      expect(quadrants.length).toBeGreaterThanOrEqual(4);
+
+      // Weryfikacja czy każdy kwadrant mieści się w zadanym zakresie
+      for (const q of quadrants) {
+        expect(q[0]).toBeGreaterThanOrEqual(largeBbox[0]);
+        expect(q[1]).toBeGreaterThanOrEqual(largeBbox[1]);
+        expect(q[2]).toBeLessThanOrEqual(largeBbox[2] + 0.01);
+        expect(q[3]).toBeLessThanOrEqual(largeBbox[3] + 0.01);
+      }
+    });
+  });
+
+  describe('findIncompleteBuildingPartsAndRelations', () => {
+    it('detects relations with missing member ways or missing nodes', () => {
+      const elements: OverpassResponse['elements'] = [
+        { type: 'node', id: 1, lat: 52.25, lon: 20.99 },
+        { type: 'way', id: 10, nodes: [1, 2], tags: { building: 'yes' } }, // węzeł 2 brakuje
+        {
+          type: 'relation',
+          id: 100,
+          members: [
+            { type: 'way', ref: 10, role: 'part' },
+            { type: 'way', ref: 20, role: 'outline' }, // way 20 w ogóle brakuje
+          ],
+          tags: { type: 'building' },
+        },
+      ];
+
+      const diag = findIncompleteBuildingPartsAndRelations(elements);
+      expect(diag.incompleteRelationIds).toContain(100);
+      expect(diag.incompleteWayBuildingIds).toContain(10);
+    });
+  });
+
   describe('fetchOsmBuildings — fidelity to proxy response (regresja: 939 vs 243 budynków dla tego samego bboxa)', () => {
-    // Dwa eksporty sceny użytkownika z tej samej lokalizacji (reference/osm-error6.json: 939
-    // budynków OSM, reference/osm-error7.json: 243 budynki OSM) ujawniły, że powtórzony import
-    // identycznego bboxa dawał skrajnie różne wyniki — przyczyna leżała w api/osm-overpass.ts
-    // (raceForNonEmpty wybierał PIERWSZY niepusty mirror zamiast najpełniejszego, patrz
-    // api/osm-overpass.test.ts). Ten test pinuje kontrakt po stronie klienta: fetchOsmBuildings
-    // musi wiernie odzwierciedlać to, co zwróci proxy — bez własnego cache'owania/tłumienia,
-    // które mogłoby maskować taką niespójność między kolejnymi wywołaniami zamiast ją ujawniać.
-    const mockProjectCenter = { lat: 52.2545839, lon: 20.996694 };
-    const bbox: WfsBbox = [20.995, 52.251, 20.999, 52.256];
+    const mockProjectCenter = { lat: 52.252, lon: 20.996 };
+    // Bbox mieszczący się w 1 kwadrancie (ok. 200m x 200m)
+    const bbox: WfsBbox = [20.995, 52.251, 20.998, 52.253];
 
     function buildOverpassPayload(buildingCount: number): OverpassResponse {
       const elements: OverpassResponse['elements'] = [];
@@ -1191,10 +1234,8 @@ describe('osmBuildingsClient', () => {
     it('two sequential fetchOsmBuildings calls for the identical bbox surface exactly what the proxy returned each time (939 then 243)', async () => {
       let call = 0;
       const responses = [
-        buildOverpassPayload(939), // first fetchOsmBuildings - stage 1 (baseline)
-        { elements: [] },          // first fetchOsmBuildings - stage 2 (details)
-        buildOverpassPayload(243), // second fetchOsmBuildings - stage 1 (baseline)
-        { elements: [] },          // second fetchOsmBuildings - stage 2 (details)
+        buildOverpassPayload(939), // first fetchOsmBuildings - quadrant 1
+        buildOverpassPayload(243), // second fetchOsmBuildings - quadrant 1
       ];
       vi.stubGlobal(
         'fetch',
@@ -1215,8 +1256,7 @@ describe('osmBuildingsClient', () => {
     it('emits progress updates informing about found buildings count and 3D details', async () => {
       const progressUpdates: any[] = [];
       const responses = [
-        buildOverpassPayload(10), // stage 1 (baseline)
-        { elements: [] },         // stage 2 (details)
+        buildOverpassPayload(10), // quadrant 1
       ];
       let call = 0;
       vi.stubGlobal(
@@ -1228,7 +1268,7 @@ describe('osmBuildingsClient', () => {
         })
       );
 
-      await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, 200, (p) => {
+      await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, 100, (p) => {
         progressUpdates.push(p);
       });
 
@@ -1238,6 +1278,24 @@ describe('osmBuildingsClient', () => {
       expect(detailsProgress).toBeDefined();
       expect(detailsProgress.foundBuildingsCount).toBe(10);
       expect(detailsProgress.message).toContain('10 budynków');
+    });
+
+    it('retries quadrant on error and succeeds if retry returns data', async () => {
+      let call = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          call++;
+          if (call === 1) {
+            return { ok: false, status: 504, json: async () => ({ error: 'Gateway Timeout' }) } as Response;
+          }
+          return { ok: true, json: async () => buildOverpassPayload(5) } as Response;
+        })
+      );
+
+      const res = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, 100);
+      expect(res.length).toBe(5);
+      expect(call).toBe(2);
     });
   });
 

@@ -968,41 +968,96 @@ function isBuildingRelationTags(tags: Record<string, string> | undefined): boole
   return t.type === 'building' || t.type === 'multipolygon' || !!t.building || !!t['building:part'];
 }
 
-export function findIncompleteRelations(elements: OverpassElement[]): number[] {
+export interface IncompleteOsmDiagnostics {
+  incompleteRelationIds: number[];
+  incompleteWayBuildingIds: number[];
+}
+
+/**
+ * Krok 2: Weryfikacja kompletności pobranych elementów OSM (relacje 3D, building:part, węzły).
+ */
+export function findIncompleteBuildingPartsAndRelations(elements: OverpassElement[]): IncompleteOsmDiagnostics {
   const nodeIds = new Set<number>();
   const ways = new Map<number, OverpassWay>();
   const relations: OverpassRelation[] = [];
+
   for (const el of elements) {
     if (el.type === 'node') nodeIds.add(el.id);
     else if (el.type === 'way') ways.set(el.id, el);
     else if (el.type === 'relation') relations.push(el);
   }
 
-  const incomplete: number[] = [];
+  const incompleteRelationIds: number[] = [];
+  const incompleteWayBuildingIds: number[] = [];
+
+  // 1. Sprawdzenie relacji (type=building, multipolygon) pod kątem brakujących członków i węzłów
   for (const rel of relations) {
     if (!isBuildingRelationTags(rel.tags)) continue;
 
-    const hasIncompleteMember = rel.members.some((member) => {
-      if (member.type !== 'way') return false;
-      const way = ways.get(member.ref);
-      if (!way) return true;
-      return way.nodes.some((nodeId) => !nodeIds.has(nodeId));
-    });
-    if (hasIncompleteMember) incomplete.push(rel.id);
+    let hasIncompleteMember = false;
+    for (const member of rel.members) {
+      if (member.type === 'way') {
+        const way = ways.get(member.ref);
+        if (!way) {
+          hasIncompleteMember = true;
+          break;
+        }
+        if (!way.nodes || way.nodes.length < 2 || way.nodes.some((nodeId) => !nodeIds.has(nodeId))) {
+          hasIncompleteMember = true;
+          break;
+        }
+      }
+    }
+    if (hasIncompleteMember) {
+      incompleteRelationIds.push(rel.id);
+    }
   }
-  return incomplete;
+
+  // 2. Sprawdzenie dróg budynkowych pod kątem brakujących węzłów
+  for (const [wayId, way] of ways.entries()) {
+    const tags = way.tags || {};
+    if (tags.building && tags.building !== 'no') {
+      const isMissingNodes = !way.nodes || way.nodes.length < 4 || way.nodes.some((nId) => !nodeIds.has(nId));
+      if (isMissingNodes) {
+        incompleteWayBuildingIds.push(wayId);
+      }
+    }
+  }
+
+  return {
+    incompleteRelationIds,
+    incompleteWayBuildingIds,
+  };
+}
+
+export function findIncompleteRelations(elements: OverpassElement[]): number[] {
+  return findIncompleteBuildingPartsAndRelations(elements).incompleteRelationIds;
 }
 
 /**
- * Runda 2: celowany dociąg pełnej geometrii JEDNEJ relacji (po ID) z podwójną rekursją —
- * bezpieczne, bo zakres to tylko ta jedna relacja (nie cała obwiednia), więc koszt
- * obliczeniowy po stronie Overpass nawet dla złożonej, zagnieżdżonej struktury jest mały.
+ * Krok 4: Celowany dociąg pełnej geometrii relacji (po ID) z podwójną rekursją.
  */
-async function fetchRelationFull(relId: number, timeoutMs: number): Promise<OverpassResponse> {
+async function fetchRelationFull(relId: number, timeoutMs = 25000): Promise<OverpassResponse> {
   const query = `
     [out:json][timeout:25];
     relation(${relId});
     (._;>;>;);
+    out body;
+  `.trim();
+  return postOverpassQuery(query, timeoutMs);
+}
+
+/**
+ * Krok 4: Celowany dociąg budynku wraz z częściami building:part wokół niego.
+ */
+async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 25000): Promise<OverpassResponse> {
+  const query = `
+    [out:json][timeout:25];
+    (
+      way(${wayId});
+      nwr(around:10)["building:part"];
+    );
+    (._;>;);
     out body;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
@@ -1015,7 +1070,7 @@ interface OverpassBounds {
   maxlon: number;
 }
 
-/** Rozszerza bbox o stały margines w metrach (dla Rundy 0, patrz ROUND0_BBOX_PADDING_METERS). */
+/** Rozszerza bbox o stały margines w metrach. */
 function padBbox(bbox: WfsBbox, paddingMeters: number): WfsBbox {
   const [west, south, east, north] = bbox;
   const midLat = (south + north) / 2;
@@ -1025,11 +1080,89 @@ function padBbox(bbox: WfsBbox, paddingMeters: number): WfsBbox {
 }
 
 /**
+ * Krok 1: Dzieli bounding box na siatkę mniejszych kwadrantów (np. 400x400m z zakładem min. 100m).
+ */
+export function splitBboxIntoQuadrants(
+  bbox: WfsBbox,
+  tileSizeMeters = 400,
+  overlapMeters = 100
+): WfsBbox[] {
+  const [west, south, east, north] = bbox;
+  const midLat = (south + north) / 2;
+  const metersPerLat = 111_320;
+  const metersPerLon = 111_320 * Math.max(0.1, Math.cos((midLat * Math.PI) / 180));
+
+  const widthMeters = Math.abs(east - west) * metersPerLon;
+  const heightMeters = Math.abs(north - south) * metersPerLat;
+
+  if (widthMeters <= tileSizeMeters && heightMeters <= tileSizeMeters) {
+    return [bbox];
+  }
+
+  const effectiveOverlap = Math.min(overlapMeters, tileSizeMeters * 0.5);
+  const stepMeters = Math.max(50, tileSizeMeters - effectiveOverlap);
+
+  const tileLonDeg = tileSizeMeters / metersPerLon;
+  const tileLatDeg = tileSizeMeters / metersPerLat;
+  const stepLonDeg = stepMeters / metersPerLon;
+  const stepLatDeg = stepMeters / metersPerLat;
+
+  const quadrants: WfsBbox[] = [];
+
+  for (let curSouth = south; curSouth < north; curSouth += stepLatDeg) {
+    const qNorth = Math.min(north, curSouth + tileLatDeg);
+    const qSouth = curSouth;
+
+    for (let curWest = west; curWest < east; curWest += stepLonDeg) {
+      const qEast = Math.min(east, curWest + tileLonDeg);
+      const qWest = curWest;
+
+      quadrants.push([qWest, qSouth, qEast, qNorth]);
+    }
+  }
+
+  return quadrants.length > 0 ? quadrants : [bbox];
+}
+
+/**
+ * Krok 3: Pobranie pojedynczego kwadrantu z automatycznym retry przy błędzie sieci lub timeout serwera.
+ */
+async function fetchQuadrantWithRetry(
+  quadrantBbox: WfsBbox,
+  timeoutMs = 65000,
+  maxRetries = 2
+): Promise<OverpassResponse | null> {
+  const [west, south, east, north] = quadrantBbox;
+  const query = `
+    [out:json][timeout:60];
+    (
+      nwr["building"](${south},${west},${north},${east});
+    );
+    out body;
+    >;
+    out skel qt;
+  `.trim();
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await postOverpassQuery(query, timeoutMs + attempt * 10000);
+      if (resp?.remark && /timeout|timed out|quota/i.test(resp.remark)) {
+        throw new Error(`Overpass remark timeout: ${resp.remark}`);
+      }
+      return resp;
+    } catch (err) {
+      console.warn(`Kwadrant [${south.toFixed(4)}, ${west.toFixed(4)}] próba ${attempt + 1}/${maxRetries + 1} nie powiodła się:`, err);
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Runda 0: tanie zapytanie discovery (bez rekursji) na poszerzonym bboxie, które zwraca same
- * ID/tagi/obwiednie relacji budynkowych — używane wyłącznie do wykrycia relacji całkowicie
- * pominiętych przez ciasny bbox Rundy 1 (patrz ROUND0_BBOX_PADDING_METERS). Błąd/timeout tego
- * zapytania nie może zablokować importu — łapany i logowany, degradacja do stanu sprzed tej
- * poprawki (tylko findIncompleteRelations decyduje o Rundzie 2).
+ * ID/tagi/obwiednie relacji budynkowych.
  */
 async function fetchRelationEnvelopes(paddedBbox: WfsBbox): Promise<(OverpassRelation & { bounds?: OverpassBounds })[]> {
   const [west, south, east, north] = paddedBbox;
@@ -1053,8 +1186,7 @@ async function fetchRelationEnvelopes(paddedBbox: WfsBbox): Promise<(OverpassRel
 
 /**
  * Z relacji znalezionych w Rundzie 0 wybiera te, które są budynkowe, mieszczą się (obwiednią)
- * w promieniu projektu i NIE występują w ogóle w elementach Rundy 1 — czyli relacje, których
- * `findIncompleteRelations` nigdy nie mogła wykryć, bo są całkowicie nieobecne w zbiorze.
+ * w promieniu projektu i NIE występują w ogóle w elementach Rundy 1.
  */
 export function findMissingBuildingRelationIds(
   envelopes: (OverpassRelation & { bounds?: OverpassBounds })[],
@@ -1088,9 +1220,11 @@ export function findMissingBuildingRelationIds(
 }
 
 /**
- * Pobiera budynki z OpenStreetMap przez Overpass API w procedurze dwuetapowej:
- * Etap 1: Szybki baseline pobierający wszystkie obrysy budynków (nwr["building"]).
- * Etap 2: Celowany dociąg detali 3D (nwr["building:part"] oraz relacje type=building).
+ * Główna procedura pobierania budynków z OpenStreetMap przez Overpass API:
+ * Krok 1: Szybki scan bazowy (nwr["building"]) w siatce kwadrantów (400x400m z zakładem >= 100m).
+ * Krok 2: Weryfikacja kompletności building:part i relacji.
+ * Krok 3: Retry dla pojedynczych kwadrantów w razie błędów/timeoutu.
+ * Krok 4: Celowane pobranie brakujących części i budynków wg ID.
  */
 export async function fetchOsmBuildings(
   bbox: WfsBbox,
@@ -1100,94 +1234,105 @@ export async function fetchOsmBuildings(
   onProgress?: (progress: OsmProgressInfo) => void
 ): Promise<BuildingLoop[]> {
   const queryBbox = radiusMeters ? padBbox(bbox, Math.max(50, radiusMeters * 0.2)) : bbox;
-  const [west, south, east, north] = queryBbox;
+  const quadrants = splitBboxIntoQuadrants(queryBbox, 400, 100);
 
-  // ETAP 1: Szybki i lekki baseline obrysów budynków
-  const baselineQuery = `
-    [out:json][timeout:180];
-    (
-      nwr["building"](${south},${west},${north},${east});
-    );
-    out body;
-    >;
-    out skel qt;
-  `.trim();
-
+  // KROK 1 + KROK 3: Szybki scan bazowy kwadrantami z obsługą retry
   onProgress?.({
     stage: 'baseline',
-    message: 'Pobieranie budynków (Etap 1: obrysy bazowe)...',
+    message: `Pobieranie budynków OSM (kwadranty: 1/${quadrants.length})...`,
+    currentDetailIndex: 1,
+    totalDetailsCount: quadrants.length,
   });
 
-  let baselineResponse: OverpassResponse;
-  try {
-    baselineResponse = await postOverpassQuery(baselineQuery, OVERPASS_REQUEST_TIMEOUT_MS);
-  } catch (err) {
-    console.warn('Etap 1 (baseline) ponowiona próba z timeoutem 240s:', err);
-    const retryQuery = `[out:json][timeout:240];(nwr["building"](${south},${west},${north},${east}););out body;>;out skel qt;`;
-    baselineResponse = await postOverpassQuery(retryQuery, 245000);
+  const quadrantResponses: OverpassResponse[] = [];
+  const CONCURRENCY = 2;
+
+  for (let i = 0; i < quadrants.length; i += CONCURRENCY) {
+    const chunk = quadrants.slice(i, i + CONCURRENCY);
+    const chunkPromises = chunk.map((qBbox, idx) => {
+      const qIndex = i + idx + 1;
+      return fetchQuadrantWithRetry(qBbox, 65000, 2).then((resp) => {
+        onProgress?.({
+          stage: 'baseline',
+          message: `Pobieranie budynków OSM (kwadranty: ${Math.min(qIndex, quadrants.length)}/${quadrants.length})...`,
+          currentDetailIndex: Math.min(qIndex, quadrants.length),
+          totalDetailsCount: quadrants.length,
+        });
+        return resp;
+      });
+    });
+
+    const chunkResults = await Promise.all(chunkPromises);
+    for (const r of chunkResults) {
+      if (r) quadrantResponses.push(r);
+    }
   }
 
-  if (baselineResponse?.remark && /timeout|timed out/i.test(baselineResponse.remark)) {
-    throw new Error(`Serwer Overpass przerwał zapytanie z powodu przekroczenia czasu wykonania: ${baselineResponse.remark}`);
+  if (quadrantResponses.length === 0) {
+    throw new Error('Żaden kwadrant Overpass API nie zwrócił danych. Sprawdź połączenie z siecią.');
   }
 
-  const baseWays = (baselineResponse?.elements || []).filter(
+  let combinedResponse = mergeOverpassResponses(...quadrantResponses);
+
+  const baseWays = (combinedResponse?.elements || []).filter(
     (e) => e.type === 'way' && e.tags && (e.tags.building || e.tags['building:part'])
   );
-  const baseRels = (baselineResponse?.elements || []).filter(
+  const baseRels = (combinedResponse?.elements || []).filter(
     (e) => e.type === 'relation' && e.tags && (e.tags.building || e.tags.type === 'building' || e.tags.type === 'multipolygon')
   );
   const foundCount = baseWays.length + baseRels.length;
 
+  // KROK 2: Weryfikacja kompletności building:part i relacji
   onProgress?.({
     stage: 'details',
-    message: `Znaleziono ${foundCount} budynków. Pobieranie szczegółów 3D...`,
+    message: `Znaleziono ${foundCount} budynków. Weryfikacja szczegółów 3D...`,
     foundBuildingsCount: foundCount,
   });
 
-  // ETAP 2: Celowany dociąg 3D (building:part oraz relacje Simple 3D Buildings)
-  const detailsQuery = `
-    [out:json][timeout:180];
-    (
-      nwr["building:part"](${south},${west},${north},${east});
-      relation["type"="building"](${south},${west},${north},${east});
-    );
-    out body;
-    >;
-    out skel qt;
-  `.trim();
+  const incomplete = findIncompleteBuildingPartsAndRelations(combinedResponse.elements);
+  const relationsToFetch = incomplete.incompleteRelationIds.slice(0, ROUND2_MAX_RELATIONS);
+  const waysToFetch = incomplete.incompleteWayBuildingIds.slice(0, 6);
+  const totalDetails = relationsToFetch.length + waysToFetch.length;
 
-  let detailsResponse: OverpassResponse | null = null;
-  try {
-    detailsResponse = await postOverpassQuery(detailsQuery, OVERPASS_REQUEST_TIMEOUT_MS);
-  } catch (err) {
-    console.warn('Etap 2 (detale 3D) nie powiódł się lub przekroczył czas:', err);
-  }
-
-  let combinedResponse = detailsResponse
-    ? mergeOverpassResponses(baselineResponse, detailsResponse)
-    : baselineResponse;
-
-  // Runda 2 (uzupełnienie relacji niekompletnych po ID)
-  const incompleteRelationIds = findIncompleteRelations(combinedResponse.elements).slice(0, ROUND2_MAX_RELATIONS);
-  if (incompleteRelationIds.length > 0) {
+  // KROK 4: Dociąganie budynków i relacji wg ID
+  if (totalDetails > 0) {
     const detailResponses: OverpassResponse[] = [];
-    for (let i = 0; i < incompleteRelationIds.length; i++) {
-      const relId = incompleteRelationIds[i];
+    let detailIdx = 0;
+
+    for (const relId of relationsToFetch) {
+      detailIdx++;
       onProgress?.({
         stage: 'details',
-        message: `Dociąganie geometrii relacji 3D #${relId} (${i + 1}/${incompleteRelationIds.length})...`,
+        message: `Dociąganie geometrii relacji 3D #${relId} (${detailIdx}/${totalDetails})...`,
         foundBuildingsCount: foundCount,
-        currentDetailIndex: i + 1,
-        totalDetailsCount: incompleteRelationIds.length,
+        currentDetailIndex: detailIdx,
+        totalDetailsCount: totalDetails,
       });
       try {
         const relDetail = await fetchRelationFull(relId, ROUND2_RELATION_TIMEOUT_MS);
         detailResponses.push(relDetail);
       } catch (err) {
-        console.warn(`Nie udało się dociągnąć pełnej geometrii relacji OSM ${relId}:`, err);
+        console.warn(`Nie udało się dociągnąć pełnej geometrii relacji OSM #${relId}:`, err);
       }
     }
+
+    for (const wayId of waysToFetch) {
+      detailIdx++;
+      onProgress?.({
+        stage: 'details',
+        message: `Dociąganie części 3D budynku #${wayId} (${detailIdx}/${totalDetails})...`,
+        foundBuildingsCount: foundCount,
+        currentDetailIndex: detailIdx,
+        totalDetailsCount: totalDetails,
+      });
+      try {
+        const wayDetail = await fetchBuildingWithPartsById(wayId, ROUND2_RELATION_TIMEOUT_MS);
+        detailResponses.push(wayDetail);
+      } catch (err) {
+        console.warn(`Nie udało się dociągnąć części 3D budynku OSM #${wayId}:`, err);
+      }
+    }
+
     if (detailResponses.length > 0) {
       combinedResponse = mergeOverpassResponses(combinedResponse, ...detailResponses);
     }
@@ -1201,3 +1346,4 @@ export async function fetchOsmBuildings(
 
   return parseOverpassBuildingsResponse(combinedResponse, projectCenter, projectCrs, radiusMeters);
 }
+

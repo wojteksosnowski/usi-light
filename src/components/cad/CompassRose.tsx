@@ -72,7 +72,7 @@ export const CompassRose: React.FC<CompassRoseProps> = React.memo(
           height="38"
           viewBox="-19 -19 38 38"
           style={{
-            transform: `rotate(${-rotationDeg}deg)`,
+            transform: `rotate(${rotationDeg}deg)`,
             transition: 'transform 0.1s linear',
           }}
         >
@@ -81,7 +81,7 @@ export const CompassRose: React.FC<CompassRoseProps> = React.memo(
 
           {/* Znacznik USERUCS (ustawiony ręcznie) */}
           {hasSavedRotation && (
-            <g transform={`rotate(${savedRotationDeg})`}>
+            <g transform={`rotate(${-savedRotationDeg})`}>
               <line
                 x1="0"
                 y1="-15"
@@ -98,7 +98,7 @@ export const CompassRose: React.FC<CompassRoseProps> = React.memo(
 
           {/* Znacznik EDGEUCS (obliczony z dominującej krawędzi) */}
           {hasEdgeAngle && (
-            <g transform={`rotate(${edgeUcsAngleDeg})`}>
+            <g transform={`rotate(${-edgeUcsAngleDeg})`}>
               <line
                 x1="0"
                 y1="-15"

@@ -80,14 +80,11 @@ export function getRotateHandleScreenPos(
   }
   const dist = Math.sqrt(maxDistSq);
 
-  // worldToScreen rotates world vectors by +viewRotationDeg before flipping Y,
-  // so to land straight up on screen at rotationDeg=0 we need to counter-rotate
-  // by viewRotationDeg here, then add the building's own rotation on top.
+  // In world coordinates, the handle is positioned along the building's local "up" (+Y) vector
+  // rotated by the building's own rotationDeg (CCW). `worldToScreen` automatically applies the camera rotation.
   const rotationDeg = bldg.transform?.rotationDeg || 0;
-  const angleRad = ((rotationDeg - viewRotationDeg) * Math.PI) / 180;
-  // (-sin, cos) is the "up" vector (0,1) rotated by angleRad using the same
-  // CCW math convention as rotateBuilding (atan2-based deltas); using
-  // (sin, cos) here would spin the handle opposite to the object/mouse.
+  const angleRad = (rotationDeg * Math.PI) / 180;
+  // (-sin, cos) is the "up" vector (0,1) rotated CCW by angleRad
   const dirX = -Math.sin(angleRad);
   const dirY = Math.cos(angleRad);
 

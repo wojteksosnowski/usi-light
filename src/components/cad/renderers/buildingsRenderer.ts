@@ -1430,16 +1430,7 @@ export function renderBuildings(
   // 2.5 Render Merged Boundary Envelopes (stykające się obiekty 'boundary' jako jedna obwiednia
   // + delikatna linia na wspólnej/ukrytej krawędzi)
   if (mergeableGroups.length > 0) {
-    const rot = ((viewRotationDeg || 0) * Math.PI) / 180;
-    const cosR = Math.cos(rot);
-    const sinR = Math.sin(rot);
-    const s = viewState.scale;
-    const a = s * cosR;
-    const b = -s * sinR;
-    const c = -s * sinR;
-    const d = -s * cosR;
-    const e = viewState.panX;
-    const f = viewState.panY;
+    const vm = rc.viewportMatrix || createViewportMatrix(viewState.panX, viewState.panY, viewState.scale, viewRotationDeg);
 
     for (const group of mergeableGroups) {
       if (!group.outer || group.outer.length < 3) continue;
@@ -1447,7 +1438,7 @@ export function renderBuildings(
       const isPlayground = group.areaType === 'playground';
 
       ctx.save();
-      ctx.setTransform(a, b, c, d, e, f);
+      applyMatrixToContext(vm, ctx);
 
       const envelopePath = new Path2D();
       envelopePath.moveTo(group.outer[0].x, group.outer[0].y);
@@ -1509,18 +1500,10 @@ export function renderBuildings(
       const envelopeLoops = computeGroupEnvelope(activeGroupBuildings, 1.0);
 
       if (envelopeLoops.length > 0) {
-        const rot = ((viewRotationDeg || 0) * Math.PI) / 180;
-        const cosR = Math.cos(rot);
-        const sinR = Math.sin(rot);
-        const a = s * cosR;
-        const b = -s * sinR;
-        const c = -s * sinR;
-        const d = -s * cosR;
-        const e = viewState.panX;
-        const f = viewState.panY;
+        const vm = rc.viewportMatrix || createViewportMatrix(viewState.panX, viewState.panY, viewState.scale, viewRotationDeg);
 
         ctx.save();
-        ctx.setTransform(a, b, c, d, e, f);
+        applyMatrixToContext(vm, ctx);
 
         for (const loop of envelopeLoops) {
           if (!loop || loop.length < 3) continue;

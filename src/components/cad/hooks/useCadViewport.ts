@@ -64,22 +64,22 @@ export function useCadViewport(
 
       // Punkt w świecie na środku ekranu przed obrotem
       const rotPrevRad = (prevRot * Math.PI) / 180;
-      const rxPrev = (cx - viewState.panX) / viewState.scale;
-      const ryPrev = -(cy - viewState.panY) / viewState.scale;
-      const cosPrev = Math.cos(-rotPrevRad);
-      const sinPrev = Math.sin(-rotPrevRad);
-      const wx = rxPrev * cosPrev - ryPrev * sinPrev;
-      const wy = rxPrev * sinPrev + ryPrev * cosPrev;
+      const cosPrev = Math.cos(rotPrevRad);
+      const sinPrev = Math.sin(rotPrevRad);
+      const uPrev = (cx - viewState.panX) / viewState.scale;
+      const vPrev = (cy - viewState.panY) / viewState.scale;
+      const wx = uPrev * cosPrev + vPrev * sinPrev;
+      const wy = uPrev * sinPrev - vPrev * cosPrev;
 
       // Wyznaczenie nowego panX i panY dla nowego kąta
       const rotNewRad = (viewRotationDeg * Math.PI) / 180;
       const cosNew = Math.cos(rotNewRad);
       const sinNew = Math.sin(rotNewRad);
-      const rxNew = wx * cosNew - wy * sinNew;
-      const ryNew = wx * sinNew + wy * cosNew;
+      const uNew = wx * cosNew + wy * sinNew;
+      const vNew = wx * sinNew - wy * cosNew;
 
-      const newPanX = cx - rxNew * viewState.scale;
-      const newPanY = cy + ryNew * viewState.scale;
+      const newPanX = cx - uNew * viewState.scale;
+      const newPanY = cy - vNew * viewState.scale;
 
       prevRotationRef.current = viewRotationDeg;
       setViewState((prev) => ({

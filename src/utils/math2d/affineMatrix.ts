@@ -27,11 +27,12 @@ export const IDENTITY_MATRIX: AffineMatrix2D = {
 };
 
 /**
- * Creates a matrix representing: Translation -> Rotation -> Scale (with flipped Y for CAD coords).
+ * Creates a matrix representing: Translation -> Camera Rotation -> Scale (with flipped Y for CAD coords).
  *
- * CAD world (wx, wy) where +Y is North, +X is East maps to Screen (sx, sy) where +Y is Down:
- * sx = panX + scale * ( wx * cos(rot) - wy * sin(rot) )
- * sy = panY - scale * ( wx * sin(rot) + wy * cos(rot) )
+ * Camera rotated CCW by angle `rot` (e.g. aligned with a world vector at angle `rot`) projects world (wx, wy)
+ * such that vectors at angle `rot` become horizontal (angle 0°) on screen:
+ * sx = panX + scale * ( wx * cos(rot) + wy * sin(rot) )
+ * sy = panY - scale * ( -wx * sin(rot) + wy * cos(rot) ) = panY + scale * wx * sin(rot) - scale * wy * cos(rot)
  *
  * Matrix equation:
  * sx = a * wx + c * wy + e
@@ -39,8 +40,8 @@ export const IDENTITY_MATRIX: AffineMatrix2D = {
  *
  * Where:
  * a = scale * cos(rot)
- * b = -scale * sin(rot)
- * c = -scale * sin(rot)
+ * b = scale * sin(rot)
+ * c = scale * sin(rot)
  * d = -scale * cos(rot)
  * e = panX
  * f = panY
@@ -57,8 +58,8 @@ export function createViewportMatrix(
 
   return {
     a: scale * cosR,
-    b: -scale * sinR,
-    c: -scale * sinR,
+    b: scale * sinR,
+    c: scale * sinR,
     d: -scale * cosR,
     e: panX,
     f: panY,

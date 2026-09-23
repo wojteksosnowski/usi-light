@@ -24,12 +24,32 @@ describe('AffineMatrix2D', () => {
     const rotRad = (rotDeg * Math.PI) / 180;
     const cosR = Math.cos(rotRad);
     const sinR = Math.sin(rotRad);
-    const expectedSx = panX + scale * (wx * cosR - wy * sinR);
-    const expectedSy = panY - scale * (wx * sinR + wy * cosR);
+    const expectedSx = panX + scale * (wx * cosR + wy * sinR);
+    const expectedSy = panY + scale * (wx * sinR - wy * cosR);
 
     const pt = transformPoint(matrix, wx, wy);
     expect(pt.x).toBeCloseTo(expectedSx, 5);
     expect(pt.y).toBeCloseTo(expectedSy, 5);
+  });
+
+  it('should align edge horizontally when viewRotationDeg matches edge angle (EDGEUCS)', () => {
+    const panX = 500;
+    const panY = 400;
+    const scale = 10;
+    const edgeAngleDeg = 17.2275;
+
+    const p1 = { x: -67.7638, y: 78.1272 };
+    const p2 = { x: 80.9838, y: 124.2505 };
+
+    // With viewRotationDeg matching edgeAngleDeg, edge becomes horizontal on screen
+    const matrix = createViewportMatrix(panX, panY, scale, edgeAngleDeg);
+    const s1 = transformPoint(matrix, p1.x, p1.y);
+    const s2 = transformPoint(matrix, p2.x, p2.y);
+
+    // Y on screen should be identical (horizontal line)
+    expect(s1.y).toBeCloseTo(s2.y, 2);
+    // X on screen should increase from p1 to p2
+    expect(s2.x).toBeGreaterThan(s1.x);
   });
 
   it('should invert matrix and accurately map screen coords back to world coords', () => {
