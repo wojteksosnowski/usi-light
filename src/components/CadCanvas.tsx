@@ -438,7 +438,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const liveShadowResult = useMemo(() => {
     if (!showShadowRange || !isInteracting) return null;
-    return computeHourlyShadowsLive(visibleBuildings, latitude, longitude, equinoxDate, 0.5, sunlightMethod);
+    return computeHourlyShadowsLive(visibleBuildings, latitude, longitude, equinoxDate, 1.0, sunlightMethod);
   }, [showShadowRange, isInteracting, visibleBuildings, latitude, longitude, equinoxDate, sunlightMethod]);
 
   const hourlyShadowsToRender = useMemo(() => {

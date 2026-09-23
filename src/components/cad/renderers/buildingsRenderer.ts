@@ -18,15 +18,29 @@ import { detectBoundaryMergeGroups, BoundaryMergeGroup } from '@/utils/math2d/bo
 import { isBuildingVariantActive, isBuildingDimmedInGroupMode } from '@/utils/geometrySelectors';
 import { BuildingLoop } from '../../../types/geometry';
 
-// Memoizacja po referencji `buildings` — patrz komentarz przy wywołaniu w `renderBuildings`.
-let boundaryMergeGroupsCacheKey: BuildingLoop[] | null = null;
+// Memoizacja po podpisie obiektów boundary — patrz komentarz przy wywołaniu w `renderBuildings`.
+let boundaryMergeGroupsCacheSig: string | null = null;
 let boundaryMergeGroupsCacheValue: BoundaryMergeGroup[] = [];
 
+function getBoundarySignature(buildings: BuildingLoop[]): string {
+  let sig = '';
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b.category === 'boundary') {
+      const v0 = b.vertices?.[0];
+      const vLen = b.vertices?.length ?? 0;
+      sig += `${b.id}:${b.isTested}:${b.isAccompanyingInvestment}:${b.areaType}:${vLen}:${v0?.x.toFixed(2)},${v0?.y.toFixed(2)};`;
+    }
+  }
+  return sig;
+}
+
 function getBoundaryMergeGroupsCached(buildings: BuildingLoop[]): BoundaryMergeGroup[] {
-  if (buildings === boundaryMergeGroupsCacheKey) {
+  const sig = getBoundarySignature(buildings);
+  if (sig === boundaryMergeGroupsCacheSig) {
     return boundaryMergeGroupsCacheValue;
   }
-  boundaryMergeGroupsCacheKey = buildings;
+  boundaryMergeGroupsCacheSig = sig;
   boundaryMergeGroupsCacheValue = detectBoundaryMergeGroups(buildings);
   return boundaryMergeGroupsCacheValue;
 }
@@ -482,15 +496,17 @@ function getOrComputeBuildingGeo(bldg: any): BuildingCachedGeometry | null {
   const minScaleForLabel = Math.min(minScaleStandard, minScaleElongated);
 
   // Pole powierzchni (shoelace) po bldg.vertices (nie activeFootprint) - używane przez etykiety działek.
-  let area = 0;
-  const baseVerts = bldg.vertices;
-  if (Array.isArray(baseVerts) && baseVerts.length >= 3) {
-    for (let i = 0; i < baseVerts.length; i++) {
-      const pA = baseVerts[i];
-      const pB = baseVerts[(i + 1) % baseVerts.length];
-      area += pA.x * pB.y - pB.x * pA.y;
+  let area = bldg.computed?.metrics?.footprintArea ?? 0;
+  if (!bldg.computed) {
+    const baseVerts = bldg.vertices;
+    if (Array.isArray(baseVerts) && baseVerts.length >= 3) {
+      for (let i = 0; i < baseVerts.length; i++) {
+        const pA = baseVerts[i];
+        const pB = baseVerts[(i + 1) % baseVerts.length];
+        area += pA.x * pB.y - pB.x * pA.y;
+      }
+      area = Math.abs(area) / 2;
     }
-    area = Math.abs(area) / 2;
   }
 
   // Path2D dla kondygnacji różniących się od podstawy i ich otworów (raz, nie co klatkę).

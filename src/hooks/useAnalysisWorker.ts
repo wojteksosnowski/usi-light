@@ -3,7 +3,6 @@ import { BuildingLoop, ProjectSettings } from '../types/geometry';
 import { AnalysisAccuracyOptions, AnalysisBatchOutput, EnabledAnalyses } from '../engine/analysisEngine';
 import { defaultSolarAnalysisEngine } from '../engine/solar';
 import { AnalysisWorkerRequest, AnalysisWorkerResponse } from '../engine/analysis.worker';
-import { serializeGeometryToFlatBuffer } from '../engine/buffers/geometryBufferSerializer';
 
 const EMPTY_ANALYSIS_OUTPUT: AnalysisBatchOutput = {
   results: [],
@@ -105,21 +104,15 @@ export function useAnalysisWorker(
 
       if (workerRef.current) {
         setIsCalculating(true);
-        const geom = serializeGeometryToFlatBuffer(bldgs);
         const req: AnalysisWorkerRequest = {
           id: reqId,
           buildings: bldgs,
-          geometryBuffer: geom.buffer,
           settings: st,
           options: opt,
           sunlightMethod: method,
           enabledAnalyses: analyses,
         };
-        try {
-          workerRef.current.postMessage(req, [geom.buffer]);
-        } catch {
-          workerRef.current.postMessage(req);
-        }
+        workerRef.current.postMessage(req);
       } else {
         // Fallback to sync if worker is unavailable
         const output = defaultSolarAnalysisEngine.runFullAnalysis(bldgs, st, opt, method, analyses);

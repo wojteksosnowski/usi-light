@@ -157,9 +157,19 @@ export const useSceneObjectsList = () => {
 
   const { getSelectionStatus, toggleGroupSelection } = useMultiSelection();
 
+  const treeSig = useMemo(() => {
+    return buildings
+      .map(
+        (b) =>
+          `${b.id}:${b.name ?? ''}:${b.category ?? 'building'}:${b.areaType ?? ''}:${b.defaultHeight}:${b.elevation ?? 0}:${b.isTested ? 1 : 0}:${b.isLocked ? 1 : 0}:${b.isGhosted ? 1 : 0}:${b.isVisible === false ? 0 : 1}:${b.isSnapExcluded ? 1 : 0}`
+      )
+      .join(';');
+  }, [buildings]);
+
   const objectTree = useMemo<ObjectTreeStructure>(() => {
     return computeObjectTree(buildings);
-  }, [buildings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeSig]);
 
   return {
     buildings,

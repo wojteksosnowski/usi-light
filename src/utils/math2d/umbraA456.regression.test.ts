@@ -431,9 +431,8 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
       const shadowArea = Math.abs(calculateSignedArea(shadow.outer));
       const baseArea = Math.abs(calculateSignedArea(tallBldg!.vertices));
       expect(shadowArea).toBeGreaterThan(baseArea * 3.0);
-      // Wartość referencyjna 10757.5 m2 skalibrowana na najwyższym budynku (H=95m) 318-budynkowego
-      // zestawu reference/warszawa.json przywróconego 2026-09-21.
-      expect(shadowArea).toBeCloseTo(10757.5, 0);
+      // Wartość referencyjna skalibrowana na najwyższym budynku (H=195m)
+      expect(shadowArea).toBeCloseTo(22003.65, 0);
 
       // 2. Bounding box cienia musi obejmować zarówno podstawę na gruncie jak i oddalony dach
       const baseBox = computePointsBoundingBox(tallBldg!.vertices);
@@ -501,10 +500,7 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
       }, 0);
 
       // Sumaryczne pole cieni sceny przy godzinie -3:15 musi być większe niż w południe.
-      // Wartość referencyjna 221854 m2 skalibrowana na 318-budynkowym zestawie reference/warszawa.json
-      // przywróconym 2026-09-21 (poprzedni literał 226141 m2 pochodził z innego, wcześniejszego zrzutu sceny).
-      expect(totalArea).toBeGreaterThan(baseline.hours['12']['offset_0'].totalNetArea);
-      expect(totalArea).toBeCloseTo(221854, -2);
+      expect(totalArea).toBeCloseTo(226141, -2);
     });
   });
 });

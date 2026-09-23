@@ -134,9 +134,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   // Zasil kąt EDGEUCS (dominująca krawędź geometrii) do useCadToolStore, żeby kompas/siatka/
   // HUD mogły go odczytać bez ponownego liczenia analyzeSegmentsStatistics.
   useEffect(() => {
-    const dominant = rawSegmentStats.dominantDirections[0];
+    const dominant = segmentStats.dominantDirections[0];
     setComputedEdgeUcsAngleDeg(dominant && dominant.isTrackingActive !== false ? dominant.angleDeg : null);
-  }, [rawSegmentStats, setComputedEdgeUcsAngleDeg]);
+  }, [segmentStats, setComputedEdgeUcsAngleDeg]);
 
   // Gdy tryb EDGEUCS jest aktywny, trzymaj kąt widoku zsynchronizowany z aktualną dominantą
   // (geometria może się zmieniać bez opuszczania trybu — np. dodanie/edycja budynku).

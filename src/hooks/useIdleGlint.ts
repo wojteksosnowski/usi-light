@@ -30,9 +30,14 @@ export function useIdleGlint(delaysMs: number[], flashDurationMs = 1000): boolea
       });
     };
 
+    let lastResetTime = 0;
     const activityEvents = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'pointermove'];
     const handleActivity = () => {
-      resetIdleTimers();
+      const now = Date.now();
+      if (now - lastResetTime >= 1000) {
+        lastResetTime = now;
+        resetIdleTimers();
+      }
     };
 
     activityEvents.forEach((evt) => {

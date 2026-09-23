@@ -346,7 +346,8 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
       savedViewRotationDeg: typeof updater === 'function' ? updater(state.savedViewRotationDeg) : updater,
     })),
 
-  setComputedEdgeUcsAngleDeg: (deg) => set({ computedEdgeUcsAngleDeg: deg }),
+  setComputedEdgeUcsAngleDeg: (deg) =>
+    set((state) => (state.computedEdgeUcsAngleDeg === deg ? state : { computedEdgeUcsAngleDeg: deg })),
   setUcsMode: (mode) => set({ ucsMode: mode }),
 
   cycleUcsMode: () => {

@@ -37,6 +37,17 @@
 - **Obsługa Modyfikatorów podczas Live Dragging:**
   - W `BuildingPreviewPanel` i `Recording3DPipWindow` podczas edycji wierzchołka (`liveVertexPreview`) na obiekcie tymczasowym wywoływane jest `applyBuildingModifiers(candidate)`, dzięki czemu bryły `storyPolygons` natychmiast odzwierciedlają nowy kształt w `getBuildingSolids`.
 
+## 1d. Canonical Precomputed Geometry (`bldg.computed`) i Izolacja Zdarzeń UI
+- **Canonical Precomputed Geometry (`GeometryCompiler` / `bldg.computed`)**:
+  - Model `CompiledObjectGeometry` dostarcza zbuforowane metryki (`metrics.footprintArea`, `volume`, `grossFloorArea`), AABB (`bounds2D`), siatki 3D (`representation3D.faces`) i krawędzie cienia (`analysis.castingEdges`).
+  - Komponenty 2D (`buildingsRenderer.ts`), 3D (`BuildingIsoPreview.tsx`) i analityczne powinny pobierać te wartości bezpośrednio z `bldg.computed` ($O(1)$) zamiast powtarzać obliczenia shoelace, skanowania AABB czy podziału kondygnacji w pętli renderowania.
+- **Izolacja Drzewa Obiektów UI (`useSceneObjectsList`)**:
+  - Drzewo `objectTree` w panelu bocznym jest memoizowane na podstawie strukturalnej sygnatury (`treeSig`: ID, nazwy, wysokości, rzędne, kategorie, flagi `isTested`/`isLocked`/`isGhosted`/`isVisible`). Dzięki temu przesuwanie i obrót obiektów na scenie nie wywołują kosztownej przebudowy drzewa komponentów Reacta i ikon `lucide-react`.
+- **Izolacja Cache Granic (`getBoundarySignature`)**:
+  - Scalanie granic `boundaryMergeGroups` w `buildingsRenderer.ts` jest kluczowane sygnaturą samych obiektów `boundary`, dzięki czemu manipulacje budynkami kubaturowymi nie inwalidują unii wielokątów działek i placów zabaw.
+- **Throttling Listenerów Aktywności (`useIdleGlint`)**:
+  - Globalne listenery nasłuchujące wysokoczęstotliwościowych zdarzeń myszy (`mousemove`/`pointermove`) na `window` nie mogą alokować timerów ani wywoływać `clearTimeout`/`setTimeout` na każde surowe zdarzenie — resetowanie timerów bezczynności musi być sthrottlowane do co najwyżej 1 wywołania na sekundę.
+
 ## 2. Obliczenia Macierzowe, Rastrowe Mapowanie i Ciągłe Struktury Pamięci (Matrix & TypedArray Architecture)
 - **Macierze transformacji afinicznych (Render i Viewport):**
   - Wszystkie transformacje widoku (pan, zoom, rotacja) oraz rzutowania obiektów łączą się w ujednoliconą macierz afiniczną $3 \times 3$ (`AffineMatrix2D` w standardzie `[a, b, c, d, e, f]`).

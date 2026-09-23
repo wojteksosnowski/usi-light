@@ -83,6 +83,17 @@ describe('polygonBooleanTwo & Shadow Analysis - Reference & Performance Benchmar
 
       const result = computeFullShadowAnalysis(sceneData.buildings);
 
+      if (process.env.UPDATE_BASELINE === '1') {
+        const newBaseline = {
+          envelopeLoops: result.envelopeLoops,
+          hourlyShadowsCount: result.hourlyShadows.length,
+          generatedAt: new Date().toISOString(),
+        };
+        fs.writeFileSync(unionTest1BaselinePath, JSON.stringify(newBaseline, null, 2));
+        console.log(`\n[UPDATE_BASELINE] Zapisano nowy baseline → ${unionTest1BaselinePath}`);
+        return;
+      }
+
       expect(result.envelopeLoops.length).toBe(baseline.envelopeLoops.length);
       expect(result.hourlyShadows.length).toBe(baseline.hourlyShadowsCount);
 
