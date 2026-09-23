@@ -40,6 +40,27 @@ describe('getBuildingSolids', () => {
     expect(solids[0].polygon).toEqual(building.vertices);
   });
 
+  it('preserves building.holes in the single extrusion fallback (e.g. OSM buildings with courtyards)', () => {
+    const courtyardHole = [
+      { x: 3, y: 3 },
+      { x: 7, y: 3 },
+      { x: 7, y: 7 },
+      { x: 3, y: 7 },
+    ];
+    const building = createBuilding({
+      name: 'Pokorna 2',
+      defaultHeight: 51.5,
+      elevation: 0,
+      holes: [courtyardHole],
+    });
+    const solids = getBuildingSolids(building);
+    expect(solids).toHaveLength(1);
+    expect(solids[0].hBottom).toBe(0);
+    expect(solids[0].hTop).toBe(51.5);
+    expect(solids[0].holes).toHaveLength(1);
+    expect(solids[0].holes[0]).toEqual(courtyardHole);
+  });
+
   it('maps multi-storey storyPolygons through, including holes', () => {
     const building = createBuilding({
       storyPolygons: [

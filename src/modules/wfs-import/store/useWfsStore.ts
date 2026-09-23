@@ -206,7 +206,9 @@ interface WfsState {
   clearLoadingParcels: () => void;
 
   setTrees: (trees: WfsTreeFeature[]) => void;
-  setStatus: (patch: Partial<WfsImportStatus>) => void;
+  setStatus: (
+    patch: Partial<WfsImportStatus> | ((prev: WfsImportStatus) => Partial<WfsImportStatus>)
+  ) => void;
   setOptions: (patch: Partial<WfsImportOptions>) => void;
   setProjectRadius: (radius: ProjectRadius) => void;
   setIsProjectCenterLocked: (locked: boolean) => void;
@@ -287,10 +289,13 @@ function isGeoFetchCovered(
 }
 
 export function formatWfsProgress(status: WfsImportStatus): string {
+  if (status.info) {
+    return status.info;
+  }
   const label = STAGE_LABELS[status.stage] || 'Pobieranie danych…';
   if (status.progressTotal > 0) {
     const pct = Math.round((status.progressDone / status.progressTotal) * 100);
-    return `${label} ${status.progressDone} z ${status.progressTotal} punktów (${pct}%)`;
+    return `${label} ${status.progressDone} z ${status.progressTotal} (${pct}%)`;
   }
   return label;
 }
@@ -367,7 +372,12 @@ export const useWfsStore = create<WfsState>()(
 
   setTrees: (trees) => set({ trees }),
   setStatus: (patch) =>
-    set((state) => ({ status: { ...state.status, ...patch } })),
+    set((state) => ({
+      status: {
+        ...state.status,
+        ...(typeof patch === 'function' ? patch(state.status) : patch),
+      },
+    })),
   setOptions: (patch) =>
     set((state) => ({ options: { ...state.options, ...patch } })),
 

@@ -31,9 +31,9 @@ const OVERPASS_ENDPOINTS = [
 // fetchOsmBuildings) — HTTP timeout głównego endpointu MUSI być większy niż 45s, inaczej
 // przerwiemy połączenie własnym AbortController, zanim Overpass zdąży dokończyć zapytanie
 // w swoim wewnętrznym budżecie (czyli sami ucinalibyśmy tę "pełną odpowiedź", o którą chodzi).
-const PRIMARY_TIMEOUT_MS = 48000;
-const FALLBACK_TIMEOUT_MS = 4000;
-const TOTAL_BUDGET_MS = 52000;
+const PRIMARY_TIMEOUT_MS = 25000;
+const FALLBACK_TIMEOUT_MS = 18000;
+const TOTAL_BUDGET_MS = 180000;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');

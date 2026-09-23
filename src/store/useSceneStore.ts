@@ -188,6 +188,7 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
   const rotateNormal = (n: Point2D) => rotatePointAroundPivot(n, { x: 0, y: 0 }, deltaAngleRad);
 
   const newVertices = bldg.vertices.map(rotate);
+  const newHoles = bldg.holes ? bldg.holes.map((hole) => hole.map(rotate)) : undefined;
   const newSweepPath = bldg.sweepPath ? bldg.sweepPath.map(rotate) : undefined;
 
   const newStoryPolygons = bldg.storyPolygons
@@ -232,6 +233,7 @@ function rotateBuildingGeometry(bldg: BuildingLoop, pivot: Point2D, deltaAngleRa
   return {
     ...bldg,
     vertices: newVertices,
+    holes: newHoles,
     sweepPath: newSweepPath,
     transform: updatedTransform,
     storyPolygons: newStoryPolygons,

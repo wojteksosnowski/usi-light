@@ -213,7 +213,20 @@ export const useProjectGeoSync = () => {
         }
       } else {
         try {
-          importedBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
+          importedBuildings = await fetchOsmBuildings(
+            bbox,
+            projectCenter,
+            projectCrs,
+            radius,
+            (progress) => {
+              setStatus((prev) => ({
+                ...prev,
+                info: progress.message,
+                progressDone: progress.stage === 'assembling' ? 2 : progress.stage === 'details' ? 1 : 0,
+                progressTotal: 2,
+              }));
+            }
+          );
           buildingsSourceLabel = 'OpenStreetMap';
           wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: buildingsSourceKeyGuess });
         } catch (osmErr) {

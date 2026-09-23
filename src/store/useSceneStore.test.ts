@@ -377,6 +377,34 @@ describe('useSceneStore', () => {
       expect(rotated.storyPolygons![4].polygon[0].y).toBeCloseTo(expectedY, 2);
     });
 
+    it('preserves and rotates holes during moveBuilding and rotateBuilding', () => {
+      const bldgId = 'bldg-with-hole';
+      const bldg = {
+        ...createBuildingFromVertices(
+          [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }],
+          'WithHole',
+          15
+        ),
+        id: bldgId,
+        holes: [[{ x: 5, y: 5 }, { x: 15, y: 5 }, { x: 15, y: 15 }, { x: 5, y: 15 }]],
+      };
+
+      useSceneStore.getState().setBuildings([bldg]);
+
+      // Move by (10, 20)
+      useSceneStore.getState().moveBuilding(bldgId, 10, 20);
+      let state = useSceneStore.getState().buildings.find((b) => b.id === bldgId)!;
+      expect(state.holes).toBeDefined();
+      expect(state.holes![0][0]).toEqual({ x: 15, y: 25 });
+
+      // Rotate by 90 degrees (Math.PI / 2) around (0, 0)
+      useSceneStore.getState().rotateBuilding(bldgId, { x: 0, y: 0 }, Math.PI / 2);
+      state = useSceneStore.getState().buildings.find((b) => b.id === bldgId)!;
+      expect(state.holes).toBeDefined();
+      expect(state.holes![0][0].x).toBeCloseTo(-25, 2);
+      expect(state.holes![0][0].y).toBeCloseTo(15, 2);
+    });
+
     it('links and unlinks buildings and prevents modifiers on grouped/compound objects', () => {
       const b1 = { ...createBuildingFromVertices([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }], 'B1', 10), id: 'b1' };
       const b2 = { ...createBuildingFromVertices([{ x: 20, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 }], 'B2', 12), id: 'b2' };

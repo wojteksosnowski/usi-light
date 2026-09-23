@@ -7,11 +7,13 @@ import {
   findIncompleteRelations,
   findMissingBuildingRelationIds,
   fetchOsmBuildings,
+  mergeOverpassResponses,
   OverpassResponse,
 } from './osmBuildingsClient';
 import { latLonToBbox } from '../shared/geocoding';
-import { CrsDetectionResult } from '../../../../utils/geoTransform';
+import { CrsDetectionResult, LatLon } from '../../../../utils/geoTransform';
 import { WfsBbox } from '../city/wfsWarsawClient';
+import { formatWfsProgress } from '../../store/useWfsStore';
 
 const EPSG_2180: CrsDetectionResult = {
   crs: 'EPSG:2180',
@@ -21,6 +23,89 @@ const EPSG_2180: CrsDetectionResult = {
 };
 
 describe('osmBuildingsClient', () => {
+  describe('formatWfsProgress', () => {
+    it('prioritizes status.info when present', () => {
+      expect(
+        formatWfsProgress({
+          isFetching: true,
+          stage: 'buildings',
+          progressDone: 1,
+          progressTotal: 2,
+          buildingsCount: 0,
+          parcelsCount: 0,
+          treesCount: 0,
+          error: null,
+          info: 'Znaleziono 42 budynków. Pobieranie szczegółów 3D...',
+        })
+      ).toBe('Znaleziono 42 budynków. Pobieranie szczegółów 3D...');
+    });
+
+    it('falls back to stage and percentage when info is null', () => {
+      expect(
+        formatWfsProgress({
+          isFetching: true,
+          stage: 'buildings',
+          progressDone: 5,
+          progressTotal: 10,
+          buildingsCount: 0,
+          parcelsCount: 0,
+          treesCount: 0,
+          error: null,
+          info: null,
+        })
+      ).toBe('Pobieranie budynków… 5 z 10 (50%)');
+    });
+  });
+  describe('mergeOverpassResponses (safe merge preserving tags)', () => {
+    it('preserves tags when merged with a skeleton entry (tags: undefined from out skel qt)', () => {
+      const resp1: OverpassResponse = {
+        elements: [
+          {
+            type: 'way',
+            id: 238291407,
+            nodes: [1, 2, 3, 1],
+            tags: { 'building:part': 'yes', height: '107', 'building:levels': '39' },
+          },
+        ],
+      };
+      const resp2: OverpassResponse = {
+        elements: [
+          {
+            type: 'way',
+            id: 238291407,
+            nodes: [1, 2, 3, 1],
+            tags: undefined,
+          },
+        ],
+      };
+
+      const merged = mergeOverpassResponses(resp1, resp2);
+      expect(merged.elements.length).toBe(1);
+      const way = merged.elements[0] as any;
+      expect(way.tags).toBeDefined();
+      expect(way.tags.height).toBe('107');
+      expect(way.tags['building:levels']).toBe('39');
+    });
+
+    it('combines multiple responses without losing nodes, ways or relations', () => {
+      const resp1: OverpassResponse = {
+        elements: [
+          { type: 'node', id: 1, lat: 52.254, lon: 20.996 },
+          { type: 'way', id: 100, nodes: [1], tags: { building: 'yes' } },
+        ],
+      };
+      const resp2: OverpassResponse = {
+        elements: [
+          { type: 'node', id: 2, lat: 52.255, lon: 20.997 },
+          { type: 'way', id: 200, nodes: [2], tags: { 'building:part': 'yes' } },
+          { type: 'relation', id: 300, members: [{ type: 'way', ref: 100, role: 'outline' }], tags: { type: 'building' } },
+        ],
+      };
+
+      const merged = mergeOverpassResponses(resp1, resp2);
+      expect(merged.elements.length).toBe(5);
+    });
+  });
   describe('resolveBuildingType', () => {
     it('resolves residential types correctly', () => {
       expect(resolveBuildingType({ building: 'house' })).toBe('residential');
@@ -609,6 +694,56 @@ describe('osmBuildingsClient', () => {
       expect(part).toBeDefined();
       expect(part.groupId).toBeDefined();
     });
+
+    it('detects enclosed building:part as a courtyard hole in outer building (Pokorna 2 pattern)', () => {
+      const mockResponse: OverpassResponse = {
+        elements: [
+          // Outer perimeter building (17 storeys, 51.5m)
+          { type: 'node', id: 1, lat: 52.2540, lon: 20.9930 },
+          { type: 'node', id: 2, lat: 52.2540, lon: 20.9960 },
+          { type: 'node', id: 3, lat: 52.2560, lon: 20.9960 },
+          { type: 'node', id: 4, lat: 52.2560, lon: 20.9930 },
+          {
+            type: 'way',
+            id: 1085333897,
+            nodes: [1, 2, 3, 4, 1],
+            tags: { building: 'apartments', 'building:levels': '17', 'addr:street': 'Pokorna', 'addr:housenumber': '2' },
+          },
+
+          // Inner courtyard part (1 storey, 3.5m) located completely inside the outer perimeter
+          { type: 'node', id: 11, lat: 52.2545, lon: 20.9940 },
+          { type: 'node', id: 12, lat: 52.2545, lon: 20.9950 },
+          { type: 'node', id: 13, lat: 52.2555, lon: 20.9950 },
+          { type: 'node', id: 14, lat: 52.2555, lon: 20.9940 },
+          {
+            type: 'way',
+            id: 1085333896,
+            nodes: [11, 12, 13, 14, 11],
+            tags: { 'building:part': 'yes', 'building:levels': '1' },
+          },
+        ],
+      };
+
+      const testCenter: LatLon = { lat: 52.2550, lon: 20.9950 };
+      const buildings = parseOverpassBuildingsResponse(mockResponse, testCenter, EPSG_2180, 500);
+
+      // 1. Outer building must survive with holes array populated
+      const outer = buildings.find((b) => b.id === 'osm-bld-1085333897');
+      expect(outer).toBeDefined();
+      expect(outer!.name).toBe('Pokorna 2');
+      expect(outer!.defaultHeight).toBeCloseTo(51.5, 1);
+      expect(outer!.holes).toBeDefined();
+      expect(outer!.holes!.length).toBe(1);
+      expect(outer!.holes![0].length).toBe(4);
+
+      // 2. Inner courtyard part must be imported with height 3.5m, inherited name and shared groupId
+      const inner = buildings.find((b) => b.id === 'osm-part-1085333896');
+      expect(inner).toBeDefined();
+      expect(inner!.name).toBe('Pokorna 2');
+      expect(inner!.defaultHeight).toBeCloseTo(3.5, 1);
+      expect(inner!.groupId).toBeDefined();
+      expect(inner!.groupId).toBe(outer!.groupId);
+    });
   });
 
   describe('Rotunda PKO (real Overpass fixture, way 743253236 + relations 13114286/13114287)', () => {
@@ -869,9 +1004,46 @@ describe('osmBuildingsClient', () => {
       expect(tower!.defaultHeight).toBeGreaterThan(90);
     });
 
-    it('does not create a duplicate low building from the relation outline way (238291404)', () => {
+    it('does not create a duplicate low building from the relation outline way (238291404) when parts are present', () => {
       const buildings = parseOverpassBuildingsResponse({ elements: intracoRawElements }, mockProjectCenter, EPSG_2180, 300);
       expect(buildings.some((b) => b.id === 'osm-bld-238291404')).toBe(false);
+    });
+
+    it('preserves the outline as fallback building when no parts generated valid polygons (failsafe)', () => {
+      // Usunięto węzły części (way 238291407 i 238560043), zostawiając tylko outline
+      const outlineOnlyElements = intracoRawElements.filter(
+        (el) => el.type !== 'way' || el.id === 238291404
+      );
+      const buildings = parseOverpassBuildingsResponse({ elements: outlineOnlyElements }, mockProjectCenter, EPSG_2180, 300);
+      const outline = buildings.find((b) => b.id === 'osm-bld-238291404');
+      expect(outline).toBeDefined();
+      expect(outline!.name).toBe('Intraco');
+    });
+
+    it('parses overpass-turbo.json reference file for Intraco landmark within 100m radius', async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const turboPath = path.resolve(process.cwd(), 'reference/osm/overpass-turbo.json');
+      if (fs.existsSync(turboPath)) {
+        const turboData = JSON.parse(fs.readFileSync(turboPath, 'utf8'));
+        const landmarkCenter = { lat: 52.2546, lon: 20.9967 };
+        const buildings100m = parseOverpassBuildingsResponse(turboData, landmarkCenter, EPSG_2180, 100);
+
+        // Intraco (way 238291404) powinno być zaimportowane
+        const intraco = buildings100m.find((b) => b.id.includes('238291404') || b.name.includes('Intraco'));
+        expect(intraco).toBeDefined();
+
+        // Intraco Prime (way 1076972425) w promieniu 100m
+        const intracoPrime = buildings100m.find((b) => b.name.includes('Intraco Prime') || b.id.includes('1076972425'));
+        expect(intracoPrime).toBeDefined();
+
+        // Wszystkie zaimportowane obiekty muszą mieć poprawne segmenty i geometrię
+        expect(buildings100m.length).toBeGreaterThanOrEqual(2);
+        for (const b of buildings100m) {
+          expect(b.vertices.length).toBeGreaterThanOrEqual(3);
+          expect(b.segments.length).toBeGreaterThanOrEqual(3);
+        }
+      }
     });
 
     // Regresja: zapytanie z podwójną rekursją (`>;>;`) naprawiało brak wieży Intraco, ale
@@ -1018,11 +1190,16 @@ describe('osmBuildingsClient', () => {
 
     it('two sequential fetchOsmBuildings calls for the identical bbox surface exactly what the proxy returned each time (939 then 243)', async () => {
       let call = 0;
-      const responses = [buildOverpassPayload(939), buildOverpassPayload(243)];
+      const responses = [
+        buildOverpassPayload(939), // first fetchOsmBuildings - stage 1 (baseline)
+        { elements: [] },          // first fetchOsmBuildings - stage 2 (details)
+        buildOverpassPayload(243), // second fetchOsmBuildings - stage 1 (baseline)
+        { elements: [] },          // second fetchOsmBuildings - stage 2 (details)
+      ];
       vi.stubGlobal(
         'fetch',
         vi.fn(async () => {
-          const payload = responses[call];
+          const payload = responses[call] || { elements: [] };
           call++;
           return { ok: true, json: async () => payload } as Response;
         })
@@ -1033,6 +1210,34 @@ describe('osmBuildingsClient', () => {
 
       expect(first.length).toBe(939);
       expect(second.length).toBe(243);
+    });
+
+    it('emits progress updates informing about found buildings count and 3D details', async () => {
+      const progressUpdates: any[] = [];
+      const responses = [
+        buildOverpassPayload(10), // stage 1 (baseline)
+        { elements: [] },         // stage 2 (details)
+      ];
+      let call = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          const payload = responses[call] || { elements: [] };
+          call++;
+          return { ok: true, json: async () => payload } as Response;
+        })
+      );
+
+      await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, 200, (p) => {
+        progressUpdates.push(p);
+      });
+
+      expect(progressUpdates.length).toBeGreaterThanOrEqual(2);
+      expect(progressUpdates.some((p) => p.stage === 'baseline')).toBe(true);
+      const detailsProgress = progressUpdates.find((p) => p.stage === 'details');
+      expect(detailsProgress).toBeDefined();
+      expect(detailsProgress.foundBuildingsCount).toBe(10);
+      expect(detailsProgress.message).toContain('10 budynków');
     });
   });
 

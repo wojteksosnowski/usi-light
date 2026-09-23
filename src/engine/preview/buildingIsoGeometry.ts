@@ -46,7 +46,7 @@ export function getBuildingSolids(building: BuildingLoop): IsoSolid[] {
   return [
     {
       polygon: building.vertices.map(normalize),
-      holes: [],
+      holes: (building.holes ?? []).map((hole) => hole.map(normalize)),
       hBottom,
       hTop: hBottom + building.defaultHeight,
       buildingType: building.buildingType ?? 'residential',

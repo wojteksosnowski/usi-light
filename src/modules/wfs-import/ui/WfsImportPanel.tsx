@@ -93,7 +93,9 @@ export const WfsImportPanel: React.FC = () => {
             }
           } else {
             try {
-              finalBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius);
+              finalBuildings = await fetchOsmBuildings(bbox, projectCenter, projectCrs, radius, (p) => {
+                setStatus((s) => ({ ...s, info: p.message }));
+              });
             } catch (osmErr) {
               console.warn('[WFS Import] Nie udało się pobrać budynków z OSM:', osmErr);
             }

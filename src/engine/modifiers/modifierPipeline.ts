@@ -1363,10 +1363,10 @@ export function applyBuildingModifiers(building: BuildingLoop): ModifierPipeline
     hBottom: interval.hBottom,
     hTop: interval.hTop,
     polygon: baseVertices.map((p) => ({ ...p })),
-    holes: [],
+    holes: (building.holes || []).map((h) => h.map((p) => ({ ...p }))),
     // Dziedziczenie ID krawędzi startuje z tożsamości: krawędź i dziedziczy po baseVertices[i].
     edgeOrigins: baseVertices.map((_, i) => i),
-    holeOrigins: [],
+    holeOrigins: (building.holes || []).map((h) => h.map((_, i) => i)),
     buildingType: building.buildingType ?? 'residential',
   }));
 
