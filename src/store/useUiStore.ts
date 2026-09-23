@@ -35,8 +35,10 @@ interface UiState {
   /** Wskaźnik zapisu projektu na HUD topbar */
   isDirty: boolean;
   lastSavedAt: number | null;
+  saveError: boolean;
   markDirty: () => void;
   markSaved: (timestamp: number) => void;
+  markSaveError: () => void;
 
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -74,8 +76,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   isDirty: false,
   lastSavedAt: null,
-  markDirty: () => set({ isDirty: true }),
-  markSaved: (timestamp) => set({ isDirty: false, lastSavedAt: timestamp }),
+  saveError: false,
+  markDirty: () => set({ isDirty: true, saveError: false }),
+  markSaved: (timestamp) => set({ isDirty: false, lastSavedAt: timestamp, saveError: false }),
+  markSaveError: () => set({ isDirty: false, saveError: true }),
 
   setViewMode2D: (mode) => {
     set({ viewMode2D: mode });

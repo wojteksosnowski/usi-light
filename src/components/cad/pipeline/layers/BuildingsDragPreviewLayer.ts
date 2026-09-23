@@ -1,6 +1,7 @@
-import { Point2D } from '../../../../types/geometry';
+import { AnalysisPointResult, Point2D } from '../../../../types/geometry';
 import { CadRenderLayer, CadRenderFrameContext } from '../types';
 import { renderBuildings } from '../../renderers/buildingsRenderer';
+import { rebuildBuildingSegments } from '../../../../utils/segmentStatistics';
 
 /**
  * Rysuje podgląd przeciąganego wierzchołka budynku — warstwa HUD (60 FPS), oddzielona od
@@ -68,6 +69,37 @@ export class BuildingsDragPreviewLayer implements CadRenderLayer {
       ? { ...draggedBuilding, sweepPath: updatedVerts }
       : { ...draggedBuilding, vertices: updatedVerts };
 
+    // Podczas przeciągania wierzchołka `buildings` w store pozostaje nieruszony (commit dopiero
+    // na mouseup, patrz komentarz klasy) — więc `pinnedPointResults` z kontekstu wciąż niesie
+    // point/normal policzone względem starych, nieprzesuniętych segmentów. Przeliczamy tu na żywo
+    // pozycję znaczników P1/P2/P3 należących do przeciąganego budynku względem segmentów preview,
+    // zachowując zamrożoną analizę shadowing/sunlight (patrz AGENTS.md §1a).
+    const previewSegments = isSweep ? null : rebuildBuildingSegments(draggedBuilding, updatedVerts).segments;
+    const livePinnedPointResults: AnalysisPointResult[] = !previewSegments
+      ? pinnedPointResults
+      : pinnedPointResults.map((ptRes) => {
+          if (ptRes.buildingId !== selectedBuildingId) return ptRes;
+          const oldSeg = draggedBuilding.segments.find((s) => s.id === ptRes.segmentId);
+          if (!oldSeg) return ptRes;
+          const dx = oldSeg.p2.x - oldSeg.p1.x;
+          const dy = oldSeg.p2.y - oldSeg.p1.y;
+          const lenSq = dx * dx + dy * dy;
+          const r =
+            lenSq > 1e-9
+              ? ((ptRes.point.x - oldSeg.p1.x) * dx + (ptRes.point.y - oldSeg.p1.y) * dy) / lenSq
+              : 0;
+          const newSeg = previewSegments.find((s) => s.id === ptRes.segmentId);
+          if (!newSeg) return ptRes;
+          return {
+            ...ptRes,
+            point: {
+              x: newSeg.p1.x + r * (newSeg.p2.x - newSeg.p1.x),
+              y: newSeg.p1.y + r * (newSeg.p2.y - newSeg.p1.y),
+            },
+            normal: newSeg.normal,
+          };
+        });
+
     renderBuildings(
       renderContext,
       [previewBuilding],
@@ -84,7 +116,7 @@ export class BuildingsDragPreviewLayer implements CadRenderLayer {
       layerSettings,
       editingEdgeLength,
       hoveredEdgeLengthBadge,
-      pinnedPointResults,
+      livePinnedPointResults,
       activePinnedPointId,
       liveFacadeSnap,
       facadePointMode,

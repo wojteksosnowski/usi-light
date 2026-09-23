@@ -146,6 +146,24 @@ export const APP_CONFIG = {
     maxToleranceMeters: 3.0,
   },
 
+  // Kolory układów współrzędnych (WORLDUCS/USERUCS/EDGEUCS): warianty "grid" — delikatne,
+  // nie mogą przytłaczać widoku; warianty "guide" — wyraźne, do prowadnic OTRACK.
+  ucs: {
+    worldGridColor: 'rgba(100, 116, 139, 0.35)', // Delikatny szary — WORLDUCS
+    userGridColor: 'rgba(56, 189, 248, 0.22)', // Delikatny błękit — USERUCS
+    edgeGridColor: 'rgba(245, 158, 11, 0.22)', // Delikatny bursztyn — EDGEUCS
+    worldGuideColor: '#94a3b8', // Szary — WORLDUCS (prowadnice ortho/świat)
+    userGuideColor: '#38bdf8', // Błękitny — USERUCS (oś widoku ustawiona ręcznie)
+    edgeGuideColor: '#f59e0b', // Bursztynowy — EDGEUCS (dominująca krawędź geometrii)
+    // Mnożniki kanału alpha bazowego koloru siatki (gridRenderer.ts): linie pomocnicze 1m
+    // przyciemnione, osie X=0/Y=0 wzmocnione — względem tego samego koloru aktywnego UCS.
+    minorGridAlphaMult: 0.55,
+    axisGridAlphaMult: 2.2,
+    // Bardzo przygaszona siatka WORLDUCS rysowana pod spodem, gdy aktywny tryb to USERUCS/EDGEUCS
+    // — czysto orientacyjna, nie może konkurować wizualnie z aktywną siatką.
+    worldUnderlayGridColor: 'rgba(100, 116, 139, 0.10)',
+  },
+
   // Konfiguracja analizy statystycznej kierunków fasad
   statistics: {
     defaultNoisePercentile: 20, // 20% najkrótszych odcinków ignorowanych przy wyznaczaniu siatek

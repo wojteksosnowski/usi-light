@@ -13,9 +13,7 @@ import {
   Map,
   Map as MapIcon,
   DraftingCompass,
-  Check,
-  CloudUpload,
-  Cloud,
+  Save,
 } from 'lucide-react';
 import { useUiStore, useSolarAnalysisStore, useCadToolStore } from '../../store';
 import { useLicenseStore } from '../../store/useLicenseStore';
@@ -77,6 +75,7 @@ export const CadTopHud: React.FC = () => {
   const setViewMode2D = useUiStore((s) => s.setViewMode2D);
   const isDirty = useUiStore((s) => s.isDirty);
   const lastSavedAt = useUiStore((s) => s.lastSavedAt);
+  const saveError = useUiStore((s) => s.saveError);
 
   const selectedCity = useSolarAnalysisStore((s) => s.selectedCity);
   const settings = useSolarAnalysisStore((s) => s.settings);
@@ -98,7 +97,8 @@ export const CadTopHud: React.FC = () => {
   const viewRotationMode = useCadToolStore((s) => s.viewRotationMode);
   const setViewRotationMode = useCadToolStore((s) => s.setViewRotationMode);
   const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
-  const toggleUcsRotation = useCadToolStore((s) => s.toggleUcsRotation);
+  const cycleUcsMode = useCadToolStore((s) => s.cycleUcsMode);
+  const ucsMode = useCadToolStore((s) => s.ucsMode);
   const isOsnapActive = useCadToolStore((s) => s.isOsnapActive);
   const toggleOsnap = useCadToolStore((s) => s.toggleOsnap);
 
@@ -171,22 +171,27 @@ export const CadTopHud: React.FC = () => {
           padding: '4px 8px',
           borderRadius: '6px',
           fontSize: '11px',
-          color: isDirty || !lastSavedAt ? 'var(--text-secondary)' : 'var(--status-emerald-text)',
+          color: saveError
+            ? 'var(--status-rose-text)'
+            : isDirty
+              ? 'var(--status-amber-text)'
+              : lastSavedAt
+                ? 'var(--status-emerald-text)'
+                : 'var(--text-secondary)',
           whiteSpace: 'nowrap',
           flexShrink: 0,
         }}
         title={
-          isDirty
-            ? 'Zapisywanie zmian...'
-            : lastSavedAt
-              ? `Projekt zapisany lokalnie o ${new Date(lastSavedAt).toLocaleTimeString('pl-PL')}`
-              : 'Brak zapisanych zmian'
+          saveError
+            ? 'Błąd zapisu lokalnego'
+            : isDirty
+              ? 'Zapisywanie zmian...'
+              : lastSavedAt
+                ? `Projekt zapisany lokalnie o ${new Date(lastSavedAt).toLocaleTimeString('pl-PL')}`
+                : 'Brak zapisanych zmian'
         }
       >
-        {isDirty ? <CloudUpload size={13} /> : lastSavedAt ? <Check size={13} /> : <Cloud size={13} />}
-        <span className="hud-btn-label">
-          {isDirty ? 'Zapisywanie...' : lastSavedAt ? 'Zapisano' : 'Niezapisano'}
-        </span>
+        <Save size={13} />
       </div>
 
       <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)', flexShrink: 0 }} />
@@ -478,12 +483,10 @@ export const CadTopHud: React.FC = () => {
         </button>
 
         <button
-          onClick={toggleUcsRotation}
-          title={
-            Math.abs(viewRotationDeg) < 0.001
-              ? 'Przełącz na zapisaną orientację układu (krzyż obrócony o 45° = główny UCS)'
-              : 'Wróć do domyślnej orientacji układu (0°)'
-          }
+          onClick={cycleUcsMode}
+          title={`Aktywny układ: ${
+            ucsMode === 'user' ? 'USERUCS (ręczny)' : ucsMode === 'edge' ? 'EDGEUCS (z dominującej krawędzi)' : 'WORLDUCS (świat)'
+          } — [X] przełącza WORLDUCS → USERUCS → EDGEUCS`}
           style={{
             height: '28px',
             display: 'inline-flex',
@@ -495,9 +498,14 @@ export const CadTopHud: React.FC = () => {
             fontSize: '11px',
             fontWeight: 600,
             cursor: 'pointer',
-            border: Math.abs(viewRotationDeg) > 0.001 ? '1px solid var(--status-cyan-border)' : '1px solid var(--border-light)',
-            backgroundColor: Math.abs(viewRotationDeg) > 0.001 ? 'var(--status-cyan-bg)' : 'var(--bg-card)',
-            color: Math.abs(viewRotationDeg) > 0.001 ? 'var(--accent-cyan)' : 'var(--text-primary)',
+            border: ucsMode !== 'world' ? '1px solid var(--status-cyan-border)' : '1px solid var(--border-light)',
+            backgroundColor: ucsMode !== 'world' ? 'var(--status-cyan-bg)' : 'var(--bg-card)',
+            color:
+              ucsMode === 'edge'
+                ? APP_CONFIG.ucs.edgeGuideColor
+                : ucsMode === 'user'
+                  ? APP_CONFIG.ucs.userGuideColor
+                  : 'var(--text-primary)',
             transition: 'all 0.15s ease',
           }}
         >
@@ -508,7 +516,9 @@ export const CadTopHud: React.FC = () => {
               transition: 'transform 0.2s ease',
             }}
           />
-          <span className="hud-btn-label">Przełącz</span>
+          <span className="hud-btn-label">
+            {ucsMode === 'user' ? 'USERUCS' : ucsMode === 'edge' ? 'EDGEUCS' : 'WORLDUCS'}
+          </span>
         </button>
       </div>
 

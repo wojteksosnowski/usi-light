@@ -1,4 +1,5 @@
 import { CadRenderContext } from '../types';
+import { APP_CONFIG } from '../../../config/appConfig';
 
 export function renderCadGrid(
   rc: CadRenderContext,
@@ -15,9 +16,28 @@ export function renderCadGrid(
   viewRotationMode: boolean,
   buildings: any[],
   hasSatelliteBackground: boolean = false,
-  projectCirclePulse?: { radius: number; opacity: number } | null
+  projectCirclePulse?: { radius: number; opacity: number } | null,
+  ucsMode: 'world' | 'user' | 'edge' = 'world'
 ) {
   const { ctx, width, height, viewState, screenToWorld, worldToScreen, viewRotationDeg } = rc;
+
+  const ucsGridColor =
+    ucsMode === 'user'
+      ? APP_CONFIG.ucs.userGridColor
+      : ucsMode === 'edge'
+        ? APP_CONFIG.ucs.edgeGridColor
+        : APP_CONFIG.ucs.worldGridColor;
+
+  // rgba(...) string z przemnożonym kanałem alpha — do wariantów major/minor/axis tego samego UCS.
+  const withAlpha = (rgba: string, mult: number): string => {
+    const m = rgba.match(/rgba\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/);
+    if (!m) return rgba;
+    const [, r, g, b, a] = m;
+    return `rgba(${r}, ${g}, ${b}, ${Math.min(1, parseFloat(a) * mult)})`;
+  };
+  const majorGridColor = ucsGridColor;
+  const minorGridColor = withAlpha(ucsGridColor, APP_CONFIG.ucs.minorGridAlphaMult);
+  const axisGridColor = withAlpha(ucsGridColor, APP_CONFIG.ucs.axisGridAlphaMult);
 
   // 1. Compute true world bounds of the screen viewport (all 4 corners for rotation support)
   const c1 = screenToWorld(0, 0);
@@ -38,38 +58,21 @@ export function renderCadGrid(
   const minGridY = Math.floor((minWy - pad) / gridStep) * gridStep;
   const maxGridY = Math.ceil((maxWy + pad) / gridStep) * gridStep;
 
-  // 3. Main CAD Grid Lines in world space
-  ctx.strokeStyle = '#0f172a';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let gx = minGridX; gx <= maxGridX; gx += gridStep) {
-    const p1 = worldToScreen(gx, minGridY);
-    const p2 = worldToScreen(gx, maxGridY);
-    ctx.moveTo(p1.sx, p1.sy);
-    ctx.lineTo(p2.sx, p2.sy);
-  }
-  for (let gy = minGridY; gy <= maxGridY; gy += gridStep) {
-    const p1 = worldToScreen(minGridX, gy);
-    const p2 = worldToScreen(maxGridX, gy);
-    ctx.moveTo(p1.sx, p1.sy);
-    ctx.lineTo(p2.sx, p2.sy);
-  }
-  ctx.stroke();
-
-  // Minor 1m Subgrid when zoomed in
-  if (viewState.scale > 10) {
-    ctx.strokeStyle = '#09101d';
-    ctx.lineWidth = 0.5;
+  // 2b. Przygaszona siatka WORLDUCS pod spodem — widoczna gdy aktywny tryb to USERUCS/EDGEUCS.
+  // Rysowana TYM SAMYM realnym worldToScreen co reszta sceny (budynki), więc naturalnie przechyla
+  // się razem z kamerą obróconą do aktywnego UCS — dając widoczny kontrast względem prostej,
+  // ekranowej siatki aktywnego trybu (krok 3b). Tylko linie główne — czysto orientacyjne tło.
+  if (ucsMode !== 'world') {
+    ctx.strokeStyle = APP_CONFIG.ucs.worldUnderlayGridColor;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let gx = minGridX; gx <= maxGridX; gx += 1) {
-      if (gx % gridStep === 0) continue;
+    for (let gx = minGridX; gx <= maxGridX; gx += gridStep) {
       const p1 = worldToScreen(gx, minGridY);
       const p2 = worldToScreen(gx, maxGridY);
       ctx.moveTo(p1.sx, p1.sy);
       ctx.lineTo(p2.sx, p2.sy);
     }
-    for (let gy = minGridY; gy <= maxGridY; gy += 1) {
-      if (gy % gridStep === 0) continue;
+    for (let gy = minGridY; gy <= maxGridY; gy += gridStep) {
       const p1 = worldToScreen(minGridX, gy);
       const p2 = worldToScreen(maxGridX, gy);
       ctx.moveTo(p1.sx, p1.sy);
@@ -78,21 +81,122 @@ export function renderCadGrid(
     ctx.stroke();
   }
 
-  // 4. Origin Axes (X=0 and Y=0) in world space
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  // X axis (y = 0)
-  const xStart = worldToScreen(minGridX, 0);
-  const xEnd = worldToScreen(maxGridX, 0);
-  ctx.moveTo(xStart.sx, xStart.sy);
-  ctx.lineTo(xEnd.sx, xEnd.sy);
-  // Y axis (x = 0)
-  const yStart = worldToScreen(0, minGridY);
-  const yEnd = worldToScreen(0, maxGridY);
-  ctx.moveTo(yStart.sx, yStart.sy);
-  ctx.lineTo(yEnd.sx, yEnd.sy);
-  ctx.stroke();
+  if (ucsMode === 'world') {
+    // 3. Main CAD Grid Lines in world space (kamera nieobrócona względem WORLDUCS)
+    ctx.strokeStyle = majorGridColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let gx = minGridX; gx <= maxGridX; gx += gridStep) {
+      const p1 = worldToScreen(gx, minGridY);
+      const p2 = worldToScreen(gx, maxGridY);
+      ctx.moveTo(p1.sx, p1.sy);
+      ctx.lineTo(p2.sx, p2.sy);
+    }
+    for (let gy = minGridY; gy <= maxGridY; gy += gridStep) {
+      const p1 = worldToScreen(minGridX, gy);
+      const p2 = worldToScreen(maxGridX, gy);
+      ctx.moveTo(p1.sx, p1.sy);
+      ctx.lineTo(p2.sx, p2.sy);
+    }
+    ctx.stroke();
+
+    // Minor 1m Subgrid when zoomed in
+    if (viewState.scale > 10) {
+      ctx.strokeStyle = minorGridColor;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let gx = minGridX; gx <= maxGridX; gx += 1) {
+        if (gx % gridStep === 0) continue;
+        const p1 = worldToScreen(gx, minGridY);
+        const p2 = worldToScreen(gx, maxGridY);
+        ctx.moveTo(p1.sx, p1.sy);
+        ctx.lineTo(p2.sx, p2.sy);
+      }
+      for (let gy = minGridY; gy <= maxGridY; gy += 1) {
+        if (gy % gridStep === 0) continue;
+        const p1 = worldToScreen(minGridX, gy);
+        const p2 = worldToScreen(maxGridX, gy);
+        ctx.moveTo(p1.sx, p1.sy);
+        ctx.lineTo(p2.sx, p2.sy);
+      }
+      ctx.stroke();
+    }
+
+    // 4. Origin Axes (X=0 and Y=0) in world space
+    ctx.strokeStyle = axisGridColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const xStart = worldToScreen(minGridX, 0);
+    const xEnd = worldToScreen(maxGridX, 0);
+    ctx.moveTo(xStart.sx, xStart.sy);
+    ctx.lineTo(xEnd.sx, xEnd.sy);
+    const yStart = worldToScreen(0, minGridY);
+    const yEnd = worldToScreen(0, maxGridY);
+    ctx.moveTo(yStart.sx, yStart.sy);
+    ctx.lineTo(yEnd.sx, yEnd.sy);
+    ctx.stroke();
+  } else {
+    // 3b. Siatka aktywnego UCS (USERUCS/EDGEUCS) — rysowana W PRZESTRZENI EKRANU, bez żadnej
+    // macierzy obrotu: kamera już się obróciła do kąta tego UCS (viewRotationDeg), więc z
+    // definicji ten kierunek jest teraz poziomy/pionowy na ekranie. Zakotwiczona w rzucie
+    // originu świata, żeby węzły siatki pokrywały się z origin-markerem poniżej.
+    const origin = worldToScreen(0, 0);
+    const stepPx = gridStep * viewState.scale;
+
+    const firstX = origin.sx - Math.ceil((origin.sx + pad * viewState.scale) / stepPx) * stepPx;
+    const firstY = origin.sy - Math.ceil((origin.sy + pad * viewState.scale) / stepPx) * stepPx;
+
+    ctx.strokeStyle = majorGridColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = firstX; x <= width + stepPx; x += stepPx) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+    }
+    for (let y = firstY; y <= height + stepPx; y += stepPx) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+    }
+    ctx.stroke();
+
+    // Minor 1m Subgrid when zoomed in
+    if (viewState.scale > 10) {
+      const stepPx1 = viewState.scale;
+      const firstX1 = origin.sx - Math.ceil((origin.sx + pad * viewState.scale) / stepPx1) * stepPx1;
+      const firstY1 = origin.sy - Math.ceil((origin.sy + pad * viewState.scale) / stepPx1) * stepPx1;
+
+      ctx.strokeStyle = minorGridColor;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      let idx = Math.round((firstX1 - origin.sx) / stepPx1);
+      for (let x = firstX1; x <= width + stepPx1; x += stepPx1, idx++) {
+        if (idx % gridStep === 0) continue;
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+      }
+      idx = Math.round((firstY1 - origin.sy) / stepPx1);
+      for (let y = firstY1; y <= height + stepPx1; y += stepPx1, idx++) {
+        if (idx % gridStep === 0) continue;
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+      }
+      ctx.stroke();
+    }
+
+    // 4b. Osie aktywnego UCS (przez rzut originu świata) — w przestrzeni ekranu
+    ctx.strokeStyle = axisGridColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (origin.sy >= -1 && origin.sy <= height + 1) {
+      ctx.moveTo(0, origin.sy);
+      ctx.lineTo(width, origin.sy);
+    }
+    if (origin.sx >= -1 && origin.sx <= width + 1) {
+      ctx.moveTo(origin.sx, 0);
+      ctx.lineTo(origin.sx, height);
+    }
+    ctx.stroke();
+  }
 
   // 4b. Project Center Target Marker & Range Pulse Circle at (0,0)
   const originSc = worldToScreen(0, 0);

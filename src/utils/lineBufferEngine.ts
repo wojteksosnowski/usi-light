@@ -150,15 +150,17 @@ export function getOrBuildBuildingLineBuffer(bldg: BuildingLoop): CachedLineEqua
  */
 export function buildLineBufferFromBuildings(
   buildings: BuildingLoop[],
-  layerSettings: Record<string, { isVisible?: boolean; isGhosted?: boolean; isLocked?: boolean }> = {}
+  layerSettings: Record<string, { isVisible?: boolean; isGhosted?: boolean; isLocked?: boolean; isSnapExcluded?: boolean }> = {}
 ): Map<string, CachedLineEquation[]> {
   const lineBufferMap = new Map<string, CachedLineEquation[]>();
 
   for (const bldg of buildings) {
     if (bldg.isIncluded === false) continue;
+    if (bldg.isSnapExcluded === true) continue;
     if (!isBuildingVariantActive(bldg)) continue;
     const lyr = bldg.layer || 'Domyślna (0)';
     if (layerSettings[lyr]?.isVisible === false) continue;
+    if (layerSettings[lyr]?.isSnapExcluded === true) continue;
 
     const bldgLines = getOrBuildBuildingLineBuffer(bldg);
     if (bldgLines.length > 0) {

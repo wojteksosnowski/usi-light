@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Lock, Unlock, Ghost, Briefcase, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Lock, Unlock, Ghost, Briefcase, EyeOff, Lightbulb, LightbulbOff, Magnet } from 'lucide-react';
 import { CircleSelectionIcon } from '../common/CircleSelectionIcon';
 import { BuildingLoop } from '@/types/geometry';
 
@@ -15,6 +15,8 @@ interface ObjectScopeSubgroupProps {
   onToggleSelection: (items: BuildingLoop[]) => void;
   onToggleMassLock: (items: BuildingLoop[]) => void;
   onToggleMassGhost: (items: BuildingLoop[]) => void;
+  onToggleMassVisibility: (items: BuildingLoop[]) => void;
+  onToggleMassSnapExclusion: (items: BuildingLoop[]) => void;
   children: React.ReactNode;
 }
 
@@ -30,12 +32,16 @@ export const ObjectScopeSubgroup: React.FC<ObjectScopeSubgroupProps> = ({
   onToggleSelection,
   onToggleMassLock,
   onToggleMassGhost,
+  onToggleMassVisibility,
+  onToggleMassSnapExclusion,
   children,
 }) => {
   if (items.length === 0) return null;
 
   const allLocked = items.length > 0 && items.every((b) => b.isLocked);
   const allGhosted = items.length > 0 && items.every((b) => b.isGhosted);
+  const allVisible = items.length > 0 && items.every((b) => b.isVisible !== false);
+  const allSnapExcluded = items.length > 0 && items.every((b) => b.isSnapExcluded);
 
   const isInProject = scope === 'inProject';
   const scopeColor = isInProject ? 'var(--accent-indigo)' : 'var(--text-secondary)';
@@ -130,6 +136,36 @@ export const ObjectScopeSubgroup: React.FC<ObjectScopeSubgroupProps> = ({
             }}
           >
             <Ghost size={12} />
+          </button>
+
+          <button
+            type="button"
+            title={allVisible ? `Ukryj (${label})` : `Pokaż (${label})`}
+            onClick={() => onToggleMassVisibility(items)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: allVisible ? 'var(--accent-amber)' : 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '2px',
+            }}
+          >
+            {allVisible ? <Lightbulb size={12} /> : <LightbulbOff size={12} />}
+          </button>
+
+          <button
+            type="button"
+            title={allSnapExcluded ? `Włącz do OSNAP (${label})` : `Wyłącz z OSNAP (${label})`}
+            onClick={() => onToggleMassSnapExclusion(items)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: allSnapExcluded ? '#92400e' : 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '2px',
+            }}
+          >
+            <Magnet size={12} />
           </button>
         </div>
       </div>

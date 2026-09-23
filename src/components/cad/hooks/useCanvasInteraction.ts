@@ -265,6 +265,7 @@ export interface UseCanvasInteractionParams extends CadCanvasProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   viewState: ViewportState;
   setViewState: React.Dispatch<React.SetStateAction<ViewportState>>;
+  scheduleViewState: (updater: (prev: ViewportState) => ViewportState) => void;
   worldToScreen: (wx: number, wy: number) => { sx: number; sy: number };
   screenToWorld: (sx: number, sy: number) => { wx: number; wy: number };
 }
@@ -343,6 +344,7 @@ export function useCanvasInteraction({
   viewMode2D = 'cad',
   viewState,
   setViewState,
+  scheduleViewState,
   worldToScreen,
   screenToWorld,
 }: UseCanvasInteractionParams) {
@@ -2117,7 +2119,7 @@ export function useCanvasInteraction({
     if (isPanning) {
       const dx = sx - dragStart.x;
       const dy = sy - dragStart.y;
-      setViewState((prev) => ({
+      scheduleViewState((prev) => ({
         ...prev,
         panX: prev.panX + dx,
         panY: prev.panY + dy,

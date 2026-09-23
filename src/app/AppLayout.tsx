@@ -89,6 +89,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const setViewRotationDeg = useCadToolStore((s) => s.setViewRotationDeg);
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
+  const ucsMode = useCadToolStore((s) => s.ucsMode);
+  const computedEdgeUcsAngleDeg = useCadToolStore((s) => s.computedEdgeUcsAngleDeg);
+  const setComputedEdgeUcsAngleDeg = useCadToolStore((s) => s.setComputedEdgeUcsAngleDeg);
   const fitRequest = useCadToolStore((s) => s.fitRequest);
   const isInteracting = useCadToolStore((s) => s.isInteracting);
   const setIsInteracting = useCadToolStore((s) => s.setIsInteracting);
@@ -117,12 +120,31 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const analysisResults = analysisOutput?.results || [];
   const shadowAnalysis = analysisOutput?.shadowAnalysis;
 
-  // Segment statistics with the default High Pass Filter (HPF) cutoff
+  // Segment statistics with the default High Pass Filter (HPF) cutoff.
+  // Referencyjny kąt separacji EDGE_UCS/OTRACK musi być niezależny od widoku ustawionego przez
+  // sam tryb EDGEUCS (inaczej dominanta byłaby porównywana samą ze sobą i deadband tłumiłby ją
+  // w nieskończoność) — dlatego w trybie 'edge' porównujemy zawsze względem WORLDUCS (0°).
+  const statsReferenceAngleDeg = ucsMode === 'edge' ? 0 : viewRotationDeg;
   const rawSegmentStats = useMemo(
-    () => analyzeSegmentsStatistics(buildings, { viewAngleDeg: viewRotationDeg }),
-    [buildings, viewRotationDeg]
+    () => analyzeSegmentsStatistics(buildings, { viewAngleDeg: statsReferenceAngleDeg }),
+    [buildings, statsReferenceAngleDeg]
   );
   const segmentStats = useStableWhileInteracting(rawSegmentStats, isInteracting);
+
+  // Zasil kąt EDGEUCS (dominująca krawędź geometrii) do useCadToolStore, żeby kompas/siatka/
+  // HUD mogły go odczytać bez ponownego liczenia analyzeSegmentsStatistics.
+  useEffect(() => {
+    const dominant = rawSegmentStats.dominantDirections[0];
+    setComputedEdgeUcsAngleDeg(dominant && dominant.isTrackingActive !== false ? dominant.angleDeg : null);
+  }, [rawSegmentStats, setComputedEdgeUcsAngleDeg]);
+
+  // Gdy tryb EDGEUCS jest aktywny, trzymaj kąt widoku zsynchronizowany z aktualną dominantą
+  // (geometria może się zmieniać bez opuszczania trybu — np. dodanie/edycja budynku).
+  useEffect(() => {
+    if (ucsMode === 'edge') {
+      setViewRotationDeg(computedEdgeUcsAngleDeg ?? 0);
+    }
+  }, [ucsMode, computedEdgeUcsAngleDeg, setViewRotationDeg]);
 
   // Evaluate pinned points
   const rawPinnedPointResults = useMemo<AnalysisPointResult[]>(() => {
@@ -220,7 +242,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       .filter(Boolean) as AnalysisPointResult[];
   }, [pinnedPoints, buildings, layerSettings, effectiveBuildings, settings, currentAccuracyOptions, sunlightMethod]);
 
-  const pinnedPointResults = useStableWhileInteracting(rawPinnedPointResults, isInteracting);
+  // Wynik analizy (shadowing/sunlight) przy przypiętych punktach liczy się na żywo co klatkę,
+  // tak samo jak pozycja (point/normal) — użytkownik oczekuje, że wartość przy P1/P2/P3
+  // aktualizuje się w trakcie przeciągania/obrotu, nie dopiero po puszczeniu myszy.
+  const pinnedPointResults = rawPinnedPointResults;
 
   const setPinnedPointResults = useSolarAnalysisStore((s) => s.setPinnedPointResults);
   useEffect(() => {
@@ -405,7 +430,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             viewRotationDeg={viewRotationDeg}
             onViewRotationChange={(deg) => {
               setViewRotationDeg(deg);
-              if (Math.abs(deg) > 0.001) setSavedViewRotationDeg(deg);
+              if (Math.abs(deg) > 0.001) {
+                setSavedViewRotationDeg(deg);
+                useCadToolStore.getState().setUcsMode('user');
+              }
             }}
             onEndViewRotationMode={() => setViewRotationMode(false)}
             isDirectionSnappingActive={isDirectionSnappingActive}

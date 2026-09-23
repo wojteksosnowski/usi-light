@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Lock, Unlock, Ghost, Lightbulb, LightbulbOff } from 'lucide-react';
+import { Lock, Unlock, Ghost, Lightbulb, LightbulbOff, Magnet } from 'lucide-react';
 import { CircleSelectionIcon } from '../common/CircleSelectionIcon';
 import { BuildingLoop } from '@/types/geometry';
 
@@ -11,6 +11,7 @@ interface ObjectTreeItemProps {
   onToggleLock: (id: string, currentLocked: boolean) => void;
   onToggleGhost: (id: string, currentGhosted: boolean) => void;
   onToggleVisibility: (id: string, currentVisible: boolean) => void;
+  onToggleSnapExclusion: (id: string, currentSnapExcluded: boolean) => void;
 }
 
 export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
@@ -21,10 +22,12 @@ export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
   onToggleLock,
   onToggleGhost,
   onToggleVisibility,
+  onToggleSnapExclusion,
 }) => {
   const isLocked = item.isLocked === true;
   const isGhosted = item.isGhosted === true;
   const isVisible = item.isVisible !== false;
+  const isSnapExcluded = item.isSnapExcluded === true;
 
   // Variant styling tokens
   const getVariantStyles = () => {
@@ -165,6 +168,24 @@ export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
           }}
         >
           {isVisible ? <Lightbulb size={12} /> : <LightbulbOff size={12} />}
+        </button>
+
+        <button
+          type="button"
+          title={isSnapExcluded ? 'Włącz do OSNAP' : 'Wyłącz z OSNAP (magnes)'}
+          onClick={() => onToggleSnapExclusion(item.id, isSnapExcluded)}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: isSnapExcluded ? '#92400e' : 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: '2px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Magnet size={12} />
         </button>
       </div>
     </div>

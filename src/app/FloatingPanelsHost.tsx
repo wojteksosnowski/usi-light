@@ -37,9 +37,10 @@ export const FloatingPanelsHost: React.FC<FloatingPanelsHostProps> = ({
   const showModifiersPanel = useCadToolStore((s) => s.showModifiersPanel);
   const setShowModifiersPanel = useCadToolStore((s) => s.setShowModifiersPanel);
   const viewRotationDeg = useCadToolStore((s) => s.viewRotationDeg);
-  const setViewRotationDeg = useCadToolStore((s) => s.setViewRotationDeg);
   const savedViewRotationDeg = useCadToolStore((s) => s.savedViewRotationDeg);
-  const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
+  const ucsMode = useCadToolStore((s) => s.ucsMode);
+  const computedEdgeUcsAngleDeg = useCadToolStore((s) => s.computedEdgeUcsAngleDeg);
+  const cycleUcsMode = useCadToolStore((s) => s.cycleUcsMode);
 
   // Solar Analysis Store
   const showProjectParameters = useSolarAnalysisStore((s) => s.showProjectParameters);
@@ -140,17 +141,9 @@ export const FloatingPanelsHost: React.FC<FloatingPanelsHostProps> = ({
       <CompassRose
         rotationDeg={viewRotationDeg}
         savedRotationDeg={savedViewRotationDeg}
-        onResetRotation={() => {
-          setViewRotationDeg((prev) => {
-            if (Math.abs(prev) > 0.001) {
-              setSavedViewRotationDeg(prev);
-              return 0;
-            } else if (Math.abs(savedViewRotationDeg) > 0.001) {
-              return savedViewRotationDeg;
-            }
-            return 0;
-          });
-        }}
+        ucsMode={ucsMode}
+        edgeUcsAngleDeg={computedEdgeUcsAngleDeg}
+        onCycleUcsMode={cycleUcsMode}
       />
 
       {/* Shared Project Toast Notification */}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building, Square, ChevronDown, ChevronRight, Lock, Unlock, Ghost, Layers } from 'lucide-react';
+import { Building, Square, ChevronDown, ChevronRight, Lock, Unlock, Ghost, Layers, Lightbulb, LightbulbOff, Magnet } from 'lucide-react';
 import { useSceneObjectsList, BuildingSubgroup } from './hooks/useSceneObjectsList';
 import { ObjectCategoryGroup } from './ObjectCategoryGroup';
 import { ObjectScopeSubgroup } from './ObjectScopeSubgroup';
@@ -33,6 +33,10 @@ export const SceneObjectsSection: React.FC = () => {
     updateBuilding(id, { isVisible: !currentVisible });
   };
 
+  const handleToggleSnapExclusion = (id: string, currentSnapExcluded: boolean) => {
+    updateBuilding(id, { isSnapExcluded: !currentSnapExcluded });
+  };
+
   const handleMassLock = (items: BuildingLoop[]) => {
     const allLocked = items.every((b) => b.isLocked);
     items.forEach((b) => updateBuilding(b.id, { isLocked: !allLocked }));
@@ -43,12 +47,24 @@ export const SceneObjectsSection: React.FC = () => {
     items.forEach((b) => updateBuilding(b.id, { isGhosted: !allGhosted }));
   };
 
+  const handleMassVisibility = (items: BuildingLoop[]) => {
+    const allVisible = items.every((b) => b.isVisible !== false);
+    items.forEach((b) => updateBuilding(b.id, { isVisible: !allVisible }));
+  };
+
+  const handleMassSnapExclusion = (items: BuildingLoop[]) => {
+    const allSnapExcluded = items.every((b) => b.isSnapExcluded);
+    items.forEach((b) => updateBuilding(b.id, { isSnapExcluded: !allSnapExcluded }));
+  };
+
   const renderBuildingSubgroups = (subgroups: BuildingSubgroup[]) => {
     return subgroups.map((subgroup) => {
       const groupKey = `bldg_sub_${subgroup.key}`;
       const isSubCollapsed = isGroupCollapsed(groupKey);
       const allSubLocked = subgroup.items.every((b) => b.isLocked);
       const allSubGhosted = subgroup.items.every((b) => b.isGhosted);
+      const allSubVisible = subgroup.items.every((b) => b.isVisible !== false);
+      const allSubSnapExcluded = subgroup.items.every((b) => b.isSnapExcluded);
       const subStatus = getSelectionStatus(subgroup.items);
 
       return (
@@ -127,6 +143,34 @@ export const SceneObjectsSection: React.FC = () => {
               >
                 <Ghost size={11} />
               </button>
+              <button
+                type="button"
+                title={allSubVisible ? 'Ukryj grupę' : 'Pokaż grupę'}
+                onClick={() => handleMassVisibility(subgroup.items)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: allSubVisible ? 'var(--accent-amber)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                }}
+              >
+                {allSubVisible ? <Lightbulb size={11} /> : <LightbulbOff size={11} />}
+              </button>
+              <button
+                type="button"
+                title={allSubSnapExcluded ? 'Włącz grupę do OSNAP' : 'Wyłącz grupę z OSNAP (magnes)'}
+                onClick={() => handleMassSnapExclusion(subgroup.items)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: allSubSnapExcluded ? '#92400e' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                }}
+              >
+                <Magnet size={11} />
+              </button>
             </div>
           </div>
 
@@ -143,6 +187,7 @@ export const SceneObjectsSection: React.FC = () => {
                   onToggleLock={handleToggleLock}
                   onToggleGhost={handleToggleGhost}
                   onToggleVisibility={handleToggleVisibility}
+                  onToggleSnapExclusion={handleToggleSnapExclusion}
                 />
               ))}
             </div>
@@ -177,6 +222,8 @@ export const SceneObjectsSection: React.FC = () => {
             onToggleSelection={toggleGroupSelection}
             onToggleMassLock={handleMassLock}
             onToggleMassGhost={handleMassGhost}
+            onToggleMassVisibility={handleMassVisibility}
+            onToggleMassSnapExclusion={handleMassSnapExclusion}
           >
             {/* 1.1 Budynki W projekcie */}
             {objectTree.buildings.inProject.length > 0 && (
@@ -192,6 +239,8 @@ export const SceneObjectsSection: React.FC = () => {
                 onToggleSelection={toggleGroupSelection}
                 onToggleMassLock={handleMassLock}
                 onToggleMassGhost={handleMassGhost}
+                onToggleMassVisibility={handleMassVisibility}
+                onToggleMassSnapExclusion={handleMassSnapExclusion}
               >
                 {renderBuildingSubgroups(objectTree.buildings.inProjectSubgroups)}
               </ObjectScopeSubgroup>
@@ -211,6 +260,8 @@ export const SceneObjectsSection: React.FC = () => {
                 onToggleSelection={toggleGroupSelection}
                 onToggleMassLock={handleMassLock}
                 onToggleMassGhost={handleMassGhost}
+                onToggleMassVisibility={handleMassVisibility}
+                onToggleMassSnapExclusion={handleMassSnapExclusion}
               >
                 {renderBuildingSubgroups(objectTree.buildings.outsideProjectSubgroups)}
               </ObjectScopeSubgroup>
@@ -235,6 +286,8 @@ export const SceneObjectsSection: React.FC = () => {
             onToggleSelection={toggleGroupSelection}
             onToggleMassLock={handleMassLock}
             onToggleMassGhost={handleMassGhost}
+            onToggleMassVisibility={handleMassVisibility}
+            onToggleMassSnapExclusion={handleMassSnapExclusion}
           >
             {/* 2.1 Działki */}
             {objectTree.plots.all.length > 0 && (
@@ -306,6 +359,8 @@ export const SceneObjectsSection: React.FC = () => {
                         onToggleSelection={toggleGroupSelection}
                         onToggleMassLock={handleMassLock}
                         onToggleMassGhost={handleMassGhost}
+                        onToggleMassVisibility={handleMassVisibility}
+                        onToggleMassSnapExclusion={handleMassSnapExclusion}
                       >
                         {objectTree.plots.inProject.map((b) => (
                           <ObjectTreeItem
@@ -317,6 +372,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
                             onToggleVisibility={handleToggleVisibility}
+                            onToggleSnapExclusion={handleToggleSnapExclusion}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -336,6 +392,8 @@ export const SceneObjectsSection: React.FC = () => {
                         onToggleSelection={toggleGroupSelection}
                         onToggleMassLock={handleMassLock}
                         onToggleMassGhost={handleMassGhost}
+                        onToggleMassVisibility={handleMassVisibility}
+                        onToggleMassSnapExclusion={handleMassSnapExclusion}
                       >
                         {objectTree.plots.outsideProject.map((b) => (
                           <ObjectTreeItem
@@ -347,6 +405,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
                             onToggleVisibility={handleToggleVisibility}
+                            onToggleSnapExclusion={handleToggleSnapExclusion}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -426,6 +485,8 @@ export const SceneObjectsSection: React.FC = () => {
                         onToggleSelection={toggleGroupSelection}
                         onToggleMassLock={handleMassLock}
                         onToggleMassGhost={handleMassGhost}
+                        onToggleMassVisibility={handleMassVisibility}
+                        onToggleMassSnapExclusion={handleMassSnapExclusion}
                       >
                         {objectTree.playgrounds.inProject.map((b) => (
                           <ObjectTreeItem
@@ -437,6 +498,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
                             onToggleVisibility={handleToggleVisibility}
+                            onToggleSnapExclusion={handleToggleSnapExclusion}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -456,6 +518,8 @@ export const SceneObjectsSection: React.FC = () => {
                         onToggleSelection={toggleGroupSelection}
                         onToggleMassLock={handleMassLock}
                         onToggleMassGhost={handleMassGhost}
+                        onToggleMassVisibility={handleMassVisibility}
+                        onToggleMassSnapExclusion={handleMassSnapExclusion}
                       >
                         {objectTree.playgrounds.outsideProject.map((b) => (
                           <ObjectTreeItem
@@ -467,6 +531,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
                             onToggleVisibility={handleToggleVisibility}
+                            onToggleSnapExclusion={handleToggleSnapExclusion}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -546,6 +611,8 @@ export const SceneObjectsSection: React.FC = () => {
                         onToggleSelection={toggleGroupSelection}
                         onToggleMassLock={handleMassLock}
                         onToggleMassGhost={handleMassGhost}
+                        onToggleMassVisibility={handleMassVisibility}
+                        onToggleMassSnapExclusion={handleMassSnapExclusion}
                       >
                         {objectTree.paved.inProject.map((b) => (
                           <ObjectTreeItem
@@ -557,6 +624,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
                             onToggleVisibility={handleToggleVisibility}
+                            onToggleSnapExclusion={handleToggleSnapExclusion}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -576,6 +644,8 @@ export const SceneObjectsSection: React.FC = () => {
                         onToggleSelection={toggleGroupSelection}
                         onToggleMassLock={handleMassLock}
                         onToggleMassGhost={handleMassGhost}
+                        onToggleMassVisibility={handleMassVisibility}
+                        onToggleMassSnapExclusion={handleMassSnapExclusion}
                       >
                         {objectTree.paved.outsideProject.map((b) => (
                           <ObjectTreeItem
@@ -587,6 +657,7 @@ export const SceneObjectsSection: React.FC = () => {
                             onToggleLock={handleToggleLock}
                             onToggleGhost={handleToggleGhost}
                             onToggleVisibility={handleToggleVisibility}
+                            onToggleSnapExclusion={handleToggleSnapExclusion}
                           />
                         ))}
                       </ObjectScopeSubgroup>
@@ -615,6 +686,8 @@ export const SceneObjectsSection: React.FC = () => {
             onToggleSelection={toggleGroupSelection}
             onToggleMassLock={handleMassLock}
             onToggleMassGhost={handleMassGhost}
+            onToggleMassVisibility={handleMassVisibility}
+            onToggleMassSnapExclusion={handleMassSnapExclusion}
           >
             {/* Balkony W projekcie */}
             {objectTree.balconies.inProject.length > 0 && (
@@ -630,6 +703,8 @@ export const SceneObjectsSection: React.FC = () => {
                 onToggleSelection={toggleGroupSelection}
                 onToggleMassLock={handleMassLock}
                 onToggleMassGhost={handleMassGhost}
+                onToggleMassVisibility={handleMassVisibility}
+                onToggleMassSnapExclusion={handleMassSnapExclusion}
               >
                 {objectTree.balconies.inProject.map((b) => (
                   <ObjectTreeItem
@@ -641,6 +716,7 @@ export const SceneObjectsSection: React.FC = () => {
                     onToggleLock={handleToggleLock}
                     onToggleGhost={handleToggleGhost}
                     onToggleVisibility={handleToggleVisibility}
+                    onToggleSnapExclusion={handleToggleSnapExclusion}
                   />
                 ))}
               </ObjectScopeSubgroup>
@@ -660,6 +736,8 @@ export const SceneObjectsSection: React.FC = () => {
                 onToggleSelection={toggleGroupSelection}
                 onToggleMassLock={handleMassLock}
                 onToggleMassGhost={handleMassGhost}
+                onToggleMassVisibility={handleMassVisibility}
+                onToggleMassSnapExclusion={handleMassSnapExclusion}
               >
                 {objectTree.balconies.outsideProject.map((b) => (
                   <ObjectTreeItem
@@ -671,6 +749,7 @@ export const SceneObjectsSection: React.FC = () => {
                     onToggleLock={handleToggleLock}
                     onToggleGhost={handleToggleGhost}
                     onToggleVisibility={handleToggleVisibility}
+                    onToggleSnapExclusion={handleToggleSnapExclusion}
                   />
                 ))}
               </ObjectScopeSubgroup>

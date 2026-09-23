@@ -21,6 +21,35 @@ export function useCadViewport(
 
   const prevRotationRef = useRef<number>(viewRotationDeg);
 
+  // Koalescencja wysokoczęstotliwościowych aktualizacji (wheel/mousemove przy pan/zoom) do rAF —
+  // bez tego każde zdarzenie DOM synchronicznie odpala setState() na CadCanvas, co przy gęstszych
+  // niż budżet klatki zdarzeniach powoduje kaskadowe re-rendery blokujące React Scheduler
+  // (zmierzone w DevTools Performance: "Update Blocked"/"Cascading Update" na CadCanvas).
+  // `setViewState` zostaje bez zmian dla rzadkich, jednorazowych aktualizacji (fitToExtents, obrót).
+  const pendingViewStateUpdateRef = useRef<((prev: ViewportState) => ViewportState) | null>(null);
+  const viewStateRafIdRef = useRef<number | null>(null);
+
+  const scheduleViewState = useCallback((updater: (prev: ViewportState) => ViewportState) => {
+    pendingViewStateUpdateRef.current = updater;
+    if (viewStateRafIdRef.current === null) {
+      viewStateRafIdRef.current = requestAnimationFrame(() => {
+        viewStateRafIdRef.current = null;
+        const pending = pendingViewStateUpdateRef.current;
+        pendingViewStateUpdateRef.current = null;
+        if (pending) setViewState(pending);
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (viewStateRafIdRef.current !== null) {
+        cancelAnimationFrame(viewStateRafIdRef.current);
+        viewStateRafIdRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     useUiStore.getState().setViewportScale(viewState.scale);
   }, [viewState.scale]);
@@ -216,6 +245,7 @@ export function useCadViewport(
   return {
     viewState,
     setViewState,
+    scheduleViewState,
     viewportMatrix,
     invViewportMatrix,
     worldToScreen,

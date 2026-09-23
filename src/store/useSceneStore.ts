@@ -98,6 +98,7 @@ interface SceneState {
   toggleLayerVisibility: (layerName: string) => void;
   toggleLayerLock: (layerName: string) => void;
   toggleLayerGhost: (layerName: string) => void;
+  toggleLayerSnapExclusion: (layerName: string) => void;
   updateLayerBuildings: (layerName: string, fields: Partial<BuildingLoop>) => void;
   selectLayerBuildings: (layerName: string) => void;
 
@@ -981,6 +982,18 @@ export const useSceneStore = create<SceneState>()(
         [layerName]: {
           ...state.layerSettings[layerName],
           isGhosted: !state.layerSettings[layerName]?.isGhosted,
+        },
+      },
+    }));
+  },
+
+  toggleLayerSnapExclusion: (layerName) => {
+    set((state) => ({
+      layerSettings: {
+        ...state.layerSettings,
+        [layerName]: {
+          ...state.layerSettings[layerName],
+          isSnapExcluded: !state.layerSettings[layerName]?.isSnapExcluded,
         },
       },
     }));

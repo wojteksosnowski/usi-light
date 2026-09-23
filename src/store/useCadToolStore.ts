@@ -55,6 +55,11 @@ interface CadToolState {
   viewRotationMode: boolean;
   viewRotationDeg: number;
   savedViewRotationDeg: number;
+  // Aktywny układ współrzędnych: WORLDUCS (0°) / USERUCS (ręczny) / EDGEUCS (z dominującej krawędzi)
+  ucsMode: 'world' | 'user' | 'edge';
+  // Kąt EDGEUCS wyliczony z analyzeSegmentsStatistics (dominantDirections[0]); null gdy brak
+  // rozróżnialnej dominanty (isTrackingActive === false) — wtedy tryb 'edge' degraduje do 0°.
+  computedEdgeUcsAngleDeg: number | null;
   // Żądanie dopasowania widoku (Zoom Extents): nonce inkrementowany przy każdym wywołaniu,
   // ignoreSelection: true wymusza dopasowanie do całego projektu z pominięciem zaznaczenia
   fitRequest: { nonce: number; ignoreSelection: boolean };
@@ -114,7 +119,9 @@ interface CadToolState {
   setViewRotationMode: (active: boolean | ((prev: boolean) => boolean)) => void;
   setViewRotationDeg: (deg: number | ((prev: number) => number)) => void;
   setSavedViewRotationDeg: (deg: number | ((prev: number) => number)) => void;
-  toggleUcsRotation: () => void;
+  setComputedEdgeUcsAngleDeg: (deg: number | null) => void;
+  setUcsMode: (mode: 'world' | 'user' | 'edge') => void;
+  cycleUcsMode: () => void;
   triggerFit: (options?: { ignoreSelection?: boolean }) => void;
 
   setIsInteracting: (interacting: boolean) => void;
@@ -166,6 +173,8 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
   viewRotationMode: false,
   viewRotationDeg: 0,
   savedViewRotationDeg: 0,
+  ucsMode: 'world',
+  computedEdgeUcsAngleDeg: null,
   fitRequest: { nonce: 0, ignoreSelection: false },
 
   isInteracting: false,
@@ -337,14 +346,31 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
       savedViewRotationDeg: typeof updater === 'function' ? updater(state.savedViewRotationDeg) : updater,
     })),
 
-  toggleUcsRotation: () => {
+  setComputedEdgeUcsAngleDeg: (deg) => set({ computedEdgeUcsAngleDeg: deg }),
+  setUcsMode: (mode) => set({ ucsMode: mode }),
+
+  cycleUcsMode: () => {
     set((state) => {
-      if (Math.abs(state.viewRotationDeg) < 0.001) {
-        return { viewRotationDeg: state.savedViewRotationDeg };
+      const order: Array<'world' | 'user' | 'edge'> = ['world', 'user', 'edge'];
+      const nextMode = order[(order.indexOf(state.ucsMode) + 1) % order.length];
+
+      // Zapamiętaj bieżący kąt jako USERUCS, jeśli opuszczamy tryb ręczny z niezerowym kątem
+      const savedViewRotationDeg =
+        state.ucsMode === 'user' && Math.abs(state.viewRotationDeg) > 0.001
+          ? state.viewRotationDeg
+          : state.savedViewRotationDeg;
+
+      let nextViewRotationDeg = 0;
+      if (nextMode === 'user') {
+        nextViewRotationDeg = savedViewRotationDeg;
+      } else if (nextMode === 'edge') {
+        nextViewRotationDeg = state.computedEdgeUcsAngleDeg ?? 0;
       }
+
       return {
-        savedViewRotationDeg: state.viewRotationDeg,
-        viewRotationDeg: 0,
+        ucsMode: nextMode,
+        savedViewRotationDeg,
+        viewRotationDeg: nextViewRotationDeg,
       };
     });
   },
@@ -382,6 +408,7 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
       viewRotationMode: false,
       viewRotationDeg: 0,
       savedViewRotationDeg: 0,
+      ucsMode: 'world',
       isInteracting: false,
     }),
 }));
