@@ -142,6 +142,7 @@ export interface BuildingLoop {
   isLocked?: boolean; // Indywidualna kłódka obiektu (blokada przesuwania i edycji)
   isGhosted?: boolean; // Indywidualny tryb ducha (pomijanie kliknięć i selekcji)
   isVisible?: boolean; // Żarówka: widoczność obiektu na płótnie i w podglądzie 3D (domyślnie true)
+  isSnapExcluded?: boolean; // Magnes: wyłącza krawędzie obiektu z pierwszego kroku filtrowania kandydatów OSNAP
   isCityCentre: boolean;
   buildingType: BuildingType;
   defaultHeight: number;
@@ -288,6 +289,7 @@ export interface CadLayerSettings {
   isLocked?: boolean; // Kłódka: blocks moving and editing
   isGhosted?: boolean; // Duch: blocks selection, passes clicks through
   isVisible?: boolean; // Żarówka: CAD visibility
+  isSnapExcluded?: boolean; // Magnes: wyłącza warstwę z pierwszego kroku filtrowania kandydatów OSNAP
 }
 
 export interface Edge2D {

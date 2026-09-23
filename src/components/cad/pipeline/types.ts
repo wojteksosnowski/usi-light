@@ -64,6 +64,7 @@ export interface CadRenderFrameContext {
   readonly dimensionType?: DimensionType;
   readonly rotationHover?: any;
   readonly viewRotationMode?: boolean;
+  readonly ucsMode?: 'world' | 'user' | 'edge';
   readonly showSatelliteLayer?: boolean;
   readonly satelliteOpacity?: number;
   readonly tileManager?: ISatelliteTileManager | null;

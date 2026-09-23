@@ -163,7 +163,7 @@ export function evaluateBuildingDragMultiSnap(
     referenceBuffer,
     distanceThresholdMeters = 0.35,
     angleToleranceRad = (0.8 * Math.PI) / 180,
-    guidelineLengthMeters = 100,
+    guidelineLengthMeters = 250,
     viewportBounds,
     spatialIndex,
   } = options;
@@ -447,7 +447,7 @@ export function evaluateEdgeDragSnap(
     referenceBuffer,
     distanceThresholdMeters = 0.35,
     angleToleranceRad = (1.5 * Math.PI) / 180,
-    guidelineLengthMeters = 100,
+    guidelineLengthMeters = 250,
     previousSnap,
     viewportBounds,
     spatialIndex,

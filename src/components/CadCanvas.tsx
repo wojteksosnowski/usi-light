@@ -558,6 +558,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
         dimensionType,
         rotationHover: interaction.rotationHover,
         viewRotationMode,
+        ucsMode: useCadToolStore.getState().ucsMode,
         showSatelliteLayer,
         satelliteOpacity,
         tileManager: activeTileManager,

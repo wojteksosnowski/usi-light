@@ -160,7 +160,7 @@ export function useCadHotkeys({
 
       if ((e.key === 'x' || e.key === 'X') && !isModifier && !isEditingEdgeLength) {
         e.preventDefault();
-        useCadToolStore.getState().toggleUcsRotation();
+        useCadToolStore.getState().cycleUcsMode();
         return;
       }
 

@@ -17,6 +17,7 @@ export const useCadLayers = () => {
   const toggleLayerLock = useSceneStore((s) => s.toggleLayerLock);
   const toggleLayerGhost = useSceneStore((s) => s.toggleLayerGhost);
   const toggleLayerVisibility = useSceneStore((s) => s.toggleLayerVisibility);
+  const toggleLayerSnapExclusion = useSceneStore((s) => s.toggleLayerSnapExclusion);
   const updateLayerBuildings = useSceneStore((s) => s.updateLayerBuildings);
 
   const activeCadLayers = useMemo<CadLayerItemInfo[]>(() => {
@@ -45,6 +46,7 @@ export const useCadLayers = () => {
     toggleLayerLock,
     toggleLayerGhost,
     toggleLayerVisibility,
+    toggleLayerSnapExclusion,
     updateLayerBuildings,
     getSelectionStatus,
     toggleGroupSelection,

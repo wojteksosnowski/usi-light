@@ -176,9 +176,7 @@ export function renderDrawingToolPreview(
           const r2 = worldToScreen(ray.p2.x, ray.p2.y);
           if (Number.isFinite(r1.sx) && Number.isFinite(r2.sx)) {
             const isStatistical = ray.isStatistical ?? (ray.type === 'horizontal' || ray.type === 'vertical');
-            const rayColor = isStatistical
-              ? (APP_CONFIG.osnap?.statisticalRayColor || '#f59e0b')
-              : (APP_CONFIG.osnap?.edgeRayColor || '#38bdf8');
+            const rayColor = isStatistical ? APP_CONFIG.ucs.edgeGuideColor : APP_CONFIG.ucs.userGuideColor;
             const rayDash = isStatistical ? [8, 4] : [5, 4];
 
             ctx.beginPath();
@@ -274,9 +272,7 @@ export function renderDrawingToolPreview(
       } else {
         // Default / OTRACK Ray Dot + Ring (Kolor zależny od typu: bursztyn vs błękit)
         const isStat = osnapSnapResult.isStatisticalGuide ?? true;
-        const otrackColor = isStat
-          ? (APP_CONFIG.osnap?.statisticalRayColor || '#f59e0b')
-          : (APP_CONFIG.osnap?.edgeRayColor || '#38bdf8');
+        const otrackColor = isStat ? APP_CONFIG.ucs.edgeGuideColor : APP_CONFIG.ucs.userGuideColor;
 
         ctx.beginPath();
         ctx.arc(pSnap.sx, pSnap.sy, 4.5, 0, Math.PI * 2);
@@ -347,8 +343,8 @@ export function renderDrawingToolPreview(
           : snapType === 'otrack_intersection'
           ? '#f43f5e'
           : snapType === 'extension' || !isStatGuide
-          ? '#38bdf8'
-          : '#f59e0b';
+          ? APP_CONFIG.ucs.userGuideColor
+          : APP_CONFIG.ucs.edgeGuideColor;
 
       const badgeText = `${osnapSnapResult.label}`;
       ctx.font = 'bold 10px Inter, sans-serif';
@@ -427,8 +423,8 @@ export function renderDrawingToolPreview(
       const guideColor = isIntersection
         ? '#c084fc'
         : isStatistical
-        ? (APP_CONFIG.directionSnapping.statisticalGuideColor || '#f59e0b')
-        : (APP_CONFIG.directionSnapping.edgeGuideColor || '#38bdf8');
+        ? APP_CONFIG.ucs.edgeGuideColor
+        : APP_CONFIG.ucs.userGuideColor;
       const guideDash = isStatistical
         ? [...APP_CONFIG.directionSnapping.statisticalGuideDash]
         : [...APP_CONFIG.directionSnapping.edgeGuideDash];

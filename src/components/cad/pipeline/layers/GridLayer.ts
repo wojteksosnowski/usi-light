@@ -18,7 +18,16 @@ export class GridLayer implements CadRenderLayer {
       buildings = [],
       showSatelliteLayer = false,
       projectCirclePulse = null,
+      ucsMode = 'world',
     } = context;
-    renderCadGrid(renderContext, rotationHover, viewRotationMode, buildings, showSatelliteLayer, projectCirclePulse);
+    renderCadGrid(
+      renderContext,
+      rotationHover,
+      viewRotationMode,
+      buildings,
+      showSatelliteLayer,
+      projectCirclePulse,
+      ucsMode
+    );
   }
 }

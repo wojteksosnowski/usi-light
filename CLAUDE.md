@@ -38,7 +38,7 @@ A separate **`MasterplanRenderPipeline`** (`src/components/cad/masterplan/Master
 
 ### State — Five Zustand Stores (`src/store/`)
 - **`useSceneStore`** — buildings, layers, DXF import state, undo history (via zundo temporal)
-- **`useCadToolStore`** — active drawing tool, OSNAP, dimensions, view rotation
+- **`useCadToolStore`** — active drawing tool, OSNAP, dimensions, view rotation, active UCS mode (`ucsMode`)
 - **`useSolarAnalysisStore`** — analysis settings, pinned facade points, analysis output
 - **`useUiStore`** — share modal open state
 - **`useLicenseStore`** — Pro license key/status, persisted to `localStorage` (`usi_license_key`)
@@ -82,6 +82,7 @@ Zero-allocation geometric primitives: `raySegmentDistance2D`, `offsetPolygonEdge
 Vercel functions: `share.ts` (compressed scene JSON in Upstash Redis with rate limiting), `license/*`, `stripe/*`, and the WFS CORS proxies above. Locally, `npm run dev`'s Vite config has a generic middleware that maps any `/api/**` request to the matching `api/**.ts` file and invokes it with a `VercelRequest`/`VercelResponse` shim — no separate dev server needed.
 
 ## Key Conventions
+- **UCS modes** (`useCadToolStore.ucsMode`: `'world' | 'user' | 'edge'`, cycled with `X` via `cycleUcsMode()`): **WORLDUCS** (fixed 0°), **USERUCS** (manually set `savedViewRotationDeg`), **EDGEUCS** (auto-computed from the scene's dominant facade direction, `analyzeSegmentsStatistics` in `src/utils/segmentStatistics.ts` → `dominantDirections[0].angleDeg`, wired to the store in `AppLayout.tsx`). All grid/OTRACK-guide colors for the three modes live in `APP_CONFIG.ucs` (`src/config/appConfig.ts`) — don't hardcode UCS colors in renderers. `gridRenderer.ts` derives major/minor/axis grid line alpha from `APP_CONFIG.ucs.minorGridAlphaMult`/`axisGridAlphaMult`; grid rotation itself needs no separate handling since `worldToScreen` already applies `viewRotationDeg`, which `cycleUcsMode` keeps in sync with the active UCS.
 - Analysis pre-filter cone: ±78° from facade normal (12° dead zone from wall surface); backface and AABB culling applied before raycasting.
 - Most tests (`*.test.ts`) live alongside source files in the same directory; a legacy `test/` directory at the repo root also holds older suites (both are picked up by `npm test`).
 - Buildings from DXF: parsed via `src/utils/dxfParser.ts` with auto-detected unit scale (no hole support — DXF `LWPOLYLINE` has no native hole concept).

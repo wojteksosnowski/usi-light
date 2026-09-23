@@ -14,6 +14,7 @@ export const CadLayersSection: React.FC = () => {
     toggleLayerLock,
     toggleLayerGhost,
     toggleLayerVisibility,
+    toggleLayerSnapExclusion,
     updateLayerBuildings,
     getSelectionStatus,
     toggleGroupSelection,
@@ -54,6 +55,7 @@ export const CadLayersSection: React.FC = () => {
                 onToggleLock={toggleLayerLock}
                 onToggleGhost={toggleLayerGhost}
                 onToggleVisibility={toggleLayerVisibility}
+                onToggleSnapExclusion={toggleLayerSnapExclusion}
               />
             );
           })}

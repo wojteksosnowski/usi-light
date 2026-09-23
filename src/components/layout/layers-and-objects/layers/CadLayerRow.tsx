@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Lock, Unlock, Ghost, Lightbulb, LightbulbOff } from 'lucide-react';
+import { Lock, Unlock, Ghost, Lightbulb, LightbulbOff, Magnet } from 'lucide-react';
 import { CircleSelectionIcon } from '../common/CircleSelectionIcon';
 import { CadLayerSettings, BuildingLoop } from '@/types/geometry';
 
@@ -15,6 +15,7 @@ interface CadLayerRowProps {
   onToggleLock: (name: string) => void;
   onToggleGhost: (name: string) => void;
   onToggleVisibility: (name: string) => void;
+  onToggleSnapExclusion: (name: string) => void;
 }
 
 export const CadLayerRow = memo<CadLayerRowProps>(({
@@ -29,10 +30,12 @@ export const CadLayerRow = memo<CadLayerRowProps>(({
   onToggleLock,
   onToggleGhost,
   onToggleVisibility,
+  onToggleSnapExclusion,
 }) => {
   const isLocked = setting.isLocked === true;
   const isGhosted = setting.isGhosted === true;
   const isVisible = setting.isVisible !== false;
+  const isSnapExcluded = setting.isSnapExcluded === true;
 
   return (
     <div
@@ -83,7 +86,7 @@ export const CadLayerRow = memo<CadLayerRowProps>(({
         </div>
       </div>
 
-      {/* 4 Action Controls: Selekcja, Kłódka, Duch, Żarówka */}
+      {/* 5 Action Controls: Selekcja, Kłódka, Duch, Żarówka, Magnes */}
       <div
         style={{ display: 'flex', alignItems: 'center', gap: '3px' }}
         onClick={(e) => e.stopPropagation()}
@@ -165,6 +168,25 @@ export const CadLayerRow = memo<CadLayerRowProps>(({
           }}
         >
           {isVisible ? <Lightbulb size={13} /> : <LightbulbOff size={13} />}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onToggleSnapExclusion(name)}
+          title={isSnapExcluded ? 'Włącz warstwę do OSNAP' : 'Wyłącz warstwę z OSNAP (magnes)'}
+          style={{
+            padding: '4px',
+            borderRadius: '5px',
+            border: 'none',
+            backgroundColor: isSnapExcluded ? 'rgba(146, 64, 14, 0.2)' : 'transparent',
+            color: isSnapExcluded ? '#92400e' : 'var(--text-muted)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Magnet size={13} />
         </button>
       </div>
     </div>

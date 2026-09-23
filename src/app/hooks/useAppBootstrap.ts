@@ -257,6 +257,7 @@ export function useAppBootstrap() {
         useUiStore.getState().markSaved(Date.now());
       } catch (err) {
         console.warn('Nie udało się zapisać bieżącego stanu sceny (localStorage):', err);
+        useUiStore.getState().markSaveError();
       }
 
       if (currentProjectId) {

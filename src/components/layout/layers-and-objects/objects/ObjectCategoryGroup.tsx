@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Lock, Unlock, Ghost } from 'lucide-react';
+import { ChevronDown, ChevronRight, Lock, Unlock, Ghost, Lightbulb, LightbulbOff, Magnet } from 'lucide-react';
 import { CircleSelectionIcon } from '../common/CircleSelectionIcon';
 import { BuildingLoop } from '@/types/geometry';
 
@@ -18,6 +18,8 @@ interface ObjectCategoryGroupProps {
   onToggleSelection: (items: BuildingLoop[]) => void;
   onToggleMassLock: (items: BuildingLoop[]) => void;
   onToggleMassGhost: (items: BuildingLoop[]) => void;
+  onToggleMassVisibility: (items: BuildingLoop[]) => void;
+  onToggleMassSnapExclusion: (items: BuildingLoop[]) => void;
   children: React.ReactNode;
 }
 
@@ -36,10 +38,14 @@ export const ObjectCategoryGroup: React.FC<ObjectCategoryGroupProps> = ({
   onToggleSelection,
   onToggleMassLock,
   onToggleMassGhost,
+  onToggleMassVisibility,
+  onToggleMassSnapExclusion,
   children,
 }) => {
   const allLocked = items.length > 0 && items.every((b) => b.isLocked);
   const allGhosted = items.length > 0 && items.every((b) => b.isGhosted);
+  const allVisible = items.length > 0 && items.every((b) => b.isVisible !== false);
+  const allSnapExcluded = items.length > 0 && items.every((b) => b.isSnapExcluded);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -124,6 +130,42 @@ export const ObjectCategoryGroup: React.FC<ObjectCategoryGroupProps> = ({
             }}
           >
             <Ghost size={13} />
+          </button>
+
+          <button
+            type="button"
+            title={allVisible ? 'Ukryj wszystkie w kategorii' : 'Pokaż wszystkie w kategorii'}
+            onClick={() => onToggleMassVisibility(items)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: allVisible ? 'var(--accent-amber)' : 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {allVisible ? <Lightbulb size={13} /> : <LightbulbOff size={13} />}
+          </button>
+
+          <button
+            type="button"
+            title={allSnapExcluded ? 'Włącz wszystkie do OSNAP' : 'Wyłącz wszystkie z OSNAP (magnes)'}
+            onClick={() => onToggleMassSnapExclusion(items)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: allSnapExcluded ? '#92400e' : 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Magnet size={13} />
           </button>
         </div>
       </div>
