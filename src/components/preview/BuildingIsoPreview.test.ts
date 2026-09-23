@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBuildingWorldInfo } from './BuildingIsoPreview';
+import { getBuildingWorldInfo, getBuildingGeometrySignature } from './BuildingIsoPreview';
 import type { BuildingLoop } from '@/types/geometry';
 
 function createBuilding(overrides: Partial<BuildingLoop> = {}): BuildingLoop {
@@ -117,5 +117,46 @@ describe('getBuildingWorldInfo', () => {
     expect(infoA!.centroid.x).toBeCloseTo(infoB!.centroid.x, 6);
     expect(infoA!.centroid.z).toBeCloseTo(infoB!.centroid.z, 6);
     expect(infoA!.extent).toEqual(infoB!.extent);
+  });
+});
+
+describe('getBuildingGeometrySignature', () => {
+  it('is invariant under pure translation (tx/ty) to prevent wasteful 3D mesh recreation during drags', () => {
+    const base = createBuilding({
+      transform: { tx: 0, ty: 0, rotationDeg: 0 },
+    });
+    const moved = createBuilding({
+      transform: { tx: 100, ty: -50, rotationDeg: 0 },
+    });
+    expect(getBuildingGeometrySignature(base)).toBe(getBuildingGeometrySignature(moved));
+  });
+
+  it('detects rotation change', () => {
+    const base = createBuilding({
+      transform: { tx: 0, ty: 0, rotationDeg: 0 },
+    });
+    const rotated = createBuilding({
+      transform: { tx: 0, ty: 0, rotationDeg: 45 },
+    });
+    expect(getBuildingGeometrySignature(base)).not.toBe(getBuildingGeometrySignature(rotated));
+  });
+
+  it('detects vertex edit change', () => {
+    const base = createBuilding();
+    const edited = createBuilding({
+      vertices: [
+        { x: 0, y: 0 },
+        { x: 15, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+    });
+    expect(getBuildingGeometrySignature(base)).not.toBe(getBuildingGeometrySignature(edited));
+  });
+
+  it('detects story and height changes', () => {
+    const base = createBuilding({ defaultHeight: 9, storeysCount: 3 });
+    const higher = createBuilding({ defaultHeight: 12, storeysCount: 4 });
+    expect(getBuildingGeometrySignature(base)).not.toBe(getBuildingGeometrySignature(higher));
   });
 });

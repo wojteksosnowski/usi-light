@@ -35,6 +35,10 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
    - **Level 1 (Wnętrze grupy)**: Podwójne kliknięcie wchodzi do wnętrza (`openGroupId = groupId`), izolując grupę i umożliwiając selekcję pojedynczych obiektów składowych.
    - **Level 2 (Edycja wierzchołków)**: Podwójne kliknięcie na pojedynczy obiekt wewnątrz otwartej grupy aktywuje tryb `vertexEdit`.
    - **Przygaszanie (Dimming)**: Gdy grupa jest aktywna / otwarta, wszystkie obiekty zewnętrzne renderowane są z `globalAlpha = 0.28`.
+6. **Podgląd 3D Zawsze Na Żywo (`BuildingIsoPreview` / `BuildingPreviewPanel` / `Recording3DPipWindow`)**:
+   - Ścisły zakaz stosowania `useStableWhileInteracting` w panelach podglądu 3D.
+   - Podgląd 3D aktualizuje się na bieżąco (60 FPS) przy edycji wierzchołków (`liveVertexPreview` + `applyBuildingModifiers`), obrocie (`rotateBuilding`), przeciąganiu krawędzi i zmianie modyfikatorów.
+   - Sygnatura `getBuildingGeometrySignature` ignoruje translację `tx`/`ty`, eliminując jank Three.js przy przesuwaniu obiektu w 2D.
 
 ---
 

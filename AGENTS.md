@@ -23,6 +23,20 @@
 - **Rozwiązanie (wdrożone):** `useCadViewport.ts` eksportuje obok `setViewState` (dla rzadkich, jednorazowych aktualizacji: `fitToExtents`, korekta obrotu) także `scheduleViewState(updater)` — zapisuje najnowszy `updater` do refa (nadpisując poprzedni, więc na klatkę commitowany jest tylko ostatni stan) i planuje **jeden** `requestAnimationFrame` na klatkę, który wywołuje faktyczny `setViewState`. Każdy handler wysokoczęstotliwościowy (`wheel` w `CadCanvas.tsx`, `handleMouseMove`/pan w `useCanvasInteraction.ts`) musi używać `scheduleViewState`, nigdy `setViewState` bezpośrednio.
 - **Przy dodawaniu nowej interakcji zmieniającej `viewState`** (nowy gest, nowy sposób panningu/zoomu) zawsze pytaj: czy ten handler odpala się częściej niż raz na klatkę? Jeśli tak — `scheduleViewState`, nie `setViewState`.
 
+## 1c. Podgląd 3D (`BuildingIsoPreview` / `BuildingPreviewPanel` / `Recording3DPipWindow`) — ZAWSZE NA ŻYWO (Ścisły Zakaz Zamrażania przez `useStableWhileInteracting`)
+- **Niezmiennik:** Podgląd 3D aktywnego/edytowanego budynku **MUSI** aktualizować się natychmiast na żywo (60 FPS) podczas **KAŻDEJ** formy edycji obiektu:
+  - Przeciąganie wierzchołka poligonu lub wstęgi (`liveVertexPreview` w `useCadToolStore`),
+  - Obrót obiektu na scenie (`rotateBuilding`),
+  - Przeciąganie krawędzi (`moveBuildingEdge` / `onUpdateBuildingVertices`),
+  - Zmiana parametrów w panelu bocznym (kondygnacje, wysokości, modyfikatory 2.5D).
+- **ŚCISŁY ZAKAZ UŻYWANIA `useStableWhileInteracting` W PODGLĄDZIE 3D:**
+  - Pod żadnym pozorem nie wolno opakowywać `effectiveBuilding` ani `localizedGroupBuildings` w `useStableWhileInteracting`. Był to wielokrotnie powracający błąd, który całkowicie wyłączał podgląd zmian 3D podczas interakcji myszą.
+- **Wydajność translacji a edycja geometrii:**
+  - Podgląd 3D operuje w lokalnym układzie obiektu wycentrowanym na centroidzie (`useLocalizedBuilding`).
+  - Sygnatura geometrii `getBuildingGeometrySignature` **WYKLUCZA** translację `tx` i `ty` (`b.transform.rotationDeg` pozostaje, `tx`/`ty` usunięte). Dzięki temu przesuwanie całego budynku po rzucie 2D nie inwaliduje siatek Three.js i nie powoduje janku, natomiast każda rzeczywista zmiana kształtu natychmiast inwaliduje sygnaturę i odświeża scenę 3D.
+- **Obsługa Modyfikatorów podczas Live Dragging:**
+  - W `BuildingPreviewPanel` i `Recording3DPipWindow` podczas edycji wierzchołka (`liveVertexPreview`) na obiekcie tymczasowym wywoływane jest `applyBuildingModifiers(candidate)`, dzięki czemu bryły `storyPolygons` natychmiast odzwierciedlają nowy kształt w `getBuildingSolids`.
+
 ## 2. Obliczenia Macierzowe, Rastrowe Mapowanie i Ciągłe Struktury Pamięci (Matrix & TypedArray Architecture)
 - **Macierze transformacji afinicznych (Render i Viewport):**
   - Wszystkie transformacje widoku (pan, zoom, rotacja) oraz rzutowania obiektów łączą się w ujednoliconą macierz afiniczną $3 \times 3$ (`AffineMatrix2D` w standardzie `[a, b, c, d, e, f]`).

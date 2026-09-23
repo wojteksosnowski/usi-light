@@ -4,10 +4,13 @@
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useSceneStore, useUiStore } from '../../store';
+import { useCadToolStore } from '../../store/useCadToolStore';
 import { useActionRecorderStore } from '../../modules/action-recorder/useActionRecorderStore';
 import { useLocalizedBuilding } from '@/hooks/useLocalizedBuilding';
 import { getActiveHighlightEdgeIndex } from '@/types/modifiers';
 import { filterActiveVariantBuildings, findSelectedBuilding } from '@/utils/geometrySelectors';
+import { generateSweepPolygon } from '@/utils/math2d/sweep';
+import { applyBuildingModifiers } from '@/engine/modifiers/modifierPipeline';
 import { BuildingIsoPreview } from './BuildingIsoPreview';
 
 export const Recording3DPipWindow: React.FC = () => {
@@ -23,6 +26,7 @@ export const Recording3DPipWindow: React.FC = () => {
   const buildings = useSceneStore((s) => s.buildings);
   const selectedBuildingId = useSceneStore((s) => s.selectedBuildingId);
   const expandedModifierId = useUiStore((s) => s.expandedModifierId);
+  const liveVertexPreview = useCadToolStore((s) => s.liveVertexPreview);
 
   const isDemoRecordingActive = (isRecording || isCountingDown) && show3DPreview;
 
@@ -39,8 +43,43 @@ export const Recording3DPipWindow: React.FC = () => {
     return activeBuildings.find((b) => b.category !== 'boundary') || null;
   }, [buildings, selectedBuildingId]);
 
+  const patchedActiveBuilding = useMemo(() => {
+    if (
+      !activeBuilding ||
+      !liveVertexPreview ||
+      liveVertexPreview.buildingId !== activeBuilding.id
+    ) {
+      return activeBuilding;
+    }
+    const isSweep = Array.isArray(activeBuilding.sweepPath) && activeBuilding.sweepPath.length >= 2;
+    let candidate = activeBuilding;
+    if (isSweep) {
+      const sweepPath = activeBuilding.sweepPath!.map((v, idx) =>
+        idx === liveVertexPreview.vertexIndex ? liveVertexPreview.point : v
+      );
+      const sweepPoly = generateSweepPolygon(
+        sweepPath,
+        activeBuilding.sweepWidth || 12,
+        activeBuilding.sweepAlignment || 'center'
+      );
+      candidate = { ...activeBuilding, sweepPath, vertices: sweepPoly };
+    } else {
+      const vertices = activeBuilding.vertices.map((v, idx) =>
+        idx === liveVertexPreview.vertexIndex ? liveVertexPreview.point : v
+      );
+      candidate = { ...activeBuilding, vertices };
+    }
+    const modRes = applyBuildingModifiers(candidate);
+    return {
+      ...candidate,
+      storyPolygons: modRes.storyPolygons && modRes.storyPolygons.length > 0 ? modRes.storyPolygons : undefined,
+      zonePolygons: modRes.zonePolygons && modRes.zonePolygons.length > 0 ? modRes.zonePolygons : undefined,
+      segments: modRes.segments,
+    };
+  }, [activeBuilding, liveVertexPreview]);
+
   const activeHighlight = getActiveHighlightEdgeIndex(
-    activeBuilding?.modifiers,
+    patchedActiveBuilding?.modifiers,
     expandedModifierId
   );
 
@@ -48,7 +87,7 @@ export const Recording3DPipWindow: React.FC = () => {
   // scenie nie może wpływać na kadr podglądu 3D.
   const { localizedBuilding, localizedGroupBuildings } = useLocalizedBuilding(
     activeBuilding,
-    activeBuilding,
+    patchedActiveBuilding,
     buildings
   );
 
