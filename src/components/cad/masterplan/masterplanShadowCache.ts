@@ -42,12 +42,22 @@ function accumulatePolygons(dest: PolygonWithHoles[], src: PolygonWithHoles[]): 
   else if (src.length > 1) dest.push(...unionPolygonsWithHolesHierarchical(src));
 }
 
+const tierFingerprintCache = new WeakMap<object, string>();
+
 function tierFingerprint(t: MasterplanStoryTier): string {
   if (t.bldgRef?.computed?.geometryHash) {
     return `${t.bldgRef.computed.geometryHash}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
   }
+  if (t.bldgRef) {
+    const cached = tierFingerprintCache.get(t.bldgRef);
+    if (cached) return `${cached}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
+  }
   const holesFingerprint = (t.holes && t.holes.length > 0) ? t.holes.map(polygonFingerprint).join(';') : '';
-  return `${t.buildingId}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}:${polygonFingerprint(t.polygon)}#${holesFingerprint}`;
+  const baseFp = `${t.buildingId}:${polygonFingerprint(t.polygon)}#${holesFingerprint}`;
+  if (t.bldgRef) {
+    tierFingerprintCache.set(t.bldgRef, baseFp);
+  }
+  return `${baseFp}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
 }
 
 /**
@@ -161,6 +171,19 @@ export function drawMasterplanShadowResult(
   }
 }
 
+const tiersArraySigMap = new WeakMap<MasterplanStoryTier[], string>();
+
+export function getTiersArraySignature(tiers: MasterplanStoryTier[]): string {
+  const cached = tiersArraySigMap.get(tiers);
+  if (cached) return cached;
+  let sig = `${tiers.length}:`;
+  for (let i = 0; i < tiers.length; i++) {
+    sig += tierFingerprint(tiers[i]) + ',';
+  }
+  tiersArraySigMap.set(tiers, sig);
+  return sig;
+}
+
 export function getCachedGroundShadowSamples(
   tiers: MasterplanStoryTier[],
   samples: MasterplanColorSample[],
@@ -170,7 +193,8 @@ export function getCachedGroundShadowSamples(
   hourFraction: number,
   method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): MasterplanShadowRenderResult {
-  const key = `soft|${method}|${tiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
+  const tiersSig = getTiersArraySignature(tiers);
+  const key = `soft|${method}|${tiersSig}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   if (key === groundLastKey) return groundLastResult;
 
   const umbraSample = samples.find((s) => s.offsetMin === 0) ?? DEFAULT_UMBRA_SAMPLE;
@@ -199,7 +223,8 @@ export function getCachedRoofShadowSamples(
   hourFraction: number,
   method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): MasterplanShadowRenderResult {
-  const key = `soft|${method}|${currentH.toFixed(2)}|${higherTiers.map(tierFingerprint).join(',')}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
+  const higherSig = getTiersArraySignature(higherTiers);
+  const key = `soft|${method}|${currentH.toFixed(2)}|${higherSig}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   const cached = roofCache.get(currentTierKey);
   if (cached && cached.key === key) return cached.result;
   if (roofCache.size > 5000) roofCache.clear();

@@ -19,15 +19,17 @@ export interface OsmFetchResult {
   trees: WfsTreeFeature[];
 }
 
+export const OVERPASS_PROXY_URL = '/api/osm-overpass';
+
 export const OVERPASS_ENDPOINTS = [
-  'http://overpass-api.de/api/interpreter',
   'https://overpass-api.de/api/interpreter',
-  'http://lz4.overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ];
 
-const OVERPASS_REQUEST_TIMEOUT_MS = 8000;
+const OVERPASS_REQUEST_TIMEOUT_MS = 65000;
 
 interface OverpassNode {
   type: 'node';
@@ -537,6 +539,70 @@ function assembleWaysIntoRings(wayNodeIds: number[][], nodeMap: Map<number, LatL
 }
 
 /**
+ * Wykonuje zapytanie Overpass przez proxy `/api/osm-overpass` (z fallbackiem bezpośrednim do HTTPS mirrorów w testach/Node)
+ */
+async function postOverpassLanduseQuery(query: string, timeoutMs = OVERPASS_REQUEST_TIMEOUT_MS): Promise<OverpassResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(OVERPASS_PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'Accept': 'application/json',
+      },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.elements)) {
+        return data as OverpassResponse;
+      }
+    } else {
+      const errorBody = await res.json().catch(() => null);
+      throw new Error(errorBody?.error || `Proxy Overpass zwrócił błąd (HTTP ${res.status}).`);
+    }
+  } catch (proxyErr) {
+    // Fallback bezpośredni do HTTPS mirrorów (np. w środowisku Node bez uruchomionego serwera dev Vite)
+    let lastErr = proxyErr instanceof Error ? proxyErr : new Error(String(proxyErr));
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      const fallbackController = new AbortController();
+      const fallbackTimer = setTimeout(() => fallbackController.abort(), 20000);
+      try {
+        const fallbackRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Accept': 'application/json',
+            'User-Agent': 'USILightCAD/2.5D (https://github.com/usi-light)',
+          },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: fallbackController.signal,
+        });
+
+        if (fallbackRes.ok) {
+          const text = await fallbackRes.text();
+          if (text.startsWith('{')) {
+            return JSON.parse(text) as OverpassResponse;
+          }
+        }
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+      } finally {
+        clearTimeout(fallbackTimer);
+      }
+    }
+    throw new Error(`Nie udało się pobrać danych z Overpass API: ${lastErr.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  throw new Error('Nie udało się pobrać danych z Overpass API.');
+}
+
+/**
  * Pobiera dane Landuse, dróg, infrastruktury oraz drzew z Overpass API dla zadanego BBox i transformuje do układu CAD projektu.
  * Ogranicza drzewa i obiekty do promienia projektu (radiusMeters + margines na korony).
  */
@@ -549,7 +615,7 @@ export async function fetchOsmLanduse(
   const [west, south, east, north] = bbox;
 
   const query = `
-    [out:json][timeout:30];
+    [out:json][timeout:45];
     (
       way["landuse"](${south},${west},${north},${east});
       relation["landuse"](${south},${west},${north},${east});
@@ -575,43 +641,7 @@ export async function fetchOsmLanduse(
     out skel qt;
   `.trim();
 
-  let responseData: OverpassResponse | null = null;
-  let lastError: Error | null = null;
-
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'Accept': 'application/json',
-          'User-Agent': 'USILightCAD/2.5D (https://github.com/usi-light)',
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: controller.signal,
-      });
-
-      if (res.ok) {
-        const text = await res.text();
-        if (text.startsWith('{')) {
-          responseData = JSON.parse(text) as OverpassResponse;
-          break;
-        }
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  if (!responseData) {
-    throw new Error(
-      `Nie udało się pobrać danych z Overpass API: ${lastError?.message || 'Błąd połączenia'}`
-    );
-  }
+  const responseData = await postOverpassLanduseQuery(query, OVERPASS_REQUEST_TIMEOUT_MS);
 
   const nodes = new Map<number, OverpassNode>();
   const nodeCoords = new Map<number, LatLon>();

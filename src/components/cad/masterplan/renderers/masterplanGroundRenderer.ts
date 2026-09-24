@@ -2,7 +2,7 @@ import { CadRenderPipeline } from '@/components/cad/pipeline/CadRenderPipeline';
 import { CadRenderFrameContext } from '@/components/cad/pipeline/types';
 import { useWfsStore } from '@/modules/wfs-import/store/useWfsStore';
 import { Point2D, BuildingLoop } from '@/types/geometry';
-import { detectBoundaryMergeGroups } from '@/utils/math2d/boundaryMerging';
+import { getBoundaryMergeGroupsCached } from '@/components/cad/renderers/buildingsRenderer';
 import {
   extractBuildingStoryTiers,
   getMasterplanSolarAngles,
@@ -90,7 +90,7 @@ export function renderMasterplanGround(context: CadRenderFrameContext, hourFract
   const boundaryObjects = bldgs.filter((b: BuildingLoop) => b.category === 'boundary');
 
   if (boundaryObjects.length > 0) {
-    const boundaryMergeGroups = detectBoundaryMergeGroups(buildings);
+    const boundaryMergeGroups = getBoundaryMergeGroupsCached(buildings);
     const mergeableGroups = boundaryMergeGroups.filter((g) => {
       const selectedFlags = g.buildingIds.map(isBuildingSelected);
       return selectedFlags.every((v) => v) || selectedFlags.every((v) => !v);

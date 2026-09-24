@@ -159,6 +159,25 @@ export function extractBuildingFunctionZones(
   return items;
 }
 
+import { polygonFingerprint } from './masterplanGeometry';
+
+const buildingTypeInsetCache = new Map<string, Point2D[][]>();
+const MAX_BUILDING_TYPE_INSET_CACHE = 500;
+
+function getCachedBuildingTypeInset(polygon: Point2D[], insetDistance: number): Point2D[][] {
+  const cacheKey = `${polygonFingerprint(polygon)}|${insetDistance.toFixed(2)}`;
+  const cached = buildingTypeInsetCache.get(cacheKey);
+  if (cached) return cached;
+
+  const computed = miterOffsetPolygon(polygon, -insetDistance, { miterLimit: 2.0 });
+  if (buildingTypeInsetCache.size >= MAX_BUILDING_TYPE_INSET_CACHE) {
+    const firstKey = buildingTypeInsetCache.keys().next().value;
+    if (firstKey) buildingTypeInsetCache.delete(firstKey);
+  }
+  buildingTypeInsetCache.set(cacheKey, computed);
+  return computed;
+}
+
 /**
  * Renderuje pasmo funkcyjne (wewnętrzny offset od obwiedni) z rozmyciem i przezroczystością
  * dla kondygnacji lub strefy o typie innym niż dominujący.
@@ -172,7 +191,7 @@ export function renderBuildingTypeOffset(
 ): void {
   if (!polygon || polygon.length < 3) return;
 
-  const insetPolygons = miterOffsetPolygon(polygon, -effect.insetDistance, { miterLimit: 2.0 });
+  const insetPolygons = getCachedBuildingTypeInset(polygon, effect.insetDistance);
   const targetRings = insetPolygons.length > 0 ? insetPolygons : [polygon];
 
   ctx.save();

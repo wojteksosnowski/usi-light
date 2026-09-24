@@ -146,12 +146,22 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const viewMode2D = useUiStore((s) => s.viewMode2D);
 
+  const lastMasterplanTileRedrawTimeRef = useRef<number>(0);
+
   const scheduleTileRedraw = useCallback(() => {
     if (tileRafIdRef.current !== null) return;
     tileRafIdRef.current = requestAnimationFrame(() => {
       tileRafIdRef.current = null;
       if (useUiStore.getState().viewMode2D === 'masterplan_white') {
         // Tryb masterplan nie jest (jeszcze) podzielony na tiery — renderuje tło+scenę razem.
+        // Ograniczamy lawinowe przerysowania całej sceny podczas gwałtownego napływu kafli (np. WMS GUGiK)
+        // do co najwyżej 1 raz na 50ms, zapewniając responsywność głównego wątku.
+        const now = performance.now();
+        if (now - lastMasterplanTileRedrawTimeRef.current < 50) {
+          scheduleTileRedraw();
+          return;
+        }
+        lastMasterplanTileRedrawTimeRef.current = now;
         if (latestSceneFrameContextRef.current) {
           MasterplanRenderPipeline.render(latestSceneFrameContextRef.current);
         }

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useSceneStore } from '@/store';
-import { computeBuildingsUnionArea } from '@/utils/math2d';
+import { computePolygonArea } from '@/utils/math2d/polygons';
 import { useMultiSelection } from '../../common/useMultiSelection';
 
 export interface CadLayerItemInfo {
@@ -31,7 +31,10 @@ export const useCadLayers = () => {
     return Array.from(map.entries()).map(([name, bldgs]) => ({
       name,
       count: bldgs.length,
-      area: computeBuildingsUnionArea(bldgs),
+      area: bldgs.reduce(
+        (sum, b) => sum + (b.computed?.metrics?.footprintArea ?? (b.vertices ? computePolygonArea(b.vertices) : 0)),
+        0
+      ),
     }));
   }, [buildings]);
 

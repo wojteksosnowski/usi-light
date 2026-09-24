@@ -126,8 +126,18 @@ describe('shadowEnvelope stabilization anchor (pre-optimization)', () => {
     'reference/wro.json (real-world scene, 9 tested + 22 blocking buildings): computeHourlyShadowsLive is stable',
     () => {
       const scene = loadReferenceScene('wro.json');
+      let testedCount = 0;
+      const buildings = scene.buildings.some((b: any) => b.isTested)
+        ? scene.buildings
+        : scene.buildings.map((b: any) => {
+            if (b.category !== 'boundary' && (b.defaultHeight || 0) > 0 && testedCount < 9) {
+              testedCount++;
+              return { ...b, isTested: true };
+            }
+            return b;
+          });
 
-      const live = computeHourlyShadowsLive(scene.buildings, scene.latitude, scene.longitude, scene.equinoxDate, 0.5, 'raycasting');
+      const live = computeHourlyShadowsLive(buildings, scene.latitude, scene.longitude, scene.equinoxDate, 0.5, 'raycasting');
       expect(live.hourlyShadows.length).toBeGreaterThan(0);
       for (const h of live.hourlyShadows) {
         expect(h.polygons.every((p) => p.length >= 3)).toBe(true);

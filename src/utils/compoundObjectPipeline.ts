@@ -51,8 +51,25 @@ export function getCompoundGroupBuildings(
   return activeBuildings.filter((b) => b.groupId === groupId && b.category !== 'boundary');
 }
 
+const compoundSummaryCache = new Map<string, CompoundObjectSummary>();
+
+function getCompoundGroupSignature(buildings: BuildingLoop[]): string {
+  let sig = '';
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b.computed?.geometryHash) {
+      sig += `${b.id}:${b.computed.geometryHash}:${b.isTested ? 1 : 0}:${b.isIncluded !== false ? 1 : 0}:${b.isCityCentre ? 1 : 0};`;
+    } else {
+      const v0 = b.vertices && b.vertices.length > 0 ? `${b.vertices[0].x.toFixed(2)},${b.vertices[0].y.toFixed(2)}` : '';
+      const vLen = b.vertices ? b.vertices.length : 0;
+      sig += `${b.id}:${vLen}:${v0}:${b.defaultHeight}:${b.elevation ?? 0}:${b.isTested ? 1 : 0}:${b.isIncluded !== false ? 1 : 0}:${b.isCityCentre ? 1 : 0};`;
+    }
+  }
+  return sig;
+}
+
 /**
- * Wyznacza zagregowane metryki, obwiednię i punkt kotwiczenia etykiety dla grupy logicznej.
+ * Wyznacza zagregowane metryki, obwiednię i punkt kotwiczenia etykiety dla grupy logicznej (z buforowaniem O(1)).
  */
 export function getCompoundObjectSummary(
   groupBuildings: BuildingLoop[]
@@ -65,6 +82,13 @@ export function getCompoundObjectSummary(
 
   const first = activeBuildings[0];
   const groupId = first.groupId || first.id;
+  const sig = `${groupId}|${activeBuildings.length}|${getCompoundGroupSignature(activeBuildings)}`;
+
+  const cached = compoundSummaryCache.get(sig);
+  if (cached) {
+    return cached;
+  }
+
   const name = first.name.replace(/\s*\(cz\..*?\)/g, '') || `Grupa ${groupId}`;
 
   let totalPz = 0;
@@ -78,7 +102,7 @@ export function getCompoundObjectSummary(
   let isCityCentre = false;
 
   for (const b of activeBuildings) {
-    const area = computePolygonArea(b.vertices);
+    const area = b.computed?.metrics?.footprintArea ?? computePolygonArea(b.vertices);
     totalPz += area;
     const h = b.defaultHeight || 0;
     if (h > maxHeight) maxHeight = h;
@@ -116,7 +140,7 @@ export function getCompoundObjectSummary(
     labelAnchor = getPolygonInteriorPoint(bestLoop);
   }
 
-  return {
+  const summary: CompoundObjectSummary = {
     groupId,
     name,
     buildings: activeBuildings,
@@ -131,4 +155,11 @@ export function getCompoundObjectSummary(
     isIncluded,
     isCityCentre,
   };
+
+  if (compoundSummaryCache.size > 200) {
+    compoundSummaryCache.clear();
+  }
+  compoundSummaryCache.set(sig, summary);
+
+  return summary;
 }

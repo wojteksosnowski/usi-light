@@ -35,7 +35,7 @@ function getBoundarySignature(buildings: BuildingLoop[]): string {
   return sig;
 }
 
-function getBoundaryMergeGroupsCached(buildings: BuildingLoop[]): BoundaryMergeGroup[] {
+export function getBoundaryMergeGroupsCached(buildings: BuildingLoop[]): BoundaryMergeGroup[] {
   const sig = getBoundarySignature(buildings);
   if (sig === boundaryMergeGroupsCacheSig) {
     return boundaryMergeGroupsCacheValue;

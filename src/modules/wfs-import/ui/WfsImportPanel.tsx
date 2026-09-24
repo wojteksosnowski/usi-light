@@ -147,7 +147,7 @@ export const WfsImportPanel: React.FC = () => {
 
       if (fetchOsmLanduseOption) {
         try {
-          await fetchOsmLanduseAction(bbox, projectCenter, projectCrs);
+          await fetchOsmLanduseAction(bbox, projectCenter, projectCrs, radius);
           setShowOsmLanduseGroup(true);
         } catch (osmErr) {
           console.warn('[WFS Import] Błąd pobierania OSM Landuse:', osmErr);

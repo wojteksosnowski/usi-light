@@ -326,40 +326,52 @@ export class WmsTileManager {
   }
 
   /** Kolejkuje trwały zapis kafla do IndexedDB na czas bezczynności głównego wątku (ten sam wzorzec
-   * co `scheduleInversionProcess`) — empirycznie (profil CPU z rzeczywistej sesji panningu przy
-   * włączonych GESUT+BDOT) `persistTileToDb`/`canvas.toBlob()` wywoływane synchronicznie w handlerze
-   * `img.onload`, PRZED `finishTileLoad`, sumarycznie zajmowało ~588ms czasu głównego wątku i
-   * opóźniało przerysowanie tła aż do zakończenia tworzenia canvasu/kodowania blob-a przy każdym
-   * nowo załadowanym kaflu — czyli dokładnie przy przeciąganiu widoku w nieodwiedzony wcześniej
-   * obszar mapy. Odłożenie na `requestIdleCallback` usuwa ten koszt z krytycznej ścieżki renderu
-   * bez utraty trwałego cache'u (zapis i tak jest best-effort, nie musi być natychmiastowy). */
+   * co `scheduleInversionProcess`) — odłożenie na `requestIdleCallback` usuwa koszt z krytycznej
+   * ścieżki renderu bez utraty trwałego cache'u (zapis i tak jest best-effort, nie musi być natychmiastowy). */
   private schedulePersistToDb(key: string, img: HTMLImageElement) {
     this.persistQueue.push({ key, img });
     if (this.persistTimerScheduled) return;
     this.persistTimerScheduled = true;
 
-    const processOne = () => {
+    const processQueue = (deadline?: IdleDeadline) => {
       this.persistTimerScheduled = false;
-      const item = this.persistQueue.shift();
-      if (item) {
-        this.persistTileToDb(item.key, item.img);
+      const startTime = performance.now();
+
+      // Przetwarzaj elementy z kolejki dopóki mamy czas w ramce bezczynności (min. 4ms)
+      // lub max 3 elementy na tick, aby nie monopolizować wątku głównego
+      let processedCount = 0;
+      while (this.persistQueue.length > 0) {
+        if (deadline && deadline.timeRemaining() < 4) break;
+        if (!deadline && processedCount >= 2) break;
+        if (performance.now() - startTime > 12) break;
+
+        const item = this.persistQueue.shift();
+        if (item) {
+          this.persistTileToDb(item.key, item.img);
+          processedCount++;
+        }
       }
+
       if (this.persistQueue.length > 0) {
         this.persistTimerScheduled = true;
         if (typeof requestIdleCallback !== 'undefined') {
-          requestIdleCallback(processOne, { timeout: 200 });
+          requestIdleCallback(processQueue, { timeout: 1000 });
         } else {
-          setTimeout(processOne, 16);
+          setTimeout(() => processQueue(), 50);
         }
       }
     };
 
     if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(processOne, { timeout: 200 });
+      requestIdleCallback(processQueue, { timeout: 1000 });
     } else {
-      setTimeout(processOne, 16);
+      setTimeout(() => processQueue(), 50);
     }
   }
+
+  // Współdzielony canvas do serializacji blobów kafli — unika alokacji DOM i cykli GC Scavengera
+  private static sharedPersistCanvas: HTMLCanvasElement | null = null;
+  private static sharedPersistCtx: CanvasRenderingContext2D | null = null;
 
   /** Best-effort: zapisuje pomyślnie załadowany kafel do trwałego cache'u IndexedDB, żeby przetrwał
    * zamknięcie przeglądarki. Wołane WYŁĄCZNIE przez `schedulePersistToDb` (na bezczynności), nigdy
@@ -369,11 +381,23 @@ export class WmsTileManager {
     try {
       const w = img.naturalWidth || 256;
       const h = img.naturalHeight || 256;
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
+
+      if (!WmsTileManager.sharedPersistCanvas) {
+        WmsTileManager.sharedPersistCanvas = document.createElement('canvas');
+      }
+      const canvas = WmsTileManager.sharedPersistCanvas;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        WmsTileManager.sharedPersistCtx = null;
+      }
+      if (!WmsTileManager.sharedPersistCtx) {
+        WmsTileManager.sharedPersistCtx = canvas.getContext('2d');
+      }
+      const ctx = WmsTileManager.sharedPersistCtx;
       if (!ctx) return;
+
+      ctx.clearRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0);
       canvas.toBlob((blob) => {
         if (blob) {

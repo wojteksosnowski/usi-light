@@ -27,6 +27,72 @@ import {
   renderMasterplanFunctionOverlays,
 } from '../masterplanBuildingTypes';
 
+interface CachedRoofsHierarchy {
+  sceneRef: BuildingLoop[];
+  sortedTiers: MasterplanStoryTier[];
+  sortedTierBounds: Bounds[];
+  sunKey: string;
+  higherTiersPerTier: MasterplanStoryTier[][];
+}
+
+let cachedRoofsHierarchy: CachedRoofsHierarchy | null = null;
+
+function getOrComputeRoofsHierarchy(
+  sceneRef: BuildingLoop[],
+  angles: ReturnType<typeof getMasterplanSolarAngles>,
+  sunKey: string
+): { sortedTiers: MasterplanStoryTier[]; sortedTierBounds: Bounds[]; higherTiersPerTier: MasterplanStoryTier[][] } {
+  if (
+    cachedRoofsHierarchy &&
+    cachedRoofsHierarchy.sceneRef === sceneRef &&
+    cachedRoofsHierarchy.sunKey === sunKey
+  ) {
+    return cachedRoofsHierarchy;
+  }
+
+  let sortedTiers: MasterplanStoryTier[];
+  let sortedTierBounds: Bounds[];
+
+  if (cachedRoofsHierarchy && cachedRoofsHierarchy.sceneRef === sceneRef) {
+    sortedTiers = cachedRoofsHierarchy.sortedTiers;
+    sortedTierBounds = cachedRoofsHierarchy.sortedTierBounds;
+  } else {
+    const validBuildings = sceneRef.filter(
+      (b: BuildingLoop) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
+    );
+    const allTiers: MasterplanStoryTier[] = [];
+    for (let i = 0; i < validBuildings.length; i++) {
+      allTiers.push(...extractBuildingStoryTiers(validBuildings[i]));
+    }
+    sortedTiers = allTiers.sort((a, b) => a.hTop - b.hTop);
+    sortedTierBounds = sortedTiers.map(tierFootprintBounds);
+  }
+
+  const higherTiersPerTier: MasterplanStoryTier[][] = new Array(sortedTiers.length);
+  for (let i = 0; i < sortedTiers.length; i++) {
+    const currentH = sortedTiers[i].hTop;
+    const currentTierBounds = sortedTierBounds[i];
+    const higher = sortedTiers.slice(i + 1).filter((ht, offset) => {
+      const deltaHTop = ht.hTop - currentH;
+      if (deltaHTop <= 0.05) return false;
+      const htOffset = computeShadowOffsetVector(deltaHTop, angles);
+      const htReachBounds = extendBoundsByOffset(sortedTierBounds[i + 1 + offset], htOffset.dx * 1.05, htOffset.dy * 1.05);
+      return boundsOverlap(currentTierBounds, htReachBounds);
+    });
+    higherTiersPerTier[i] = higher;
+  }
+
+  cachedRoofsHierarchy = {
+    sceneRef,
+    sortedTiers,
+    sortedTierBounds,
+    sunKey,
+    higherTiersPerTier,
+  };
+
+  return cachedRoofsHierarchy;
+}
+
 /**
  * Renderuje dachy budynków, rzutowanie cieni ΔH od wyższych kondygnacji/budynków (zacienianie wzajemne i własne)
  * oraz czarne linie tuszowe i etykiety wysokościowe.
@@ -36,29 +102,19 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
   const { ctx, width, height, viewRotationDeg, viewState, latitude, longitude, equinoxDate, sunlightMethod, screenToWorld } = renderContext;
   const method = sunlightMethod ?? 'raycasting';
 
-  const bldgs = (visibleBuildings || buildings).filter(
-    (b: BuildingLoop) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3
-  );
+  const sceneBuildings = visibleBuildings || buildings;
+  if (!sceneBuildings || sceneBuildings.length === 0) return;
 
-  if (bldgs.length === 0) return;
-
-  const dominantBuildingType = getDominantBuildingType(buildings || visibleBuildings || []);
+  const dominantBuildingType = getDominantBuildingType(sceneBuildings);
 
   const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
+  const sunKey = `${latitude}:${longitude}:${equinoxDate}:${hourFraction.toFixed(2)}:${method}`;
 
   const viewport = viewportWorldBounds({ width, height, screenToWorld });
 
-  // 1. Ekstrakcja wszystkich poziomów kondygnacji z pełnej sceny (cienie ΔH i cache są stabilne w układzie świata)
-  const allTiers: MasterplanStoryTier[] = [];
-  for (const bldg of bldgs) {
-    allTiers.push(...extractBuildingStoryTiers(bldg, selectedBuildingId, selectedBuildingIds, hoveredBuildingId));
-  }
-
-  if (allTiers.length === 0) return;
-
-  // 2. Sortowanie poziomów dachowych po wysokości Htop rosnąco (najniższe dachy najpierw, najwyższe na końcu)
-  const sortedTiers = [...allTiers].sort((a, b) => a.hTop - b.hTop);
-  const sortedTierBounds = sortedTiers.map(tierFootprintBounds);
+  // 1. Pobranie zbuforowanej hierarchii kondygnacji i relacji cieni ΔH (stabilne O(1) przy pan/zoom)
+  const { sortedTiers, sortedTierBounds, higherTiersPerTier } = getOrComputeRoofsHierarchy(sceneBuildings, angles, sunKey);
+  if (sortedTiers.length === 0) return;
 
   ctx.save();
   ctx.translate(viewState.panX, viewState.panY);
@@ -75,9 +131,9 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
       continue;
     }
 
-    const isSelected = tier.isSelected;
-    const isHovered = tier.isHovered;
-    const isProposed = tier.isProposed;
+    const isSelected = tier.buildingId === selectedBuildingId || (selectedBuildingIds && selectedBuildingIds.includes(tier.buildingId));
+    const isHovered = tier.buildingId === hoveredBuildingId;
+    const isProposed = tier.bldgRef?.isTested ?? tier.isProposed;
 
     const baseFill = isHovered
       ? MASTERPLAN_COLORS.hoverFill
@@ -114,18 +170,11 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
     ctx.fillStyle = baseFill;
     ctx.fill('evenodd');
 
-    // 2. Pobierz wszystkie kondygnacje/bryły wyższe (z tego samego budynku - self-shading, oraz z innych budynków - mutual shading)
-    // Dokładny filtr przestrzenny: obliczamy realny zasięg cienia dla deltaHTop (a nie pełnego hTop!)
+    // 2. Pobierz wyższe bryły z gotowej mapy relacji cienia
     const currentH = tier.hTop;
-    const higherTiers = sortedTiers.slice(i + 1).filter((ht, offset) => {
-      const deltaHTop = ht.hTop - currentH;
-      if (deltaHTop <= 0.05) return false;
-      const htOffset = computeShadowOffsetVector(deltaHTop, angles);
-      const htReachBounds = extendBoundsByOffset(sortedTierBounds[i + 1 + offset], htOffset.dx * 1.05, htOffset.dy * 1.05);
-      return boundsOverlap(tierBounds, htReachBounds);
-    });
+    const higherTiers = higherTiersPerTier[i];
 
-    if (higherTiers.length > 0) {
+    if (higherTiers && higherTiers.length > 0) {
       // Rysujemy obrys cienia dachowego (A456 umbra) z sumą boolowską (brak podwójnego nakładania się cieni)
       const currentTierKey = `${tier.buildingId}:${tier.storyIndex}`;
       const shadowResult = getCachedRoofShadowSamples(
@@ -189,7 +238,7 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
 
   // 3. Wizualizacja stref i kondygnacji funkcyjnych (w tym parterów i stref krawędziowych modyfikatora zone_function)
   // Rysowane w przestrzeni świata CAD z zachowaniem hierarchii zakrycia (blur + opacity)
-  const visibleBldgs = bldgs.filter((b) => {
+  const visibleBldgs = sceneBuildings.filter((b: BuildingLoop) => {
     const aabb = getBuildingAABB(b);
     return aabb ? boundsOverlap(aabb, viewport) : true;
   });

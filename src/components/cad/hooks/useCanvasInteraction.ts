@@ -2,6 +2,7 @@ import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react'
 import { Point2D, BuildingLoop, CadLayerSettings, DimensionItem, DimensionReference, DimensionType, DEFAULT_SWEEP_WIDTH } from '../../../types/geometry';
 import { isPointInPolygon, adjustEdgeLength, calculateOutwardNormal, isPolygonCCW, normalizeAngle180, angleDiff180, getPolygonCentroid, getRotateHandleScreenPos, offsetPolygonEdge, offsetOpenPolylineEdge } from '@/utils/math2d';
 import { isBuildingVariantActive } from '@/utils/geometrySelectors';
+import { getBuildingAABB } from '@/engine/buildingGeometryCache';
 import { useUiStore } from '../../../store/useUiStore';
 import { useCadToolStore } from '../../../store/useCadToolStore';
 import { useSceneStore } from '../../../store/useSceneStore';
@@ -1331,9 +1332,20 @@ export function useCanvasInteraction({
 
     let hoveredBldgId: string | undefined;
     let minBldgDistPx = 45;
+    const maxDistMeters = 45 / (viewState.scale || 1.0);
     for (const bldg of buildings) {
       if (bldg.isIncluded === false || !Array.isArray(bldg.vertices)) continue;
       if (!isBuildingVariantActive(bldg)) continue;
+      const aabb = getBuildingAABB(bldg);
+      if (
+        aabb &&
+        (world.wx < aabb.minX - maxDistMeters ||
+          world.wx > aabb.maxX + maxDistMeters ||
+          world.wy < aabb.minY - maxDistMeters ||
+          world.wy > aabb.maxY + maxDistMeters)
+      ) {
+        continue;
+      }
       for (const v of bldg.vertices) {
         const sv = worldToScreen(v.x, v.y);
         const d = Math.hypot(sx - sv.sx, sy - sv.sy);

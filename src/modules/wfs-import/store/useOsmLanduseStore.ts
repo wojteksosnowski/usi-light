@@ -369,7 +369,7 @@ export const useOsmLanduseStore = create<OsmLanduseState>()(
       fetchLanduse: async (bbox, projectCenter, projectCrs, radius) => {
         set({ isFetching: true, error: null });
         try {
-          const result = await fetchOsmLanduse(bbox, projectCenter, projectCrs);
+          const result = await fetchOsmLanduse(bbox, projectCenter, projectCrs, radius);
           set({
             features: result.features,
             trees: result.trees,

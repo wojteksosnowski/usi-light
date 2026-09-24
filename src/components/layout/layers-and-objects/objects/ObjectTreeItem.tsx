@@ -190,6 +190,18 @@ export const ObjectTreeItem = memo<ObjectTreeItemProps>(({
       </div>
     </div>
   );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.variant === nextProps.variant &&
+    prevProps.item.name === nextProps.item.name &&
+    prevProps.item.plotNumber === nextProps.item.plotNumber &&
+    prevProps.item.isLocked === nextProps.item.isLocked &&
+    prevProps.item.isGhosted === nextProps.item.isGhosted &&
+    prevProps.item.isVisible === nextProps.item.isVisible &&
+    prevProps.item.isSnapExcluded === nextProps.item.isSnapExcluded
+  );
 });
 
 ObjectTreeItem.displayName = 'ObjectTreeItem';

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Building, Square, ChevronDown, ChevronRight, Lock, Unlock, Ghost, Layers, Lightbulb, LightbulbOff, Magnet } from 'lucide-react';
 import { useSceneObjectsList, BuildingSubgroup } from './hooks/useSceneObjectsList';
 import { ObjectCategoryGroup } from './ObjectCategoryGroup';
@@ -21,41 +21,41 @@ export const SceneObjectsSection: React.FC = () => {
     updateBuilding,
   } = useSceneObjectsList();
 
-  const handleToggleLock = (id: string, currentLocked: boolean) => {
+  const handleToggleLock = useCallback((id: string, currentLocked: boolean) => {
     updateBuilding(id, { isLocked: !currentLocked });
-  };
+  }, [updateBuilding]);
 
-  const handleToggleGhost = (id: string, currentGhosted: boolean) => {
+  const handleToggleGhost = useCallback((id: string, currentGhosted: boolean) => {
     updateBuilding(id, { isGhosted: !currentGhosted });
-  };
+  }, [updateBuilding]);
 
-  const handleToggleVisibility = (id: string, currentVisible: boolean) => {
+  const handleToggleVisibility = useCallback((id: string, currentVisible: boolean) => {
     updateBuilding(id, { isVisible: !currentVisible });
-  };
+  }, [updateBuilding]);
 
-  const handleToggleSnapExclusion = (id: string, currentSnapExcluded: boolean) => {
+  const handleToggleSnapExclusion = useCallback((id: string, currentSnapExcluded: boolean) => {
     updateBuilding(id, { isSnapExcluded: !currentSnapExcluded });
-  };
+  }, [updateBuilding]);
 
-  const handleMassLock = (items: BuildingLoop[]) => {
+  const handleMassLock = useCallback((items: BuildingLoop[]) => {
     const allLocked = items.every((b) => b.isLocked);
     items.forEach((b) => updateBuilding(b.id, { isLocked: !allLocked }));
-  };
+  }, [updateBuilding]);
 
-  const handleMassGhost = (items: BuildingLoop[]) => {
+  const handleMassGhost = useCallback((items: BuildingLoop[]) => {
     const allGhosted = items.every((b) => b.isGhosted);
     items.forEach((b) => updateBuilding(b.id, { isGhosted: !allGhosted }));
-  };
+  }, [updateBuilding]);
 
-  const handleMassVisibility = (items: BuildingLoop[]) => {
+  const handleMassVisibility = useCallback((items: BuildingLoop[]) => {
     const allVisible = items.every((b) => b.isVisible !== false);
     items.forEach((b) => updateBuilding(b.id, { isVisible: !allVisible }));
-  };
+  }, [updateBuilding]);
 
-  const handleMassSnapExclusion = (items: BuildingLoop[]) => {
+  const handleMassSnapExclusion = useCallback((items: BuildingLoop[]) => {
     const allSnapExcluded = items.every((b) => b.isSnapExcluded);
     items.forEach((b) => updateBuilding(b.id, { isSnapExcluded: !allSnapExcluded }));
-  };
+  }, [updateBuilding]);
 
   const renderBuildingSubgroups = (subgroups: BuildingSubgroup[]) => {
     return subgroups.map((subgroup) => {

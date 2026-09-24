@@ -218,8 +218,18 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       const fs = require('fs');
       if (!fs.existsSync('reference/wro.json')) return;
       const scene = JSON.parse(fs.readFileSync('reference/wro.json', 'utf-8'));
+      let testedCount = 0;
+      const buildings = scene.buildings.some((b: any) => b.isTested)
+        ? scene.buildings
+        : scene.buildings.map((b: any) => {
+            if (b.category !== 'boundary' && (b.defaultHeight || 0) > 0 && testedCount < 9) {
+              testedCount++;
+              return { ...b, isTested: true };
+            }
+            return b;
+          });
       const result = computeFullShadowAnalysis(
-        scene.buildings,
+        buildings,
         scene.settings?.latitude || 51.1079,
         scene.settings?.longitude || 17.0385,
         scene.settings?.equinoxDate || 'spring',
@@ -238,19 +248,29 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       const fs = require('fs');
       if (!fs.existsSync('reference/wro.json')) return;
       const scene = JSON.parse(fs.readFileSync('reference/wro.json', 'utf-8'));
+      let testedCount = 0;
+      const buildings = scene.buildings.some((b: any) => b.isTested)
+        ? scene.buildings
+        : scene.buildings.map((b: any) => {
+            if (b.category !== 'boundary' && (b.defaultHeight || 0) > 0 && testedCount < 9) {
+              testedCount++;
+              return { ...b, isTested: true };
+            }
+            return b;
+          });
       const lat = scene.settings?.latitude || 51.1079;
       const lon = scene.settings?.longitude || 17.0385;
       const date = scene.settings?.equinoxDate || 'spring';
 
       // Warmup
-      computeFullShadowAnalysis(scene.buildings, lat, lon, date, 0.25);
+      computeFullShadowAnalysis(buildings, lat, lon, date, 0.25);
 
       const times: number[] = [];
       let lastResult: any = null;
 
       for (let i = 0; i < 5; i++) {
         const t0 = performance.now();
-        lastResult = computeFullShadowAnalysis(scene.buildings, lat, lon, date, 0.25);
+        lastResult = computeFullShadowAnalysis(buildings, lat, lon, date, 0.25);
         const elapsed = performance.now() - t0;
         times.push(elapsed);
       }

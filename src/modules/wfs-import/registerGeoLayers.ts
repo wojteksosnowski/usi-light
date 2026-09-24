@@ -349,7 +349,16 @@ export function registerGeoLayers(): () => void {
   const unsubWfs = useWfsStore.subscribe(updateLayers);
   const unsubOsm = useOsmLanduseStore.subscribe(updateLayers);
   const unsubLicense = useLicenseStore.subscribe(updateLayers);
-  const unsubSolar = useSolarAnalysisStore.subscribe(updateLayers);
+  let prevLat = -999;
+  let prevLon = -999;
+  const unsubSolar = useSolarAnalysisStore.subscribe((state) => {
+    const { latitude, longitude } = state.settings;
+    if (latitude !== prevLat || longitude !== prevLon) {
+      prevLat = latitude;
+      prevLon = longitude;
+      updateLayers();
+    }
+  });
 
   return () => {
     unsubWfs();
