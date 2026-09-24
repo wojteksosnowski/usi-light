@@ -2,7 +2,7 @@ import { Point2D } from '../../types/geometry';
 import { calculateSignedArea, isPolygonCCW, isSimplePolygonRing, resolveSelfIntersectingRing } from './polygons';
 
 export interface MiterOffsetOptions {
-  miterLimit?: number; // Maksymalny współczynnik wydłużenia narożnika (domyślnie 3.0)
+  miterLimit?: number; // Maksymalny współczynnik wydłużenia narożnika (domyślnie 4.0)
   minArea?: number;    // Minimalne pole powierzchni po offsetcie (domyślnie 0.5 m²)
 }
 
@@ -91,7 +91,7 @@ export function miterOffsetPolygon(
     return vertices && vertices.length > 0 ? [vertices.map((p) => ({ ...p }))] : [];
   }
 
-  const { miterLimit = 3.0, minArea = 0.5 } = options;
+  const { miterLimit = 4.0, minArea = 0.5 } = options;
 
   // Sprawdzamy orientację wielokąta – normalizujemy wektory do standardu CCW
   const isCCW = isPolygonCCW(vertices);
@@ -142,19 +142,17 @@ export function miterOffsetPolygon(
       const maxDist = Math.abs(distance) * miterLimit;
 
       if (offsetDist > maxDist && maxDist > 0) {
-        // Obcięcie do bisectora z limitem długości
-        const bisectX = norm1.x + norm2.x;
-        const bisectY = norm1.y + norm2.y;
-        const bisectLen = Math.hypot(bisectX, bisectY);
-        if (bisectLen > 1e-5) {
-          const dir = distance >= 0 ? 1 : -1;
-          result.push({
-            x: vi.x + (dir * maxDist * bisectX) / bisectLen,
-            y: vi.y + (dir * maxDist * bisectY) / bisectLen,
-          });
-        } else {
-          result.push({ x: px, y: py });
-        }
+        // Standardowe ścięcie narożnika (bevel join) na dwie proste offsetu
+        // gwarantujące 100% równoległość krawędzi przyległych do krawędzi bazowych
+        const p1 = {
+          x: vi.x + distance * norm1.x,
+          y: vi.y + distance * norm1.y,
+        };
+        const p2 = {
+          x: vi.x + distance * norm2.x,
+          y: vi.y + distance * norm2.y,
+        };
+        result.push(p1, p2);
       } else {
         result.push({ x: px, y: py });
       }

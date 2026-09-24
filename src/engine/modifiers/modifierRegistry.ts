@@ -16,7 +16,7 @@ import {
   ZoneOffsetModifier,
 } from '../../types/modifiers';
 import { miterOffsetPolygon } from '../../utils/math2d/miterOffset';
-import { generateGateCorridor } from '../../utils/math2d/gateGeometry';
+import { generateGateCorridor, computeGateSpan } from '../../utils/math2d/gateGeometry';
 import {
   cutGateFromFootprint,
   generateBayWindowPolygon,
@@ -287,12 +287,46 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
   },
 
   gate: (modifier: GateModifier, ctx) => {
-    const { width, storiesCount, edgeIndex, positionRatio } = modifier;
-    if (width <= 1e-4) return;
+    const { width, storiesCount, edgeIndex, positionRatio, autoWidth } = modifier;
+    if (width <= 1e-4 && !autoWidth) return;
 
     const steps = resolveStoryModifierSteps(ctx.K, storiesCount);
     const targetStoryIndices = new Set(steps.map((s) => s.storyIndex));
 
+    const targetFootprints = ctx.storyFootprints.filter((sf) => targetStoryIndices.has(sf.storyIndex));
+    if (targetFootprints.length === 0) return;
+
+    // 1. Wyznacz referencyjny korytarz wycinający bramy z pierwszej/najszerszej kondygnacji docelowej
+    let refCorridor: ReturnType<typeof generateGateCorridor> = null;
+    for (const sf of targetFootprints) {
+      const resolvedEdgeIdx = resolveOuterEdgeIndexForFragment(sf, edgeIndex, ctx.baseVertices);
+      if (resolvedEdgeIdx === null) continue;
+
+      const hasLineage = sf.edgeOrigins && sf.edgeOrigins.some((tag) => tag !== null);
+      const edgeEligible = hasLineage ? sf.edgeOrigins!.map((tag) => tag !== null) : undefined;
+      const span = computeGateSpan(sf.polygon, sf.holes, resolvedEdgeIdx, edgeEligible);
+      if (!span) continue;
+
+      const effWidth = autoWidth ? span.maxWidth : Math.min(width, span.maxWidth);
+      if (effWidth <= 1e-4) continue;
+
+      const candidate = generateGateCorridor(
+        sf.polygon,
+        sf.holes,
+        effWidth,
+        positionRatio ?? 0.5,
+        resolvedEdgeIdx,
+        edgeEligible
+      );
+      if (candidate) {
+        refCorridor = candidate;
+        break;
+      }
+    }
+
+    if (!refCorridor) return;
+
+    // 2. Aplikuj ten sam korytarz wycinający do wszystkich targetowanych kondygnacji
     const newFootprints: StoryFootprint[] = [];
     for (const sf of ctx.storyFootprints) {
       if (!targetStoryIndices.has(sf.storyIndex)) {
@@ -308,27 +342,8 @@ export const MODIFIER_APPLIERS: { [K in ModifierType]: ModifierApplyFn<Extract<M
         continue;
       }
 
-      // Ściany bez dziedziczonego pochodzenia (edgeOrigins[i] === null) to artefakty cięcia innej
-      // bramy w tym samym przebiegu (tunel) — promień "first hit" nie może traktować ich jako
-      // prawdziwej ściany przeciwległej (patrz gateGeometry.ts). Gdy `edgeOrigins` jest całkowicie
-      // puste (linia dziedziczenia już wcześniej utracona, np. przez corner_cut), filtr wykluczyłby
-      // WSZYSTKIE ściany — zamiast tego nie filtrujemy wcale (zachowanie jak dotychczas).
-      const hasLineage = sf.edgeOrigins && sf.edgeOrigins.some((tag) => tag !== null);
-      const edgeEligible = hasLineage ? sf.edgeOrigins!.map((tag) => tag !== null) : undefined;
-      const corridor = generateGateCorridor(
-        sf.polygon,
-        sf.holes,
-        width,
-        positionRatio ?? 0.5,
-        resolvedEdgeIndex,
-        edgeEligible
-      );
-      if (corridor) {
-        const cutResults = cutGateFromFootprint(sf, corridor.cuttingPolygon);
-        newFootprints.push(...cutResults);
-      } else {
-        newFootprints.push(sf);
-      }
+      const cutResults = cutGateFromFootprint(sf, refCorridor.cuttingPolygon);
+      newFootprints.push(...cutResults);
     }
 
     ctx.storyFootprints = newFootprints;

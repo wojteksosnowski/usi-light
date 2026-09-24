@@ -121,7 +121,18 @@ export const GateFields: React.FC<ModifierFieldsProps<GateModifier>> = ({
           placeholderValue={-1}
           placeholderLabel="Domyślna (najdłuższa ściana)"
           options={availableEdges}
-          onChange={(edgeIndex) => onChange({ edgeIndex })}
+          onChange={(edgeIndex) => {
+            const building = context.building;
+            const sampleStoryWithHoles = building?.storyPolygons?.find((sp) => sp.holes && sp.holes.length > 0);
+            const vertices = sampleStoryWithHoles?.polygon || building?.vertices || [];
+            const holes = sampleStoryWithHoles?.holes;
+            const span = computeGateSpan(vertices, holes, edgeIndex);
+            if (isAuto && span && span.maxWidth > 0) {
+              onChange({ edgeIndex, width: span.maxWidth });
+            } else {
+              onChange({ edgeIndex });
+            }
+          }}
           accentVar="var(--accent-emerald)"
           showAutoOption={false}
         />
