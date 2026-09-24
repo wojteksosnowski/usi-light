@@ -59,6 +59,17 @@ export interface LabelPlacementInfo {
   readonly spanY: number;
 }
 
+export interface PrecomputedMasterplanTier {
+  readonly storyIndex: number;
+  readonly polygon: readonly Point2D[];
+  readonly holes: readonly (readonly Point2D[])[];
+  readonly hBottom: number;
+  readonly hTop: number;
+  readonly geomFingerprint: string;
+  readonly isConvex: boolean;
+  readonly buildingType?: string;
+}
+
 export interface CompiledObjectGeometry {
   /** Deterministyczny hash stanu wejściowego (wierzchołki, otwory, wysokości, modyfikatory) */
   readonly geometryHash: string;
@@ -69,6 +80,7 @@ export interface CompiledObjectGeometry {
     readonly footprintBase: Polygon2D;
     readonly footprintRoof: Polygon2D;
     readonly storySlices: readonly StorySlice[];
+    readonly masterplanTiers?: readonly PrecomputedMasterplanTier[];
     readonly bounds2D: {
       readonly min: Point2D;
       readonly max: Point2D;

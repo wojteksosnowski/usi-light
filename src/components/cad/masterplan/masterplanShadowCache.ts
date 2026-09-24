@@ -234,6 +234,9 @@ export function getCachedRoofShadowSamples(
   hourFraction: number,
   method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
 ): MasterplanShadowRenderResult {
+  if (!higherTiers || higherTiers.length === 0) {
+    return { samples: [] };
+  }
   const higherSig = getTiersArraySignature(higherTiers);
   const key = `soft|${method}|${currentH.toFixed(2)}|${higherSig}|${latitude}|${longitude}|${equinoxDate}|${hourFraction}`;
   const cached = roofCache.get(currentTierKey);

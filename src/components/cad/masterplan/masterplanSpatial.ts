@@ -257,7 +257,21 @@ export function unionPolygonsWithHolesHierarchical(polys: PolygonWithHoles[]): P
           if (b1 && b2 && !boundsOverlap(b1, b2)) {
             next.push([...g1, ...g2]);
           } else {
-            next.push(unionPolygonsWithHoles([...g1, ...g2]));
+            const g1Bounds = g1.map((p) => computePointsBoundingBox(p.outer));
+            const g2Bounds = g2.map((p) => computePointsBoundingBox(p.outer));
+            let hasAnyOverlap = false;
+            for (let a = 0; a < g1.length && !hasAnyOverlap; a++) {
+              for (let b = 0; b < g2.length && !hasAnyOverlap; b++) {
+                if (boundsOverlap(g1Bounds[a], g2Bounds[b])) {
+                  hasAnyOverlap = true;
+                }
+              }
+            }
+            if (!hasAnyOverlap) {
+              next.push([...g1, ...g2]);
+            } else {
+              next.push(unionPolygonsWithHoles([...g1, ...g2]));
+            }
           }
         }
       } else {

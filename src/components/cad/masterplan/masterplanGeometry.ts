@@ -68,6 +68,24 @@ export function extractBuildingStoryTiers(
   const totalHeight = bldg.defaultHeight || 0.0;
   const defaultBldgType = bldg.buildingType ?? 'residential';
 
+  if (bldg.computed?.representation2D?.masterplanTiers && bldg.computed.representation2D.masterplanTiers.length > 0) {
+    return bldg.computed.representation2D.masterplanTiers.map((t) => ({
+      buildingId: bldg.id,
+      storyIndex: t.storyIndex,
+      polygon: t.polygon as Point2D[],
+      holes: (t.holes ?? []) as Point2D[][],
+      hBottom: t.hBottom,
+      hTop: t.hTop,
+      isProposed,
+      isSelected,
+      isHovered,
+      geomFingerprint: t.geomFingerprint,
+      isConvex: t.isConvex,
+      bldgRef: bldg,
+      buildingType: (t.buildingType ?? defaultBldgType) as BuildingType,
+    }));
+  }
+
   if (bldg.computed?.representation2D?.storySlices && bldg.computed.representation2D.storySlices.length > 0) {
     const slices = bldg.computed.representation2D.storySlices;
     const tiers: MasterplanStoryTier[] = [];

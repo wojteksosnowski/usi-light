@@ -247,6 +247,17 @@ export function isPolygonConvex(polygon: Point2D[]): boolean {
 }
 
 /**
+ * Zwraca zwięzły fingerprint geometrii wielokąta dla cache'owania cieni.
+ */
+export function polygonFingerprint(polygon: readonly Point2D[]): string {
+  let s = String(polygon.length);
+  for (const p of polygon) {
+    s += `:${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+  }
+  return s;
+}
+
+/**
  * Pomocnicza funkcja łącząca poligony za pomocą polygonClipping.union
  */
 /**

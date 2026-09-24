@@ -6,6 +6,7 @@ import type {
   LabelPlacementInfo,
   Point3D,
   Polygon2D,
+  PrecomputedMasterplanTier,
   ShadowCastingEdge,
   StorySlice,
 } from '@/types/compiledGeometry';
@@ -16,6 +17,9 @@ import {
   rotatePointAroundPivot,
   getPolygonInteriorPoint,
   computePolygonDominantAngle,
+  isPolygonConvex,
+  polygonFingerprint,
+  collapseIdenticalConsecutiveHeightRuns,
 } from '@/utils/math2d/polygons';
 import { calculateOutwardNormal } from '@/utils/math2d/vec2';
 import { clippingResultToPolygonsWithHoles, polygonsWithHolesToClipping, PolygonWithHoles } from '@/utils/math2d/polygons';
@@ -319,6 +323,50 @@ export class GeometryCompiler {
       };
     }
 
+    // Prekompilacja story tiers dla widoku Masterplan (Bake on Edit)
+    const rawTiers: PrecomputedMasterplanTier[] = [];
+    const defaultBldgType = building.buildingType ?? 'residential';
+    if (storySlices.length > 0) {
+      for (const s of storySlices) {
+        if (!s.footprint.exterior || s.footprint.exterior.length < 3) continue;
+        const poly = s.footprint.exterior as Point2D[];
+        const holes = (s.footprint.holes as Point2D[][]) || [];
+        rawTiers.push({
+          storyIndex: s.storyIndex,
+          polygon: poly,
+          holes,
+          hBottom: s.elevationBottom,
+          hTop: s.elevationTop,
+          geomFingerprint: polygonFingerprint(poly),
+          isConvex: isPolygonConvex(poly),
+          buildingType: defaultBldgType,
+        });
+      }
+    } else if (baseVertices.length >= 3 && defaultHeight > 0) {
+      rawTiers.push({
+        storyIndex: 0,
+        polygon: baseVertices,
+        holes: baseHoles,
+        hBottom: baseElevation,
+        hTop: baseElevation + defaultHeight,
+        geomFingerprint: polygonFingerprint(baseVertices),
+        isConvex: isPolygonConvex(baseVertices),
+        buildingType: defaultBldgType,
+      });
+    }
+
+    const masterplanTiers: PrecomputedMasterplanTier[] = rawTiers.length > 0
+      ? collapseIdenticalConsecutiveHeightRuns(
+          rawTiers,
+          (t) => t.polygon as Point2D[],
+          (t) => t.holes as Point2D[][],
+          (t) => t.hBottom,
+          (t) => t.hTop,
+          (last, hBottom, hTop) => ({ ...last, hBottom, hTop }),
+          (t) => t.buildingType
+        )
+      : [];
+
     return {
       geometryHash: hash,
       computedAt: Date.now(),
@@ -326,6 +374,7 @@ export class GeometryCompiler {
         footprintBase,
         footprintRoof,
         storySlices,
+        masterplanTiers,
         bounds2D,
         labelInfo,
       },

@@ -69,16 +69,21 @@ function getOrComputeRoofsHierarchy(
   }
 
   const higherTiersPerTier: MasterplanStoryTier[][] = new Array(sortedTiers.length);
-  for (let i = 0; i < sortedTiers.length; i++) {
+  const n = sortedTiers.length;
+  for (let i = 0; i < n; i++) {
     const currentH = sortedTiers[i].hTop;
     const currentTierBounds = sortedTierBounds[i];
-    const higher = sortedTiers.slice(i + 1).filter((ht, offset) => {
+    const higher: MasterplanStoryTier[] = [];
+    for (let j = i + 1; j < n; j++) {
+      const ht = sortedTiers[j];
       const deltaHTop = ht.hTop - currentH;
-      if (deltaHTop <= 0.05) return false;
+      if (deltaHTop <= 0.05) continue;
       const htOffset = computeShadowOffsetVector(deltaHTop, angles);
-      const htReachBounds = extendBoundsByOffset(sortedTierBounds[i + 1 + offset], htOffset.dx * 1.05, htOffset.dy * 1.05);
-      return boundsOverlap(currentTierBounds, htReachBounds);
-    });
+      const htReachBounds = extendBoundsByOffset(sortedTierBounds[j], htOffset.dx * 1.05, htOffset.dy * 1.05);
+      if (boundsOverlap(currentTierBounds, htReachBounds)) {
+        higher.push(ht);
+      }
+    }
     higherTiersPerTier[i] = higher;
   }
 
