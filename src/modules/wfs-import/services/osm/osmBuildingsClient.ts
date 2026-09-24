@@ -1034,10 +1034,48 @@ export function findIncompleteRelations(elements: OverpassElement[]): number[] {
   return findIncompleteBuildingPartsAndRelations(elements).incompleteRelationIds;
 }
 
+interface OverpassBounds {
+  minlat: number;
+  minlon: number;
+  maxlat: number;
+  maxlon: number;
+}
+
+export function findMissingBuildingRelationIds(
+  envelopes: (OverpassRelation & { bounds?: OverpassBounds })[],
+  round1Elements: OverpassElement[],
+  projectCenter: LatLon,
+  projectCrs: CrsDetectionResult,
+  radiusMeters: number
+): number[] {
+  const round1RelationIds = new Set<number>();
+  for (const el of round1Elements) {
+    if (el.type === 'relation') round1RelationIds.add(el.id);
+  }
+
+  const projectCenterCad = wgs84ToCadPoint(projectCenter, projectCrs, projectCenter);
+
+  const missing: number[] = [];
+  for (const rel of envelopes) {
+    if (!isBuildingRelationTags(rel.tags)) continue;
+    if (round1RelationIds.has(rel.id)) continue;
+    if (!rel.bounds) continue;
+
+    const centerLatLon: LatLon = {
+      lat: (rel.bounds.minlat + rel.bounds.maxlat) / 2,
+      lon: (rel.bounds.minlon + rel.bounds.maxlon) / 2,
+    };
+    const centerCad = wgs84ToCadPoint(centerLatLon, projectCrs, projectCenter);
+    const distance = Math.hypot(centerCad.x - projectCenterCad.x, centerCad.y - projectCenterCad.y);
+    if (distance <= radiusMeters + ROUND0_BBOX_PADDING_METERS) missing.push(rel.id);
+  }
+  return missing;
+}
+
 /**
  * Krok 4: Celowany dociąg pełnej geometrii relacji (po ID) z podwójną rekursją.
  */
-async function fetchRelationFull(relId: number, timeoutMs = 25000): Promise<OverpassResponse> {
+export async function fetchRelationFull(relId: number, timeoutMs = 25000): Promise<OverpassResponse> {
   const query = `
     [out:json][timeout:25];
     relation(${relId});
@@ -1050,7 +1088,7 @@ async function fetchRelationFull(relId: number, timeoutMs = 25000): Promise<Over
 /**
  * Krok 4: Zbiorczy dociąg pełnej geometrii wielu relacji naraz po ID.
  */
-async function fetchRelationsBatch(relIds: number[], timeoutMs = 30000): Promise<OverpassResponse> {
+export async function fetchRelationsBatch(relIds: number[], timeoutMs = 30000): Promise<OverpassResponse> {
   if (relIds.length === 0) return { elements: [] };
   const idsStr = relIds.join(',');
   const query = `
@@ -1065,7 +1103,7 @@ async function fetchRelationsBatch(relIds: number[], timeoutMs = 30000): Promise
 /**
  * Krok 3: Celowany dociąg budynku wraz z częściami building:part wokół niego.
  */
-async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 25000): Promise<OverpassResponse> {
+export async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 25000): Promise<OverpassResponse> {
   const query = `
     [out:json][timeout:25];
     (
@@ -1078,11 +1116,25 @@ async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 25000): Pro
   return postOverpassQuery(query, timeoutMs);
 }
 
-interface OverpassBounds {
-  minlat: number;
-  minlon: number;
-  maxlat: number;
-  maxlon: number;
+/**
+ * Krok 3: Zbiorczy dociąg części 3D (building:part) oraz pełnej geometrii relacji po ID budynków.
+ */
+export async function fetchBuildingPartsBatch(
+  wayIds: number[],
+  relIds: number[],
+  timeoutMs = 30000
+): Promise<OverpassResponse> {
+  if (wayIds.length === 0 && relIds.length === 0) return { elements: [] };
+  const query = `
+    [out:json][timeout:30];
+    (
+      ${relIds.length > 0 ? `relation(id:${relIds.join(',')}); (._;>;>;);` : ''}
+      ${wayIds.length > 0 ? `way(id:${wayIds.join(',')}); nwr(around:1)["building:part"];` : ''}
+    );
+    (._;>;);
+    out body;
+  `.trim();
+  return postOverpassQuery(query, timeoutMs);
 }
 
 /** Rozszerza bbox o stały margines w metrach. */
@@ -1177,70 +1229,12 @@ async function fetchQuadrantWithRetry(
 }
 
 /**
- * Runda 0: tanie zapytanie discovery (bez rekursji) na poszerzonym bboxie, które zwraca same
- * ID/tagi/obwiednie relacji budynkowych.
- */
-async function fetchRelationEnvelopes(paddedBbox: WfsBbox): Promise<(OverpassRelation & { bounds?: OverpassBounds })[]> {
-  const [west, south, east, north] = paddedBbox;
-  const query = `
-    [out:json][timeout:30];
-    (
-      relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
-      relation["building:part"]["type"="multipolygon"](${south},${west},${north},${east});
-      relation["type"="building"](${south},${west},${north},${east});
-    );
-    out ids tags bb;
-  `.trim();
-  try {
-    const response = await postOverpassQuery(query, ROUND0_TIMEOUT_MS);
-    return response.elements.filter((el): el is OverpassRelation & { bounds?: OverpassBounds } => el.type === 'relation');
-  } catch (err) {
-    console.warn('Runda 0 (discovery obwiedni relacji OSM) nie powiodła się:', err);
-    return [];
-  }
-}
-
-/**
- * Z relacji znalezionych w Rundzie 0 wybiera te, które są budynkowe, mieszczą się (obwiednią)
- * w promieniu projektu i NIE występują w ogóle w elementach Rundy 1.
- */
-export function findMissingBuildingRelationIds(
-  envelopes: (OverpassRelation & { bounds?: OverpassBounds })[],
-  round1Elements: OverpassElement[],
-  projectCenter: LatLon,
-  projectCrs: CrsDetectionResult,
-  radiusMeters: number
-): number[] {
-  const round1RelationIds = new Set<number>();
-  for (const el of round1Elements) {
-    if (el.type === 'relation') round1RelationIds.add(el.id);
-  }
-
-  const projectCenterCad = wgs84ToCadPoint(projectCenter, projectCrs, projectCenter);
-
-  const missing: number[] = [];
-  for (const rel of envelopes) {
-    if (!isBuildingRelationTags(rel.tags)) continue;
-    if (round1RelationIds.has(rel.id)) continue;
-    if (!rel.bounds) continue;
-
-    const centerLatLon: LatLon = {
-      lat: (rel.bounds.minlat + rel.bounds.maxlat) / 2,
-      lon: (rel.bounds.minlon + rel.bounds.maxlon) / 2,
-    };
-    const centerCad = wgs84ToCadPoint(centerLatLon, projectCrs, projectCenter);
-    const distance = Math.hypot(centerCad.x - projectCenterCad.x, centerCad.y - projectCenterCad.y);
-    if (distance <= radiusMeters + ROUND0_BBOX_PADDING_METERS) missing.push(rel.id);
-  }
-  return missing;
-}
-
-/**
  * Główna procedura pobierania budynków z OpenStreetMap przez Overpass API:
  * Krok 1: Podział na kwadranty 350x350m z zakładem >= 100m.
  * Krok 2: Pobranie bazowych budynków (TYLKO nwr["building"]) per kwadrant z retry i ich połączenie.
- * Krok 3: Precyzyjny dociąg geometrii relacji 3D i niekompletnych budynków po ID z Kroku 2.
- * Krok 4: Asemblacja i sanityzacja geometrii CAD (odrzucenie envelope, grupowanie części, holes).
+ * Krok 3: Precyzyjny dociąg building:part oraz relacji 3D po ID budynków z Kroku 2.
+ * Krok 4: Weryfikacja kompletności geometrii (relacje, węzły, części 3D).
+ * Krok 5: Asemblacja i sanityzacja geometrii CAD (odrzucenie envelope, grupowanie części, holes).
  */
 export async function fetchOsmBuildings(
   bbox: WfsBbox,
@@ -1300,67 +1294,57 @@ export async function fetchOsmBuildings(
   );
   const foundCount = baseWays.length + baseRels.length;
 
-  // KROK 3: Precyzyjny dociąg relacji 3D i brakujących geometrii po ID z Kroku 2
+  // KROK 3: Dociąg building:part oraz pełnej geometrii relacji po ID budynków
   onProgress?.({
     stage: 'details',
-    message: `Znaleziono ${foundCount} budynków. Weryfikacja geometrii po ID...`,
+    message: `Znaleziono ${foundCount} budynków. Pobieranie części 3D (building:part)...`,
     foundBuildingsCount: foundCount,
   });
 
-  const incomplete = findIncompleteBuildingPartsAndRelations(combinedResponse.elements);
-  const baseRelIds = Array.from(new Set([...baseRels.map((r) => r.id), ...incomplete.incompleteRelationIds])).slice(
-    0,
-    ROUND2_MAX_RELATIONS
-  );
-  const waysToFetch = incomplete.incompleteWayBuildingIds.slice(0, 6);
+  const wayIds = Array.from(new Set(baseWays.map((w) => w.id)));
+  const relIds = Array.from(new Set(baseRels.map((r) => r.id)));
 
   const detailResponses: OverpassResponse[] = [];
+  const BATCH_SIZE = 30;
+  const totalBatches = Math.max(1, Math.ceil(wayIds.length / BATCH_SIZE));
 
-  // 3a. Dociąg geometrii relacji (type=building / multipolygon) po ID z Kroku 2
-  if (baseRelIds.length > 0) {
+  for (let bIdx = 0; bIdx < totalBatches; bIdx++) {
+    const chunkWays = wayIds.slice(bIdx * BATCH_SIZE, (bIdx + 1) * BATCH_SIZE);
+    const chunkRels = bIdx === 0 ? relIds : [];
+
     onProgress?.({
       stage: 'details',
-      message: `Dociąganie geometrii relacji 3D (${baseRelIds.length} relacji po ID)...`,
+      message: `Pobieranie części 3D (paczka ${bIdx + 1}/${totalBatches})...`,
       foundBuildingsCount: foundCount,
-      currentDetailIndex: 1,
-      totalDetailsCount: baseRelIds.length + waysToFetch.length,
+      currentDetailIndex: bIdx + 1,
+      totalDetailsCount: totalBatches,
     });
+
     try {
-      const relsBatchResp = await fetchRelationsBatch(baseRelIds, 35000);
-      if (relsBatchResp && relsBatchResp.elements.length > 0) {
-        detailResponses.push(relsBatchResp);
+      const batchResp = await fetchBuildingPartsBatch(chunkWays, chunkRels, 35000);
+      if (batchResp && batchResp.elements.length > 0) {
+        detailResponses.push(batchResp);
       }
-    } catch (err) {
-      console.warn('Nie udało się pobrać relacji w batchu, próba sekwencyjna:', err);
-      for (const relId of baseRelIds) {
+    } catch (batchErr) {
+      console.warn(`Paczka ${bIdx + 1}/${totalBatches} części 3D nie powiodła się, próba awaryjna:`, batchErr);
+      // Fallback na pojedyncze relacje
+      for (const relId of chunkRels) {
         try {
           const singleRel = await fetchRelationFull(relId, ROUND2_RELATION_TIMEOUT_MS);
           if (singleRel) detailResponses.push(singleRel);
-        } catch (innerErr) {
-          console.warn(`Nie udało się pobrać relacji #${relId}:`, innerErr);
+        } catch {
+          // ignore individual relation error
         }
       }
-    }
-  }
-
-  // 3b. Dociąg niekompletnych budynków way po ID
-  let detailIdx = baseRelIds.length;
-  for (const wayId of waysToFetch) {
-    detailIdx++;
-    onProgress?.({
-      stage: 'details',
-      message: `Dociąganie szczegółów budynku #${wayId} (${detailIdx}/${baseRelIds.length + waysToFetch.length})...`,
-      foundBuildingsCount: foundCount,
-      currentDetailIndex: detailIdx,
-      totalDetailsCount: baseRelIds.length + waysToFetch.length,
-    });
-    try {
-      const wayDetail = await fetchBuildingWithPartsById(wayId, ROUND2_RELATION_TIMEOUT_MS);
-      if (wayDetail && wayDetail.elements.length > 0) {
-        detailResponses.push(wayDetail);
+      // Fallback na pojedyncze drogi
+      for (const wayId of chunkWays.slice(0, 8)) {
+        try {
+          const singleWay = await fetchBuildingWithPartsById(wayId, ROUND2_RELATION_TIMEOUT_MS);
+          if (singleWay) detailResponses.push(singleWay);
+        } catch {
+          // ignore individual way error
+        }
       }
-    } catch (err) {
-      console.warn(`Nie udało się dociągnąć części budynku #${wayId}:`, err);
     }
   }
 
@@ -1368,7 +1352,24 @@ export async function fetchOsmBuildings(
     combinedResponse = mergeOverpassResponses(combinedResponse, ...detailResponses);
   }
 
-  // KROK 4: Asemblacja i sanityzacja geometrii CAD
+  // KROK 4: Weryfikacja kompletności pobranych elementów
+  const incomplete = findIncompleteBuildingPartsAndRelations(combinedResponse.elements);
+  if (incomplete.incompleteRelationIds.length > 0 || incomplete.incompleteWayBuildingIds.length > 0) {
+    const fallbackRelIds = incomplete.incompleteRelationIds.slice(0, 4);
+    const fallbackWayIds = incomplete.incompleteWayBuildingIds.slice(0, 4);
+    if (fallbackRelIds.length > 0 || fallbackWayIds.length > 0) {
+      try {
+        const recoveryResp = await fetchBuildingPartsBatch(fallbackWayIds, fallbackRelIds, 30000);
+        if (recoveryResp && recoveryResp.elements.length > 0) {
+          combinedResponse = mergeOverpassResponses(combinedResponse, recoveryResp);
+        }
+      } catch {
+        // recovery optional
+      }
+    }
+  }
+
+  // KROK 5: Asemblacja i sanityzacja geometrii CAD
   onProgress?.({
     stage: 'assembling',
     message: 'Generowanie i sanityzacja geometrii CAD...',

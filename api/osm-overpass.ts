@@ -18,21 +18,17 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 // mało elementów, bo "mało" jest nie do odróżnienia od poprawnego wyniku bez porównywania
 // mirrorów, a właśnie to porównywanie było źródłem niedeterminizmu.
 const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.osm.ch/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
 ];
 
-// Budżet czasowy klienta (AbortError) to 55s (OVERPASS_REQUEST_TIMEOUT_MS w
+// Budżet czasowy klienta (AbortError) to 185s (OVERPASS_REQUEST_TIMEOUT_MS w
 // osmBuildingsClient.ts) — cały łańcuch prób (główny endpoint + fallbacki) musi się w nim
-// zmieścić z zapasem. Zapytanie ma własny budżet [timeout:45] (Overpass QL, patrz
-// fetchOsmBuildings) — HTTP timeout głównego endpointu MUSI być większy niż 45s, inaczej
-// przerwiemy połączenie własnym AbortController, zanim Overpass zdąży dokończyć zapytanie
-// w swoim wewnętrznym budżecie (czyli sami ucinalibyśmy tę "pełną odpowiedź", o którą chodzi).
+// zmieścić z zapasem.
 const PRIMARY_TIMEOUT_MS = 25000;
-const FALLBACK_TIMEOUT_MS = 18000;
+const FALLBACK_TIMEOUT_MS = 25000;
 const TOTAL_BUDGET_MS = 180000;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -81,10 +77,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!text.startsWith('{')) {
         throw new Error(`Endpoint ${endpoint} zwrócił nieoczekiwaną odpowiedź.`);
       }
+      let parsed: any;
       try {
-        JSON.parse(text);
+        parsed = JSON.parse(text);
       } catch {
         throw new Error(`Endpoint ${endpoint} zwrócił niepoprawny JSON.`);
+      }
+      if (parsed?.remark && /timeout|timed out|quota|runtime error|Dispatcher_Client/i.test(parsed.remark)) {
+        throw new Error(`Endpoint ${endpoint} zgłosił błąd wykonania: ${parsed.remark}`);
       }
       return text;
     } finally {
