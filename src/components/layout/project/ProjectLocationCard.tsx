@@ -8,6 +8,7 @@ import {
   Crosshair,
   ExternalLink,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { POLISH_CITIES } from '../../../store';
 import { useProjectGeoSync } from './hooks/useProjectGeoSync';
@@ -33,9 +34,13 @@ export const ProjectLocationCard: React.FC = () => {
     WFS_IMPORT_CONTINUE_HINT,
     updateProjectCenter,
     handleMapsInputChange,
-    handleSyncGeoData,
+    handleSyncParcels,
+    handleSyncBuildings,
     triggerFit,
   } = useProjectGeoSync();
+
+  const isFetchingParcels = status.isFetching && status.stage === 'parcels';
+  const isFetchingBuildings = status.isFetching && status.stage === 'buildings';
 
   return (
     <div className="ui-card">
@@ -185,75 +190,100 @@ export const ProjectLocationCard: React.FC = () => {
           </div>
         </div>
 
-        {isPro && (
-          <>
-            {/* Źródło budynków: Geoportal / OSM (PRO) */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                Źródło budynków:
-              </span>
-              <div
-                className="project-grid-presets"
-                style={{
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  padding: '3px',
-                  borderRadius: '8px',
-                }}
-              >
-                {([
-                  { id: 'geoportal' as const, label: 'Geoportal' },
-                  { id: 'osm' as const, label: 'OSM' },
-                ]).map((opt) => {
-                  const isActive = buildingSource === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setBuildingSource(opt.id)}
-                      className={`project-preset-btn ${isActive ? 'active-cyan' : ''}`}
-                      style={{ padding: '3px 6px', fontSize: '10px' }}
-                      title={
-                        opt.id === 'geoportal'
-                          ? 'Pobierz budynki z geoportalu miejskiego (WFS/EGiB)'
-                          : 'Pobierz budynki z OpenStreetMap'
-                      }
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+        {/* Źródło budynków: Geoportal / OSM */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            Źródło budynków:
+          </span>
+          <div
+            className="project-grid-presets"
+            style={{
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              padding: '3px',
+              borderRadius: '8px',
+            }}
+          >
+            {([
+              { id: 'geoportal' as const, label: 'Geoportal' },
+              { id: 'osm' as const, label: 'OSM' },
+            ]).map((opt) => {
+              const isActive = buildingSource === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setBuildingSource(opt.id)}
+                  className={`project-preset-btn ${isActive ? 'active-cyan' : ''}`}
+                  style={{ padding: '3px 6px', fontSize: '10px' }}
+                  title={
+                    opt.id === 'geoportal'
+                      ? 'Pobierz budynki z geoportalu miejskiego (WFS/EGiB)'
+                      : 'Pobierz budynki z OpenStreetMap'
+                  }
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-            {/* Przycisk Pobierz działki i budynki (PRO) */}
-            <button
-              type="button"
-              onClick={handleSyncGeoData}
-              disabled={status.isFetching}
-              className="project-sync-btn"
-              title="Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK) oraz budynki wewnątrz okręgu projektu"
-            >
-              {status.isFetching && <RefreshCw size={13} className="spin" />}
-              <span>{status.isFetching ? formatWfsProgress(status) : 'Pobierz działki i budynki'}</span>
-            </button>
+        {/* Przyciski Pobierz Działki i Pobierz Budynki (Dostępne w PRO, wyszarzone we Free) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', marginTop: '2px' }}>
+          <button
+            type="button"
+            onClick={handleSyncParcels}
+            disabled={status.isFetching}
+            className={`project-sync-btn ${!isPro ? 'is-free' : ''}`}
+            title={
+              isPro
+                ? 'Pobierz i zsynchronizuj wektorowe działki ewidencyjne (ULDK / Geoportal miejski)'
+                : 'Pobieranie działek ewidencyjnych (wymagana licencja PRO — kliknij, aby odblokować)'
+            }
+          >
+            {isFetchingParcels ? (
+              <RefreshCw size={13} className="spin" />
+            ) : (
+              <Download size={13} />
+            )}
+            <span>{isFetchingParcels ? formatWfsProgress(status) : 'Działki'}</span>
+          </button>
 
-            {status.isFetching && (
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center' }}>
-                {WFS_IMPORT_CONTINUE_HINT}
-              </div>
+          <button
+            type="button"
+            onClick={handleSyncBuildings}
+            disabled={status.isFetching}
+            className={`project-sync-btn ${!isPro ? 'is-free' : ''}`}
+            title={
+              isPro
+                ? `Pobierz i zsynchronizuj budynki (${buildingSource === 'geoportal' ? 'Geoportal WFS/EGiB' : 'OpenStreetMap'})`
+                : 'Pobieranie budynków (wymagana licencja PRO — kliknij, aby odblokować)'
+            }
+          >
+            {isFetchingBuildings ? (
+              <RefreshCw size={13} className="spin" />
+            ) : (
+              <Download size={13} />
             )}
+            <span>{isFetchingBuildings ? formatWfsProgress(status) : 'Budynki'}</span>
+          </button>
+        </div>
 
-            {syncFeedback && (
-              <div style={{ fontSize: '10.5px', color: 'var(--accent-emerald-light)', textAlign: 'center', fontWeight: 600 }}>
-                {syncFeedback}
-              </div>
-            )}
-            {status.error && (
-              <div style={{ fontSize: '10.5px', color: 'var(--accent-rose)', textAlign: 'center' }}>
-                {status.error}
-              </div>
-            )}
-          </>
+        {status.isFetching && (
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', textAlign: 'center' }}>
+            {WFS_IMPORT_CONTINUE_HINT}
+          </div>
+        )}
+
+        {syncFeedback && (
+          <div style={{ fontSize: '10.5px', color: 'var(--accent-emerald-light)', textAlign: 'center', fontWeight: 600 }}>
+            {syncFeedback}
+          </div>
+        )}
+        {status.error && (
+          <div style={{ fontSize: '10.5px', color: 'var(--accent-rose)', textAlign: 'center' }}>
+            {status.error}
+          </div>
         )}
       </div>
     </div>

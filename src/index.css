@@ -944,21 +944,36 @@ html, body, #root {
 }
 
 .project-sync-btn {
-  margin-top: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--accent-amber);
   background: linear-gradient(135deg, var(--accent-amber), #ea580c);
-  color: #ffffff;
+  color: var(--text-primary);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
-  transition: opacity 0.15s ease;
+  transition: all 0.15s ease;
+}
+
+.project-sync-btn.is-free {
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  box-shadow: none;
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.project-sync-btn.is-free:hover {
+  opacity: 0.95;
+  border-color: var(--border-light);
+  color: var(--text-primary);
+  background: var(--bg-card);
 }
 
 .project-sync-btn:disabled {

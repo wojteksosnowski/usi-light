@@ -1232,16 +1232,20 @@ describe('osmBuildingsClient', () => {
     });
 
     it('two sequential fetchOsmBuildings calls for the identical bbox surface exactly what the proxy returned each time (939 then 243)', async () => {
-      let call = 0;
-      const responses = [
+      let baselineCall = 0;
+      const baselineResponses = [
         buildOverpassPayload(939), // first fetchOsmBuildings - quadrant 1
         buildOverpassPayload(243), // second fetchOsmBuildings - quadrant 1
       ];
       vi.stubGlobal(
         'fetch',
-        vi.fn(async () => {
-          const payload = responses[call] || { elements: [] };
-          call++;
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = String(init?.body || '');
+          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+            return { ok: true, json: async () => ({ elements: [] }) } as Response;
+          }
+          const payload = baselineResponses[baselineCall] || { elements: [] };
+          baselineCall++;
           return { ok: true, json: async () => payload } as Response;
         })
       );
@@ -1255,16 +1259,14 @@ describe('osmBuildingsClient', () => {
 
     it('emits progress updates informing about found buildings count and 3D details', async () => {
       const progressUpdates: any[] = [];
-      const responses = [
-        buildOverpassPayload(10), // quadrant 1
-      ];
-      let call = 0;
       vi.stubGlobal(
         'fetch',
-        vi.fn(async () => {
-          const payload = responses[call] || { elements: [] };
-          call++;
-          return { ok: true, json: async () => payload } as Response;
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = String(init?.body || '');
+          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+            return { ok: true, json: async () => ({ elements: [] }) } as Response;
+          }
+          return { ok: true, json: async () => buildOverpassPayload(10) } as Response;
         })
       );
 
@@ -1281,12 +1283,16 @@ describe('osmBuildingsClient', () => {
     });
 
     it('retries quadrant on error and succeeds if retry returns data', async () => {
-      let call = 0;
+      let baselineCall = 0;
       vi.stubGlobal(
         'fetch',
-        vi.fn(async () => {
-          call++;
-          if (call === 1) {
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = String(init?.body || '');
+          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+            return { ok: true, json: async () => ({ elements: [] }) } as Response;
+          }
+          baselineCall++;
+          if (baselineCall === 1) {
             return { ok: false, status: 504, json: async () => ({ error: 'Gateway Timeout' }) } as Response;
           }
           return { ok: true, json: async () => buildOverpassPayload(5) } as Response;
@@ -1295,7 +1301,7 @@ describe('osmBuildingsClient', () => {
 
       const res = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, 100);
       expect(res.length).toBe(5);
-      expect(call).toBe(2);
+      expect(baselineCall).toBe(2);
     });
   });
 

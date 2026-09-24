@@ -90,7 +90,7 @@ export const useProjectGeoSync = () => {
     const oldLon = settings.longitude;
     if (oldLat === newLat && oldLon === newLon) return;
 
-    const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
+    const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []), { lat: newLat, lon: newLon });
     const delta = wgs84ToCadPoint({ lat: oldLat, lon: oldLon }, projectCrs, { lat: newLat, lon: newLon });
     setBuildings(buildings.map((b) => translateBuildingGeometry(b, delta.x, delta.y)));
     useWfsStore.getState().shiftVectorLayers(delta);
@@ -136,6 +136,217 @@ export const useProjectGeoSync = () => {
     }
   };
 
+  const handleSyncParcels = async () => {
+    if (!isPro) {
+      openModal('pricing');
+      return;
+    }
+    setStatus({ isFetching: true, stage: 'parcels', progressDone: 0, progressTotal: 0, error: null, info: null });
+    setSyncFeedback(null);
+    try {
+      const centerLat = settings.latitude;
+      const centerLon = settings.longitude;
+      const radius = projectRadius;
+      const projectCenter = { lat: centerLat, lon: centerLon };
+      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []), projectCenter);
+      const bbox = latLonToBbox(centerLat, centerLon, radius);
+      const citySource = findCitySource(centerLat, centerLon);
+      const wfsStoreState = useWfsStore.getState();
+
+      let parcelsSourceKey = citySource?.fetchParcels ? `wfs:${citySource.name}` : 'uldk';
+      let parcels: BuildingLoop[];
+      const existingParcels = buildings.filter((b) => b.category === 'boundary' || b.id.startsWith('uldk-'));
+      const fetchUldkParcels = () =>
+        fetchParcelsInRadius(
+          centerLat,
+          centerLon,
+          radius,
+          projectCrs,
+          projectCenter,
+          undefined,
+          (done, total) => setStatus({ progressDone: done, progressTotal: total }),
+          (loops) => {
+            useWfsStore.getState().addLoadingParcels(loops);
+            window.dispatchEvent(new Event('geo-render-needed'));
+          }
+        );
+
+      if (wfsStoreState.isParcelsFetchCovered(projectCenter, radius, parcelsSourceKey) && existingParcels.length > 0) {
+        parcels = existingParcels;
+      } else if (citySource?.fetchParcels) {
+        try {
+          const parcelsGeoJson = await citySource.fetchParcels(bbox);
+          parcels = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter).parcels;
+          if (parcels.length === 0) {
+            console.warn(`WFS ${citySource.name} zwrócił 0 działek, fallback krajowy (ULDK) na wszelki wypadek`);
+            parcelsSourceKey = 'uldk';
+            parcels = await fetchUldkParcels();
+          }
+        } catch (err) {
+          console.warn(`Nie udało się pobrać działek z ${citySource.name}, fallback krajowy (ULDK):`, err);
+          parcelsSourceKey = 'uldk';
+          parcels = await fetchUldkParcels();
+        }
+        wfsStoreState.setParcelsFetchCoverage({ center: projectCenter, radius, sourceKey: parcelsSourceKey });
+      } else {
+        parcels = await fetchUldkParcels();
+        wfsStoreState.setParcelsFetchCoverage({ center: projectCenter, radius, sourceKey: parcelsSourceKey });
+      }
+
+      // Smart Updater: Zachowujemy wszystkie obiekty niebędące starymi działkami
+      const existingNonParcels = buildings.filter(
+        (b) => b.category !== 'boundary' && !b.id.startsWith('uldk-')
+      );
+      const combined = [...existingNonParcels, ...parcels];
+      setBuildings(combined);
+
+      setStatus({
+        isFetching: false,
+        stage: 'done',
+        error: null,
+        info: null,
+        parcelsCount: parcels.length,
+        buildingsCount: useWfsStore.getState().status.buildingsCount || 0,
+      });
+      setSyncFeedback(
+        `Zsynchronizowano: ${parcels.length} działek (${parcelsSourceKey === 'uldk' ? 'ULDK' : citySource?.name || 'WFS'})`
+      );
+
+      if (showOsmLanduseGroup) {
+        ensureOsmLanduseLoaded().catch(() => {});
+      }
+
+      window.dispatchEvent(new CustomEvent('geo-prefetch-satellite', {
+        detail: { lat: centerLat, lon: centerLon, radius },
+      }));
+
+      triggerFit();
+    } catch (err) {
+      setStatus({
+        isFetching: false,
+        stage: 'idle',
+        error: err instanceof Error ? err.message : 'Błąd synchronizacji działek',
+        info: null,
+      });
+    } finally {
+      useWfsStore.getState().clearLoadingParcels();
+      window.dispatchEvent(new Event('geo-render-needed'));
+    }
+  };
+
+  const handleSyncBuildings = async () => {
+    if (!isPro) {
+      openModal('pricing');
+      return;
+    }
+    setStatus({ isFetching: true, stage: 'buildings', progressDone: 0, progressTotal: 0, error: null, info: null });
+    setSyncFeedback(null);
+    try {
+      const centerLat = settings.latitude;
+      const centerLon = settings.longitude;
+      const radius = projectRadius;
+      const projectCenter = { lat: centerLat, lon: centerLon };
+      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []), projectCenter);
+      const bbox = latLonToBbox(centerLat, centerLon, radius);
+      const citySource = findCitySource(centerLat, centerLon);
+      const wfsStoreState = useWfsStore.getState();
+
+      let importedBuildings: BuildingLoop[] = [];
+      let buildingsFetchError: string | null = null;
+      let buildingsSourceLabel = citySource?.name || 'WFS';
+
+      const buildingsSourceKeyGuess = buildingSource === 'geoportal' ? `wfs:${citySource?.name || 'egib'}` : 'osm';
+      const existingImportedBuildings = buildings.filter((b) => b.category !== 'boundary' && (b.id.startsWith('wfs-') || b.id.startsWith('osm-')));
+      if (wfsStoreState.isBuildingsFetchCovered(projectCenter, radius, buildingsSourceKeyGuess) && existingImportedBuildings.length > 0) {
+        importedBuildings = existingImportedBuildings;
+        buildingsSourceLabel = buildingSource === 'geoportal' ? (citySource?.name || 'Geoportal') : 'OpenStreetMap';
+      } else if (buildingSource === 'geoportal') {
+        try {
+          const fetched = await fetchBuildingsWithFallback(citySource, bbox);
+          if (fetched) {
+            const res = importBuildingsFromGeoJson(fetched.geojson, fetched.source.sourceCrs, projectCrs, projectCenter, radius);
+            importedBuildings = res.buildings;
+            buildingsSourceLabel = fetched.source.name;
+            wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: `wfs:${fetched.source.name}` });
+          }
+        } catch (err) {
+          console.warn(`Nie udało się pobrać budynków z Geoportalu (${citySource?.name}), w tym z fallbacku krajowego:`, err);
+        }
+        if (importedBuildings.length === 0) {
+          buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
+        }
+      } else {
+        try {
+          importedBuildings = await fetchOsmBuildings(
+            bbox,
+            projectCenter,
+            projectCrs,
+            radius,
+            (progress) => {
+              setStatus((prev) => ({
+                ...prev,
+                info: progress.message,
+                progressDone: progress.stage === 'assembling' ? 2 : progress.stage === 'details' ? 1 : 0,
+                progressTotal: 2,
+              }));
+            }
+          );
+          buildingsSourceLabel = 'OpenStreetMap';
+          wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: buildingsSourceKeyGuess });
+        } catch (osmErr) {
+          console.warn('Nie udało się pobrać budynków z OSM:', osmErr);
+          buildingsFetchError = `Nie udało się pobrać budynków z OpenStreetMap: ${osmErr instanceof Error ? osmErr.message : String(osmErr)}`;
+        }
+        if (importedBuildings.length === 0 && !buildingsFetchError) {
+          buildingsFetchError = 'Brak danych budynków dla zadanego obszaru';
+        }
+      }
+
+      if (buildingsFetchError && importedBuildings.length === 0 && existingImportedBuildings.length > 0) {
+        importedBuildings = existingImportedBuildings;
+      }
+
+      // Smart Updater: Zachowujemy wszystkie obiekty niebędące starymi importowanymi budynkami
+      const existingUserParcelsAndTested = buildings.filter(
+        (b) => b.isTested || b.category === 'boundary' || (!b.id.startsWith('wfs-') && !b.id.startsWith('osm-'))
+      );
+      const combined = [...existingUserParcelsAndTested, ...importedBuildings];
+      setBuildings(combined);
+
+      setStatus({
+        isFetching: false,
+        stage: 'done',
+        error: null,
+        info: buildingsFetchError ? `Budynki: ${buildingsFetchError}` : null,
+        parcelsCount: useWfsStore.getState().status.parcelsCount || 0,
+        buildingsCount: importedBuildings.length,
+      });
+      setSyncFeedback(
+        `Zsynchronizowano: ${importedBuildings.length} budynków (${buildingsSourceLabel})` +
+        (buildingsFetchError ? ` (⚠️ nie udało się pobrać budynków: ${buildingsFetchError})` : '')
+      );
+
+      if (showOsmLanduseGroup) {
+        ensureOsmLanduseLoaded().catch(() => {});
+      }
+
+      window.dispatchEvent(new CustomEvent('geo-prefetch-satellite', {
+        detail: { lat: centerLat, lon: centerLon, radius },
+      }));
+
+      triggerFit();
+    } catch (err) {
+      setStatus({
+        isFetching: false,
+        stage: 'idle',
+        error: err instanceof Error ? err.message : 'Błąd synchronizacji budynków',
+        info: null,
+      });
+    } finally {
+      window.dispatchEvent(new Event('geo-render-needed'));
+    }
+  };
+
   const handleSyncGeoData = async () => {
     if (!isPro) {
       openModal('pricing');
@@ -148,13 +359,12 @@ export const useProjectGeoSync = () => {
       const centerLon = settings.longitude;
       const radius = projectRadius;
       const projectCenter = { lat: centerLat, lon: centerLon };
-      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
+      const projectCrs = detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []), projectCenter);
       const bbox = latLonToBbox(centerLat, centerLon, radius);
       const citySource = findCitySource(centerLat, centerLon);
       const wfsStoreState = useWfsStore.getState();
 
       // 1. Działki — pomiń ponowne pobranie, jeśli ten sam obszar i źródło były już zsynchronizowane
-      // (unika powtarzania kosztownego sondowania ULDK / zapytań WFS przy wielokrotnym kliknięciu "Synchronizuj").
       let parcelsSourceKey = citySource?.fetchParcels ? `wfs:${citySource.name}` : 'uldk';
       let parcels: BuildingLoop[];
       const existingParcels = buildings.filter((b) => b.category === 'boundary' || b.id.startsWith('uldk-') || b.id.startsWith('wfs-'));
@@ -179,10 +389,6 @@ export const useProjectGeoSync = () => {
         try {
           const parcelsGeoJson = await citySource.fetchParcels(bbox);
           parcels = importParcelsFromGeoJson(parcelsGeoJson, citySource.sourceCrs, projectCrs, projectCenter).parcels;
-          // Pusty wynik bez wyjątku traktujemy jako niepewny, nie autorytatywny — niektóre
-          // miejskie WFS (np. Poznań, patrz komentarz w wfsPoznanClient.ts) potrafią "cicho"
-          // zwrócić HTTP 200 z zerem dopasowań dla małych promieni zamiast rzucić błąd, więc
-          // brak wyjątku nie gwarantuje, że w promieniu naprawdę nie ma działek.
           if (parcels.length === 0) {
             console.warn(`WFS ${citySource.name} zwrócił 0 działek, fallback krajowy (ULDK) na wszelki wypadek`);
             parcelsSourceKey = 'uldk';
@@ -246,9 +452,6 @@ export const useProjectGeoSync = () => {
           wfsStoreState.setBuildingsFetchCoverage({ center: projectCenter, radius, sourceKey: buildingsSourceKeyGuess });
         } catch (osmErr) {
           console.warn('Nie udało się pobrać budynków z OSM:', osmErr);
-          // Komunikat zawiera treść błędu (np. timeout wszystkich mirrorów Overpass), zamiast
-          // generycznego "brak danych" — to rozróżnia realną awarię sieci od faktycznie pustego
-          // obszaru, co wcześniej było nie do odróżnienia dla użytkownika.
           buildingsFetchError = `Nie udało się pobrać budynków z OpenStreetMap: ${osmErr instanceof Error ? osmErr.message : String(osmErr)}`;
         }
         if (importedBuildings.length === 0 && !buildingsFetchError) {
@@ -256,18 +459,11 @@ export const useProjectGeoSync = () => {
         }
       }
 
-      // 2d. Nieudany fetch (np. wszystkie mirrory Overpass padły) nie może pogarszać stanu
-      // sceny względem tego, co już w niej było — bez tego nieudana PONOWNA próba dogrania
-      // budynków dla tego samego obszaru czyściła te już poprawnie zaimportowane wcześniej
-      // (patrz filtr `existingUserAndTestedBuildings` niżej, który je pomija jako "stare OSM/WFS").
       if (buildingsFetchError && importedBuildings.length === 0 && existingImportedBuildings.length > 0) {
         importedBuildings = existingImportedBuildings;
       }
 
       // 3. Inteligentna synchronizacja do sceny (Smart Updater)
-      // Zachowujemy:
-      // - Wszystkie obiekty oznaczone jako projektowane (isTested: true)
-      // - Wszystkie obiekty stworzone / zmodyfikowane przez użytkownika (niebędące starymi uldk-*, wfs-*, osm-bld-*)
       const existingUserAndTestedBuildings = buildings.filter(
         (b) => b.isTested || (!b.id.startsWith('uldk-') && !b.id.startsWith('wfs-') && !b.id.startsWith('osm-'))
       );
@@ -470,6 +666,8 @@ export const useProjectGeoSync = () => {
     updateProjectCenter,
     handleMapsInputChange,
     handleSyncGeoData,
+    handleSyncParcels,
+    handleSyncBuildings,
     toggleOvertureGreenAreas,
     toggleMpzpZonesLayer,
     toggleLandCoverLayer,
