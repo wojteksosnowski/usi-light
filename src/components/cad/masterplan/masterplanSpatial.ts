@@ -158,7 +158,14 @@ export function clusterTiersByShadowOverlap(
   if (n === 0) return [];
   if (n === 1) return [tiers];
 
-  const bounds = tiers.map((t) => tierShadowReachBounds(t, angles));
+  const items = tiers.map((t, idx) => ({
+    idx,
+    tier: t,
+    bounds: tierShadowReachBounds(t, angles),
+  }));
+
+  // Sortowanie po minX dla 1D sweep-line AABB culling
+  items.sort((a, b) => a.bounds.minX - b.bounds.minX);
 
   const parent = Array.from({ length: n }, (_, i) => i);
   const find = (i: number): number => {
@@ -175,8 +182,17 @@ export function clusterTiersByShadowOverlap(
   };
 
   for (let i = 0; i < n; i++) {
+    const bA = items[i].bounds;
+    const idxA = items[i].idx;
     for (let j = i + 1; j < n; j++) {
-      if (boundsOverlap(bounds[i], bounds[j])) union(i, j);
+      const bB = items[j].bounds;
+      if (bB.minX > bA.maxX) {
+        // Ponieważ posortowano po minX, żaden kolejny j nie może nachodzić na bA
+        break;
+      }
+      if (bA.maxY >= bB.minY && bA.minY <= bB.maxY && bA.maxX >= bB.minX) {
+        union(idxA, items[j].idx);
+      }
     }
   }
 

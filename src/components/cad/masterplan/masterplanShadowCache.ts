@@ -48,6 +48,9 @@ function tierFingerprint(t: MasterplanStoryTier): string {
   if (t.bldgRef?.computed?.geometryHash) {
     return `${t.bldgRef.computed.geometryHash}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
   }
+  if (t.geomFingerprint) {
+    return `${t.buildingId}:${t.geomFingerprint}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
+  }
   if (t.bldgRef) {
     const cached = tierFingerprintCache.get(t.bldgRef);
     if (cached) return `${cached}:${t.storyIndex}:${t.hTop.toFixed(2)}:${t.hBottom.toFixed(2)}`;
@@ -86,7 +89,15 @@ function computeSoftSamples(
     for (const tier of cluster) {
       const umbraKey = makeSunBucketKey(tier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0);
       const polys = getOrComputeBuildingShadow(tier.bldgRef, umbraKey, () =>
-        computeStoryShadowPolygonWithHoles(tier.polygon, tier.holes, angles, tier.hTop, tier.hBottom)
+        computeStoryShadowPolygonWithHoles(
+          tier.polygon,
+          tier.holes,
+          angles,
+          tier.hTop,
+          tier.hBottom,
+          tier.geomFingerprint,
+          tier.isConvex
+        )
       );
       cUmbra.push(...polys);
     }
@@ -240,7 +251,15 @@ export function getCachedRoofShadowSamples(
     const extra = `roof:${currentH.toFixed(2)}`;
     const key = makeSunBucketKey(higherTier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, extra);
     const shadowRoofPolys = getOrComputeBuildingShadow(higherTier.bldgRef, key, () =>
-      computeStoryShadowPolygonWithHoles(higherTier.polygon, higherTier.holes, angles, deltaHTop, deltaHBase)
+      computeStoryShadowPolygonWithHoles(
+        higherTier.polygon,
+        higherTier.holes,
+        angles,
+        deltaHTop,
+        deltaHBase,
+        higherTier.geomFingerprint,
+        higherTier.isConvex
+      )
     );
     umbraPolys.push(...shadowRoofPolys);
   }

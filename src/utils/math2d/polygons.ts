@@ -772,8 +772,6 @@ export function differencePolygonLoops(
   }
 
   const result: Point2D[][] = [];
-  const fallbackPositives: Point2D[][] = [];
-  const fallbackNegativesSet = new Set<Point2D[]>();
   const negBoxes = overlappingNegatives.map(computePointsBoundingBox);
 
   for (const posLoop of positiveLoops) {
@@ -807,8 +805,7 @@ export function differencePolygonLoops(
     // batched polygon-clipping sweep over all of them at once, so past this size the
     // batched sweep-line is the cheaper (and already proven-correct) option.
     if (relevant.length > MAX_FAST_DIFFERENCE_CHAIN_LENGTH) {
-      fallbackPositives.push(posLoop);
-      for (const neg of relevant) fallbackNegativesSet.add(neg);
+      result.push(...differencePolygonLoopsViaClipping([posLoop], relevant));
       continue;
     }
 
@@ -836,19 +833,14 @@ export function differencePolygonLoops(
       currentPieces = nextPieces;
     }
 
-    if (chainFailed) {
-      fallbackPositives.push(posLoop);
-      for (const neg of relevant) fallbackNegativesSet.add(neg);
+    if (chainFailed || relevant.length > MAX_FAST_DIFFERENCE_CHAIN_LENGTH) {
+      result.push(...differencePolygonLoopsViaClipping([posLoop], relevant));
     } else {
       for (const piece of currentPieces) {
         result.push(piece.outer);
         if (piece.holes.length > 0) result.push(...piece.holes);
       }
     }
-  }
-
-  if (fallbackPositives.length > 0) {
-    result.push(...differencePolygonLoopsViaClipping(fallbackPositives, [...fallbackNegativesSet]));
   }
 
   return result;

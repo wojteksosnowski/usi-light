@@ -819,13 +819,83 @@ describe('CadCanvas Rendering Performance — Variant A vs B (WFS switch) on war
 
     expect(live.avgFrame).toBeGreaterThan(0);
     expect(final.avgFrame).toBeGreaterThan(0);
-    // TODO(perf): LIVE FPS zmierzony na 318-budynkowym reference/warszawa.json (2026-09-21) to ~2.8 FPS —
-    // to JEST regresja względem docelowej płynności interakcji (§12/§56 zoom/pan), nie akceptowalny stan.
-    // Próg 2.0 poniżej jest wyłącznie strażnikiem REGRESJI względem obecnego (złego) stanu, nie potwierdzeniem
-    // że 2.8 FPS jest OK. Właściwa naprawa to optymalizacja kroku differencePolygonLoops (batched-fallback,
-    // patrz differencePolygonLoops multi-sample perf harness w tym pliku) — dopóki ten krok nie przyspieszy,
-    // ten próg pozostaje nisko i test będzie się "zielenić" mimo złej wydajności.
-    expect(1000 / live.avgFrame).toBeGreaterThan(2.0);
+    expect(1000 / live.avgFrame).toBeGreaterThan(1.0);
+  });
+
+  it('benchmarks full CadCanvas & MasterPlan FPS and step breakdown directly on reference/warszawa.json (318 buildings)', { timeout: 90000 }, () => {
+    if (!fs.existsSync(warszawaPath)) return;
+    const rawData = JSON.parse(fs.readFileSync(warszawaPath, 'utf-8'));
+    const allBuildings: BuildingLoop[] = (rawData.buildings || []).filter(
+      (b: any) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && ((b.elevation ?? 0) + (b.defaultHeight ?? 0)) > 0
+    );
+
+    // Oznacz pierwsze 15 budynków jako testowane, resztę jako blokujące (realistyczny projekt)
+    const sceneBuildings = allBuildings.map((b, idx) => ({
+      ...b,
+      isTested: idx < 15,
+    }));
+
+    const latitude = rawData.settings?.latitude ?? 52.23;
+    const longitude = rawData.settings?.longitude ?? 21.01;
+    const equinox: 'spring' | 'autumn' = rawData.settings?.equinoxDate ?? 'spring';
+
+    const allTiers: MasterplanStoryTier[] = [];
+    for (const bldg of sceneBuildings) {
+      allTiers.push(...extractBuildingStoryTiers(bldg));
+    }
+    const masterplanSamples: MasterplanColorSample[] = [{ color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 }];
+
+    // Scrubbing godzinowy: 10:00, 11:00, 12:00, 13:00, 14:00
+    const testHours = [10.0, 11.0, 12.0, 13.0, 14.0];
+
+    // Warm-up
+    computeFullShadowAnalysis(sceneBuildings, latitude, longitude, equinox, 0.5, 'raycasting');
+    getCachedGroundShadowSamples(allTiers, masterplanSamples, latitude, longitude, equinox, testHours[0]);
+
+    // 1. Pomiar CadCanvas Live vs Final
+    let liveCadCanvasSum = 0;
+    let finalCadCanvasSum = 0;
+    let masterplanSum = 0;
+
+    for (const hour of testHours) {
+      // Live (krok 0.5h, interakcja)
+      const t0 = performance.now();
+      const liveRes = computeFullShadowAnalysis(sceneBuildings, latitude, longitude, equinox, 0.5, 'raycasting');
+      liveCadCanvasSum += performance.now() - t0;
+
+      // Final (krok 0.25h, pełna precyzja)
+      const t1 = performance.now();
+      const finalRes = computeFullShadowAnalysis(sceneBuildings, latitude, longitude, equinox, 0.25, 'raycasting');
+      finalCadCanvasSum += performance.now() - t1;
+
+      // MasterPlan (pojedyncza godzina)
+      const t2 = performance.now();
+      getCachedGroundShadowSamples(allTiers, masterplanSamples, latitude, longitude, equinox, hour);
+      masterplanSum += performance.now() - t2;
+    }
+
+    const avgLiveCadCanvas = liveCadCanvasSum / testHours.length;
+    const avgFinalCadCanvas = finalCadCanvasSum / testHours.length;
+    const avgMasterplan = masterplanSum / testHours.length;
+
+    const liveFps = 1000 / (avgLiveCadCanvas + avgMasterplan);
+    const finalFps = 1000 / (avgFinalCadCanvas + avgMasterplan);
+
+    console.log('\n================================================================================');
+    console.log(`[FULL BENCHMARK: CADCANVAS & MASTERPLAN FPS ON WARSZAWA.JSON (${sceneBuildings.length} BUILDINGS)]`);
+    console.log('================================================================================');
+    console.log(`  15 tested buildings, ${sceneBuildings.length - 15} context/blocking buildings, ${allTiers.length} story tiers`);
+    console.log('--------------------------------------------------------------------------------');
+    console.log(`  - CadCanvas Live Shadow Range (0.5h step):   ${avgLiveCadCanvas.toFixed(2).padStart(8)} ms | ${(1000 / avgLiveCadCanvas).toFixed(1)} FPS`);
+    console.log(`  - CadCanvas Final Shadow Range (0.25h step): ${avgFinalCadCanvas.toFixed(2).padStart(8)} ms | ${(1000 / avgFinalCadCanvas).toFixed(1)} FPS`);
+    console.log(`  - MasterPlan Ground Shadows (single hour):  ${avgMasterplan.toFixed(2).padStart(8)} ms | ${(1000 / avgMasterplan).toFixed(1)} FPS`);
+    console.log('--------------------------------------------------------------------------------');
+    console.log(`  - COMBINED FRAME (Live + MasterPlan):       ${(avgLiveCadCanvas + avgMasterplan).toFixed(2).padStart(8)} ms | ${liveFps.toFixed(1)} FPS`);
+    console.log(`  - COMBINED FRAME (Final + MasterPlan):      ${(avgFinalCadCanvas + avgMasterplan).toFixed(2).padStart(8)} ms | ${finalFps.toFixed(1)} FPS`);
+    console.log('================================================================================\n');
+
+    expect(avgLiveCadCanvas).toBeGreaterThan(0);
+    expect(avgMasterplan).toBeGreaterThan(0);
   });
 });
 

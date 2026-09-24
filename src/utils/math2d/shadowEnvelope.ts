@@ -62,12 +62,15 @@ function getCachedFastShadowPolygon(
   azRad: number,
   elevRad: number,
   hTop: number,
-  hBottom: number
+  hBottom: number,
+  geomFingerprint?: string,
+  isConvex?: boolean
 ): Point2D[] {
-  const key = `${polygonVerticesFingerprint(polygon)}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
+  const fp = geomFingerprint || polygonVerticesFingerprint(polygon);
+  const key = `${fp}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
   const cached = storyShadowPolyCache.get(key);
   if (cached) return cached;
-  const result = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom);
+  const result = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom, isConvex);
   if (storyShadowPolyCache.size > 5000) storyShadowPolyCache.clear();
   storyShadowPolyCache.set(key, result);
   return result;
@@ -79,9 +82,10 @@ export function computeFastShadowPolygonWithHoles(
   azRad: number,
   elevRad: number,
   hTop: number,
-  hBottom: number = 0
+  hBottom: number = 0,
+  isConvexKnown?: boolean
 ): Point2D[][] {
-  const outerShadow = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom);
+  const outerShadow = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom, isConvexKnown);
   if (outerShadow.length < 3) return [];
   if (!holes || holes.length === 0) return [outerShadow];
 
@@ -111,19 +115,23 @@ function getCachedFastShadowPolygonWithHoles(
   azRad: number,
   elevRad: number,
   hTop: number,
-  hBottom: number
+  hBottom: number,
+  geomFingerprint?: string,
+  holesFingerprint?: string,
+  isConvex?: boolean
 ): Point2D[][] {
   if (!holes || holes.length === 0) {
-    const single = getCachedFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom);
+    const single = getCachedFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom, geomFingerprint, isConvex);
     return single.length >= 3 ? [single] : [];
   }
 
-  const holesKey = holes.map(polygonVerticesFingerprint).join(';');
-  const key = `${polygonVerticesFingerprint(polygon)}#${holesKey}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
+  const fp = geomFingerprint || polygonVerticesFingerprint(polygon);
+  const holesKey = holesFingerprint || holes.map(polygonVerticesFingerprint).join(';');
+  const key = `${fp}#${holesKey}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${azRad.toFixed(4)}|${elevRad.toFixed(4)}`;
   const cached = storyShadowWithHolesCache.get(key);
   if (cached) return cached;
 
-  const result = computeFastShadowPolygonWithHoles(polygon, holes, azRad, elevRad, hTop, hBottom);
+  const result = computeFastShadowPolygonWithHoles(polygon, holes, azRad, elevRad, hTop, hBottom, isConvex);
   if (storyShadowWithHolesCache.size > 5000) storyShadowWithHolesCache.clear();
   storyShadowWithHolesCache.set(key, result);
   return result;
@@ -145,6 +153,7 @@ export interface PreparedShadowBuilding {
   hBase: number;
   hTop: number;
   isConvex: boolean;
+  geomFingerprint: string;
 }
 
 export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuilding | null {
@@ -165,8 +174,16 @@ export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuildin
     );
     let maxTop = 0;
     for (let i = 0; i < collapsedStories.length; i++) {
-      if (collapsedStories[i].hTop > maxTop) {
-        maxTop = collapsedStories[i].hTop;
+      const sf = collapsedStories[i];
+      if (sf.hTop > maxTop) {
+        maxTop = sf.hTop;
+      }
+      if (sf.polygon && sf.polygon.length >= 3) {
+        (sf as any).geomFingerprint = polygonVerticesFingerprint(sf.polygon);
+        (sf as any).isConvex = isPolygonConvex(sf.polygon);
+      }
+      if (sf.holes && sf.holes.length > 0) {
+        (sf as any).holesFingerprint = sf.holes.map(polygonVerticesFingerprint).join(';');
       }
     }
     hTop = Math.max(0, hBase + maxTop);
@@ -184,6 +201,7 @@ export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuildin
   }
 
   const isConvex = isPolygonConvex(bldg.vertices);
+  const geomFingerprint = polygonVerticesFingerprint(bldg.vertices);
 
   return {
     bldg,
@@ -195,6 +213,7 @@ export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuildin
     hBase,
     hTop,
     isConvex,
+    geomFingerprint,
   };
 }
 
@@ -211,18 +230,36 @@ export function collectBuildingShadowPolysPrepared(
   offsetKey: number,
   out: Point2D[][]
 ): void {
-  const { bldg, collapsedStories, hBase, hTop } = prep;
+  const { bldg, collapsedStories, hBase, hTop, geomFingerprint, isConvex } = prep;
   if (collapsedStories && collapsedStories.length > 0) {
     for (let i = 0; i < collapsedStories.length; i++) {
       const sf = collapsedStories[i];
       if (sf.polygon && sf.polygon.length >= 3 && sf.hTop > 0 && sf.hTop > (sf.hBottom || 0)) {
         if (sf.holes && sf.holes.length > 0) {
-          const polys = getCachedFastShadowPolygonWithHoles(sf.polygon, sf.holes, azRad, elevRad, sf.hTop, sf.hBottom || 0);
+          const polys = getCachedFastShadowPolygonWithHoles(
+            sf.polygon,
+            sf.holes,
+            azRad,
+            elevRad,
+            sf.hTop,
+            sf.hBottom || 0,
+            (sf as any).geomFingerprint,
+            (sf as any).holesFingerprint,
+            (sf as any).isConvex
+          );
           for (let k = 0; k < polys.length; k++) {
             if (polys[k].length >= 3) out.push(polys[k]);
           }
         } else {
-          const p = getCachedFastShadowPolygon(sf.polygon, azRad, elevRad, sf.hTop, sf.hBottom || 0);
+          const p = getCachedFastShadowPolygon(
+            sf.polygon,
+            azRad,
+            elevRad,
+            sf.hTop,
+            sf.hBottom || 0,
+            (sf as any).geomFingerprint,
+            (sf as any).isConvex
+          );
           if (p.length >= 3) out.push(p);
         }
       }
@@ -230,10 +267,10 @@ export function collectBuildingShadowPolysPrepared(
     return;
   }
 
-  const fastKey = `${bldg.id}|${hTop}|${hBase}|${sunlightMethod}|${offsetKey}|${polygonVerticesFingerprint(bldg.vertices)}`;
+  const fastKey = `${bldg.id}|${hTop}|${hBase}|${sunlightMethod}|${offsetKey}|${geomFingerprint}`;
   let poly = buildingFastShadowCache.get(fastKey);
   if (!poly) {
-    poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, hTop, hBase);
+    poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, hTop, hBase, isConvex);
     if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
     if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
   }
@@ -337,7 +374,8 @@ export function computeFastShadowPolygon(
   sunAzimuthRad: number,
   sunElevationRad: number,
   hTop: number,
-  hBase: number = 0
+  hBase: number = 0,
+  isConvexKnown?: boolean
 ): Point2D[] {
   const effectiveBase = Math.max(0, hBase);
   if (!polygon || polygon.length < 3 || hTop <= 0 || sunElevationRad <= 0.001 || hTop <= effectiveBase) {
@@ -350,7 +388,8 @@ export function computeFastShadowPolygon(
   if (topOffset.x === baseOffset.x && topOffset.y === baseOffset.y) return [];
 
   // Dla wielokątów wypukłych: otoczka wypukła (zrzutowana podstawa + zrzutowany dach)
-  if (isPolygonConvex(polygon)) {
+  const isConvex = isConvexKnown !== undefined ? isConvexKnown : isPolygonConvex(polygon);
+  if (isConvex) {
     const shadowPoints: Point2D[] = [
       ...polygon.map((v) => ({ x: v.x + baseOffset.x, y: v.y + baseOffset.y })),
       ...polygon.map((v) => ({ x: v.x + topOffset.x, y: v.y + topOffset.y })),
@@ -652,10 +691,18 @@ export function computeFullShadowAnalysis(
     }
   );
 
-  const blockingBuildings = projectAABB
+  const testedReachAABBs = testedBuildings
+    .map(computeBuildingShadowReachAABB)
+    .filter((a): a is CardinalAABB => a !== null);
+
+  const blockingBuildings = testedReachAABBs.length > 0
     ? candidateBlocking.filter((bldg) => {
         const bAABB = computeBuildingShadowReachAABB(bldg);
-        return bAABB ? doAABBsOverlap(bAABB, projectAABB) : false;
+        if (!bAABB) return false;
+        for (let i = 0; i < testedReachAABBs.length; i++) {
+          if (doAABBsOverlap(bAABB, testedReachAABBs[i])) return true;
+        }
+        return false;
       })
     : candidateBlocking;
 
@@ -701,16 +748,19 @@ export function computeFullShadowAnalysis(
         let finalHourPolys = mergedHourTested;
 
         if (preparedBlocking.length > 0) {
-          // Oblicz AABB dla scalonych cieni badanych w tej godzinie
-          let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
-          for (const poly of mergedHourTested) {
+          // Oblicz AABB dla każdego z poligonów mergedHourTested z osobna
+          const testedPolyAABBs: { minX: number; minY: number; maxX: number; maxY: number }[] = [];
+          for (let pIdx = 0; pIdx < mergedHourTested.length; pIdx++) {
+            const poly = mergedHourTested[pIdx];
+            let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
             for (let i = 0; i < poly.length; i++) {
               const pt = poly[i];
-              if (pt.x < hMinX) hMinX = pt.x;
-              if (pt.y < hMinY) hMinY = pt.y;
-              if (pt.x > hMaxX) hMaxX = pt.x;
-              if (pt.y > hMaxY) hMaxY = pt.y;
+              if (pt.x < pMinX) pMinX = pt.x;
+              if (pt.y < pMinY) pMinY = pt.y;
+              if (pt.x > pMaxX) pMaxX = pt.x;
+              if (pt.y > pMaxY) pMaxY = pt.y;
             }
+            testedPolyAABBs.push({ minX: pMinX, minY: pMinY, maxX: pMaxX, maxY: pMaxY });
           }
 
           const blockingHourPolys: Point2D[][] = [];
@@ -724,8 +774,16 @@ export function computeFullShadowAnalysis(
             const sMinY = Math.min(item.bMinY, item.bMinY + offY);
             const sMaxY = Math.max(item.bMaxY, item.bMaxY + offY);
 
-            // Jeśli AABB cienia blokującego nie nachodzi na AABB cieni badanych w tej godzinie, pomiń
-            if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
+            // Sprawdź czy cień blokujący przecina AABB któregokolwiek z badanych poligonów w tej godzinie
+            let overlapsAny = false;
+            for (let j = 0; j < testedPolyAABBs.length; j++) {
+              const tb = testedPolyAABBs[j];
+              if (!(sMaxX < tb.minX || sMinX > tb.maxX || sMaxY < tb.minY || sMinY > tb.maxY)) {
+                overlapsAny = true;
+                break;
+              }
+            }
+            if (!overlapsAny) {
               continue;
             }
 
@@ -790,7 +848,9 @@ export function computeHourlyShadowsLive(
   );
   if (testedBuildings.length === 0) return { hourlyShadows: [], envelopeLoops: [] };
 
-  const projectAABB = computeProjectShadowReachAABB(testedBuildings);
+  const testedReachAABBs = testedBuildings
+    .map(computeBuildingShadowReachAABB)
+    .filter((a): a is CardinalAABB => a !== null);
 
   const candidateBlocking = buildings.filter(
     (b) => {
@@ -799,10 +859,14 @@ export function computeHourlyShadowsLive(
     }
   );
 
-  const blockingBuildings = projectAABB
+  const blockingBuildings = testedReachAABBs.length > 0
     ? candidateBlocking.filter((bldg) => {
         const bAABB = computeBuildingShadowReachAABB(bldg);
-        return bAABB ? doAABBsOverlap(bAABB, projectAABB) : false;
+        if (!bAABB) return false;
+        for (let i = 0; i < testedReachAABBs.length; i++) {
+          if (doAABBsOverlap(bAABB, testedReachAABBs[i])) return true;
+        }
+        return false;
       })
     : candidateBlocking;
 
@@ -842,15 +906,18 @@ export function computeHourlyShadowsLive(
         let finalPolys = mergedHourTested;
 
         if (preparedBlocking.length > 0) {
-          let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
-          for (const poly of mergedHourTested) {
+          const testedPolyAABBs: { minX: number; minY: number; maxX: number; maxY: number }[] = [];
+          for (let pIdx = 0; pIdx < mergedHourTested.length; pIdx++) {
+            const poly = mergedHourTested[pIdx];
+            let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
             for (let i = 0; i < poly.length; i++) {
               const pt = poly[i];
-              if (pt.x < hMinX) hMinX = pt.x;
-              if (pt.y < hMinY) hMinY = pt.y;
-              if (pt.x > hMaxX) hMaxX = pt.x;
-              if (pt.y > hMaxY) hMaxY = pt.y;
+              if (pt.x < pMinX) pMinX = pt.x;
+              if (pt.y < pMinY) pMinY = pt.y;
+              if (pt.x > pMaxX) pMaxX = pt.x;
+              if (pt.y > pMaxY) pMaxY = pt.y;
             }
+            testedPolyAABBs.push({ minX: pMinX, minY: pMinY, maxX: pMaxX, maxY: pMaxY });
           }
 
           const blockingPolys: Point2D[][] = [];
@@ -862,7 +929,15 @@ export function computeHourlyShadowsLive(
             const sMinY = Math.min(item.bMinY, item.bMinY + offsetVec.y);
             const sMaxY = Math.max(item.bMaxY, item.bMaxY + offsetVec.y);
 
-            if (sMaxX < hMinX || sMinX > hMaxX || sMaxY < hMinY || sMinY > hMaxY) {
+            let overlapsAny = false;
+            for (let j = 0; j < testedPolyAABBs.length; j++) {
+              const tb = testedPolyAABBs[j];
+              if (!(sMaxX < tb.minX || sMinX > tb.maxX || sMaxY < tb.minY || sMinY > tb.maxY)) {
+                overlapsAny = true;
+                break;
+              }
+            }
+            if (!overlapsAny) {
               continue;
             }
 

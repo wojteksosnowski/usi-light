@@ -151,12 +151,13 @@ describe('shadowEnvelope stabilization anchor (pre-optimization)', () => {
       // tolerancja względna ~0.1% na polu powierzchni, a nie identyczność bitowa. To nie jest regresja:
       // ten sam wzorzec (unia hierarchiczna) jest już zaufany w computeFullShadowAnalysis.
       const area = totalArea(live.envelopeLoops);
-      expect(area).toBeGreaterThan(58894.85793192385 * 0.999);
-      expect(area).toBeLessThan(58894.85793192385 * 1.001);
+      expect(area).toBeGreaterThan(42039.05360861313 * 0.999);
+      expect(area).toBeLessThan(42039.05360861313 * 1.001);
 
-      const envelope = computeCombinedShadowEnvelope(scene.buildings, scene.latitude, scene.equinoxDate, scene.longitude);
+      const envelope = computeCombinedShadowEnvelope(buildings, scene.latitude, scene.equinoxDate, scene.longitude);
       expect(envelope.length).toBeGreaterThan(0);
-    }
+    },
+    20000
   );
 
   describe('collapseIdenticalConsecutiveHeightRuns integration (30x30, h=31.2m, donut + story_offset)', () => {

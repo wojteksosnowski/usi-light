@@ -34,6 +34,13 @@ export interface MasterplanStoryTier {
   isSelected: boolean;
   isHovered: boolean;
   /**
+   * Prekalkulowany fingerprint geometrii (wszystkie wierzchołki + otwory), by uniknąć
+   * powtarzalnej alokacji stringów przy każdym rzutowaniu cienia / klatce.
+   */
+  geomFingerprint?: string;
+  /** Prekalkulowana flaga wypukłości wielokąta bazowego. */
+  isConvex?: boolean;
+  /**
    * Referencja do źródłowego obiektu `BuildingLoop`, do kluczowania cache'u cienia per
    * obiekt (patrz `buildingShadowCache` w `src/engine/buildingGeometryCache.ts`). Opcjonalna,
    * żeby nie wymagać jej od miejsc konstruujących tiery ręcznie (np. w testach).
@@ -66,16 +73,20 @@ export function extractBuildingStoryTiers(
     const tiers: MasterplanStoryTier[] = [];
     for (const s of slices) {
       if (!s.footprint.exterior || s.footprint.exterior.length < 3) continue;
+      const poly = s.footprint.exterior as Point2D[];
+      const holes = (s.footprint.holes as Point2D[][]) || [];
       tiers.push({
         buildingId: bldg.id,
         storyIndex: s.storyIndex,
-        polygon: s.footprint.exterior as Point2D[],
-        holes: (s.footprint.holes as Point2D[][]) || [],
+        polygon: poly,
+        holes,
         hBottom: s.elevationBottom,
         hTop: s.elevationTop,
         isProposed,
         isSelected,
         isHovered,
+        geomFingerprint: polygonFingerprint(poly),
+        isConvex: isPolygonConvex(poly),
         bldgRef: bldg,
         buildingType: defaultBldgType,
       });
@@ -109,6 +120,8 @@ export function extractBuildingStoryTiers(
         isProposed,
         isSelected,
         isHovered,
+        geomFingerprint: polygonFingerprint(sf.polygon),
+        isConvex: isPolygonConvex(sf.polygon),
         bldgRef: bldg,
         buildingType: sf.buildingType ?? defaultBldgType,
       });
@@ -141,6 +154,8 @@ export function extractBuildingStoryTiers(
         isProposed,
         isSelected,
         isHovered,
+        geomFingerprint: polygonFingerprint(bldg.vertices),
+        isConvex: isPolygonConvex(bldg.vertices),
         bldgRef: bldg,
         buildingType: defaultBldgType,
       },
@@ -148,6 +163,15 @@ export function extractBuildingStoryTiers(
   }
 
   return [];
+}
+
+let cachedLinijka: { key: string; inst: LinijkaSolarSystem } | null = null;
+function getLinijkaInstance(lat: number, lon: number, date: 'spring' | 'autumn'): LinijkaSolarSystem {
+  const k = `${lat}|${lon}|${date}`;
+  if (cachedLinijka && cachedLinijka.key === k) return cachedLinijka.inst;
+  const inst = new LinijkaSolarSystem(lat, lon, date);
+  cachedLinijka = { key: k, inst };
+  return inst;
 }
 
 /**
@@ -169,7 +193,7 @@ export function getMasterplanSolarAngles(
   let elevationDeg: number;
 
   if (isLinijka) {
-    const linijkaSys = new LinijkaSolarSystem(latitude, longitude, equinoxDate);
+    const linijkaSys = getLinijkaInstance(latitude, longitude, equinoxDate);
     azimuthDeg = linijkaSys.getAzimuthForHour(effectiveHourFraction);
     elevationDeg = linijkaSys.getElevationForAzimuth(azimuthDeg);
   } else {
@@ -255,15 +279,18 @@ export function computeStoryShadowPolygon(
   polygon: Point2D[],
   solarAngles: SolarAngles,
   hTop: number,
-  hBottom: number = 0
+  hBottom: number = 0,
+  geomFingerprint?: string,
+  isConvexKnown?: boolean
 ): Point2D[] {
   if (!polygon || polygon.length < 3) return [];
 
-  const cacheKey = `${polygonFingerprint(polygon)}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${solarAngles.azimuthDeg.toFixed(2)}|${solarAngles.elevationDeg.toFixed(2)}`;
+  const fp = geomFingerprint ?? polygonFingerprint(polygon);
+  const cacheKey = `${fp}|${hTop.toFixed(2)}|${hBottom.toFixed(2)}|${solarAngles.azimuthDeg.toFixed(2)}|${solarAngles.elevationDeg.toFixed(2)}`;
   const cached = storyShadowCache.get(cacheKey);
   if (cached) return cached;
 
-  const result = computeStoryShadowPolygonUncached(polygon, solarAngles, hTop, hBottom);
+  const result = computeStoryShadowPolygonUncached(polygon, solarAngles, hTop, hBottom, isConvexKnown);
 
   if (storyShadowCache.size > 5000) storyShadowCache.clear();
   storyShadowCache.set(cacheKey, result);
@@ -289,9 +316,11 @@ export function computeStoryShadowPolygonWithHoles(
   holes: Point2D[][] | undefined,
   solarAngles: SolarAngles,
   hTop: number,
-  hBottom: number = 0
+  hBottom: number = 0,
+  geomFingerprint?: string,
+  isConvexKnown?: boolean
 ): PolygonWithHoles[] {
-  const outerShadow = computeStoryShadowPolygon(polygon, solarAngles, hTop, hBottom);
+  const outerShadow = computeStoryShadowPolygon(polygon, solarAngles, hTop, hBottom, geomFingerprint, isConvexKnown);
   if (outerShadow.length < 3) return [];
   if (!holes || holes.length === 0) return [{ outer: outerShadow, holes: [] }];
 
@@ -326,7 +355,8 @@ function computeStoryShadowPolygonUncached(
   polygon: Point2D[],
   solarAngles: SolarAngles,
   hTop: number,
-  hBottom: number
+  hBottom: number,
+  isConvexKnown?: boolean
 ): Point2D[] {
   const effectiveBottom = Math.max(0, hBottom);
   if (!polygon || polygon.length < 3 || hTop <= 0 || solarAngles.elevationDeg <= 0.001 || hTop <= effectiveBottom) {
@@ -340,8 +370,10 @@ function computeStoryShadowPolygonUncached(
     return [];
   }
 
+  const isConvex = isConvexKnown !== undefined ? isConvexKnown : isPolygonConvex(polygon);
+
   // Dla wielokątów wypukłych: szybka otoczka wypukła
-  if (isPolygonConvex(polygon)) {
+  if (isConvex) {
     const shadowPoints: Point2D[] = [
       ...polygon.map((v) => ({ x: v.x + baseOffset.dx, y: v.y + baseOffset.dy })),
       ...polygon.map((v) => ({ x: v.x + topOffset.dx, y: v.y + topOffset.dy })),
