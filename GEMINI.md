@@ -237,8 +237,39 @@ Funkcje rysujące per warstwa (jedna renderer-funkcja na layer): `buildingsRende
 - [`geoParser.ts`](file:///Volumes/Samsam/py/usi-light/src/utils/geoParser.ts) / [`geoTransform.ts`](file:///Volumes/Samsam/py/usi-light/src/utils/geoTransform.ts) — obsługa polskich układów współrzędnych (PL-1992 EPSG:2180, PL-2000 strefy 5-8 EPSG:2176-2179) oraz WGS84 (EPSG:4326).
 - [`projectStorage.ts`](file:///Volumes/Samsam/py/usi-light/src/utils/projectStorage.ts) — zapis i odczyt projektu w `localStorage` oraz plikach `.usi`.
 
-### 6.2. Moduły Dodatkowe (`src/modules/`)
-- `wfs-import/` — integracja z Geoportalem (Krajowa Integracja Miejscowych Planów Zagospodarowania Przestrzennego, EGiB działki ewidencyjne, NMT).
+### 6.2. Silnik Pobierania Budynków OSM i Danych Geo (`src/modules/wfs-import/`)
+
+#### 6.2.1. Architektura Pobierania Budynków z OpenStreetMap / Overpass API ([`osmBuildingsClient.ts`](file:///Volumes/Samsam/py/usi-light/src/modules/wfs-import/services/osm/osmBuildingsClient.ts))
+Silnik realizuje wieloetapowy, odporny na awarie i zoptymalizowany pod kątem limitów Overpass potok pobierania geometrii budynków 2D/3D:
+
+1. **Podział na Kwadranty z Zakładem (Tiling & Overlap)**:
+   - Funkcja `splitBboxIntoQuadrants(bbox, tileSizeMeters = 350, overlapMeters = 100)` dzieli obszar zapytania na siatkę mniejszych kafelków (~350m z zakładem 100m).
+   - Eliminuje to ryzyko przekroczenia limitów pamięci i limitu czasu obliczeń serwerów Overpass ([`timeout:180`]), zapewniając stabilność przy dużych promieniach analizy.
+
+2. **Warstwa Proxy i Failover Endpointów**:
+   - Zapytania kierowane są przez serverless proxy `/api/osm-overpass` (`api/osm-overpass.ts`), co zapobiega problemom CORS, blokadom IP oraz umożliwia automatyczny failover między publicznymi mirrorami Overpass (`kumi.systems`, `overpass-api.de`, `openstreetmap.fr`).
+   - `fetchQuadrantWithRetry` ponawia zapytanie w przypadku przejściowych błędów sieciowych lub przeciążenia serwera.
+
+3. **Wieloetapowy Potok Pobierania i Dociągania Części 3D**:
+   - **Krok 1 (Siatka Kwadrantów — Baseline Scan)**: Pobranie bazowych obrysów budynków (`nwr["building"]`) w siatce kwadrantów (~350m z zakładem 100m).
+   - **Krok 2 (Merge & Deduplication)**: Łączenie odpowiedzi kwadrantów, deduplikacja węzłów i dróg oraz wyodrębnienie ID odebranych budynków i relacji (`mergeOverpassResponses`).
+   - **Krok 3 (Precyzyjny dociąg relacji 3D i niekompletnych budynków po ID)**:
+     - Dociąganie pełnej geometrii relacji budynkowych i multipolygonów po ID (`fetchRelationsBatch` / `fetchRelationFull`) z limitem budżetowym (`ROUND2_RELATION_TIMEOUT_MS`).
+     - Dociąganie niekompletnych obiektów `way` po ID (`fetchBuildingWithPartsById`).
+   - **Krok 4 (Asemblacja, Weryfikacja i Filtracja Envelope)**:
+     - **Filtracja obrysów zewnętrznych (Envelope Removal)**: Jeśli budynek posiada zdefiniowane części 3D (`building:part`), zewnętrzny obrys nadrzędny (envelope `way`) jest automatycznie odrzucany, co zapobiega nakładaniu się zduplikowanych brył o różnych wysokościach.
+     - **Multipolygony i dziedzińce (`holes`)**: Składanie relacji multipolygon (`role: outer` oraz `role: inner`), sanityzacja geometrii (`sanitizePolygon`) i gwarancja przeciwnej orientacji wierzchołków otworów (`ensureOppositeWinding`).
+     - **Ekstrakcja wysokości i kondygnacji ([`extractOsmBuildingElevation`](file:///Volumes/Samsam/py/usi-light/src/modules/wfs-import/services/osm/osmBuildingsClient.ts#L164-L225))**:
+       - Wysokość posadowienia dolnej krawędzi (`elevation`): parsowanie `min_height`, `building:min_height`, `building:min_level` (z uwzględnieniem wysokości parteru 3.5m i pięter 3.0m).
+       - Wysokość dachu (`defaultHeight`): parsowanie `height`, `building:height`, `roof:height`, `building:levels`, `levels`.
+       - Rozpoznawanie przeznaczenia (`resolveBuildingType`: `residential`, `service`, `garage`).
+
+4. **Harmonizacja Układów Współrzędnych i Smart Synchronizacja ([`useProjectGeoSync.ts`](file:///Volumes/Samsam/py/usi-light/src/components/layout/project/hooks/useProjectGeoSync.ts))**:
+   - Wykrywanie układu współrzędnych (`detectCoordinateSystem`) powiązane z centrum projektu (`projectCenter`), zapobiegające przesunięciom pomiędzy działkami (EGiB/ULDK) a budynkami z OSM.
+   - **Smart Updater**: Niezależna synchronizacja działek (`handleSyncParcels`) oraz budynków (`handleSyncBuildings`), z zachowaniem obiektów użytkownika i projektowanych (`isTested: true`), oraz odpornością na błędy (fallback do zbuforowanych budynków).
+
+### 6.3. Moduły Dodatkowe (`src/modules/`)
+- `wfs-import/` — integracja z Geoportalem (Krajowa Integracja Miejscowych Planów Zagospodarowania Przestrzennego, EGiB działki ewidencyjne, NMT), BDOT, NMT/WCS oraz Overture Maps.
 - `action-recorder/` — rejestrator sesji użytkownika do generowania interaktywnych prezentacji i testów regresyjnych.
 
 ---
