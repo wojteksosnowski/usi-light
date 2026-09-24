@@ -22,6 +22,14 @@ import {
 } from '../../../../utils/math2d/polygons';
 import { parseOsmHeight } from './osmLanduseClient';
 import { WfsBbox } from '../city/wfsWarsawClient';
+import {
+  getQuadrantCache,
+  setQuadrantCache,
+  getBuildingPartsBatchCache,
+  setBuildingPartsBatchCache,
+  getAssembledBuildingsCache,
+  setAssembledBuildingsCache,
+} from './osmBuildingsStorage';
 
 // Zapytanie idzie przez serverless proxy `/api/osm-overpass` (api/osm-overpass.ts) zamiast
 // bezpośrednio z przeglądarki do mirrorów Overpass — omija to CORS/timeouty/lokalne blokady
@@ -1122,9 +1130,18 @@ export async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 2500
 export async function fetchBuildingPartsBatch(
   wayIds: number[],
   relIds: number[],
-  timeoutMs = 30000
+  timeoutMs = 30000,
+  bypassCache = false
 ): Promise<OverpassResponse> {
   if (wayIds.length === 0 && relIds.length === 0) return { elements: [] };
+
+  if (!bypassCache) {
+    const cached = await getBuildingPartsBatchCache(wayIds, relIds);
+    if (cached) {
+      return cached;
+    }
+  }
+
   const query = `
     [out:json][timeout:30];
     (
@@ -1134,7 +1151,11 @@ export async function fetchBuildingPartsBatch(
     (._;>;);
     out body;
   `.trim();
-  return postOverpassQuery(query, timeoutMs);
+  const resp = await postOverpassQuery(query, timeoutMs);
+  if (resp && resp.elements && resp.elements.length > 0) {
+    await setBuildingPartsBatchCache(wayIds, relIds, resp);
+  }
+  return resp;
 }
 
 /** Rozszerza bbox o stały margines w metrach. */
@@ -1198,8 +1219,16 @@ export function splitBboxIntoQuadrants(
 async function fetchQuadrantWithRetry(
   quadrantBbox: WfsBbox,
   timeoutMs = 65000,
-  maxRetries = 2
+  maxRetries = 2,
+  bypassCache = false
 ): Promise<OverpassResponse | null> {
+  if (!bypassCache) {
+    const cached = await getQuadrantCache(quadrantBbox);
+    if (cached && cached.elements && cached.elements.length > 0) {
+      return cached;
+    }
+  }
+
   const [west, south, east, north] = quadrantBbox;
   const query = `
     [out:json][timeout:60];
@@ -1216,6 +1245,9 @@ async function fetchQuadrantWithRetry(
       const resp = await postOverpassQuery(query, timeoutMs + attempt * 10000);
       if (resp?.remark && /timeout|timed out|quota/i.test(resp.remark)) {
         throw new Error(`Overpass remark timeout: ${resp.remark}`);
+      }
+      if (resp && resp.elements && resp.elements.length > 0) {
+        await setQuadrantCache(quadrantBbox, resp);
       }
       return resp;
     } catch (err) {
@@ -1241,8 +1273,26 @@ export async function fetchOsmBuildings(
   projectCenter: LatLon,
   projectCrs: CrsDetectionResult,
   radiusMeters?: number,
-  onProgress?: (progress: OsmProgressInfo) => void
+  onProgress?: (progress: OsmProgressInfo) => void,
+  bypassCache = false
 ): Promise<BuildingLoop[]> {
+  if (!bypassCache) {
+    const cachedAssembled = await getAssembledBuildingsCache(
+      projectCenter.lat,
+      projectCenter.lon,
+      radiusMeters || 0,
+      projectCrs.crs
+    );
+    if (cachedAssembled && cachedAssembled.length > 0) {
+      onProgress?.({
+        stage: 'assembling',
+        message: `Wczytano ${cachedAssembled.length} budynków z lokalnego magazynu...`,
+        foundBuildingsCount: cachedAssembled.length,
+      });
+      return cachedAssembled;
+    }
+  }
+
   const queryBbox = radiusMeters ? padBbox(bbox, Math.max(50, radiusMeters * 0.2)) : bbox;
   const quadrants = splitBboxIntoQuadrants(queryBbox, 350, 100);
 
@@ -1261,7 +1311,7 @@ export async function fetchOsmBuildings(
     const chunk = quadrants.slice(i, i + CONCURRENCY);
     const chunkPromises = chunk.map((qBbox, idx) => {
       const qIndex = i + idx + 1;
-      return fetchQuadrantWithRetry(qBbox, 65000, 2).then((resp) => {
+      return fetchQuadrantWithRetry(qBbox, 65000, 2, bypassCache).then((resp) => {
         onProgress?.({
           stage: 'baseline',
           message: `Pobieranie budynków OSM (kwadranty: ${Math.min(qIndex, quadrants.length)}/${quadrants.length})...`,
@@ -1284,6 +1334,7 @@ export async function fetchOsmBuildings(
 
   // KROK 2: Połączenie odpowiedzi, deduplikacja i wyodrębnienie ID obiektów
   let combinedResponse = mergeOverpassResponses(...quadrantResponses);
+  const baseQuadrantCombinedResponse = combinedResponse;
 
   const baseWays = (combinedResponse?.elements || []).filter(
     (e): e is OverpassWay => e.type === 'way' && !!e.tags && (!!e.tags.building || !!e.tags['building:part'])
@@ -1321,7 +1372,7 @@ export async function fetchOsmBuildings(
     });
 
     try {
-      const batchResp = await fetchBuildingPartsBatch(chunkWays, chunkRels, 35000);
+      const batchResp = await fetchBuildingPartsBatch(chunkWays, chunkRels, 35000, bypassCache);
       if (batchResp && batchResp.elements.length > 0) {
         detailResponses.push(batchResp);
       }
@@ -1353,20 +1404,24 @@ export async function fetchOsmBuildings(
   }
 
   // KROK 4: Weryfikacja kompletności pobranych elementów
-  const incomplete = findIncompleteBuildingPartsAndRelations(combinedResponse.elements);
-  if (incomplete.incompleteRelationIds.length > 0 || incomplete.incompleteWayBuildingIds.length > 0) {
-    const fallbackRelIds = incomplete.incompleteRelationIds.slice(0, 4);
-    const fallbackWayIds = incomplete.incompleteWayBuildingIds.slice(0, 4);
-    if (fallbackRelIds.length > 0 || fallbackWayIds.length > 0) {
-      try {
-        const recoveryResp = await fetchBuildingPartsBatch(fallbackWayIds, fallbackRelIds, 30000);
-        if (recoveryResp && recoveryResp.elements.length > 0) {
-          combinedResponse = mergeOverpassResponses(combinedResponse, recoveryResp);
+  try {
+    const incomplete = findIncompleteBuildingPartsAndRelations(combinedResponse.elements);
+    if (incomplete.incompleteRelationIds.length > 0 || incomplete.incompleteWayBuildingIds.length > 0) {
+      const fallbackRelIds = incomplete.incompleteRelationIds.slice(0, 4);
+      const fallbackWayIds = incomplete.incompleteWayBuildingIds.slice(0, 4);
+      if (fallbackRelIds.length > 0 || fallbackWayIds.length > 0) {
+        try {
+          const recoveryResp = await fetchBuildingPartsBatch(fallbackWayIds, fallbackRelIds, 30000, bypassCache);
+          if (recoveryResp && recoveryResp.elements.length > 0) {
+            combinedResponse = mergeOverpassResponses(combinedResponse, recoveryResp);
+          }
+        } catch {
+          // recovery optional
         }
-      } catch {
-        // recovery optional
       }
     }
+  } catch (diagErr) {
+    console.warn('Weryfikacja kompletności 3D napotkała błąd, kontynuacja:', diagErr);
   }
 
   // KROK 5: Asemblacja i sanityzacja geometrii CAD
@@ -1376,6 +1431,24 @@ export async function fetchOsmBuildings(
     foundBuildingsCount: foundCount,
   });
 
-  return parseOverpassBuildingsResponse(combinedResponse, projectCenter, projectCrs, radiusMeters);
+  let assembledBuildings: BuildingLoop[] = [];
+  try {
+    assembledBuildings = parseOverpassBuildingsResponse(combinedResponse, projectCenter, projectCrs, radiusMeters);
+  } catch (parseErr) {
+    console.warn('Błąd asemblacji z częściami 3D, uruchamianie awaryjnej asemblacji budynków bazowych:', parseErr);
+    assembledBuildings = parseOverpassBuildingsResponse(baseQuadrantCombinedResponse, projectCenter, projectCrs, radiusMeters);
+  }
+
+  if (assembledBuildings.length > 0) {
+    await setAssembledBuildingsCache(
+      projectCenter.lat,
+      projectCenter.lon,
+      radiusMeters || 0,
+      projectCrs.crs,
+      assembledBuildings
+    );
+  }
+
+  return assembledBuildings;
 }
 

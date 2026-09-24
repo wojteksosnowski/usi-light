@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveBuildingType,
   extractOsmBuildingElevation,
@@ -12,6 +12,7 @@ import {
   mergeOverpassResponses,
   OverpassResponse,
 } from './osmBuildingsClient';
+import { clearOsmBuildingsStorage } from './osmBuildingsStorage';
 import { latLonToBbox } from '../shared/geocoding';
 import { CrsDetectionResult, LatLon } from '../../../../utils/geoTransform';
 import { WfsBbox } from '../city/wfsWarsawClient';
@@ -25,6 +26,9 @@ const EPSG_2180: CrsDetectionResult = {
 };
 
 describe('osmBuildingsClient', () => {
+  beforeEach(async () => {
+    await clearOsmBuildingsStorage();
+  });
   describe('formatWfsProgress', () => {
     it('prioritizes status.info when present', () => {
       expect(
@@ -1250,11 +1254,35 @@ describe('osmBuildingsClient', () => {
         })
       );
 
-      const first = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180);
-      const second = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180);
+      const first = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, undefined, undefined, true);
+      const second = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180, undefined, undefined, true);
 
       expect(first.length).toBe(939);
       expect(second.length).toBe(243);
+    });
+
+    it('returns cached buildings on second call when bypassCache is false and does not re-fetch', async () => {
+      let fetchCount = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = String(init?.body || '');
+          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+            return { ok: true, json: async () => ({ elements: [] }) } as Response;
+          }
+          fetchCount++;
+          return { ok: true, json: async () => buildOverpassPayload(15) } as Response;
+        })
+      );
+
+      const first = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180);
+      expect(first.length).toBe(15);
+      expect(fetchCount).toBeGreaterThan(0);
+
+      const countBeforeSecond = fetchCount;
+      const second = await fetchOsmBuildings(bbox, mockProjectCenter, EPSG_2180);
+      expect(second.length).toBe(15);
+      expect(fetchCount).toBe(countBeforeSecond); // No new network fetches
     });
 
     it('emits progress updates informing about found buildings count and 3D details', async () => {
