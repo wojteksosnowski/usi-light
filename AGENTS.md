@@ -48,6 +48,19 @@
 - **Throttling Listenerów Aktywności (`useIdleGlint`)**:
   - Globalne listenery nasłuchujące wysokoczęstotliwościowych zdarzeń myszy (`mousemove`/`pointermove`) na `window` nie mogą alokować timerów ani wywoływać `clearTimeout`/`setTimeout` na każde surowe zdarzenie — resetowanie timerów bezczynności musi być sthrottlowane do co najwyżej 1 wywołania na sekundę.
 
+## 1e. Płynność Canvas Masterplan na Chrome MacOSX (Wydajność 60 FPS)
+- **Koalescencja zdarzeń i buforowanie matryc**:
+  - Płynny scrubbing słońca i manipulacja widokiem (pan/zoom/rotate) wykorzystują koalescencję `scheduleViewState` do rAF oraz prekompilowane fingerprinty kondygnacji (`tier fingerprints`).
+  - Rzutowanie i obwiednie budynków w widoku Masterplan korzystają z akceleracji sprzętowej Canvas 2D (`AffineMatrix2D`), sweep-line AABB culling oraz cache wypukłości poligonów (`polygon convex caching`), co gwarantuje stabilne 60 FPS na Chrome MacOSX nawet przy setkach złożonych brył.
+
+## 1f. Import OSM Overpass (Kompletność 3D i building:part)
+- **5-etapowy potok importu OSM**:
+  1. Podział zadanego obszaru na kwadranty $350 \times 350\text{ m}$ z zakładem $\ge 100\text{ m}$.
+  2. Pobranie bazowych obrysów (`nwr["building"]`) z automatycznym retry i failoverem między mirrorami Overpass.
+  3. Precyzyjny dociąg części 3D (`building:part`) po ID budynków z buforem `nwr(around:10)["building:part"]` (promień $10\text{ m}$ jest krytyczny, aby nie gubić wież, kopuł i wycofanych kondygnacji w głębi bryły).
+  4. Weryfikacja kompletności relacji i węzłów (z rundą naprawczą recovery).
+  5. Asemblacja obiektów CAD: grupowanie części w obiekty logiczne (`groupId`), odrzucanie envelope przy pełnym pokryciu przez części ($>85\%$) i ekstrakcja wewnętrznych dziedzińców (`holes`).
+
 ## 2. Obliczenia Macierzowe, Rastrowe Mapowanie i Ciągłe Struktury Pamięci (Matrix & TypedArray Architecture)
 - **Macierze transformacji afinicznych (Render i Viewport):**
   - Wszystkie transformacje widoku (pan, zoom, rotacja) oraz rzutowania obiektów łączą się w ujednoliconą macierz afiniczną $3 \times 3$ (`AffineMatrix2D` w standardzie `[a, b, c, d, e, f]`).
@@ -60,3 +73,4 @@
 - **Płaskie bufory pamięci (TypedArray & Zero-Copy Web Workers):**
   - Złożone struktury geometryczne i segmenty fasad podlegają reprezentacji w płaskich buforach pamięci (`Float32Array` w układzie $[x_0, y_0, x_1, y_1, \dots]$) zapewniających maksymalną lokalność pamięci podręcznej (cache locality).
   - Transfer geometrii do Web Workera realizowany jest w postaci bufora binarnego (`ArrayBuffer`) z mechanizmem *Transferable Objects*, eliminując narzut serializacji JSON.
+

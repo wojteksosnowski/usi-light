@@ -10,6 +10,7 @@ import {
   differencePolygonLoops,
   intersectionPolygonLoops,
   collapseIdenticalConsecutiveHeightRuns,
+  computePointsBoundingBox,
 } from './polygons';
 import { StoryFootprint } from '../../types/modifiers';
 
@@ -179,11 +180,11 @@ export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuildin
         maxTop = sf.hTop;
       }
       if (sf.polygon && sf.polygon.length >= 3) {
-        (sf as any).geomFingerprint = polygonVerticesFingerprint(sf.polygon);
-        (sf as any).isConvex = isPolygonConvex(sf.polygon);
+        sf.geomFingerprint = polygonVerticesFingerprint(sf.polygon);
+        sf.isConvex = isPolygonConvex(sf.polygon);
       }
       if (sf.holes && sf.holes.length > 0) {
-        (sf as any).holesFingerprint = sf.holes.map(polygonVerticesFingerprint).join(';');
+        sf.holesFingerprint = sf.holes.map(polygonVerticesFingerprint).join(';');
       }
     }
     hTop = Math.max(0, hBase + maxTop);
@@ -191,14 +192,7 @@ export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuildin
 
   if (hTop <= 0) return null;
 
-  let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-  for (let i = 0; i < bldg.vertices.length; i++) {
-    const v = bldg.vertices[i];
-    if (v.x < bMinX) bMinX = v.x;
-    if (v.y < bMinY) bMinY = v.y;
-    if (v.x > bMaxX) bMaxX = v.x;
-    if (v.y > bMaxY) bMaxY = v.y;
-  }
+  const { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY } = computePointsBoundingBox(bldg.vertices);
 
   const isConvex = isPolygonConvex(bldg.vertices);
   const geomFingerprint = polygonVerticesFingerprint(bldg.vertices);
@@ -243,9 +237,9 @@ export function collectBuildingShadowPolysPrepared(
             elevRad,
             sf.hTop,
             sf.hBottom || 0,
-            (sf as any).geomFingerprint,
-            (sf as any).holesFingerprint,
-            (sf as any).isConvex
+            sf.geomFingerprint,
+            sf.holesFingerprint,
+            sf.isConvex
           );
           for (let k = 0; k < polys.length; k++) {
             if (polys[k].length >= 3) out.push(polys[k]);
@@ -257,8 +251,8 @@ export function collectBuildingShadowPolysPrepared(
             elevRad,
             sf.hTop,
             sf.hBottom || 0,
-            (sf as any).geomFingerprint,
-            (sf as any).isConvex
+            sf.geomFingerprint,
+            sf.isConvex
           );
           if (p.length >= 3) out.push(p);
         }
@@ -570,14 +564,7 @@ export function computeBuildingShadowReachAABB(bldg: BuildingLoop): CardinalAABB
   const hMax = getBuildingAbsoluteHmax(bldg);
   if (hMax <= 0) return null;
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i < bldg.vertices.length; i++) {
-    const v = bldg.vertices[i];
-    if (v.x < minX) minX = v.x;
-    if (v.y < minY) minY = v.y;
-    if (v.x > maxX) maxX = v.x;
-    if (v.y > maxY) maxY = v.y;
-  }
+  const { minX, minY, maxX, maxY } = computePointsBoundingBox(bldg.vertices);
 
   return {
     minX: minX - hMax * 5.0,
@@ -624,6 +611,25 @@ export function computeProjectShadowReachAABB(testedBuildings: BuildingLoop[]): 
  */
 export function doAABBsOverlap(a: CardinalAABB, b: CardinalAABB): boolean {
   return a.maxX >= b.minX && a.minX <= b.maxX && a.maxY >= b.minY && a.minY <= b.maxY;
+}
+
+/**
+ * Odsiewa kandydatów na budynki blokujące ("negatywny cień") do tych, których kardynalne AABB
+ * zasięgu cienia przecina się z co najmniej jednym AABB zasięgu cienia budynków badanych.
+ */
+function filterBlockingBuildingsByReach(
+  candidateBlocking: BuildingLoop[],
+  testedReachAABBs: CardinalAABB[]
+): BuildingLoop[] {
+  if (testedReachAABBs.length === 0) return candidateBlocking;
+  return candidateBlocking.filter((bldg) => {
+    const bAABB = computeBuildingShadowReachAABB(bldg);
+    if (!bAABB) return false;
+    for (let i = 0; i < testedReachAABBs.length; i++) {
+      if (doAABBsOverlap(bAABB, testedReachAABBs[i])) return true;
+    }
+    return false;
+  });
 }
 
 /**
@@ -681,8 +687,6 @@ export function computeFullShadowAnalysis(
     };
   }
 
-  const projectAABB = computeProjectShadowReachAABB(testedBuildings);
-
   // Budynki ograniczające ("negatywny cień") odsiane wstępnie przez kardynalne AABB zasięgu cienia
   const candidateBlocking = buildings.filter(
     (b) => {
@@ -695,16 +699,7 @@ export function computeFullShadowAnalysis(
     .map(computeBuildingShadowReachAABB)
     .filter((a): a is CardinalAABB => a !== null);
 
-  const blockingBuildings = testedReachAABBs.length > 0
-    ? candidateBlocking.filter((bldg) => {
-        const bAABB = computeBuildingShadowReachAABB(bldg);
-        if (!bAABB) return false;
-        for (let i = 0; i < testedReachAABBs.length; i++) {
-          if (doAABBsOverlap(bAABB, testedReachAABBs[i])) return true;
-        }
-        return false;
-      })
-    : candidateBlocking;
+  const blockingBuildings = filterBlockingBuildingsByReach(candidateBlocking, testedReachAABBs);
 
   // Pre-collapsing kondygnacji i pre-kalkulacja parametrów RAZ przed pętlą godzinową
   const preparedTested = testedBuildings
@@ -749,19 +744,7 @@ export function computeFullShadowAnalysis(
 
         if (preparedBlocking.length > 0) {
           // Oblicz AABB dla każdego z poligonów mergedHourTested z osobna
-          const testedPolyAABBs: { minX: number; minY: number; maxX: number; maxY: number }[] = [];
-          for (let pIdx = 0; pIdx < mergedHourTested.length; pIdx++) {
-            const poly = mergedHourTested[pIdx];
-            let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
-            for (let i = 0; i < poly.length; i++) {
-              const pt = poly[i];
-              if (pt.x < pMinX) pMinX = pt.x;
-              if (pt.y < pMinY) pMinY = pt.y;
-              if (pt.x > pMaxX) pMaxX = pt.x;
-              if (pt.y > pMaxY) pMaxY = pt.y;
-            }
-            testedPolyAABBs.push({ minX: pMinX, minY: pMinY, maxX: pMaxX, maxY: pMaxY });
-          }
+          const testedPolyAABBs = mergedHourTested.map(computePointsBoundingBox);
 
           const blockingHourPolys: Point2D[][] = [];
           for (let i = 0; i < preparedBlocking.length; i++) {
@@ -859,16 +842,7 @@ export function computeHourlyShadowsLive(
     }
   );
 
-  const blockingBuildings = testedReachAABBs.length > 0
-    ? candidateBlocking.filter((bldg) => {
-        const bAABB = computeBuildingShadowReachAABB(bldg);
-        if (!bAABB) return false;
-        for (let i = 0; i < testedReachAABBs.length; i++) {
-          if (doAABBsOverlap(bAABB, testedReachAABBs[i])) return true;
-        }
-        return false;
-      })
-    : candidateBlocking;
+  const blockingBuildings = filterBlockingBuildingsByReach(candidateBlocking, testedReachAABBs);
 
   const preparedTested = testedBuildings
     .map((b) => prepareShadowBuilding(b))
@@ -906,19 +880,7 @@ export function computeHourlyShadowsLive(
         let finalPolys = mergedHourTested;
 
         if (preparedBlocking.length > 0) {
-          const testedPolyAABBs: { minX: number; minY: number; maxX: number; maxY: number }[] = [];
-          for (let pIdx = 0; pIdx < mergedHourTested.length; pIdx++) {
-            const poly = mergedHourTested[pIdx];
-            let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
-            for (let i = 0; i < poly.length; i++) {
-              const pt = poly[i];
-              if (pt.x < pMinX) pMinX = pt.x;
-              if (pt.y < pMinY) pMinY = pt.y;
-              if (pt.x > pMaxX) pMaxX = pt.x;
-              if (pt.y > pMaxY) pMaxY = pt.y;
-            }
-            testedPolyAABBs.push({ minX: pMinX, minY: pMinY, maxX: pMaxX, maxY: pMaxY });
-          }
+          const testedPolyAABBs = mergedHourTested.map(computePointsBoundingBox);
 
           const blockingPolys: Point2D[][] = [];
           for (let i = 0; i < preparedBlocking.length; i++) {

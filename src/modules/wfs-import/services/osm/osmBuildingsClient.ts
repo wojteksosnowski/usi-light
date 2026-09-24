@@ -1129,7 +1129,7 @@ export async function fetchBuildingPartsBatch(
     [out:json][timeout:30];
     (
       ${relIds.length > 0 ? `relation(id:${relIds.join(',')}); (._;>;>;);` : ''}
-      ${wayIds.length > 0 ? `way(id:${wayIds.join(',')}); nwr(around:1)["building:part"];` : ''}
+      ${wayIds.length > 0 ? `way(id:${wayIds.join(',')}); nwr(around:10)["building:part"];` : ''}
     );
     (._;>;);
     out body;

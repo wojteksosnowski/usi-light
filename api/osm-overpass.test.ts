@@ -77,7 +77,7 @@ describe('api/osm-overpass — sekwencyjny fallback (regresja: 939 vs 243 budynk
 
   it('ufa głównemu endpointowi wprost — nie porównuje go z innymi mirrorami, nawet gdyby zwrócił mniej elementów', async () => {
     fetchMock.mockImplementation((endpoint: string) => {
-      if (endpoint.includes('overpass-api.de') && !endpoint.includes('lz4')) {
+      if (endpoint.includes('lz4.overpass-api.de')) {
         return Promise.resolve(jsonResponse(243));
       }
       // Fallbacki nigdy nie powinny zostać odpytane, bo główny endpoint odpowiada poprawnie.
@@ -134,6 +134,6 @@ describe('api/osm-overpass — sekwencyjny fallback (regresja: 939 vs 243 budynk
     await handler(makeRequest(), res);
 
     expect(res.statusCode).toBe(502);
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });

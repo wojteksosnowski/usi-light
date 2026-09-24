@@ -293,6 +293,12 @@ export interface StoryFootprint {
   // edgeOrigins, dla każdego typu modyfikatora jednakowo (patrz modifierRegistry.ts: applyModifier).
   holeOrigins?: (number | null)[][];
   buildingType?: BuildingType; // Indywidualne przeznaczenie kondygnacji/obrysu (np. po modyfikatorze strefy funkcji)
+  // Cache hints precomputed once by shadowEnvelope.ts's prepareShadowBuilding (geometry fingerprint /
+  // convexity for the story's polygon and holes), reused across every hourly shadow-cache lookup instead
+  // of recomputing them per hour.
+  geomFingerprint?: string;
+  holesFingerprint?: string;
+  isConvex?: boolean;
 }
 
 export interface ZoneFootprint {
