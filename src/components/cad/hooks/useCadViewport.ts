@@ -1,14 +1,27 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ViewportState } from '../types';
-import { BuildingLoop } from '../../../types/geometry';
+import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { useUiStore } from '../../../store/useUiStore';
 import { createViewportMatrix, invertAffineMatrix, transformPoint, AffineMatrix2D } from '@/utils/math2d';
+
+export interface FitToExtentsOptions {
+  ignoreSelection?: boolean;
+  fitMode?: 'contain' | 'cover' | 'project_circle_cover';
+  preferTested?: boolean;
+  scaleFactor?: number;
+}
 
 export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
   buildings: BuildingLoop[],
   viewRotationDeg: number,
-  fitRequest?: { nonce: number; ignoreSelection: boolean },
+  fitRequest?: {
+    nonce: number;
+    ignoreSelection: boolean;
+    fitMode?: 'contain' | 'cover' | 'project_circle_cover';
+    preferTested?: boolean;
+    scaleFactor?: number;
+  },
   selectedBuildingId?: string | null,
   layerSettings?: Record<string, any>,
   projectRadius?: number
@@ -116,17 +129,41 @@ export function useCadViewport(
     [invViewportMatrix]
   );
 
-  const fitToExtents = useCallback((ignoreSelection: boolean = false) => {
+  const fitToExtents = useCallback((options?: boolean | FitToExtentsOptions) => {
     const container = containerRef.current;
     if (!container) return;
 
+    const opts: FitToExtentsOptions =
+      typeof options === 'boolean'
+        ? { ignoreSelection: options }
+        : (options ?? {});
+
+    const ignoreSelection = opts.ignoreSelection ?? fitRequest?.ignoreSelection ?? false;
+    const fitMode = opts.fitMode ?? fitRequest?.fitMode ?? 'contain';
+    const preferTested = opts.preferTested ?? fitRequest?.preferTested ?? false;
     const effectiveSelectedBuildingId = ignoreSelection ? null : selectedBuildingId;
 
     const rect = container.getBoundingClientRect();
-    const width = rect.width > 50 ? rect.width : window.innerWidth - 380;
-    const height = rect.height > 50 ? rect.height : window.innerHeight;
+    const isMobile = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+    const isKiosk = isMobile || useUiStore.getState().isMobileShowcasePreview;
+    const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
+    const defaultWidth = isSidebarActive ? Math.max(100, window.innerWidth - 380) : window.innerWidth;
+    const width = container.clientWidth > 50 ? container.clientWidth : (rect.width > 50 ? rect.width : defaultWidth);
+    const height = container.clientHeight > 50 ? container.clientHeight : (rect.height > 50 ? rect.height : window.innerHeight);
 
     const r = projectRadius ?? 100;
+
+    // Tryb specjalny Kiosk: powiększenie tak, aby cały okrąg zasięgu projektu znalazł się poza canvasem
+    if (fitMode === 'project_circle_cover') {
+      const diameter = r * 2;
+      const targetScale = Math.max(width, height) / diameter;
+      setViewState({
+        panX: width / 2,
+        panY: height / 2,
+        scale: Math.max(0.1, Math.min(100, targetScale)),
+      });
+      return;
+    }
 
     // Gdy brak budynków na scenie: centruj na (0,0) z widokiem na cały okrąg zasięgu
     if (!buildings || buildings.length === 0) {
@@ -142,42 +179,85 @@ export function useCadViewport(
 
     // 1. Ustalenie obiektów docelowych do wycentrowania
     let targetBuildings: BuildingLoop[] = [];
+    const hasTested = buildings.some((b) => b.isTested && b.isIncluded !== false);
 
     if (effectiveSelectedBuildingId) {
       targetBuildings = buildings.filter((b) => b.id === effectiveSelectedBuildingId);
-    }
-
-    // Jeśli brak zaznaczenia lub obiekt nie istnieje, bierzemy obiekty z włączonych (widocznych) warstw
-    if (targetBuildings.length === 0) {
-      targetBuildings = buildings.filter((b) => {
+    } else if (hasTested) {
+      // Jeśli na scenie są obiekty projektowane (isTested === true), to one definiują główny projekt
+      const testedBuildings = buildings.filter(
+        (b) => b.isTested && b.isIncluded !== false && b.category !== 'boundary'
+      );
+      if (testedBuildings.length > 0) {
+        targetBuildings = testedBuildings;
+      } else {
+        targetBuildings = buildings.filter((b) => b.isTested && b.isIncluded !== false);
+      }
+    } else {
+      // Gdy brak obiektów isTested: bierzemy budynki wewnątrz zasięgu projektu (projectRadius)
+      const visible = buildings.filter((b) => {
         const lyr = b.layer || 'Domyślna (0)';
         const s = layerSettings?.[lyr] || {};
         return s.isVisible !== false && b.isIncluded !== false;
       });
+      const candidates = visible.length > 0 ? visible : buildings.filter((b) => b.isIncluded !== false);
+      const cubature = candidates.filter((b) => b.category !== 'boundary');
+      const basePool = cubature.length > 0 ? cubature : candidates;
+
+      // Ograniczamy do obiektów w promieniu zasięgu projektu
+      const inProjectRadius = basePool.filter((b) => {
+        if (!b.vertices || b.vertices.length === 0) return false;
+        let cx = 0;
+        let cy = 0;
+        for (const v of b.vertices) {
+          cx += v.x;
+          cy += v.y;
+        }
+        cx /= b.vertices.length;
+        cy /= b.vertices.length;
+        return Math.hypot(cx, cy) <= r * 1.25;
+      });
+
+      targetBuildings = inProjectRadius.length > 0 ? inProjectRadius : basePool;
     }
 
-    if (targetBuildings.length === 0) {
-      targetBuildings = buildings.filter((b) => b.isIncluded !== false);
-    }
-    if (targetBuildings.length === 0) {
-      targetBuildings = buildings;
-    }
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
+    const allPoints: Point2D[] = [];
     for (const bldg of targetBuildings) {
-      for (const v of bldg.vertices) {
-        if (Number.isFinite(v.x) && v.x < minX) minX = v.x;
-        if (Number.isFinite(v.x) && v.x > maxX) maxX = v.x;
-        if (Number.isFinite(v.y) && v.y < minY) minY = v.y;
-        if (Number.isFinite(v.y) && v.y > maxY) maxY = v.y;
+      if (Array.isArray(bldg.vertices)) {
+        for (const v of bldg.vertices) {
+          if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+        }
+      }
+      if (Array.isArray(bldg.holes)) {
+        for (const hole of bldg.holes) {
+          if (Array.isArray(hole)) {
+            for (const v of hole) {
+              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+            }
+          }
+        }
+      }
+      if (Array.isArray(bldg.storyPolygons)) {
+        for (const sp of bldg.storyPolygons) {
+          if (Array.isArray(sp.polygon)) {
+            for (const v of sp.polygon) {
+              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+            }
+          }
+        }
+      }
+      if (Array.isArray(bldg.zonePolygons)) {
+        for (const zp of bldg.zonePolygons) {
+          if (Array.isArray(zp.polygon)) {
+            for (const v of zp.polygon) {
+              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+            }
+          }
+        }
       }
     }
 
-    if (minX === Infinity) {
+    if (allPoints.length === 0) {
       // Brak prawidłowych wierzchołków — fallback do widoku okręgu
       const diameter = r * 2;
       const scale = Math.min(width, height) * 0.80 / diameter;
@@ -192,55 +272,62 @@ export function useCadViewport(
     const rot = (viewRotationDeg * Math.PI) / 180;
     const cos = Math.cos(rot);
     const sin = Math.sin(rot);
-    const rotated = targetBuildings.flatMap((bldg) =>
-      bldg.vertices.map((v) => ({
-        x: v.x * cos - v.y * sin,
-        y: v.x * sin + v.y * cos,
-      }))
-    );
-    let rMinX = Infinity;
-    let rMaxX = -Infinity;
-    let rMinY = Infinity;
-    let rMaxY = -Infinity;
-    for (const p of rotated) {
-      if (p.x < rMinX) rMinX = p.x;
-      if (p.x > rMaxX) rMaxX = p.x;
-      if (p.y < rMinY) rMinY = p.y;
-      if (p.y > rMaxY) rMaxY = p.y;
-    }
-    const rBboxWidth = Math.max(5, rMaxX - rMinX);
-    const rBboxHeight = Math.max(5, rMaxY - rMinY);
-    const rotatedCenterX = (rMinX + rMaxX) / 2;
-    const rotatedCenterY = (rMinY + rMaxY) / 2;
 
-    const scaleFactor = effectiveSelectedBuildingId ? 0.70 : 0.80;
+    let rMinU = Infinity;
+    let rMaxU = -Infinity;
+    let rMinV = Infinity;
+    let rMaxV = -Infinity;
+    for (const p of allPoints) {
+      const u = p.x * cos + p.y * sin;
+      const v = -p.x * sin + p.y * cos;
+      if (u < rMinU) rMinU = u;
+      if (u > rMaxU) rMaxU = u;
+      if (v < rMinV) rMinV = v;
+      if (v > rMaxV) rMaxV = v;
+    }
+    const rBboxWidth = Math.max(5, rMaxU - rMinU);
+    const rBboxHeight = Math.max(5, rMaxV - rMinV);
+    const rotatedCenterU = (rMinU + rMaxU) / 2;
+    const rotatedCenterV = (rMinV + rMaxV) / 2;
+
+    const defaultScaleFactor = fitMode === 'cover' ? 1.0 : (effectiveSelectedBuildingId ? 0.80 : 0.92);
+    const scaleFactor = opts.scaleFactor ?? fitRequest?.scaleFactor ?? defaultScaleFactor;
     const scaleX = (width * scaleFactor) / rBboxWidth;
     const scaleY = (height * scaleFactor) / rBboxHeight;
-    let newScale = Math.max(0.001, Math.min(100, Math.min(scaleX, scaleY)));
+    const newScale = Math.max(
+      0.001,
+      Math.min(100, fitMode === 'cover' ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY))
+    );
 
-    // Sprawdź czy okrąg zasięgu projektu mieści się w 85% ekranu przy tej skali
-    const circleDiamPx = r * 2 * newScale;
-    const maxAllowedCircle = Math.min(width, height) * 0.85;
-    if (circleDiamPx > maxAllowedCircle) {
-      newScale = maxAllowedCircle / (r * 2);
-    }
-
-    const panX = width / 2 - rotatedCenterX * newScale;
-    const panY = height / 2 + rotatedCenterY * newScale;
+    const panX = width / 2 - rotatedCenterU * newScale;
+    const panY = height / 2 + rotatedCenterV * newScale;
 
     setViewState({
       panX,
       panY,
       scale: newScale,
     });
-  }, [buildings, viewRotationDeg, containerRef, selectedBuildingId, layerSettings, projectRadius]);
+  }, [buildings, viewRotationDeg, containerRef, selectedBuildingId, layerSettings, projectRadius, fitRequest]);
 
   useEffect(() => {
-    const ignoreSelection = fitRequest?.ignoreSelection ?? false;
-    fitToExtents(ignoreSelection);
-    const t = setTimeout(() => fitToExtents(ignoreSelection), 100);
+    if (!fitRequest?.nonce) return;
+    const opts: FitToExtentsOptions = {
+      ignoreSelection: fitRequest.ignoreSelection,
+      fitMode: fitRequest.fitMode,
+      preferTested: fitRequest.preferTested,
+      scaleFactor: fitRequest.scaleFactor,
+    };
+    fitToExtents(opts);
+    const t = setTimeout(() => fitToExtents(opts), 100);
     return () => clearTimeout(t);
-  }, [fitRequest?.nonce]);
+  }, [
+    fitRequest?.nonce,
+    fitRequest?.ignoreSelection,
+    fitRequest?.fitMode,
+    fitRequest?.preferTested,
+    fitRequest?.scaleFactor,
+    fitToExtents,
+  ]);
 
   return {
     viewState,

@@ -40,20 +40,20 @@ export interface CadRenderContext {
 
 export interface CadCanvasProps {
   buildings: BuildingLoop[];
-  selectedBuildingId: string | null;
+  selectedBuildingId?: string | null;
   selectedBuildingIds?: string[];
-  onSelectBuilding: (id: string | null, isMultiSelect?: boolean) => void;
+  onSelectBuilding?: (id: string | null, isMultiSelect?: boolean) => void;
   /** Wywoływane przy "czystym" kliknięciu (bez przeciągnięcia) w etykietę budynku - przełącza minipanel rozwiniętej etykiety. `null` zamyka minipanel. */
   onLabelClick?: (id: string | null) => void;
-  onBuildingMove: (id: string, dx: number, dy: number) => void;
+  onBuildingMove?: (id: string, dx: number, dy: number) => void;
   onBuildingsMove?: (ids: string[], dx: number, dy: number) => void;
-  analysisResults: AnalysisPointResult[];
-  selectedPointResult: AnalysisPointResult | null;
+  analysisResults?: AnalysisPointResult[];
+  selectedPointResult?: AnalysisPointResult | null;
   activePointMode?: 'shadowing' | 'sunlight';
-  onSelectPointResult: (res: AnalysisPointResult | null) => void;
-  showNormals: boolean;
-  showShadowingLines: boolean;
-  showSunlightLines: boolean;
+  onSelectPointResult?: (res: AnalysisPointResult | null) => void;
+  showNormals?: boolean;
+  showShadowingLines?: boolean;
+  showSunlightLines?: boolean;
   showAnalysisPoints?: boolean;
   showShadowRange?: boolean;
   showShadowFill?: boolean;
@@ -65,7 +65,13 @@ export interface CadCanvasProps {
   longitude?: number;
   equinoxDate?: 'spring' | 'autumn';
   masterplanHourFraction?: number;
-  fitRequest?: { nonce: number; ignoreSelection: boolean };
+  fitRequest?: {
+    nonce: number;
+    ignoreSelection: boolean;
+    fitMode?: 'contain' | 'cover' | 'project_circle_cover';
+    preferTested?: boolean;
+    scaleFactor?: number;
+  };
   onInteractionChange?: (isInteracting: boolean) => void;
   isLinkingMode?: boolean;
   linkingSourceId?: string | null;

@@ -12,7 +12,10 @@ import {
   useSceneStore,
   useCadToolStore,
   useSolarAnalysisStore,
+  useUiStore,
 } from '@/store';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { MobileKioskOverlay } from '@/components/mobile/MobileKioskOverlay';
 import { Point2D, AnalysisPointResult, BuildingLoop } from '@/types/geometry';
 import { createBuildingFromVertices } from '@/utils/dxfParser';
 import { generateSweepPolygon } from '@/utils/math2d';
@@ -310,51 +313,76 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     [rotateBuilding]
   );
 
+  const isMobile = useIsMobile();
+  const isMobileShowcasePreview = useUiStore((s) => s.isMobileShowcasePreview);
+  const isKiosk = isMobile || isMobileShowcasePreview;
+
   return (
-    <div className="app-container">
+    <div
+      className="app-container"
+      style={{
+        width: '100vw',
+        height: '100vh',
+        backgroundColor: isKiosk ? '#FAFAF9' : 'var(--bg-main)',
+      }}
+    >
       <Analytics />
       <SpeedInsights />
 
-      {/* Collapsible Left Sidebar */}
-      <AppSidebar />
+      {/* Kiosk Mode Overlay (Header & branding + footer) */}
+      {isKiosk && <MobileKioskOverlay stepMinutes={1} intervalMs={1000 / 30} />}
+
+      {/* Collapsible Left Sidebar (hidden in Kiosk mode) */}
+      {!isKiosk && <AppSidebar />}
 
       {/* Main Fullscreen CAD Viewport */}
       <main
         className="cad-viewport"
         style={{
           flex: 1,
-          width: '100%',
+          width: isKiosk ? '100vw' : '100%',
           height: '100vh',
           position: 'relative',
           overflow: 'hidden',
-          backgroundColor: 'var(--bg-main)',
+          backgroundColor: isKiosk ? '#FAFAF9' : 'var(--bg-main)',
         }}
       >
         {/* Floating Top HUD */}
-        <CadTopHud />
+        {!isKiosk && <CadTopHud />}
 
         {/* Floating Tool Bar under Top HUD */}
-        <div className="cad-toolbar-row">
-          <ControlPointButton />
-          <CadToolBar />
-        </div>
+        {!isKiosk && (
+          <div className="cad-toolbar-row">
+            <ControlPointButton />
+            <CadToolBar />
+          </div>
+        )}
 
         {/* Legend & Stats Overlay at Bottom-Left */}
-        <CadLegendBottom />
+        {!isKiosk && <CadLegendBottom />}
 
         {/* CAD Canvas Engine */}
-        <div style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: isKiosk ? 'none' : 'auto',
+            touchAction: isKiosk ? 'none' : 'auto',
+          }}
+        >
           <CadCanvas
             buildings={buildings}
-            selectedBuildingId={selectedBuildingId}
-            selectedBuildingIds={selectedBuildingIds}
+            selectedBuildingId={isKiosk ? null : selectedBuildingId}
+            selectedBuildingIds={isKiosk ? [] : selectedBuildingIds}
             onSelectBuilding={selectBuilding}
             onBuildingMove={moveBuilding}
             onBuildingsMove={moveBuildings}
             analysisResults={analysisResults}
-            pinnedPoints={pinnedPoints}
-            pinnedPointResults={pinnedPointResults}
-            activePinnedPointId={activePinnedPointId}
+            pinnedPoints={isKiosk ? [] : pinnedPoints}
+            pinnedPointResults={isKiosk ? [] : pinnedPointResults}
+            activePinnedPointId={isKiosk ? null : activePinnedPointId}
             onSelectPinnedPoint={(id) => {
               setActivePinnedPointId(id);
               const found = pinnedPoints.find((p) => p.id === id);
@@ -370,7 +398,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             }}
             onDeletePinnedPoint={deletePinnedPoint}
             onUpdatePinnedPoint={updatePinnedPoint}
-            selectedPointResult={activePointResult}
+            selectedPointResult={isKiosk ? null : activePointResult}
             onSelectPointResult={(res) => {
               if (!res) {
                 setActivePinnedPointId(null);
@@ -384,12 +412,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               }
             }}
             activePointMode={activePointMode}
-            showNormals={showNormals}
-            showShadowingLines={showShadowingLines}
-            showSunlightLines={showSunlightLines}
-            showAnalysisPoints={showAnalysisPoints}
-            showShadowRange={showShadowRange}
-            showShadowFill={showShadowFill}
+            showNormals={isKiosk ? false : showNormals}
+            showShadowingLines={isKiosk ? false : showShadowingLines}
+            showSunlightLines={isKiosk ? false : showSunlightLines}
+            showAnalysisPoints={isKiosk ? false : showAnalysisPoints}
+            showShadowRange={isKiosk ? false : showShadowRange}
+            showShadowFill={isKiosk ? false : showShadowFill}
+            showSatelliteLayer={isKiosk ? false : showSatelliteLayer}
+            satelliteOpacity={satelliteOpacity}
             isInteracting={isInteracting}
             shadowAnalysis={shadowAnalysis}
             sunlightMethod={sunlightMethod}
@@ -401,7 +431,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             onInteractionChange={setIsInteracting}
             isLinkingMode={isLinkingMode}
             linkingSourceId={linkingSourceId}
-            drawingMode={drawingMode}
+            drawingMode={isKiosk ? 'none' : drawingMode}
             onDrawingModeChange={setDrawingMode}
             sweepWidth={sweepWidth}
             sweepAlignment={sweepAlignment}
@@ -411,14 +441,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             onUpdateBuildingVertices={updateBuildingVertices}
             onUpdateBuildingSweepPath={updateBuildingSweepPath}
             onBuildingRotate={handleBuildingRotate}
-            facadePointMode={facadePointMode}
+            facadePointMode={isKiosk ? false : facadePointMode}
             onFacadePointMove={(buildingId, segmentId, offsetRatio) => {
               addPinnedPoint({ buildingId, segmentId, offsetRatio });
             }}
             isEditMode={isEditMode}
             onBuildingEdgeMove={moveBuildingEdge}
-            dimensions={dimensions}
-            isDimensionMode={isDimensionToolActive}
+            dimensions={isKiosk ? [] : dimensions}
+            isDimensionMode={isKiosk ? false : isDimensionToolActive}
             dimensionType={dimensionType}
             dimensionPendingRef={dimensionPendingRef}
             onDimensionClickEdge={handleDimensionClickEdge}
@@ -442,18 +472,18 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             isOsnapActive={isOsnapActive}
             onToggleOsnap={toggleOsnap}
             dominantDirections={segmentStats.dominantDirections}
-            showSatelliteLayer={showSatelliteLayer}
-            satelliteOpacity={satelliteOpacity}
           />
         </div>
 
         {/* Floating Inspector Accordion, Compass Rose & Shared Project Toast */}
-        <FloatingPanelsHost
-          activePointResult={activePointResult}
-          selectedBuildingPinnedPoints={selectedBuildingPinnedPoints}
-          loadStatus={loadStatus}
-          onDismissStatus={onDismissStatus}
-        />
+        {!isKiosk && (
+          <FloatingPanelsHost
+            activePointResult={activePointResult}
+            selectedBuildingPinnedPoints={selectedBuildingPinnedPoints}
+            loadStatus={loadStatus}
+            onDismissStatus={onDismissStatus}
+          />
+        )}
       </main>
     </div>
   );

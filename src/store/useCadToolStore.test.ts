@@ -104,3 +104,26 @@ describe('useCadToolStore - Project Brush Tool', () => {
   });
 });
 
+describe('useCadToolStore - triggerFit & FitRequestOptions', () => {
+  it('inkrementuje nonce i ustawia domyślne opcje', () => {
+    const initialNonce = useCadToolStore.getState().fitRequest.nonce;
+    useCadToolStore.getState().triggerFit();
+    const updated = useCadToolStore.getState().fitRequest;
+    expect(updated.nonce).toBe(initialNonce + 1);
+    expect(updated.ignoreSelection).toBe(false);
+    expect(updated.fitMode).toBe('contain');
+  });
+
+  it('obsługuje opcję project_circle_cover dla trybu Kiosk', () => {
+    const prevNonce = useCadToolStore.getState().fitRequest.nonce;
+    useCadToolStore.getState().triggerFit({
+      ignoreSelection: true,
+      fitMode: 'project_circle_cover',
+    });
+    const updated = useCadToolStore.getState().fitRequest;
+    expect(updated.nonce).toBe(prevNonce + 1);
+    expect(updated.ignoreSelection).toBe(true);
+    expect(updated.fitMode).toBe('project_circle_cover');
+  });
+});
+

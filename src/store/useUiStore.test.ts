@@ -46,4 +46,17 @@ describe('useUiStore - viewMode2D auto-sync invertColors', () => {
     expect(useWfsStore.getState().geoOverlayInvertColors).toBe(true);
     expect(useWfsStore.getState().mpzpInvertColors).toBe(true);
   });
+
+  it('poprawnie przełącza i ustawia isMobileShowcasePreview', () => {
+    expect(useUiStore.getState().isMobileShowcasePreview).toBe(false);
+
+    useUiStore.getState().setMobileShowcasePreview(true);
+    expect(useUiStore.getState().isMobileShowcasePreview).toBe(true);
+
+    useUiStore.getState().toggleMobileShowcasePreview();
+    expect(useUiStore.getState().isMobileShowcasePreview).toBe(false);
+
+    useUiStore.getState().toggleMobileShowcasePreview();
+    expect(useUiStore.getState().isMobileShowcasePreview).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Activity, Timer, Globe, ZoomIn, Crown, Sparkles } from 'lucide-react';
+import { Activity, Timer, Globe, ZoomIn, Crown, Sparkles, Smartphone } from 'lucide-react';
 import { useSolarAnalysisStore, useSceneStore, useUiStore, useLicenseStore } from '../../store';
 import { detectCoordinateSystem } from '../../utils/geoTransform';
 import { Point2D } from '../../types/geometry';
@@ -22,6 +22,7 @@ export const CadLegendBottom: React.FC = () => {
   const activateLicense = useLicenseStore((s) => s.activateLicense);
   const clearLicense = useLicenseStore((s) => s.clearLicense);
   const showCopiedToast = useUiStore((s) => s.showCopiedToast);
+  const toggleMobileShowcasePreview = useUiStore((s) => s.toggleMobileShowcasePreview);
 
   const handleToggleDevPro = async () => {
     if (isPro) {
@@ -225,6 +226,31 @@ export const CadLegendBottom: React.FC = () => {
               <span>PRO</span>
             </button>
           </div>
+
+          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
+
+          {/* DEV: Mobile Kiosk / Showcase Preview */}
+          <button
+            type="button"
+            onClick={toggleMobileShowcasePreview}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 7px',
+              borderRadius: '6px',
+              backgroundColor: 'var(--bg-badge)',
+              border: '1px solid var(--border-light)',
+              fontSize: '10px',
+              fontWeight: 600,
+              color: 'var(--accent-cyan)',
+              cursor: 'pointer',
+            }}
+            title="DEV: Włącz podgląd trybu pokazowego Showcase / Kiosk dla urządzeń mobilnych"
+          >
+            <Smartphone size={11} />
+            <span>Kiosk</span>
+          </button>
 
           <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-light)' }} />
         </>

@@ -6,6 +6,13 @@ import { useSceneStore } from './useSceneStore';
 import { DEFAULT_SNAP_ENGINE_CONFIG, SnapType, EDGE_UCS_DEADBAND_DEG } from '../engine/snapping/types';
 export type DrawingMode = 'none' | 'rectangle' | 'polyline' | 'sweep' | 'vertexEdit' | 'align';
 
+export interface FitRequestOptions {
+  ignoreSelection?: boolean;
+  fitMode?: 'contain' | 'cover' | 'project_circle_cover';
+  preferTested?: boolean;
+  scaleFactor?: number;
+}
+
 interface CadToolState {
   // Drawing Tools
   drawingMode: DrawingMode;
@@ -62,7 +69,13 @@ interface CadToolState {
   computedEdgeUcsAngleDeg: number | null;
   // Żądanie dopasowania widoku (Zoom Extents): nonce inkrementowany przy każdym wywołaniu,
   // ignoreSelection: true wymusza dopasowanie do całego projektu z pominięciem zaznaczenia
-  fitRequest: { nonce: number; ignoreSelection: boolean };
+  fitRequest: {
+    nonce: number;
+    ignoreSelection: boolean;
+    fitMode?: 'contain' | 'cover' | 'project_circle_cover';
+    preferTested?: boolean;
+    scaleFactor?: number;
+  };
 
   // Interaction accuracy flag
   isInteracting: boolean;
@@ -122,7 +135,7 @@ interface CadToolState {
   setComputedEdgeUcsAngleDeg: (deg: number | null) => void;
   setUcsMode: (mode: 'world' | 'user' | 'edge') => void;
   cycleUcsMode: () => void;
-  triggerFit: (options?: { ignoreSelection?: boolean }) => void;
+  triggerFit: (options?: FitRequestOptions) => void;
 
   setIsInteracting: (interacting: boolean) => void;
   setLiveVertexPreview: (
@@ -378,7 +391,13 @@ export const useCadToolStore = create<CadToolState>((set, get) => ({
 
   triggerFit: (options) =>
     set((state) => ({
-      fitRequest: { nonce: state.fitRequest.nonce + 1, ignoreSelection: options?.ignoreSelection ?? false },
+      fitRequest: {
+        nonce: state.fitRequest.nonce + 1,
+        ignoreSelection: options?.ignoreSelection ?? false,
+        fitMode: options?.fitMode ?? 'contain',
+        preferTested: options?.preferTested ?? false,
+        scaleFactor: options?.scaleFactor,
+      },
     })),
   setIsInteracting: (interacting) => {
     set({ isInteracting: interacting });

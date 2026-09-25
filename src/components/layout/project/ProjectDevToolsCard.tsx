@@ -13,7 +13,9 @@ import {
   Keyboard,
   Timer,
   Box,
+  Smartphone,
 } from 'lucide-react';
+import { useUiStore } from '../../../store/useUiStore';
 import { useProjectIO } from './hooks/useProjectIO';
 import { useActionRecorderStore } from '../../../modules/action-recorder/useActionRecorderStore';
 import { ActionRecorderEngine } from '../../../modules/action-recorder/ActionRecorderEngine';
@@ -322,6 +324,29 @@ export const ProjectDevToolsCard: React.FC = () => {
         >
           <FolderOpen size={13} color="var(--accent-cyan)" />
           <span>Katalog Nagrań i Sesji</span>
+        </button>
+
+        {/* Przycisk uruchamiający tryb pokazowy Showcase / Kiosk Mobile */}
+        <button
+          type="button"
+          onClick={() => useUiStore.getState().setMobileShowcasePreview(true)}
+          className="btn-secondary"
+          style={{
+            padding: '6px 8px',
+            fontSize: '10.5px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+            background: 'rgba(56, 189, 248, 0.1)',
+            borderColor: 'rgba(56, 189, 248, 0.3)',
+            color: 'var(--accent-cyan)',
+          }}
+          title="Uruchom tryb pokazowy Showcase / Kiosk dla urządzeń mobilnych"
+        >
+          <Smartphone size={13} />
+          <span>Podgląd Mobile Showcase (Kiosk)</span>
         </button>
       </div>
 

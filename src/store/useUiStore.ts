@@ -56,6 +56,11 @@ interface UiState {
   setViewMode2D: (mode: ViewportMode2D) => void;
   toggleViewMode2D: () => void;
   setExpandedModifierId: (id: string | null) => void;
+
+  /** Tryb podglądu Showcase / Kiosk dla urządzeń mobilnych (lub w trybie dev) */
+  isMobileShowcasePreview: boolean;
+  setMobileShowcasePreview: (val: boolean) => void;
+  toggleMobileShowcasePreview: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -73,6 +78,9 @@ export const useUiStore = create<UiState>((set) => ({
   viewportScale: 14,
   viewMode2D: 'cad',
   expandedModifierId: null,
+  isMobileShowcasePreview: false,
+  setMobileShowcasePreview: (val) => set({ isMobileShowcasePreview: val }),
+  toggleMobileShowcasePreview: () => set((state) => ({ isMobileShowcasePreview: !state.isMobileShowcasePreview })),
 
   isDirty: false,
   lastSavedAt: null,

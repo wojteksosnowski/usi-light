@@ -389,9 +389,18 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     onCycleSnapCandidate: interaction.handleCycleSnapCandidate,
   });
 
-  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({
-    width: typeof window !== 'undefined' ? window.innerWidth - 380 : 1200,
-    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  const isMobileShowcasePreview = useUiStore((s) => s.isMobileShowcasePreview);
+  const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
+
+  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>(() => {
+    if (typeof window === 'undefined') return { width: 1200, height: 800 };
+    const isMobile = window.innerWidth <= 768;
+    const isKiosk = isMobile || useUiStore.getState().isMobileShowcasePreview;
+    const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
+    return {
+      width: isSidebarActive ? Math.max(100, window.innerWidth - 380) : window.innerWidth,
+      height: window.innerHeight,
+    };
   });
 
   useEffect(() => {
@@ -408,7 +417,13 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     const updateDimensions = () => {
       const rect = container.getBoundingClientRect();
-      updateFromSize(rect.width, rect.height);
+      const isMobile = window.innerWidth <= 768;
+      const isKiosk = isMobile || useUiStore.getState().isMobileShowcasePreview;
+      const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
+      const defaultWidth = isSidebarActive ? Math.max(100, window.innerWidth - 380) : window.innerWidth;
+      const w = container.clientWidth > 50 ? container.clientWidth : (rect.width > 50 ? rect.width : defaultWidth);
+      const h = container.clientHeight > 50 ? container.clientHeight : (rect.height > 50 ? rect.height : window.innerHeight);
+      updateFromSize(w, h);
     };
 
     updateDimensions();
@@ -427,7 +442,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
       observer.disconnect();
       window.removeEventListener('resize', updateDimensions);
     };
-  }, []);
+  }, [isMobileShowcasePreview, isSidebarOpen]);
 
   const visibleBuildings = useMemo(() => {
     return buildings.filter((b) => {
@@ -942,7 +957,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
           left: 0,
           width: '100%',
           height: '100%',
-          display: 'block',
+          display: viewMode2D === 'masterplan_white' ? 'none' : 'block',
           pointerEvents: 'none',
         }}
       />
