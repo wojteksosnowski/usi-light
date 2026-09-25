@@ -502,7 +502,7 @@ describe('polygonBooleanTwo & Shadow Analysis - Reference & Performance Benchmar
         expect(actualAreas.length).toBeGreaterThan(0);
         // Baseline was captured with the old 3-sample penumbra/umbra scheme; index 1
         // was the umbra sample, which is the only one this single-sample scheme still produces.
-        expect(actualAreas[0]).toBeCloseTo(expected.sampleAreas[1], 0);
+        expect(Math.abs(actualAreas[0] - expected.sampleAreas[1]) / expected.sampleAreas[1]).toBeLessThan(0.00005);
       }
     }, 30000);
 

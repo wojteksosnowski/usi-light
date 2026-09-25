@@ -1,7 +1,9 @@
 import { Point2D, BuildingLoop } from '@/types/geometry';
 import {
   PolygonWithHoles,
+  computePointsBoundingBox,
 } from '@/utils/math2d/polygons';
+import { polygonIntersectionTwo, arePolygonsDefinitelyDisjoint } from '@/utils/math2d/polygonBooleanTwo';
 import {
   getMasterplanSolarAngles,
   computeStoryShadowPolygonWithHoles,
@@ -36,10 +38,32 @@ const DEFAULT_UMBRA_SAMPLE: MasterplanColorSample = { color: 'rgba(30, 41, 59, 0
 let groundLastKey: string | null = null;
 let groundLastResult: MasterplanShadowRenderResult = { samples: [] };
 
-/** Scala listę poligonów klastra do wyniku: bez unii dla pojedynczego elementu, hierarchicznie dla wielu. */
+/** Scala listę poligonów klastra do wyniku: bez unii dla rozłącznych elementów, hierarchicznie dla nachodzących. */
 function accumulatePolygons(dest: PolygonWithHoles[], src: PolygonWithHoles[]): void {
-  if (src.length === 1) dest.push(src[0]);
-  else if (src.length > 1) dest.push(...unionPolygonsWithHolesHierarchical(src));
+  if (src.length <= 2) {
+    // 0/1 elementów: bez zmian; 2: fastUnionPair (wewnątrz hierarchii) ma własny AABB/disjoint bypass.
+    dest.push(...unionPolygonsWithHolesHierarchical(src));
+    return;
+  }
+
+  // Szybki test rozłączności AABB dla wszystkich par
+  let hasAnyOverlap = false;
+  const boxes = src.map((p) => computePointsBoundingBox(p.outer));
+  for (let i = 0; i < boxes.length && !hasAnyOverlap; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (boundsOverlap(boxes[i], boxes[j])) {
+        hasAnyOverlap = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasAnyOverlap) {
+    dest.push(...src);
+    return;
+  }
+
+  dest.push(...unionPolygonsWithHolesHierarchical(src));
 }
 
 const tierFingerprintCache = new WeakMap<object, string>();
@@ -232,7 +256,8 @@ export function getCachedRoofShadowSamples(
   longitude: number,
   equinoxDate: 'spring' | 'autumn',
   hourFraction: number,
-  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting'
+  method: 'raycasting' | 'segments' | 'astro' | 'linijka' = 'raycasting',
+  receivingRoofPolygon?: Point2D[]
 ): MasterplanShadowRenderResult {
   if (!higherTiers || higherTiers.length === 0) {
     return { samples: [] };
@@ -245,6 +270,8 @@ export function getCachedRoofShadowSamples(
 
   const angles = getMasterplanSolarAngles(latitude, longitude, equinoxDate, hourFraction, 0, method);
   const umbraPolys: PolygonWithHoles[] = [];
+  const roofPoly = receivingRoofPolygon && receivingRoofPolygon.length >= 3 ? receivingRoofPolygon : null;
+  const roofBox = roofPoly ? computePointsBoundingBox(roofPoly) : null;
 
   for (const higherTier of higherTiers) {
     const deltaHTop = higherTier.hTop - currentH;
@@ -264,7 +291,19 @@ export function getCachedRoofShadowSamples(
         higherTier.isConvex
       )
     );
-    umbraPolys.push(...shadowRoofPolys);
+
+    if (roofPoly && roofBox) {
+      for (const sp of shadowRoofPolys) {
+        const spBox = computePointsBoundingBox(sp.outer);
+        if (!boundsOverlap(roofBox, spBox)) continue;
+        if (arePolygonsDefinitelyDisjoint(sp.outer, roofPoly)) continue;
+        for (const c of polygonIntersectionTwo(sp.outer, roofPoly)) {
+          if (c.length >= 3) umbraPolys.push({ outer: c, holes: [] });
+        }
+      }
+    } else {
+      umbraPolys.push(...shadowRoofPolys);
+    }
   }
 
   const umbraColor = samples.find((s) => s.offsetMin === 0)?.color ?? DEFAULT_UMBRA_SAMPLE.color;

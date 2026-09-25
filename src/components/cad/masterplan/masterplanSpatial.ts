@@ -219,7 +219,65 @@ export function clusterTiersByShadowOverlap(
 
 import { fastUnionTwoSimpleLoops, arePolygonsDefinitelyDisjoint } from '@/utils/math2d/polygonBooleanTwo';
 
-function fastUnionPair(p1: PolygonWithHoles, p2: PolygonWithHoles): PolygonWithHoles[] {
+/**
+ * Sortuje przestrzennie wielokąty według 32-bitowej krzywej Z-order (kod Mortona) ich centroidów AABB.
+ * Zapewnia lokalność przestrzenną podczas łączenia hierarchicznego, eliminując rozległe obwiednie
+ * i przyspieszając AABB reject na wyższych poziomach hierarchii.
+ */
+export function sortPolygonsSpatially(polys: PolygonWithHoles[]): PolygonWithHoles[] {
+  const n = polys.length;
+  if (n <= 1) return polys;
+
+  let minCx = Infinity;
+  let minCy = Infinity;
+  let maxCx = -Infinity;
+  let maxCy = -Infinity;
+
+  const items = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const p = polys[i];
+    const box = computePointsBoundingBox(p.outer);
+    const cx = (box.minX + box.maxX) * 0.5;
+    const cy = (box.minY + box.maxY) * 0.5;
+    if (cx < minCx) minCx = cx;
+    if (cx > maxCx) maxCx = cx;
+    if (cy < minCy) minCy = cy;
+    if (cy > maxCy) maxCy = cy;
+    items[i] = { p, cx, cy, morton: 0 };
+  }
+
+  const spanX = Math.max(1e-4, maxCx - minCx);
+  const spanY = Math.max(1e-4, maxCy - minCy);
+
+  for (let i = 0; i < n; i++) {
+    const item = items[i];
+    const normX = Math.min(65535, Math.max(0, Math.floor(((item.cx - minCx) / spanX) * 65535)));
+    const normY = Math.min(65535, Math.max(0, Math.floor(((item.cy - minCy) / spanY) * 65535)));
+
+    let x = normX;
+    x = (x | (x << 8)) & 0x00ff00ff;
+    x = (x | (x << 4)) & 0x0f0f0f0f;
+    x = (x | (x << 2)) & 0x33333333;
+    x = (x | (x << 1)) & 0x55555555;
+
+    let y = normY;
+    y = (y | (y << 8)) & 0x00ff00ff;
+    y = (y | (y << 4)) & 0x0f0f0f0f;
+    y = (y | (y << 2)) & 0x33333333;
+    y = (y | (y << 1)) & 0x55555555;
+
+    item.morton = (x | (y << 1)) >>> 0;
+  }
+
+  items.sort((a, b) => a.morton - b.morton);
+  const sorted = new Array(n);
+  for (let i = 0; i < n; i++) {
+    sorted[i] = items[i].p;
+  }
+  return sorted;
+}
+
+export function fastUnionPair(p1: PolygonWithHoles, p2: PolygonWithHoles): PolygonWithHoles[] {
   if ((!p1.holes || p1.holes.length === 0) && (!p2.holes || p2.holes.length === 0)) {
     const box1 = computePointsBoundingBox(p1.outer);
     const box2 = computePointsBoundingBox(p2.outer);
@@ -243,14 +301,16 @@ function fastUnionPair(p1: PolygonWithHoles, p2: PolygonWithHoles): PolygonWithH
 /**
  * Łączy wielokąty parami hierarchicznie poziom po poziomie (Hierarchical Pairwise Union),
  * drastycznie redukując złożoność obliczeniową i liczbę wierzchołków wchodzących do sweep-line.
- * Wykorzystuje fast-path 2-poligonowy bez alokacji oraz O(1) disjoint AABB bypass.
+ * Wykorzystuje sortowanie przestrzenne Morton Z-order, fast-path 2-poligonowy bez alokacji
+ * oraz O(1) disjoint AABB bypass.
  */
 export function unionPolygonsWithHolesHierarchical(polys: PolygonWithHoles[]): PolygonWithHoles[] {
   if (polys.length === 0) return [];
   if (polys.length === 1) return polys;
   if (polys.length === 2) return fastUnionPair(polys[0], polys[1]);
 
-  let current = polys.map((p) => [p]);
+  const sorted = sortPolygonsSpatially(polys);
+  let current = sorted.map((p) => [p]);
   while (current.length > 1) {
     const next: PolygonWithHoles[][] = [];
     for (let i = 0; i < current.length; i += 2) {

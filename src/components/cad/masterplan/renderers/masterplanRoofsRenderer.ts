@@ -191,7 +191,8 @@ export function renderMasterplanRoofs(context: CadRenderFrameContext, hourFracti
         longitude,
         equinoxDate,
         hourFraction,
-        method
+        method,
+        tier.polygon
       );
 
       drawMasterplanShadowResult(ctx, shadowResult);

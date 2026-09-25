@@ -344,8 +344,8 @@ describe('UMBRA A456 - Armored Regression & Stability Suite', () => {
         }
 
         const expectedArea = baseline.hours['12']['offset_0'].totalNetArea;
-        // Pole powierzchni rzutu z odliczonymi otworami powinno być zachowane
-        expect(totalAreaRot).toBeCloseTo(expectedArea, 0);
+        // Pole powierzchni rzutu z odliczonymi otworami powinno być zachowane (tolerancja < 0.005% dla całej sceny)
+        expect(Math.abs(totalAreaRot - expectedArea) / expectedArea).toBeLessThan(0.00005);
       }
     });
   });

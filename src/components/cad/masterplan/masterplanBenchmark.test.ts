@@ -156,7 +156,8 @@ describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
           17.03,
           'spring',
           12.0,
-          'raycasting'
+          'raycasting',
+          tier.polygon
         );
       }
     }

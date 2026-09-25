@@ -47,6 +47,9 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
 8. **FastShadowInTheMiddle (Cienie na Płaszczyznach Pośrednich $Z = \text{const}$)**:
    - Rzutowanie cieni na poziome dachy i tarasy $Z_{\text{target}}$ realizowane jest jednowymiarową transformacją afiniczną $P(Z) = P_0 - Z \cdot \vec{s} = P_0 + \frac{Z}{z_{\text{max}}}(V_{xy} - P_0)$ w $O(1)$ ($32.9\text{ ns/vertex}$).
    - Wypiek w `CanonicalShadowBaker` i konsumpcja w `FastShadowInTheMiddle` oraz `MasterplanFastShadowPipeline` eliminują powtarzalne rzutowanie 3D i obciążenie GC.
+9. **Morton Spatial Sorting i Culling Cieni Dachowych Masterplan**:
+   - Sortowanie poligonów 32-bitowym kodem Mortona (Z-order) `sortPolygonsSpatially` w `unionPolygonsWithHolesHierarchical` grupuje sąsiednie bryły i eliminuje rozrost AABB na wyższych poziomach unii hierarchicznej.
+   - Culling i docinanie łat cieni dachowych $\Delta H$ za pomocą `polygonIntersectionTwo` (`fastIntersectTwoSimpleLoops`) w `masterplanRoofsRenderer.ts` / `masterplanShadowCache.ts` wraz z wczesnym testem rozłączności AABB par w `accumulatePolygons`.
 
 
 ---
