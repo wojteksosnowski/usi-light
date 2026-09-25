@@ -3,10 +3,88 @@ import { useSolarAnalysisStore } from '../../store/useSolarAnalysisStore';
 import { useCadToolStore } from '../../store/useCadToolStore';
 import { useUiStore } from '../../store/useUiStore';
 import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
-import { useOsmLanduseStore } from '../../modules/wfs-import/store/useOsmLanduseStore';
+import { useOsmLanduseStore, OsmLanduseLayerConfig } from '../../modules/wfs-import/store/useOsmLanduseStore';
 import { useSceneStore } from '../../store/useSceneStore';
 
+import { applyStoreOverrides, StoreOverrideEntry } from '../../store/storeSnapshot';
+
 const KIOSK_FIT_OPTS = { ignoreSelection: true, fitMode: 'project_circle_cover' as const };
+
+/**
+ * Zwraca konfigurację wyłączenia wszystkich warstw analitycznych, podkładowych i narzędzi w trybie Kiosk.
+ */
+export function getKioskStoreOverrides(): StoreOverrideEntry[] {
+  return [
+    {
+      store: useSolarAnalysisStore,
+      overrides: {
+        showNormals: false,
+        showShadowingLines: false,
+        showSunlightLines: false,
+        showAnalysisPoints: false,
+        showShadowRange: false,
+        showShadowFill: false,
+        showSatelliteLayer: false,
+        activePinnedPointId: null,
+      },
+    },
+    {
+      store: useWfsStore,
+      overrides: {
+        showGeoOverlayGroup: false,
+        showKiutLayer: false,
+        showBdotLayer: false,
+        showOrthophotoLayer: false,
+        showPlansOverlayGroup: false,
+        showMpzpLayer: false,
+        showMpzpZonesLayer: false,
+        showLandCoverLayer: false,
+        showOvertureGreenAreas: false,
+        showTreesLayer: false,
+      },
+    },
+    {
+      store: useOsmLanduseStore,
+      capture: (s: any) => ({
+        showOsmLanduseGroup: s.showOsmLanduseGroup,
+        layers: (s.layers || []).map((l: OsmLanduseLayerConfig) => ({ ...l })),
+      }),
+      apply: () => {
+        const osm = useOsmLanduseStore.getState();
+        osm.setShowOsmLanduseGroup(false);
+        osm.setAllLayersVisibility(false);
+      },
+      restore: (_, snapshot) => {
+        const osm = useOsmLanduseStore.getState();
+        osm.setShowOsmLanduseGroup(snapshot.showOsmLanduseGroup);
+        for (const layer of snapshot.layers) {
+          osm.updateLayerConfig(layer.id, { isVisible: layer.isVisible });
+        }
+      },
+    },
+    {
+      store: useCadToolStore,
+      overrides: {
+        isDimensionToolActive: false,
+        facadePointMode: false,
+        drawingMode: 'none',
+      },
+    },
+    {
+      store: useSceneStore,
+      overrides: {
+        selectedBuildingId: null,
+        selectedBuildingIds: [],
+      },
+    },
+    {
+      store: useUiStore,
+      overrides: {
+        isSidebarOpen: false,
+      },
+    },
+  ];
+}
 
 interface MobileKioskOverlayProps {
   /** Krok w minutach co tick (domyślnie 1 min) */
@@ -26,93 +104,9 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
 
   const setMasterplanHourFraction = useSolarAnalysisStore((s) => s.setMasterplanHourFraction);
 
-  // 1. Całkowite wyłączenie WSZYSTKICH warstw analitycznych, podkładowych i geodezyjnych
+  // 1. Całkowite wyłączenie WSZYSTKICH warstw analitycznych, podkładowych i geodezyjnych ze snapshotem
   useEffect(() => {
-    const solar = useSolarAnalysisStore.getState();
-    const wfs = useWfsStore.getState();
-    const osm = useOsmLanduseStore.getState();
-    const cadTools = useCadToolStore.getState();
-    const scene = useSceneStore.getState();
-
-    // Migawka stanu warstw analitycznych (Solar / §12 / §56 / Cień / Punkty / Satelita)
-    const prevSolar = {
-      showNormals: solar.showNormals,
-      showShadowingLines: solar.showShadowingLines,
-      showSunlightLines: solar.showSunlightLines,
-      showAnalysisPoints: solar.showAnalysisPoints,
-      showShadowRange: solar.showShadowRange,
-      showShadowFill: solar.showShadowFill,
-      showSatelliteLayer: solar.showSatelliteLayer,
-      activePinnedPointId: solar.activePinnedPointId,
-    };
-
-    // Migawka stanu warstw podkładowych i planistycznych (GESUT, BDOT, Orto, MPZP, Zieleń, Drzewa)
-    const prevWfs = {
-      showGeoOverlayGroup: wfs.showGeoOverlayGroup,
-      showKiutLayer: wfs.showKiutLayer,
-      showBdotLayer: wfs.showBdotLayer,
-      showOrthophotoLayer: wfs.showOrthophotoLayer,
-      showPlansOverlayGroup: wfs.showPlansOverlayGroup,
-      showMpzpLayer: wfs.showMpzpLayer,
-      showMpzpZonesLayer: wfs.showMpzpZonesLayer,
-      showLandCoverLayer: wfs.showLandCoverLayer,
-      showOvertureGreenAreas: wfs.showOvertureGreenAreas,
-      showTreesLayer: wfs.showTreesLayer,
-    };
-
-    // Migawka stanu zagospodarowania OSM
-    const prevOsm = {
-      showOsmLanduseGroup: osm.showOsmLanduseGroup,
-      layers: osm.layers.map((l) => ({ ...l })),
-    };
-
-    // Migawka narzędzi kreślarskich i wymiarowania
-    const prevCadTools = {
-      isDimensionToolActive: cadTools.isDimensionToolActive,
-      facadePointMode: cadTools.facadePointMode,
-      drawingMode: cadTools.drawingMode,
-    };
-
-    // Migawka selekcji obiektów
-    const prevSelection = {
-      selectedBuildingId: scene.selectedBuildingId,
-      selectedBuildingIds: [...scene.selectedBuildingIds],
-    };
-
-    // Migawka panelu bocznego
-    const prevSidebarOpen = useUiStore.getState().isSidebarOpen;
-    useUiStore.getState().setSidebarOpen(false);
-
-    // WYŁĄCZ WSZYSTKIE WARSTWY ANALITYCZNE I PODKŁADOWE
-    solar.setShowNormals(false);
-    solar.setShowShadowingLines(false);
-    solar.setShowSunlightLines(false);
-    solar.setShowAnalysisPoints(false);
-    solar.setShowShadowRange(false);
-    solar.setShowShadowFill(false);
-    solar.setShowSatelliteLayer(false);
-    solar.setActivePinnedPointId(null);
-
-    wfs.setShowGeoOverlayGroup(false);
-    wfs.setShowKiutLayer(false);
-    wfs.setShowBdotLayer(false);
-    wfs.setShowOrthophotoLayer(false);
-    wfs.setShowPlansOverlayGroup(false);
-    wfs.setShowMpzpLayer(false);
-    wfs.setShowMpzpZonesLayer(false);
-    wfs.setShowLandCoverLayer(false);
-    wfs.setShowOvertureGreenAreas(false);
-    wfs.setShowTreesLayer(false);
-
-    osm.setShowOsmLanduseGroup(false);
-    osm.setAllLayersVisibility(false);
-
-    cadTools.setIsDimensionToolActive(false);
-    cadTools.setFacadePointMode(false);
-    cadTools.setDrawingMode('none');
-
-    scene.setSelectedBuildingId(null);
-    scene.setSelectedBuildingIds([]);
+    const restoreStores = applyStoreOverrides(getKioskStoreOverrides());
 
     const prevMode = viewMode2D;
     setViewMode2D('masterplan_white');
@@ -123,16 +117,23 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
     // Automatyczne elastyczne centrowanie i dopasowanie przy zmianach rozmiaru ekranu,
     // skoalescowane do rAF, żeby seria zdarzeń resize podczas przeciągania okna nie
     // odpalała pełnego przeliczenia dopasowania widoku na każdą klatkę.
+    const hasWindow = typeof window !== 'undefined';
     let resizeRafId: number | null = null;
     const handleResize = () => {
       if (resizeRafId !== null) return;
-      resizeRafId = requestAnimationFrame(() => {
-        resizeRafId = null;
+      if (typeof requestAnimationFrame === 'function') {
+        resizeRafId = requestAnimationFrame(() => {
+          resizeRafId = null;
+          triggerFit(KIOSK_FIT_OPTS);
+        });
+      } else {
         triggerFit(KIOSK_FIT_OPTS);
-      });
+      }
     };
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
+    if (hasWindow) {
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('orientationchange', handleResize);
+    }
 
     // Globalna cicha obsługa klawisza ESC do wyjścia z trybu Kiosk
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -141,50 +142,24 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
         setMobileShowcasePreview(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    if (hasWindow) {
+      window.addEventListener('keydown', handleKeyDown, { capture: true });
+    }
 
     return () => {
       clearTimeout(fitTimer1);
       clearTimeout(fitTimer2);
-      if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleResize);
-      window.removeEventListener('keydown', handleKeyDown, { capture: true });
-
-      // PRZYWRÓĆ STAN WSZYSTKICH WARSTW I NARZĘDZI
-      solar.setShowNormals(prevSolar.showNormals);
-      solar.setShowShadowingLines(prevSolar.showShadowingLines);
-      solar.setShowSunlightLines(prevSolar.showSunlightLines);
-      solar.setShowAnalysisPoints(prevSolar.showAnalysisPoints);
-      solar.setShowShadowRange(prevSolar.showShadowRange);
-      solar.setShowShadowFill(prevSolar.showShadowFill);
-      solar.setShowSatelliteLayer(prevSolar.showSatelliteLayer);
-      solar.setActivePinnedPointId(prevSolar.activePinnedPointId);
-
-      wfs.setShowGeoOverlayGroup(prevWfs.showGeoOverlayGroup);
-      wfs.setShowKiutLayer(prevWfs.showKiutLayer);
-      wfs.setShowBdotLayer(prevWfs.showBdotLayer);
-      wfs.setShowOrthophotoLayer(prevWfs.showOrthophotoLayer);
-      wfs.setShowPlansOverlayGroup(prevWfs.showPlansOverlayGroup);
-      wfs.setShowMpzpLayer(prevWfs.showMpzpLayer);
-      wfs.setShowMpzpZonesLayer(prevWfs.showMpzpZonesLayer);
-      wfs.setShowLandCoverLayer(prevWfs.showLandCoverLayer);
-      wfs.setShowOvertureGreenAreas(prevWfs.showOvertureGreenAreas);
-      wfs.setShowTreesLayer(prevWfs.showTreesLayer);
-
-      osm.setShowOsmLanduseGroup(prevOsm.showOsmLanduseGroup);
-      for (const layer of prevOsm.layers) {
-        osm.updateLayerConfig(layer.id, { isVisible: layer.isVisible });
+      if (resizeRafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(resizeRafId);
+      }
+      if (hasWindow) {
+        window.removeEventListener('resize', handleResize);
+        window.removeEventListener('orientationchange', handleResize);
+        window.removeEventListener('keydown', handleKeyDown, { capture: true });
       }
 
-      cadTools.setIsDimensionToolActive(prevCadTools.isDimensionToolActive);
-      cadTools.setFacadePointMode(prevCadTools.facadePointMode);
-      cadTools.setDrawingMode(prevCadTools.drawingMode);
-
-      scene.setSelectedBuildingId(prevSelection.selectedBuildingId);
-      scene.setSelectedBuildingIds(prevSelection.selectedBuildingIds);
-
-      useUiStore.getState().setSidebarOpen(prevSidebarOpen);
+      // Przywróć stan wszystkich warstw i narzędzi
+      restoreStores();
 
       if (prevMode !== 'masterplan_white') {
         setViewMode2D(prevMode);

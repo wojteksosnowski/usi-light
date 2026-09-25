@@ -16,6 +16,7 @@ import {
   unionPolygonsWithHolesHierarchical,
   fastUnionPair,
   extendBoundsByOffset,
+  tierFootprintBounds,
   Bounds,
   polygonsWithHolesBounds,
   boundsOverlap,
@@ -318,7 +319,7 @@ export function getCachedRoofShadowSamples(
     // Szybki AABB reach check przed rzutowaniem cienia bryły wyższej
     if (roofBox) {
       const htOffset = computeShadowOffsetVector(deltaHTop, angles);
-      const htBounds = higherTier.bounds2D || computePointsBoundingBox(higherTier.polygon);
+      const htBounds = tierFootprintBounds(higherTier);
       const htReachBounds = extendBoundsByOffset(htBounds, htOffset.dx * 1.05, htOffset.dy * 1.05);
       if (!boundsOverlap(roofBox, htReachBounds)) {
         continue;

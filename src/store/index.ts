@@ -3,3 +3,4 @@ export * from './useCadToolStore';
 export * from './useSolarAnalysisStore';
 export * from './useUiStore';
 export * from './useLicenseStore';
+export * from './storeSnapshot';

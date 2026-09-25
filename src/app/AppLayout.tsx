@@ -317,6 +317,46 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const isMobileShowcasePreview = useUiStore((s) => s.isMobileShowcasePreview);
   const isKiosk = isMobile || isMobileShowcasePreview;
 
+  const kioskCanvasOverrides = isKiosk
+    ? {
+        selectedBuildingId: null,
+        selectedBuildingIds: [],
+        pinnedPoints: [],
+        pinnedPointResults: [],
+        activePinnedPointId: null,
+        selectedPointResult: null,
+        showNormals: false,
+        showShadowingLines: false,
+        showSunlightLines: false,
+        showAnalysisPoints: false,
+        showShadowRange: false,
+        showShadowFill: false,
+        showSatelliteLayer: false,
+        drawingMode: 'none' as const,
+        facadePointMode: false,
+        dimensions: [],
+        isDimensionMode: false,
+      }
+    : {
+        selectedBuildingId,
+        selectedBuildingIds,
+        pinnedPoints,
+        pinnedPointResults,
+        activePinnedPointId,
+        selectedPointResult: activePointResult,
+        showNormals,
+        showShadowingLines,
+        showSunlightLines,
+        showAnalysisPoints,
+        showShadowRange,
+        showShadowFill,
+        showSatelliteLayer,
+        drawingMode,
+        facadePointMode,
+        dimensions,
+        isDimensionMode: isDimensionToolActive,
+      };
+
   return (
     <div
       className="app-container"
@@ -374,15 +414,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         >
           <CadCanvas
             buildings={buildings}
-            selectedBuildingId={isKiosk ? null : selectedBuildingId}
-            selectedBuildingIds={isKiosk ? [] : selectedBuildingIds}
+            {...kioskCanvasOverrides}
             onSelectBuilding={selectBuilding}
             onBuildingMove={moveBuilding}
             onBuildingsMove={moveBuildings}
             analysisResults={analysisResults}
-            pinnedPoints={isKiosk ? [] : pinnedPoints}
-            pinnedPointResults={isKiosk ? [] : pinnedPointResults}
-            activePinnedPointId={isKiosk ? null : activePinnedPointId}
             onSelectPinnedPoint={(id) => {
               setActivePinnedPointId(id);
               const found = pinnedPoints.find((p) => p.id === id);
@@ -398,7 +434,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             }}
             onDeletePinnedPoint={deletePinnedPoint}
             onUpdatePinnedPoint={updatePinnedPoint}
-            selectedPointResult={isKiosk ? null : activePointResult}
             onSelectPointResult={(res) => {
               if (!res) {
                 setActivePinnedPointId(null);
@@ -412,13 +447,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               }
             }}
             activePointMode={activePointMode}
-            showNormals={isKiosk ? false : showNormals}
-            showShadowingLines={isKiosk ? false : showShadowingLines}
-            showSunlightLines={isKiosk ? false : showSunlightLines}
-            showAnalysisPoints={isKiosk ? false : showAnalysisPoints}
-            showShadowRange={isKiosk ? false : showShadowRange}
-            showShadowFill={isKiosk ? false : showShadowFill}
-            showSatelliteLayer={isKiosk ? false : showSatelliteLayer}
             satelliteOpacity={satelliteOpacity}
             isInteracting={isInteracting}
             shadowAnalysis={shadowAnalysis}
@@ -431,7 +459,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             onInteractionChange={setIsInteracting}
             isLinkingMode={isLinkingMode}
             linkingSourceId={linkingSourceId}
-            drawingMode={isKiosk ? 'none' : drawingMode}
             onDrawingModeChange={setDrawingMode}
             sweepWidth={sweepWidth}
             sweepAlignment={sweepAlignment}
@@ -441,14 +468,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             onUpdateBuildingVertices={updateBuildingVertices}
             onUpdateBuildingSweepPath={updateBuildingSweepPath}
             onBuildingRotate={handleBuildingRotate}
-            facadePointMode={isKiosk ? false : facadePointMode}
             onFacadePointMove={(buildingId, segmentId, offsetRatio) => {
               addPinnedPoint({ buildingId, segmentId, offsetRatio });
             }}
             isEditMode={isEditMode}
             onBuildingEdgeMove={moveBuildingEdge}
-            dimensions={isKiosk ? [] : dimensions}
-            isDimensionMode={isKiosk ? false : isDimensionToolActive}
             dimensionType={dimensionType}
             dimensionPendingRef={dimensionPendingRef}
             onDimensionClickEdge={handleDimensionClickEdge}

@@ -22,6 +22,19 @@ export function checkIsMobile(breakpoint = 768, win: typeof window | null = type
 }
 
 /**
+ * Wspólne wyliczenie flag trybu kiosk + aktywności sidebaru, używane zarówno przy inicjalizacji
+ * canvasu jak i przy przeliczaniu jego wymiarów/viewportu.
+ */
+export function getKioskLayoutFlags(
+  isMobileShowcasePreview: boolean,
+  isSidebarOpen: boolean,
+  win: typeof window | null = typeof window !== 'undefined' ? window : null
+): { isKiosk: boolean; isSidebarActive: boolean } {
+  const isKiosk = checkIsMobile(768, win) || isMobileShowcasePreview;
+  return { isKiosk, isSidebarActive: isSidebarOpen && !isKiosk };
+}
+
+/**
  * Hook detekcji urządzeń mobilnych i ekranów dotykowych.
  * Zwraca true, jeśli szerokość okna <= breakpoint lub wskaźnik to pointer: coarse (ekran dotykowy).
  */

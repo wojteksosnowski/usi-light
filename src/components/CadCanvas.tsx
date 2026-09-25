@@ -29,7 +29,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useUiStore } from '../store/useUiStore';
 import { useCadToolStore } from '../store/useCadToolStore';
 import { MasterplanRenderPipeline } from './cad/masterplan/MasterplanRenderPipeline';
-import { checkIsMobile, getCanvasWorkingWidth } from '../hooks/useIsMobile';
+import { getCanvasWorkingWidth, getKioskLayoutFlags } from '../hooks/useIsMobile';
 
 export { isBuildingLocked, getBuildingTopElevation };
 
@@ -395,8 +395,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>(() => {
     if (typeof window === 'undefined') return { width: 1200, height: 800 };
-    const isKiosk = checkIsMobile() || isMobileShowcasePreview;
-    const isSidebarActive = isSidebarOpen && !isKiosk;
+    const { isSidebarActive } = getKioskLayoutFlags(isMobileShowcasePreview, isSidebarOpen);
     return {
       width: getCanvasWorkingWidth(isSidebarActive),
       height: window.innerHeight,
@@ -417,8 +416,7 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     const updateDimensions = () => {
       const rect = container.getBoundingClientRect();
-      const isKiosk = checkIsMobile() || isMobileShowcasePreview;
-      const isSidebarActive = isSidebarOpen && !isKiosk;
+      const { isSidebarActive } = getKioskLayoutFlags(isMobileShowcasePreview, isSidebarOpen);
       const defaultWidth = getCanvasWorkingWidth(isSidebarActive);
       const w = container.clientWidth > 50 ? container.clientWidth : (rect.width > 50 ? rect.width : defaultWidth);
       const h = container.clientHeight > 50 ? container.clientHeight : (rect.height > 50 ? rect.height : window.innerHeight);

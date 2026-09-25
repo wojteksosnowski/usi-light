@@ -3,7 +3,7 @@ import { ViewportState } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { useUiStore } from '../../../store/useUiStore';
 import { createViewportMatrix, invertAffineMatrix, transformPoint, AffineMatrix2D } from '@/utils/math2d';
-import { checkIsMobile, getCanvasWorkingWidth } from '../../../hooks/useIsMobile';
+import { getCanvasWorkingWidth, getKioskLayoutFlags } from '../../../hooks/useIsMobile';
 import { FitRequestOptions as FitToExtentsOptions } from '../../../store/useCadToolStore';
 
 export function useCadViewport(
@@ -133,8 +133,10 @@ export function useCadViewport(
     const effectiveSelectedBuildingId = ignoreSelection ? null : selectedBuildingId;
 
     const rect = container.getBoundingClientRect();
-    const isKiosk = checkIsMobile() || useUiStore.getState().isMobileShowcasePreview;
-    const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
+    const { isSidebarActive } = getKioskLayoutFlags(
+      useUiStore.getState().isMobileShowcasePreview,
+      useUiStore.getState().isSidebarOpen
+    );
     const defaultWidth = getCanvasWorkingWidth(isSidebarActive);
     const width = container.clientWidth > 50 ? container.clientWidth : (rect.width > 50 ? rect.width : defaultWidth);
     const height = container.clientHeight > 50 ? container.clientHeight : (rect.height > 50 ? rect.height : window.innerHeight);
