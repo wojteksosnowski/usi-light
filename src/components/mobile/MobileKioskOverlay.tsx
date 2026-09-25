@@ -6,6 +6,8 @@ import { useWfsStore } from '../../modules/wfs-import/store/useWfsStore';
 import { useOsmLanduseStore } from '../../modules/wfs-import/store/useOsmLanduseStore';
 import { useSceneStore } from '../../store/useSceneStore';
 
+const KIOSK_FIT_OPTS = { ignoreSelection: true, fitMode: 'project_circle_cover' as const };
+
 interface MobileKioskOverlayProps {
   /** Krok w minutach co tick (domyślnie 1 min) */
   stepMinutes?: number;
@@ -114,17 +116,20 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
 
     const prevMode = viewMode2D;
     setViewMode2D('masterplan_white');
-    triggerFit({ ignoreSelection: true, fitMode: 'project_circle_cover' });
-    const fitTimer1 = setTimeout(() => {
-      triggerFit({ ignoreSelection: true, fitMode: 'project_circle_cover' });
-    }, 60);
-    const fitTimer2 = setTimeout(() => {
-      triggerFit({ ignoreSelection: true, fitMode: 'project_circle_cover' });
-    }, 180);
+    triggerFit(KIOSK_FIT_OPTS);
+    const fitTimer1 = setTimeout(() => triggerFit(KIOSK_FIT_OPTS), 60);
+    const fitTimer2 = setTimeout(() => triggerFit(KIOSK_FIT_OPTS), 180);
 
-    // Automatyczne elastyczne centrowanie i dopasowanie przy zmianach rozmiaru ekranu
+    // Automatyczne elastyczne centrowanie i dopasowanie przy zmianach rozmiaru ekranu,
+    // skoalescowane do rAF, żeby seria zdarzeń resize podczas przeciągania okna nie
+    // odpalała pełnego przeliczenia dopasowania widoku na każdą klatkę.
+    let resizeRafId: number | null = null;
     const handleResize = () => {
-      triggerFit({ ignoreSelection: true, fitMode: 'project_circle_cover' });
+      if (resizeRafId !== null) return;
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        triggerFit(KIOSK_FIT_OPTS);
+      });
     };
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
@@ -141,6 +146,7 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
     return () => {
       clearTimeout(fitTimer1);
       clearTimeout(fitTimer2);
+      if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
       window.removeEventListener('keydown', handleKeyDown, { capture: true });

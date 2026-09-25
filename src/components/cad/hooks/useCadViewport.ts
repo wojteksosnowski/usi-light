@@ -3,25 +3,14 @@ import { ViewportState } from '../types';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { useUiStore } from '../../../store/useUiStore';
 import { createViewportMatrix, invertAffineMatrix, transformPoint, AffineMatrix2D } from '@/utils/math2d';
-
-export interface FitToExtentsOptions {
-  ignoreSelection?: boolean;
-  fitMode?: 'contain' | 'cover' | 'project_circle_cover';
-  preferTested?: boolean;
-  scaleFactor?: number;
-}
+import { checkIsMobile, getCanvasWorkingWidth } from '../../../hooks/useIsMobile';
+import { FitRequestOptions as FitToExtentsOptions } from '../../../store/useCadToolStore';
 
 export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
   buildings: BuildingLoop[],
   viewRotationDeg: number,
-  fitRequest?: {
-    nonce: number;
-    ignoreSelection: boolean;
-    fitMode?: 'contain' | 'cover' | 'project_circle_cover';
-    preferTested?: boolean;
-    scaleFactor?: number;
-  },
+  fitRequest?: FitToExtentsOptions & { nonce: number; ignoreSelection: boolean },
   selectedBuildingId?: string | null,
   layerSettings?: Record<string, any>,
   projectRadius?: number
@@ -144,10 +133,9 @@ export function useCadViewport(
     const effectiveSelectedBuildingId = ignoreSelection ? null : selectedBuildingId;
 
     const rect = container.getBoundingClientRect();
-    const isMobile = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
-    const isKiosk = isMobile || useUiStore.getState().isMobileShowcasePreview;
+    const isKiosk = checkIsMobile() || useUiStore.getState().isMobileShowcasePreview;
     const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
-    const defaultWidth = isSidebarActive ? Math.max(100, window.innerWidth - 380) : window.innerWidth;
+    const defaultWidth = getCanvasWorkingWidth(isSidebarActive);
     const width = container.clientWidth > 50 ? container.clientWidth : (rect.width > 50 ? rect.width : defaultWidth);
     const height = container.clientHeight > 50 ? container.clientHeight : (rect.height > 50 ? rect.height : window.innerHeight);
 
@@ -321,11 +309,9 @@ export function useCadViewport(
     const t = setTimeout(() => fitToExtents(opts), 100);
     return () => clearTimeout(t);
   }, [
+    // fitRequest is replaced as a single object whenever nonce changes (see triggerFit in
+    // useCadToolStore), so nonce alone is a sufficient dependency for the other fields.
     fitRequest?.nonce,
-    fitRequest?.ignoreSelection,
-    fitRequest?.fitMode,
-    fitRequest?.preferTested,
-    fitRequest?.scaleFactor,
     fitToExtents,
   ]);
 

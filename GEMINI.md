@@ -57,6 +57,9 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
     - Bypass CPU docięcia dachem `polygonIntersectionTwo` dla pojedynczych cieni wyższych brył pod maską sprzętową GPU `ctx.clip('evenodd')` w Canvas 2D.
 11. **Tłumienie Krycia Cieni z Wysokością Płaszczyzny Odbiorczej (Elevation-Adjusted Shadow Transparency)**:
     - Cienie rzucane na dachy i tarasy wyższych kondygnacji ($H > 0$) otrzymują łagodne tłumienie krycia w `getElevationAdjustedShadowColor` (`masterplanShadowCache.ts`): $\alpha(H) = \alpha_0 \cdot \max(0.60, 1 - \frac{0.40 \cdot H}{H + 30})$, dając subtelny efekt rozproszenia światła z wysokością przy pełnym buforowaniu w `roofCache`.
+12. **Ciągłość Cieni Dachowych Masterplan, Wczesny Zasięg AABB i Telemetria Containment**:
+    - Skaner 601 minut na scenie miejskiej `reference/shadow/poz.json` (-5h do +5h, co 1 min) potwierdza 0 anomalii mrygania (*flickering dropouts*) w `masterplanRoofFlicker.test.ts`.
+    - Wczesne odrzucanie par AABB ($O(1)$ reach reject) w `getCachedRoofShadowSamples` oraz $74.4\%$ wyjść *Containment Exit* w unii boolowskiej cieni dachowych eliminują narzut operacji sweep-line.
 
 ---
 

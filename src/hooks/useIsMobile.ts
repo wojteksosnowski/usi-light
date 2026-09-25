@@ -1,5 +1,15 @@
 import { useState, useEffect } from 'react';
 
+export const SIDEBAR_WIDTH_PX = 380;
+
+/**
+ * Szerokość roboczą canvasu, uwzględniając otwarty sidebar (poza trybem kiosk).
+ */
+export function getCanvasWorkingWidth(isSidebarActive: boolean, win: typeof window | null = typeof window !== 'undefined' ? window : null): number {
+  if (!win) return 1200;
+  return isSidebarActive ? Math.max(100, win.innerWidth - SIDEBAR_WIDTH_PX) : win.innerWidth;
+}
+
 /**
  * Funkcja pomocnicza sprawdzająca, czy bieżące środowisko/okno spełnia kryteria urządzenia mobilnego.
  */

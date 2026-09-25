@@ -29,6 +29,7 @@ import { useSceneStore } from '../store/useSceneStore';
 import { useUiStore } from '../store/useUiStore';
 import { useCadToolStore } from '../store/useCadToolStore';
 import { MasterplanRenderPipeline } from './cad/masterplan/MasterplanRenderPipeline';
+import { checkIsMobile, getCanvasWorkingWidth } from '../hooks/useIsMobile';
 
 export { isBuildingLocked, getBuildingTopElevation };
 
@@ -394,11 +395,10 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
   const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>(() => {
     if (typeof window === 'undefined') return { width: 1200, height: 800 };
-    const isMobile = window.innerWidth <= 768;
-    const isKiosk = isMobile || useUiStore.getState().isMobileShowcasePreview;
-    const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
+    const isKiosk = checkIsMobile() || isMobileShowcasePreview;
+    const isSidebarActive = isSidebarOpen && !isKiosk;
     return {
-      width: isSidebarActive ? Math.max(100, window.innerWidth - 380) : window.innerWidth,
+      width: getCanvasWorkingWidth(isSidebarActive),
       height: window.innerHeight,
     };
   });
@@ -417,10 +417,9 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
 
     const updateDimensions = () => {
       const rect = container.getBoundingClientRect();
-      const isMobile = window.innerWidth <= 768;
-      const isKiosk = isMobile || useUiStore.getState().isMobileShowcasePreview;
-      const isSidebarActive = useUiStore.getState().isSidebarOpen && !isKiosk;
-      const defaultWidth = isSidebarActive ? Math.max(100, window.innerWidth - 380) : window.innerWidth;
+      const isKiosk = checkIsMobile() || isMobileShowcasePreview;
+      const isSidebarActive = isSidebarOpen && !isKiosk;
+      const defaultWidth = getCanvasWorkingWidth(isSidebarActive);
       const w = container.clientWidth > 50 ? container.clientWidth : (rect.width > 50 ? rect.width : defaultWidth);
       const h = container.clientHeight > 50 ? container.clientHeight : (rect.height > 50 ? rect.height : window.innerHeight);
       updateFromSize(w, h);

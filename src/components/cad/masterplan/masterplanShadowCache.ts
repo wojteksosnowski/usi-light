@@ -6,11 +6,20 @@ import {
 import { fastIntersectTwoSimpleLoops, arePolygonsDefinitelyDisjoint } from '@/utils/math2d/polygonBooleanTwo';
 import {
   getMasterplanSolarAngles,
+  computeShadowOffsetVector,
   computeStoryShadowPolygonWithHoles,
   polygonFingerprint,
   MasterplanStoryTier,
 } from './masterplanGeometry';
-import { clusterTiersByShadowOverlap, unionPolygonsWithHolesHierarchical, Bounds, polygonsWithHolesBounds, boundsOverlap } from './masterplanSpatial';
+import {
+  clusterTiersByShadowOverlap,
+  unionPolygonsWithHolesHierarchical,
+  fastUnionPair,
+  extendBoundsByOffset,
+  Bounds,
+  polygonsWithHolesBounds,
+  boundsOverlap,
+} from './masterplanSpatial';
 import { getCachedBuildingShadow, makeSunBucketKey, getOrComputeBuildingShadow } from '@/engine/buildingGeometryCache';
 
 export interface MasterplanColorSample {
@@ -40,9 +49,13 @@ let groundLastResult: MasterplanShadowRenderResult = { samples: [] };
 
 /** Scala listę poligonów klastra do wyniku: bez unii dla rozłącznych elementów, hierarchicznie dla nachodzących. */
 function accumulatePolygons(dest: PolygonWithHoles[], src: PolygonWithHoles[]): void {
-  if (src.length <= 2) {
-    // 0/1 elementów: bez zmian; 2: fastUnionPair (wewnątrz hierarchii) ma własny AABB/disjoint bypass.
-    dest.push(...unionPolygonsWithHolesHierarchical(src));
+  if (src.length === 0) return;
+  if (src.length === 1) {
+    dest.push(src[0]);
+    return;
+  }
+  if (src.length === 2) {
+    dest.push(...fastUnionPair(src[0], src[1]));
     return;
   }
 
@@ -301,6 +314,16 @@ export function getCachedRoofShadowSamples(
     const deltaHTop = higherTier.hTop - currentH;
     const deltaHBase = Math.max(0, higherTier.hBottom - currentH);
     if (deltaHTop <= 0.05) continue;
+
+    // Szybki AABB reach check przed rzutowaniem cienia bryły wyższej
+    if (roofBox) {
+      const htOffset = computeShadowOffsetVector(deltaHTop, angles);
+      const htBounds = higherTier.bounds2D || computePointsBoundingBox(higherTier.polygon);
+      const htReachBounds = extendBoundsByOffset(htBounds, htOffset.dx * 1.05, htOffset.dy * 1.05);
+      if (!boundsOverlap(roofBox, htReachBounds)) {
+        continue;
+      }
+    }
 
     const extra = `roof:${currentH.toFixed(2)}`;
     const key = makeSunBucketKey(higherTier.storyIndex, 'soft', method, latitude, longitude, equinoxDate, hourFraction, 0, extra);

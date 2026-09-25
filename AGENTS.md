@@ -113,6 +113,17 @@
 - **Obsługa ograniczeń serwerowych**:
   - W przypadku serwisów nieobsługujących `PROPERTYNAME` (np. MapServer EGiB w Krakowie rzucający błąd 500 przy próbie filtrowania) zapytania wysyłane są w pełnej postaci bez parametru `PROPERTYNAME`.
 
+## 1m. Ciągłość Cieni Dachowych Masterplan, Wczesny Zasięg AABB i Telemetria Containment (Milestone poz.json 601 min)
+- **Ciągłość Czasowa Cieni Dachowych (-5h do +5h, co 1 min)**:
+  - Weryfikacja ciągłości geometrycznej na scenie miejskiej `reference/shadow/poz.json` (375 budynków, 601 kroków czasowych, 168 475 ewaluacji) gwarantuje 0 anomalii mrygania (*flickering dropouts*) — brak skokowych zaników cienia na dachach.
+  - Test stabilizacyjny `src/components/cad/masterplan/masterplanRoofFlicker.test.ts` stanowi stałą kotwicę regresyjną w repozytorium.
+- **Wczesny Test Zasięgu AABB Cienia Wyższych Brył (AABB Shadow-Reach Culling $O(1)$)**:
+  - W `masterplanShadowCache.ts` przed przystąpieniem do rzutowania cienia bryły wyższej ($\Delta H$) sprawdzany jest warunek nachodzenia powiększonego bufora zasięgu `extendBoundsByOffset(higherTier.bounds2D, htOffset.dx, htOffset.dy)` na obwiednię dachu docelowego `roofBox`.
+  - Pozwala to na natychmiastowe odrzucenie w $O(1)$ par brył niemających fizycznej możliwości zacienienia dachu, eliminując narzut rzutowania i operacji boolowskich.
+- **Optymalizacja Agregacji Poligonów `accumulatePolygons` i Telemetria Containment**:
+  - $74.4\%$ wywołań unii boolowskiej w cieniowaniu dachowym to relacje pełnego zawierania ($A \subseteq B$ lub $B \subseteq A$).
+  - Obsługa bazowych przypadków $N = 0, 1, 2$ oraz weryfikacja rozłączności par AABB przed wywołaniem unii hierarchicznej redukuje narzut pamięciowy i zapobiega niepotrzebnemu uruchamianiu algorytmów sweep-line.
+
 ## 2. Obliczenia Macierzowe, Rastrowe Mapowanie i Ciągłe Struktury Pamięci (Matrix & TypedArray Architecture)
 - **Macierze transformacji afinicznych (Render i Viewport):**
   - Wszystkie transformacje widoku (pan, zoom, rotacja) oraz rzutowania obiektów łączą się w ujednoliconą macierz afiniczną $3 \times 3$ (`AffineMatrix2D` w standardzie `[a, b, c, d, e, f]`).

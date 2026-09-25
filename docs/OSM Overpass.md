@@ -2,27 +2,30 @@ Kod:
 
 `@/src/modules/wfs-import/services/osm/osmBuildingsClient.ts`
 
+działający commit na GitHub: 5dfec89e
+
 ---
 
 # Algorytm usi-light
 
 1. Podzielić obszar na kwadranty po 300x300 lub 400x400m każdy ze 100m zakładem
 2. Sprawdzic kompletnosc, deduplikowac, pobrac ponownie kwadranty ktore sie nie pobrały, ewentualnie fallback na mirror
-3. Wysłać zoptymalizowane zapytanie na serwer overpass odpytujące o budynki z minimalizacją payloadu (`out tags geom qt;`):
+3. Wysłać proste zapytanie na serwer overpass odpytujace o same tylko budynki:
 
 ```
-[out:json][timeout:25];
+[out:json][timeout:180];
 // Zastąp współrzędne własnymi: (min_lat, min_lon, max_lat, max_lon)
 (
-  way["building"](52.251,20.995,52.256,20.999);
-  relation["building"]["type"="multipolygon"](52.251,20.995,52.256,20.999);
+  nwr["building"](52.251,20.995,52.256,20.999);
 );
-out tags geom qt;
+out body;
+>;
+out skel qt;
 ```
 
-4. Dla każdego odebranego budynku odpytać serwer overpass o `building:part` według jego ID z buforem `nwr(around:10)["building:part"]`, aby nie gubić wież, kopuł i wycofanych kondygnacji.
-5. Sprawdzić kompletność budynku i building parts (relacje 3D, węzły, runda naprawcza recovery).
-6. Zbudować obiekty, wieloelementowe obiekty łączyć w jeden obiekt logiczny (`groupId`) po geometrycznym odrzuceniu obwiedni (envelope) i wyodrębnieniu dziedzińców (holes).
+3. Dla każdego odebranego budynku odpytać serwer overpass o `building:part`  według jego ID pojedynczo - nie hurtowo.
+4. Sprawdzić kompletność budynku i building parts
+5. Zbudować obiekty, wieloelementowe obiektu laczyc w jeden obiekt logiczny po odrzuceniu envelope
 
 ---
 
