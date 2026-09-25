@@ -201,5 +201,36 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
     return () => clearInterval(timer);
   }, [stepMinutes, intervalMs, setMasterplanHourFraction]);
 
-  return null;
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        paddingTop: 'calc(1.5rem + env(safe-area-inset-top, 0px))',
+        paddingBottom: '1rem',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        pointerEvents: 'none',
+        userSelect: 'none',
+        zIndex: 100,
+      }}
+    >
+      <span
+        style={{
+          color: '#000000',
+          fontSize: 'clamp(2rem, 5vw, 3.25rem)',
+          fontWeight: 900,
+          letterSpacing: '-0.03em',
+          lineHeight: 1.1,
+          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        }}
+      >
+        swiatlo.app
+      </span>
+    </div>
+  );
 };
+
