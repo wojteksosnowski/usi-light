@@ -40,6 +40,8 @@ export interface MasterplanStoryTier {
   geomFingerprint?: string;
   /** Prekalkulowana flaga wypukłości wielokąta bazowego. */
   isConvex?: boolean;
+  /** Prekalkulowane granice AABB tieru. */
+  bounds2D?: { min: Point2D; max: Point2D };
   /**
    * Referencja do źródłowego obiektu `BuildingLoop`, do kluczowania cache'u cienia per
    * obiekt (patrz `buildingShadowCache` w `src/engine/buildingGeometryCache.ts`). Opcjonalna,
@@ -81,6 +83,7 @@ export function extractBuildingStoryTiers(
       isHovered,
       geomFingerprint: t.geomFingerprint,
       isConvex: t.isConvex,
+      bounds2D: t.bounds2D,
       bldgRef: bldg,
       buildingType: (t.buildingType ?? defaultBldgType) as BuildingType,
     }));

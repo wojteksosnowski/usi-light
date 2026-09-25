@@ -59,6 +59,13 @@ export interface LabelPlacementInfo {
   readonly spanY: number;
 }
 
+export interface CardinalAABB2D {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+}
+
 export interface PrecomputedMasterplanTier {
   readonly storyIndex: number;
   readonly polygon: readonly Point2D[];
@@ -66,8 +73,13 @@ export interface PrecomputedMasterplanTier {
   readonly hBottom: number;
   readonly hTop: number;
   readonly geomFingerprint: string;
+  readonly holesFingerprint?: string;
   readonly isConvex: boolean;
   readonly buildingType?: string;
+  readonly bounds2D?: {
+    readonly min: Point2D;
+    readonly max: Point2D;
+  };
 }
 
 export interface CompiledObjectGeometry {
@@ -105,8 +117,10 @@ export interface CompiledObjectGeometry {
     readonly heightMin: number;
     readonly heightMax: number;
     readonly simplifiedEnvelope2D: Polygon2D;
+    readonly shadowReachAABB?: CardinalAABB2D;
   };
 
   /** Zbuforowane metryki geometryczne */
   readonly metrics: CompiledMetrics;
 }
+

@@ -331,6 +331,7 @@ export class GeometryCompiler {
         if (!s.footprint.exterior || s.footprint.exterior.length < 3) continue;
         const poly = s.footprint.exterior as Point2D[];
         const holes = (s.footprint.holes as Point2D[][]) || [];
+        const tierRings: Point2D[][] = [poly, ...holes];
         rawTiers.push({
           storyIndex: s.storyIndex,
           polygon: poly,
@@ -338,11 +339,14 @@ export class GeometryCompiler {
           hBottom: s.elevationBottom,
           hTop: s.elevationTop,
           geomFingerprint: polygonFingerprint(poly),
+          holesFingerprint: holes.length > 0 ? holes.map((h) => polygonFingerprint(h as Point2D[])).join(';') : undefined,
           isConvex: isPolygonConvex(poly),
           buildingType: defaultBldgType,
+          bounds2D: computeBounds2DFromRings(tierRings),
         });
       }
     } else if (baseVertices.length >= 3 && defaultHeight > 0) {
+      const baseRings: Point2D[][] = [baseVertices, ...baseHoles];
       rawTiers.push({
         storyIndex: 0,
         polygon: baseVertices,
@@ -350,8 +354,10 @@ export class GeometryCompiler {
         hBottom: baseElevation,
         hTop: baseElevation + defaultHeight,
         geomFingerprint: polygonFingerprint(baseVertices),
+        holesFingerprint: baseHoles.length > 0 ? baseHoles.map((h) => polygonFingerprint(h as Point2D[])).join(';') : undefined,
         isConvex: isPolygonConvex(baseVertices),
         buildingType: defaultBldgType,
+        bounds2D: computeBounds2DFromRings(baseRings),
       });
     }
 
@@ -369,6 +375,13 @@ export class GeometryCompiler {
 
     const baseIsConvex = baseVertices.length >= 3 ? isPolygonConvex(baseVertices as Point2D[]) : true;
     const baseGeomFingerprint = baseVertices.length >= 3 ? polygonFingerprint(baseVertices as Point2D[]) : '';
+
+    const shadowReachAABB = heightMax > 0 ? {
+      minX: bounds2D.min.x - heightMax * 5.0,
+      maxX: bounds2D.max.x + heightMax * 5.0,
+      minY: bounds2D.min.y,
+      maxY: bounds2D.max.y + heightMax * 1.5,
+    } : undefined;
 
     return {
       geometryHash: hash,
@@ -392,6 +405,7 @@ export class GeometryCompiler {
         heightMin: baseElevation,
         heightMax,
         simplifiedEnvelope2D: footprintBase,
+        shadowReachAABB,
       },
       metrics,
     };
@@ -484,6 +498,14 @@ export class GeometryCompiler {
       };
     }
 
+    const groupHMax = Math.max(...bakedChildren.map((c) => c.analysis.heightMax));
+    const shadowReachAABB = groupHMax > 0 ? {
+      minX: bounds2D.min.x - groupHMax * 5.0,
+      maxX: bounds2D.max.x + groupHMax * 5.0,
+      minY: bounds2D.min.y,
+      maxY: bounds2D.max.y + groupHMax * 1.5,
+    } : undefined;
+
     return {
       geometryHash: hash,
       computedAt: Date.now(),
@@ -501,8 +523,9 @@ export class GeometryCompiler {
       analysis: {
         castingEdges: aggregatedCastingEdges,
         heightMin: Math.min(...bakedChildren.map((c) => c.analysis.heightMin)),
-        heightMax: Math.max(...bakedChildren.map((c) => c.analysis.heightMax)),
+        heightMax: groupHMax,
         simplifiedEnvelope2D: footprintBase,
+        shadowReachAABB,
       },
       metrics: aggregatedMetrics,
     };
@@ -617,14 +640,33 @@ export class GeometryCompiler {
     const transformedMasterplanTiers: PrecomputedMasterplanTier[] | undefined = computed.representation2D.masterplanTiers?.map((t) => {
       const transformedPoly = t.polygon.map(transformPoint2D);
       const transformedHoles = t.holes.map((h) => h.map(transformPoint2D));
+      const tierRings: Point2D[][] = [transformedPoly, ...transformedHoles];
       return {
         ...t,
         polygon: transformedPoly,
         holes: transformedHoles,
         geomFingerprint: polygonFingerprint(transformedPoly as Point2D[]),
+        holesFingerprint: transformedHoles.length > 0 ? transformedHoles.map((h) => polygonFingerprint(h as Point2D[])).join(';') : undefined,
         isConvex: t.isConvex,
+        bounds2D: computeBounds2DFromRings(tierRings),
       };
     });
+
+    const transformedShadowReachAABB = computed.analysis.shadowReachAABB
+      ? (isRotating
+          ? {
+              minX: bounds2D.min.x - computed.analysis.heightMax * 5.0,
+              maxX: bounds2D.max.x + computed.analysis.heightMax * 5.0,
+              minY: bounds2D.min.y,
+              maxY: bounds2D.max.y + computed.analysis.heightMax * 1.5,
+            }
+          : {
+              minX: computed.analysis.shadowReachAABB.minX + dx,
+              maxX: computed.analysis.shadowReachAABB.maxX + dx,
+              minY: computed.analysis.shadowReachAABB.minY + dy,
+              maxY: computed.analysis.shadowReachAABB.maxY + dy,
+            })
+      : undefined;
 
     return {
       ...computed,
@@ -648,6 +690,7 @@ export class GeometryCompiler {
         ...computed.analysis,
         castingEdges: transformedCastingEdges,
         simplifiedEnvelope2D: transformedBase,
+        shadowReachAABB: transformedShadowReachAABB,
       },
     };
   }

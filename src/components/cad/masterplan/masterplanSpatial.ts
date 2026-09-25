@@ -11,6 +11,14 @@ export interface Bounds {
 }
 
 export function tierFootprintBounds(tier: MasterplanStoryTier): Bounds {
+  if (tier.bounds2D) {
+    return {
+      minX: tier.bounds2D.min.x,
+      minY: tier.bounds2D.min.y,
+      maxX: tier.bounds2D.max.x,
+      maxY: tier.bounds2D.max.y,
+    };
+  }
   const { minX, maxX, minY, maxY } = computePointsBoundingBox(tier.polygon);
   return { minX, minY, maxX, maxY };
 }

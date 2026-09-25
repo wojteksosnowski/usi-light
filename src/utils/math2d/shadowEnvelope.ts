@@ -58,6 +58,18 @@ function polygonVerticesFingerprint(vertices: Point2D[]): string {
 const storyShadowPolyCache = new Map<string, Point2D[]>();
 const storyShadowWithHolesCache = new Map<string, Point2D[][]>();
 
+function setWithLRUPrune<K, V>(map: Map<K, V>, key: K, val: V, maxCapacity = 65536, pruneCount = 8192): void {
+  if (map.size >= maxCapacity) {
+    let deleted = 0;
+    for (const k of map.keys()) {
+      map.delete(k);
+      deleted++;
+      if (deleted >= pruneCount) break;
+    }
+  }
+  map.set(key, val);
+}
+
 function getCachedFastShadowPolygon(
   polygon: Point2D[],
   azRad: number,
@@ -72,8 +84,7 @@ function getCachedFastShadowPolygon(
   const cached = storyShadowPolyCache.get(key);
   if (cached) return cached;
   const result = computeFastShadowPolygon(polygon, azRad, elevRad, hTop, hBottom, isConvex);
-  if (storyShadowPolyCache.size > 5000) storyShadowPolyCache.clear();
-  storyShadowPolyCache.set(key, result);
+  setWithLRUPrune(storyShadowPolyCache, key, result, 65536, 8192);
   return result;
 }
 
@@ -133,8 +144,7 @@ function getCachedFastShadowPolygonWithHoles(
   if (cached) return cached;
 
   const result = computeFastShadowPolygonWithHoles(polygon, holes, azRad, elevRad, hTop, hBottom, isConvex);
-  if (storyShadowWithHolesCache.size > 5000) storyShadowWithHolesCache.clear();
-  storyShadowWithHolesCache.set(key, result);
+  setWithLRUPrune(storyShadowWithHolesCache, key, result, 65536, 8192);
   return result;
 }
 
@@ -307,10 +317,9 @@ export function collectBuildingShadowPolysPrepared(
   let poly = buildingFastShadowCache.get(fastKey);
   if (!poly) {
     poly = computeFastShadowPolygon(bldg.vertices, azRad, elevRad, hTop, hBase, isConvex);
-    if (buildingFastShadowCache.size > 5000) buildingFastShadowCache.clear();
-    if (poly.length >= 3) buildingFastShadowCache.set(fastKey, poly);
+    if (poly.length >= 3) setWithLRUPrune(buildingFastShadowCache, fastKey, poly, 65536, 8192);
   }
-  if (poly.length >= 3) out.push(poly);
+  if (poly && poly.length >= 3) out.push(poly);
 }
 
 /**
@@ -545,8 +554,7 @@ export function computeBuildingShadowEnvelope(
     }
 
     const result = shadowPoints.length > 0 ? computeConvexHull(shadowPoints) : [];
-    if (buildingEnvelopeCache.size > 2000) buildingEnvelopeCache.clear();
-    buildingEnvelopeCache.set(cacheKey, result);
+    setWithLRUPrune(buildingEnvelopeCache, cacheKey, result, 16384, 2048);
     return result;
   }
 
@@ -567,8 +575,7 @@ export function computeBuildingShadowEnvelope(
 
   const unionResult = unionPolygonLoops(hourlyPolys);
   const result = unionResult.length > 0 ? unionResult[0] : computeConvexHull(vertices);
-  if (buildingEnvelopeCache.size > 2000) buildingEnvelopeCache.clear();
-  buildingEnvelopeCache.set(cacheKey, result);
+  setWithLRUPrune(buildingEnvelopeCache, cacheKey, result, 16384, 2048);
   return result;
 }
 
@@ -605,6 +612,9 @@ export function getBuildingAbsoluteHmax(bldg: BuildingLoop): number {
  * - Północ-Południe (Y): cień rzucany wyłącznie na północ (+Y) -> [minY, maxY + 1.5*Hmax]
  */
 export function computeBuildingShadowReachAABB(bldg: BuildingLoop): CardinalAABB | null {
+  if (bldg.computed?.analysis?.shadowReachAABB) {
+    return bldg.computed.analysis.shadowReachAABB;
+  }
   if (!bldg.vertices || bldg.vertices.length < 3) return null;
   const hMax = getBuildingAbsoluteHmax(bldg);
   if (hMax <= 0) return null;
