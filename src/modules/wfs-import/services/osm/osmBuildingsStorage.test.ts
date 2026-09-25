@@ -94,6 +94,8 @@ describe('osmBuildingsStorage', () => {
           storeysCount: 5,
           vertices: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
           segments: [],
+          buildingType: 'residential',
+          hWindowBottom: 0.85,
           isClockwise: false,
           transform: { tx: 0, ty: 0, rotationDeg: 0 },
         },

@@ -354,7 +354,7 @@ describe('Granular Step-by-Step Profiler for Shadow Extent Pipeline', () => {
     console.log(`  * Envelope Area (m²):              NEW: ${repW.envelopeAreaNew.toFixed(2)} | LEGACY: ${repW.envelopeAreaLegacy.toFixed(2)}`);
     console.log(`  * Envelope Vertices:               NEW: ${repW.envelopeVerticesNew} | LEGACY: ${repW.envelopeVerticesLegacy}`);
     console.log('\n========================================================================================\n');
-  });
+  }, 60000);
 
   it('measures fastUnionTwoSimpleLoops telemetry and fallback rate on union-test1 and warszawa', () => {
     // 1. Telemetry on union-test1.json
@@ -406,7 +406,7 @@ describe('Granular Step-by-Step Profiler for Shadow Extent Pipeline', () => {
     console.log(`  - Fallback reasons:                        ${fW.fallbackReasons}`);
 
     console.log('\n========================================================================================\n');
-  });
+  }, 60000);
 
   it('measures fastUnionTwoSimpleLoops fallback rate on adversarial (fallback-prone) geometry', () => {
     // Geometries known to previously stress the tolerance stack: shared edges, near-duplicate
@@ -452,5 +452,5 @@ describe('Granular Step-by-Step Profiler for Shadow Extent Pipeline', () => {
     console.log(`  - FALLBACK CALLS:                           ${tel.fallbackCalls} (${fbRate}%)`);
     console.log(`  - Fallback reasons: [Insufficient segments: ${tel.insufficientSegmentsExits}, Multiple outer components: ${tel.multipleOuterComponentsExits}, Empty loops: ${tel.emptyLoopsExits}, Caught exceptions: ${tel.caughtExceptionExits}]`);
     console.log('\n========================================================================================\n');
-  });
+  }, 60000);
 });

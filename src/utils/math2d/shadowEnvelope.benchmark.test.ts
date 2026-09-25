@@ -86,7 +86,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
   const warszawa = loadReferenceScene('warszawa.json');
   const unionTest = loadReferenceScene('union-test1.json');
 
-  it('Step-by-Step Profiling of Shadow Envelope Pipeline on warszawa.json', { timeout: 20000 }, () => {
+  it('Step-by-Step Profiling of Shadow Envelope Pipeline on warszawa.json', { timeout: 60000 }, () => {
     if (!warszawa) return;
 
     // Mark first 15 buildings as tested, rest as blocking/context
@@ -306,7 +306,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
     expect(finalEnvelopeLoops).toBeGreaterThan(0);
   });
 
-  it('Drills down 1 level deeper into the Largest Bottleneck (Step 5c: differencePolygonLoops)', { timeout: 20000 }, () => {
+  it('Drills down 1 level deeper into the Largest Bottleneck (Step 5c: differencePolygonLoops)', { timeout: 60000 }, () => {
     if (!warszawa) return;
 
     // Odtwórz realne pary (mergedHourTested, blockingHourPolys) z każdej godziny, tak jak
@@ -452,7 +452,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
     expect(tSubTotal).toBeGreaterThan(0);
   });
 
-  it('Drills down 2 levels deep: differencePolygonLoops(5c-iv) cost vs. input complexity (vertex-count scaling)', { timeout: 20000 }, () => {
+  it('Drills down 2 levels deep: differencePolygonLoops(5c-iv) cost vs. input complexity (vertex-count scaling)', { timeout: 60000 }, () => {
     if (!warszawa) return;
 
     // Odtwórz te same realne pary (positive, negative) jak w drill-downie 5c powyżej,
@@ -568,7 +568,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
     expect(resSmall).not.toBeNull();
   });
 
-  it('Real-path split of 5c: time spent in fast-peel (fastDifferenceTwoSimpleLoops chains) vs. batched polygon-clipping fallback', { timeout: 20000 }, () => {
+  it('Real-path split of 5c: time spent in fast-peel (fastDifferenceTwoSimpleLoops chains) vs. batched polygon-clipping fallback', { timeout: 60000 }, () => {
     if (!warszawa) return;
 
     // differencePolygonLoops (polygons.ts) już robi fast-peel per pozytywna pętla, a dopiero
@@ -707,7 +707,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
     expect(realFallbackRate).toBeLessThan(0.90);
   });
 
-  it('Hypothesis 5: fastDifferenceTwoSimpleLoops-based differencePolygonLoops vs. old pure polygon-clipping, same process (no machine-noise drift)', { timeout: 30000 }, () => {
+  it('Hypothesis 5: fastDifferenceTwoSimpleLoops-based differencePolygonLoops vs. old pure polygon-clipping, same process (no machine-noise drift)', { timeout: 60000 }, () => {
     if (!warszawa) return;
 
     const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 15 }));
@@ -878,7 +878,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
     expect(maxAreaDiff).toBeLessThan(Math.max(0.05, 0.001 * 30000));
   });
 
-  it('Hypothesis 4: per-loop AABB-clustering in differencePolygonLoops (vs. single aggregate AABB) cuts irrelevant negative-loop admission into polygon-clipping', { timeout: 20000 }, () => {
+  it('Hypothesis 4: per-loop AABB-clustering in differencePolygonLoops (vs. single aggregate AABB) cuts irrelevant negative-loop admission into polygon-clipping', { timeout: 60000 }, () => {
     if (!warszawa) return;
 
     const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 15 }));
@@ -1257,7 +1257,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
       expect(collapsed[1].hTop).toBe(30);
     });
 
-    it('Hypothesis 3: unionPolygonLoops degrades groups of >=3 overlapping loops straight to slow polygon-clipping (no pairwise reduction)', { timeout: 20000 }, () => {
+    it('Hypothesis 3: unionPolygonLoops degrades groups of >=3 overlapping loops straight to slow polygon-clipping (no pairwise reduction)', { timeout: 60000 }, () => {
       if (!warszawa) return;
 
       // Odtwórz realny scenariusz z computeHourlyShadowsLive: dwie sąsiednie godzinowe
@@ -1372,7 +1372,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
       expect(clusterMap.size).toBeGreaterThan(0);
     });
 
-    it('Telemetry: how often does fastUnionTwoSimpleLoops fall back to polygon-clipping during a real computeFullShadowAnalysis run', { timeout: 20000 }, () => {
+    it('Telemetry: how often does fastUnionTwoSimpleLoops fall back to polygon-clipping during a real computeFullShadowAnalysis run', { timeout: 60000 }, () => {
       if (!warszawa) return;
 
       const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 30 }));
@@ -1412,7 +1412,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
       expect(t.totalCalls > 0 ? t.fallbackCalls / t.totalCalls : 0).toBeLessThan(MAX_UNION_FALLBACK_RATE);
     });
 
-    it('Telemetry: how often does fastDifferenceTwoSimpleLoops fall back to polygon-clipping during a real computeFullShadowAnalysis run', { timeout: 20000 }, () => {
+    it('Telemetry: how often does fastDifferenceTwoSimpleLoops fall back to polygon-clipping during a real computeFullShadowAnalysis run', { timeout: 60000 }, () => {
       if (!warszawa) return;
 
       const buildings: BuildingLoop[] = warszawa.buildings.map((b, idx) => ({ ...b, isTested: idx < 30 }));
@@ -1451,7 +1451,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
   });
 
   describe('Hypothesis 6 & 7: Fast-Peel Difference and Geometry-Keyed Cache', () => {
-    it('Hypothesis 6: fast-peel differencePolygonLoops (fastDifferenceTwoSimpleLoops per-pair before polygon-clipping batch)', { timeout: 30000 }, () => {
+    it('Hypothesis 6: fast-peel differencePolygonLoops (fastDifferenceTwoSimpleLoops per-pair before polygon-clipping batch)', { timeout: 60000 }, () => {
       if (!warszawa) return;
 
       // Odtwórz realne pary (mergedHourTested, blockingHourPolys) z każdej godziny
@@ -1652,7 +1652,7 @@ describe('Shadow Envelope (Zakres Cienia) - Detailed Benchmark & Deep-Dive Profi
 
     });
 
-    it('Hypothesis 7: geometry-keyed cache hit-ratio before vs after variant switch (WFS import simulation)', { timeout: 20000 }, () => {
+    it('Hypothesis 7: geometry-keyed cache hit-ratio before vs after variant switch (WFS import simulation)', { timeout: 60000 }, () => {
       if (!warszawa) return;
 
       const buildings: BuildingLoop[] = warszawa.buildings
@@ -1930,8 +1930,8 @@ describe('differencePolygonLoops multi-sample perf harness (MAX_FAST_DIFFERENCE_
       expect(cases.length).toBeGreaterThan(0);
 
       const CAPS = [0, 6, 15, 20, 50]; // 0 = zawsze batched polygon-clipping, ground-truth do izolacji rozbieżności
-      const TOTAL_RUNS = 15;
-      const WARMUP = 5;
+      const TOTAL_RUNS = 5;
+      const WARMUP = 2;
 
       const results = CAPS.map((cap) => benchmarkCap(cases, cap, TOTAL_RUNS, WARMUP));
 

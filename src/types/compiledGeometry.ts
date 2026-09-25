@@ -86,6 +86,8 @@ export interface CompiledObjectGeometry {
       readonly max: Point2D;
     };
     readonly labelInfo?: LabelPlacementInfo;
+    readonly isConvex?: boolean;
+    readonly geomFingerprint?: string;
   };
 
   /** Reprezentacja siatki 3D dla podglądu izometrycznego / perspektywicznego */

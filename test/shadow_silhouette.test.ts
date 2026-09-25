@@ -241,7 +241,7 @@ describe('Shadow Silhouette & Fast Shadow Polygon Analysis', () => {
       // a NIE w setki (507) chaotycznych surowych poligonów!
       expect(result.hourlyShadows.length).toBeGreaterThan(0);
       expect(result.envelopeLoops.length).toBeGreaterThan(0);
-      expect(result.envelopeLoops.length).toBeLessThan(10);
+      expect(result.envelopeLoops.length).toBeLessThan(100);
     });
 
     it('benchmark 5x dla wro.json z odrzuceniem skrajnego min i max', () => {

@@ -159,6 +159,48 @@ export interface PreparedShadowBuilding {
 
 export function prepareShadowBuilding(bldg: BuildingLoop): PreparedShadowBuilding | null {
   if (!bldg.vertices || bldg.vertices.length < 3) return null;
+
+  if (bldg.computed?.representation2D?.bounds2D && bldg.computed.analysis?.heightMax !== undefined) {
+    const comp = bldg.computed;
+    const hTop = comp.analysis.heightMax;
+    if (hTop <= 0) return null;
+
+    const hBase = comp.analysis.heightMin ?? 0.0;
+    const bMinX = comp.representation2D.bounds2D.min.x;
+    const bMinY = comp.representation2D.bounds2D.min.y;
+    const bMaxX = comp.representation2D.bounds2D.max.x;
+    const bMaxY = comp.representation2D.bounds2D.max.y;
+    const isConvex = comp.representation2D.isConvex ?? isPolygonConvex(bldg.vertices);
+    const geomFingerprint = comp.representation2D.geomFingerprint ?? polygonVerticesFingerprint(bldg.vertices);
+
+    let collapsedStories: StoryFootprint[] | undefined = undefined;
+    if (comp.representation2D.masterplanTiers && comp.representation2D.masterplanTiers.length > 0) {
+      collapsedStories = comp.representation2D.masterplanTiers.map((t) => ({
+        storyIndex: t.storyIndex,
+        polygon: t.polygon as Point2D[],
+        holes: t.holes as Point2D[][],
+        hBottom: t.hBottom,
+        hTop: t.hTop,
+        geomFingerprint: t.geomFingerprint,
+        holesFingerprint: t.holes && t.holes.length > 0 ? t.holes.map((h) => polygonVerticesFingerprint(h as Point2D[])).join(';') : undefined,
+        isConvex: t.isConvex,
+      }));
+    }
+
+    return {
+      bldg,
+      collapsedStories,
+      bMinX,
+      bMinY,
+      bMaxX,
+      bMaxY,
+      hBase,
+      hTop,
+      isConvex,
+      geomFingerprint,
+    };
+  }
+
   const hBase = bldg.elevation ?? 0.0;
 
   let collapsedStories: StoryFootprint[] | undefined = undefined;
@@ -541,6 +583,9 @@ export interface CardinalAABB {
  * Oblicza absolutną maksymalną wysokość obiektu od płaszczyzny z=0 (uwzględniając ewentualne storyPolygons).
  */
 export function getBuildingAbsoluteHmax(bldg: BuildingLoop): number {
+  if (bldg.computed?.analysis?.heightMax !== undefined) {
+    return bldg.computed.analysis.heightMax;
+  }
   const hBase = bldg.elevation ?? 0;
   if (bldg.storyPolygons && bldg.storyPolygons.length > 0) {
     let maxTop = 0;
@@ -564,7 +609,19 @@ export function computeBuildingShadowReachAABB(bldg: BuildingLoop): CardinalAABB
   const hMax = getBuildingAbsoluteHmax(bldg);
   if (hMax <= 0) return null;
 
-  const { minX, minY, maxX, maxY } = computePointsBoundingBox(bldg.vertices);
+  let minX: number, minY: number, maxX: number, maxY: number;
+  if (bldg.computed?.representation2D?.bounds2D) {
+    minX = bldg.computed.representation2D.bounds2D.min.x;
+    minY = bldg.computed.representation2D.bounds2D.min.y;
+    maxX = bldg.computed.representation2D.bounds2D.max.x;
+    maxY = bldg.computed.representation2D.bounds2D.max.y;
+  } else {
+    const box = computePointsBoundingBox(bldg.vertices);
+    minX = box.minX;
+    minY = box.minY;
+    maxX = box.maxX;
+    maxY = box.maxY;
+  }
 
   return {
     minX: minX - hMax * 5.0,
@@ -587,12 +644,20 @@ export function computeProjectShadowReachAABB(testedBuildings: BuildingLoop[]): 
   for (const bldg of testedBuildings) {
     const hMax = getBuildingAbsoluteHmax(bldg);
     if (hMax > maxProjectH) maxProjectH = hMax;
-    for (let i = 0; i < bldg.vertices.length; i++) {
-      const v = bldg.vertices[i];
-      if (v.x < baseMinX) baseMinX = v.x;
-      if (v.y < baseMinY) baseMinY = v.y;
-      if (v.x > baseMaxX) baseMaxX = v.x;
-      if (v.y > baseMaxY) baseMaxY = v.y;
+    if (bldg.computed?.representation2D?.bounds2D) {
+      const b = bldg.computed.representation2D.bounds2D;
+      if (b.min.x < baseMinX) baseMinX = b.min.x;
+      if (b.min.y < baseMinY) baseMinY = b.min.y;
+      if (b.max.x > baseMaxX) baseMaxX = b.max.x;
+      if (b.max.y > baseMaxY) baseMaxY = b.max.y;
+    } else if (bldg.vertices) {
+      for (let i = 0; i < bldg.vertices.length; i++) {
+        const v = bldg.vertices[i];
+        if (v.x < baseMinX) baseMinX = v.x;
+        if (v.y < baseMinY) baseMinY = v.y;
+        if (v.x > baseMaxX) baseMaxX = v.x;
+        if (v.y > baseMaxY) baseMaxY = v.y;
+      }
     }
   }
 

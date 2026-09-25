@@ -367,6 +367,9 @@ export class GeometryCompiler {
         )
       : [];
 
+    const baseIsConvex = baseVertices.length >= 3 ? isPolygonConvex(baseVertices as Point2D[]) : true;
+    const baseGeomFingerprint = baseVertices.length >= 3 ? polygonFingerprint(baseVertices as Point2D[]) : '';
+
     return {
       geometryHash: hash,
       computedAt: Date.now(),
@@ -377,6 +380,8 @@ export class GeometryCompiler {
         masterplanTiers,
         bounds2D,
         labelInfo,
+        isConvex: baseIsConvex,
+        geomFingerprint: baseGeomFingerprint,
       },
       representation3D: {
         faces,
@@ -609,6 +614,18 @@ export class GeometryCompiler {
       updatedHash = `${computed.geometryHash}|tr:${v0}|rot:${rotationRad.toFixed(4)}`;
     }
 
+    const transformedMasterplanTiers: PrecomputedMasterplanTier[] | undefined = computed.representation2D.masterplanTiers?.map((t) => {
+      const transformedPoly = t.polygon.map(transformPoint2D);
+      const transformedHoles = t.holes.map((h) => h.map(transformPoint2D));
+      return {
+        ...t,
+        polygon: transformedPoly,
+        holes: transformedHoles,
+        geomFingerprint: polygonFingerprint(transformedPoly as Point2D[]),
+        isConvex: t.isConvex,
+      };
+    });
+
     return {
       ...computed,
       geometryHash: updatedHash,
@@ -617,8 +634,11 @@ export class GeometryCompiler {
         footprintBase: transformedBase,
         footprintRoof: transformedRoof,
         storySlices: transformedStorySlices,
+        masterplanTiers: transformedMasterplanTiers,
         bounds2D,
         labelInfo: transformedLabelInfo,
+        isConvex: computed.representation2D.isConvex,
+        geomFingerprint: polygonFingerprint(transformedBase.exterior as Point2D[]),
       },
       representation3D: {
         faces: transformedFaces,
