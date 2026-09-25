@@ -54,9 +54,11 @@ async function fetchAllPages(
   featureTagName: string,
   textProperties: string[],
   numericProperties: string[],
-  bbox: WfsBbox
+  bbox: WfsBbox,
+  geometryProperty = 'geom'
 ): Promise<GeoJsonFeatureCollection['features'][]> {
   const pages: GeoJsonFeatureCollection['features'][] = [];
+  const propertyName = [geometryProperty, ...textProperties, ...numericProperties].join(',');
   for (let page = 0; page < MAX_PAGES; page++) {
     const params = new URLSearchParams({
       service: 'WFS',
@@ -66,6 +68,7 @@ async function fetchAllPages(
       bbox: wgs84BboxToUrnLatLon(bbox),
       count: String(PAGE_SIZE),
       startIndex: String(page * PAGE_SIZE),
+      propertyName,
     });
 
     const controller = new AbortController();
@@ -87,6 +90,12 @@ async function fetchAllPages(
 }
 
 export async function fetchEgibBuildings(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
-  const pages = await fetchAllPages('ms:budynki', 'budynki', ['ID_BUDYNKU'], ['KONDYGNACJE_NADZIEMNE'], bbox);
+  const pages = await fetchAllPages('ms:budynki', 'budynki', ['ID_BUDYNKU', 'RODZAJ'], ['KONDYGNACJE_NADZIEMNE'], bbox, 'geom');
   return { type: 'FeatureCollection', features: pages.flat() };
 }
+
+export async function fetchEgibParcels(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
+  const pages = await fetchAllPages('ms:dzialki', 'dzialki', ['ID_DZIALKI', 'NUMER_DZIALKI', 'NUMER_OBREBU', 'NAZWA_OBREBU', 'NAZWA_GMINY', 'DATA'], [], bbox, 'geom');
+  return { type: 'FeatureCollection', features: pages.flat() };
+}
+

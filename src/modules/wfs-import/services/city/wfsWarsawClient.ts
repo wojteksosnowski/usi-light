@@ -111,6 +111,7 @@ export async function fetchWarsawBuildings(bbox: WfsBbox): Promise<GeoJsonFeatur
     request: 'GetFeature',
     typeNames: 'wfs:budynki',
     bbox: wgs84BboxToEpsg2178(bbox),
+    propertyName: 'GEOMETRY,ID_BUDYNKU,RODZAJ,KONDYGNACJE_NADZIEMNE,KONDYGNACJE_PODZIEMNE',
     outputFormat: 'application/json',
   });
 
@@ -132,6 +133,7 @@ export async function fetchWarsawParcels(bbox: WfsBbox): Promise<GeoJsonFeatureC
     request: 'GetFeature',
     typeNames: 'wfs:dzialki',
     bbox: wgs84BboxToEpsg2178(bbox),
+    propertyName: 'GEOMETRY,ID_DZIALKI,NUMER_DZIALKI,NUMER_OBREBU,NAZWA_OBREBU,NAZWA_GMINY,POLE_EWIDENCYJNE,DATA',
     outputFormat: 'application/json',
   });
 

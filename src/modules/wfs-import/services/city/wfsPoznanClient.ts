@@ -45,13 +45,14 @@ const POZNAN_EGIB_WFS_URL = '/api/wfs?target=poznan-egib';
 // przeskok przez /api/wfs — powodowało niepotrzebnie częsty fallback na mniej precyzyjny ULDK.
 const WFS_REQUEST_TIMEOUT_MS = 20000;
 
-async function fetchPoznanEgibLayer(typeName: string, bbox: WfsBbox): Promise<string> {
+async function fetchPoznanEgibLayer(typeName: string, bbox: WfsBbox, propertyName?: string): Promise<string> {
   const params = new URLSearchParams({
     SERVICE: 'WFS',
     VERSION: '2.0.0',
     REQUEST: 'GetFeature',
     typeNames: typeName,
     BBOX: wgs84BboxToEpsg2177(bbox),
+    ...(propertyName ? { propertyName } : {}),
   });
 
   const controller = new AbortController();
@@ -75,6 +76,10 @@ export async function fetchPoznanBuildings(_bbox: WfsBbox): Promise<GeoJsonFeatu
 }
 
 export async function fetchPoznanParcels(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
-  const gml = await fetchPoznanEgibLayer('gmgml:Działki_ewidencyjne', bbox);
+  const gml = await fetchPoznanEgibLayer(
+    'gmgml:Działki_ewidencyjne',
+    bbox,
+    'gmgml:SHAPE,gmgml:IDENTYFIKATOR_DZIAŁKI,gmgml:NUMER_DZIAŁKI,gmgml:NUMER_ARKUSZ,gmgml:POWIERZCHNIA_GEODEZYJNA,gmgml:OZN_DZ'
+  );
   return parseWfsPolygonGml(gml, 'member', 'Działki_ewidencyjne', ['ID_DZIALKI', 'NUMER_DZIALKI']);
 }

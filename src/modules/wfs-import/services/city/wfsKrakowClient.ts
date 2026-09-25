@@ -35,6 +35,8 @@ function wgs84BboxToEpsg2178EN(bbox: WfsBbox): string {
 const WFS_REQUEST_TIMEOUT_MS = 10000;
 
 export async function fetchKrakowBuildings(bbox: WfsBbox): Promise<GeoJsonFeatureCollection> {
+  // Uwaga: krakowski MapServer nie wspiera parametru PROPERTYNAME i rzuca HTTP 500 (Internal Server Error)
+  // przy próbie selektywnego filtrowania atrybutów — zapytanie wysyłane jest w pełnej postaci.
   const params = new URLSearchParams({
     SERVICE: 'WFS',
     VERSION: '1.1.0',

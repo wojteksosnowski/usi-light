@@ -17,6 +17,20 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
   const bboxStr = `${wgs84BboxToEpsg2178(bbox)},urn:ogc:def:crs:EPSG::2178`;
 
   // 1. Strefy przeznaczenia
+  const zoneProps = [
+    'oznaczenie',
+    'opis_oznaczenia',
+    'nazwa_mpzp',
+    'rodzaj_oznaczenia',
+    'SYMBOL',
+    'PRZEZNACZENIE',
+    'NAZWA_PLANU',
+    'WYSOKOSC_ZABUDOWY',
+    'INTENSYWNOSC_MAX',
+    'INTENSYWNOSC_MIN',
+    'POW_BIOLOGICZNIE_CZYNNA',
+    'www',
+  ];
   let zones: MpzpZoneRawFeature[] = [];
   try {
     const paramsZones = new URLSearchParams({
@@ -25,6 +39,7 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
       REQUEST: 'GetFeature',
       TYPENAME: 'BP_MPZP_POBIERANIE:Przeznaczenia_MPZP',
       BBOX: bboxStr,
+      PROPERTYNAME: ['SHAPE', ...zoneProps].join(','),
     });
     const res = await fetch(`${KRAKOW_WFS_URL}&${paramsZones}`);
     if (res.ok) {
@@ -33,20 +48,7 @@ export async function fetchKrakowMpzp(bbox: WfsBbox): Promise<{
         gml,
         'featureMember',
         'Przeznaczenia_MPZP',
-        [
-          'oznaczenie',
-          'opis_oznaczenia',
-          'nazwa_mpzp',
-          'rodzaj_oznaczenia',
-          'SYMBOL',
-          'PRZEZNACZENIE',
-          'NAZWA_PLANU',
-          'WYSOKOSC_ZABUDOWY',
-          'INTENSYWNOSC_MAX',
-          'INTENSYWNOSC_MIN',
-          'POW_BIOLOGICZNIE_CZYNNA',
-          'www',
-        ]
+        zoneProps
       );
       zones = parsed.features as unknown as MpzpZoneRawFeature[];
     }

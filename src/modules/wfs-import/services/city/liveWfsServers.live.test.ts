@@ -93,7 +93,7 @@ describe.skipIf(!LIVE)('testy live WFS — prawdziwe serwery, bez mocków (npm r
     expect(body).toContain('featureMember');
   }, 20000);
 
-  it('krajowy EGiB (przez realny handler api/wfs.ts, target=egib-wfs): budynki dla Wrocławia zwracają >0 obiektów', async () => {
+  it('krajowy EGiB (przez realny handler api/wfs.ts, target=egib-wfs): budynki dla Wrocławia zwracają >0 obiektów z propertyName', async () => {
     const [west, south, east, north] = wroclawBbox;
     const { status, body } = await callWfsProxy({
       target: 'egib-wfs',
@@ -104,12 +104,13 @@ describe.skipIf(!LIVE)('testy live WFS — prawdziwe serwery, bez mocków (npm r
       bbox: `${south},${west},${north},${east},urn:ogc:def:crs:EPSG::4326`,
       count: '1000',
       startIndex: '0',
+      propertyName: 'geom,ID_BUDYNKU,RODZAJ,KONDYGNACJE_NADZIEMNE',
     });
     expect(status).toBe(200);
     expect(body).toMatch(/numberReturned="[1-9]/);
   }, 20000);
 
-  it('krajowy EGiB (przez realny handler api/wfs.ts, target=egib-wfs): budynki dla Poznania zwracają >0 obiektów (potwierdza, że fallback ma czym zastąpić zepsuty serwis miejski)', async () => {
+  it('krajowy EGiB (przez realny handler api/wfs.ts, target=egib-wfs): budynki dla Poznania zwracają >0 obiektów z propertyName', async () => {
     const [west, south, east, north] = poznanBbox;
     const { status, body } = await callWfsProxy({
       target: 'egib-wfs',
@@ -120,6 +121,7 @@ describe.skipIf(!LIVE)('testy live WFS — prawdziwe serwery, bez mocków (npm r
       bbox: `${south},${west},${north},${east},urn:ogc:def:crs:EPSG::4326`,
       count: '1000',
       startIndex: '0',
+      propertyName: 'geom,ID_BUDYNKU,RODZAJ,KONDYGNACJE_NADZIEMNE',
     });
     expect(status).toBe(200);
     expect(body).toMatch(/numberReturned="[1-9]/);

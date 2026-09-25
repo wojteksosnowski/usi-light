@@ -56,6 +56,7 @@ Poza Warszawą → fallback na krajowe serwisy GUGiK.
 GET {URL}?service=WFS&version=2.0.0&request=GetFeature
     &typeNames=wfs:budynki&count=100
     &bbox=7500000,5785000,7501000,5786000
+    &propertyName=GEOMETRY,ID_BUDYNKU,RODZAJ,KONDYGNACJE_NADZIEMNE,KONDYGNACJE_PODZIEMNE
     &outputFormat=application/json
 ```
 
@@ -94,6 +95,7 @@ Brak bezpośredniej wysokości → `defaultHeight = KONDYGNACJE_NADZIEMNE × 3.0
 GET {URL}?service=WFS&version=2.0.0&request=GetFeature
     &typeNames=wfs:dzialki&count=50
     &bbox=7492000,5785000,7494000,5786000
+    &propertyName=GEOMETRY,ID_DZIALKI,NUMER_DZIALKI,NUMER_OBREBU,NAZWA_OBREBU,NAZWA_GMINY,POLE_EWIDENCYJNE,DATA
     &outputFormat=application/json
 ```
 

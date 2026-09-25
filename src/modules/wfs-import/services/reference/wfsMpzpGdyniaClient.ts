@@ -17,6 +17,14 @@ export async function fetchGdyniaMpzp(bbox: WfsBbox): Promise<{
   const bboxStr = `${wgs84BboxToEpsg2177(bbox)},urn:ogc:def:crs:EPSG::2177`;
 
   // 1. Akty planowania przestrzennego (granice i statusy MPZP)
+  const zoneProps = [
+    'tytul',
+    'nazwaWlasna',
+    'status',
+    'obowiazujeOd',
+    'przestrzenNazw',
+    'lokalnyId',
+  ];
   let zones: MpzpZoneRawFeature[] = [];
   try {
     const paramsZones = new URLSearchParams({
@@ -25,6 +33,7 @@ export async function fetchGdyniaMpzp(bbox: WfsBbox): Promise<{
       REQUEST: 'GetFeature',
       TYPENAME: 'MPZP_ZbiorDanychPrzestrzennychMPZP:AktPlanowaniaPrzestrzennego.MPZP',
       BBOX: bboxStr,
+      PROPERTYNAME: ['SHAPE', ...zoneProps].join(','),
     });
     const res = await fetch(`${GDYNIA_WFS_URL}&${paramsZones}`);
     if (res.ok) {
@@ -33,14 +42,7 @@ export async function fetchGdyniaMpzp(bbox: WfsBbox): Promise<{
         gml,
         'featureMember',
         'AktPlanowaniaPrzestrzennego.MPZP',
-        [
-          'tytul',
-          'nazwaWlasna',
-          'status',
-          'obowiazujeOd',
-          'przestrzenNazw',
-          'lokalnyId',
-        ]
+        zoneProps
       );
       zones = parsed.features as unknown as MpzpZoneRawFeature[];
     }

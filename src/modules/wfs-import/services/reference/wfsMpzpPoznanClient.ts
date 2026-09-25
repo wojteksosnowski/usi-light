@@ -17,6 +17,16 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
   const bboxStr = `${wgs84BboxToEpsg2177(bbox)},urn:ogc:def:crs:EPSG::2177`;
 
   // 1. Wydzielenia planistyczne (strefy przeznaczenia)
+  const zoneProps = [
+    'symbol',
+    'symb_t',
+    'symb_t_o',
+    'przeznaczenie_nazwa',
+    'przeznaczenie_kod',
+    'rodz_zab',
+    'kod_ter',
+    'aktPlanowania_link',
+  ];
   let zones: MpzpZoneRawFeature[] = [];
   try {
     const paramsZones = new URLSearchParams({
@@ -25,6 +35,7 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
       REQUEST: 'GetFeature',
       TYPENAME: 'ZbiorDanychPrzestrzennychMPZP:app.WydzieleniePlanistyczne.MPZP',
       BBOX: bboxStr,
+      PROPERTYNAME: ['SHAPE', ...zoneProps].join(','),
     });
     const res = await fetch(`${POZNAN_WFS_URL}&${paramsZones}`);
     if (res.ok) {
@@ -33,16 +44,7 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
         gml,
         'featureMember',
         'app.WydzieleniePlanistyczne.MPZP',
-        [
-          'symbol',
-          'symb_t',
-          'symb_t_o',
-          'przeznaczenie_nazwa',
-          'przeznaczenie_kod',
-          'rodz_zab',
-          'kod_ter',
-          'aktPlanowania_link',
-        ]
+        zoneProps
       );
       zones = parsed.features as unknown as MpzpZoneRawFeature[];
     }
@@ -51,6 +53,7 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
   }
 
   // 2. Linie zabudowy
+  const lineProps = ['rodzajLinii', 'typ_linii', 'kod_lz', 'aktPlanowania_link'];
   let lines: MpzpLineRawFeature[] = [];
   try {
     const paramsLines = new URLSearchParams({
@@ -59,16 +62,12 @@ export async function fetchPoznanMpzp(bbox: WfsBbox): Promise<{
       REQUEST: 'GetFeature',
       TYPENAME: 'ZbiorDanychPrzestrzennychMPZP:app.LinieZabudowy.MPZP',
       BBOX: bboxStr,
+      PROPERTYNAME: ['SHAPE', ...lineProps].join(','),
     });
     const res = await fetch(`${POZNAN_WFS_URL}&${paramsLines}`);
     if (res.ok) {
       const gml = await res.text();
-      const parsed = parseWfsLineStringGml(gml, 'app.LinieZabudowy.MPZP', [
-        'rodzajLinii',
-        'typ_linii',
-        'kod_lz',
-        'aktPlanowania_link',
-      ]);
+      const parsed = parseWfsLineStringGml(gml, 'app.LinieZabudowy.MPZP', lineProps);
       lines = parsed.features as unknown as MpzpLineRawFeature[];
     }
   } catch (e) {
