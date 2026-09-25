@@ -53,13 +53,15 @@
   - Płynny scrubbing słońca i manipulacja widokiem (pan/zoom/rotate) wykorzystują koalescencję `scheduleViewState` do rAF oraz prekompilowane fingerprinty kondygnacji (`tier fingerprints`).
   - Rzutowanie i obwiednie budynków w widoku Masterplan korzystają z akceleracji sprzętowej Canvas 2D (`AffineMatrix2D`), sweep-line AABB culling oraz cache wypukłości poligonów (`polygon convex caching`), co gwarantuje stabilne 60 FPS na Chrome MacOSX nawet przy setkach złożonych brył.
 
-## 1f. Import OSM Overpass (Kompletność 3D, building:part i Minimalizacja Payloadu)
+## 1f. Import OSM Overpass (Kompletność 3D, building:part, Selektywna Geometria i Sanityzacja Tagów)
 - **5-etapowy potok importu OSM**:
   1. Podział zadanego obszaru na kwadranty $350 \times 350\text{ m}$ z zakładem $\ge 100\text{ m}$.
   2. Pobranie bazowych obrysów (`way["building"]` + `relation["building"]["type"="multipolygon"]`) z minimalizacją payloadu (`out tags geom qt;`) eliminującą tysiące zbędnych elementów `node` i przyspieszającą streaming dzięki indeksacji quadtile `qt`.
   3. Precyzyjny dociąg części 3D (`building:part`) po ID budynków z buforem `nwr(around:10)["building:part"]` (promień $10\text{ m}$ jest krytyczny, aby nie gubić wież, kopuł i wycofanych kondygnacji w głębi bryły).
   4. Weryfikacja kompletności relacji i geometrii (z rundą naprawczą recovery).
   5. Asemblacja obiektów CAD: składanie pierścieni zewnętrznych i wewnętrznych (`assembleCoordinateSegmentsIntoRings`), grupowanie części w obiekty logiczne (`groupId`), odrzucanie envelope przy pełnym pokryciu przez części ($>85\%$) i ekstrakcja wewnętrznych dziedzińców (`holes`).
+- **Sanityzacja tagów OSM (`sanitizeOsmBuildingTags`)**:
+  - Filtrowanie słowników tagów w locie zachowuje wyłącznie klucze geometryczne, wysokościowe i identyfikacyjne (`building*`, `height`, `min_height`, `levels`, `roof*`, `name*`, `addr*`, `amenity`, `shop`, `office`, `landuse`, `type`), odrzucając 80–90% zbędnych metadanych (`wikidata`, `wikipedia`, `source*`, `created_by`, `fixme`, `bdot10k`) i redukując zużycie pamięci sterty V8.
 
 ## 1g. Szybkie Operacje Boolowskie 2D (FastUnion, FastDifference, FastIntersect)
 - **Symetria potoków boolowskich**:

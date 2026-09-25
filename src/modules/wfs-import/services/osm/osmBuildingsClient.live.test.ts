@@ -93,7 +93,7 @@ describe.skipIf(!LIVE)('testy live OSM/Overpass (budynki) — prawdziwy serwer, 
         expect(b.vertices.length).toBeGreaterThanOrEqual(3);
         expect(b.segments.length).toBeGreaterThanOrEqual(3);
       }
-    }, 65000);
+    }, 120000);
   }
 
   it('weryfikacja redukcji payloadu i identyczności z baseline: out tags geom qt vs out body >; out skel qt', async () => {
@@ -113,7 +113,8 @@ describe.skipIf(!LIVE)('testy live OSM/Overpass (budynki) — prawdziwy serwer, 
     const legacyQuery = `
       [out:json][timeout:30];
       (
-        nwr["building"](${south},${west},${north},${east});
+        way["building"](${south},${west},${north},${east});
+        relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
       );
       out body;
       >;
@@ -134,15 +135,41 @@ describe.skipIf(!LIVE)('testy live OSM/Overpass (budynki) — prawdziwy serwer, 
     const legacyText = await legacyRes.text();
     const legacyJson = JSON.parse(legacyText);
 
-    // Spadek wielkości odpowiedzi o co najmniej 30-50%
+    // 1. Spadek wielkości odpowiedzi o co najmniej 30-60%
     expect(optText.length).toBeLessThan(legacyText.length * 0.7);
+
+    // 2. Weryfikacja eliminacji zbędnych elementów typu node ze strumienia
+    const optNodes = optJson.elements.filter((el: any) => el.type === 'node');
+    const legacyNodes = legacyJson.elements.filter((el: any) => el.type === 'node');
+    expect(optNodes.length).toBe(0);
+    expect(legacyNodes.length).toBeGreaterThan(100);
 
     const optBuildings = parseOverpassBuildingsResponse(optJson, testCenter, localCrs);
     const legacyBuildings = parseOverpassBuildingsResponse(legacyJson, testCenter, localCrs);
 
-    expect(optBuildings.length).toBeGreaterThan(0);
-    expect(legacyBuildings.length).toBeGreaterThan(0);
-    expect(Math.abs(optBuildings.length - legacyBuildings.length)).toBeLessThanOrEqual(2);
+    expect(optBuildings.length).toBeGreaterThan(50);
+    expect(legacyBuildings.length).toBeGreaterThan(50);
+
+    // 3. Weryfikacja 1:1 geometrii dla budynków
+    const legacyMap = new Map(legacyBuildings.map((b) => [b.id, b]));
+    let matchedCount = 0;
+    for (const optB of optBuildings) {
+      const legB = legacyMap.get(optB.id);
+      if (legB) {
+        matchedCount++;
+        expect(optB.defaultHeight).toBeCloseTo(legB.defaultHeight, 1);
+        expect(optB.elevation).toBeCloseTo(legB.elevation ?? 0, 1);
+        expect(optB.storeysCount).toBe(legB.storeysCount);
+        expect(optB.vertices.length).toBe(legB.vertices.length);
+
+        // Porównanie współrzędnych wierzchołków (z tolerancją < 1cm)
+        for (let i = 0; i < optB.vertices.length; i++) {
+          expect(optB.vertices[i].x).toBeCloseTo(legB.vertices[i].x, 2);
+          expect(optB.vertices[i].y).toBeCloseTo(legB.vertices[i].y, 2);
+        }
+      }
+    }
+    expect(matchedCount).toBeGreaterThanOrEqual(optBuildings.length - 2);
   }, 90000);
 
   // Regresja dla zgłoszenia: import przy 500m całkowicie się nie udawał, przy 300m dawał

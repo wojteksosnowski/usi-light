@@ -10,6 +10,7 @@ import { Point2D } from '../../../../types/geometry';
 import { LatLon, wgs84ToCadPoint, CrsDetectionResult } from '../../../../utils/geoTransform';
 import { OsmLanduseFeature } from '../../store/useOsmLanduseStore';
 import { WfsTreeFeature } from '../../store/useWfsStore';
+import { assembleCoordinateSegmentsIntoRings } from './osmBuildingsClient';
 
 /** Bbox [west, south, east, north] */
 export type OsmBbox = [number, number, number, number];
@@ -42,7 +43,8 @@ interface OverpassNode {
 interface OverpassWay {
   type: 'way';
   id: number;
-  nodes: number[];
+  nodes?: number[];
+  geometry?: LatLon[];
   tags?: Record<string, string>;
 }
 
@@ -50,6 +52,7 @@ interface OverpassRelationMember {
   type: 'way' | 'node' | 'relation';
   ref: number;
   role: 'outer' | 'inner' | string;
+  geometry?: LatLon[];
 }
 
 interface OverpassRelation {
@@ -59,10 +62,25 @@ interface OverpassRelation {
   tags?: Record<string, string>;
 }
 
-type OverpassElement = OverpassNode | OverpassWay | OverpassRelation;
+export type OverpassElement = OverpassNode | OverpassWay | OverpassRelation;
 
-interface OverpassResponse {
+export interface OverpassResponse {
   elements: OverpassElement[];
+}
+
+function extractLanduseWayLatLons(way: OverpassWay, nodeCoords: Map<number, LatLon>): LatLon[] | null {
+  if (way.geometry && way.geometry.length >= 2) {
+    return way.geometry;
+  }
+  if (way.nodes && way.nodes.length >= 2) {
+    const pts: LatLon[] = [];
+    for (const nodeId of way.nodes) {
+      const coord = nodeCoords.get(nodeId);
+      if (coord) pts.push(coord);
+    }
+    return pts.length >= 2 ? pts : null;
+  }
+  return null;
 }
 
 /**
@@ -606,6 +624,10 @@ async function postOverpassLanduseQuery(query: string, timeoutMs = OVERPASS_REQU
  * Pobiera dane Landuse, dróg, infrastruktury oraz drzew z Overpass API dla zadanego BBox i transformuje do układu CAD projektu.
  * Ogranicza drzewa i obiekty do promienia projektu (radiusMeters + margines na korony).
  */
+function coordsEqual(a: LatLon, b: LatLon, tol = 1e-6): boolean {
+  return Math.abs(a.lat - b.lat) <= tol && Math.abs(a.lon - b.lon) <= tol;
+}
+
 export async function fetchOsmLanduse(
   bbox: OsmBbox,
   projectCenter: LatLon,
@@ -636,13 +658,22 @@ export async function fetchOsmLanduse(
       way["natural"="tree_group"](${south},${west},${north},${east});
       relation["natural"="tree_group"](${south},${west},${north},${east});
     );
-    out body;
-    >;
-    out skel qt;
+    out tags geom qt;
   `.trim();
 
   const responseData = await postOverpassLanduseQuery(query, OVERPASS_REQUEST_TIMEOUT_MS);
+  return parseOsmLanduseResponse(responseData, projectCenter, projectCrs, radiusMeters);
+}
 
+/**
+ * Parsuje odpowiedź Overpass API do obiektów warstw terenu i drzew CAD.
+ */
+export function parseOsmLanduseResponse(
+  responseData: { elements: OverpassElement[] },
+  projectCenter: LatLon,
+  projectCrs: CrsDetectionResult,
+  radiusMeters?: number
+): OsmFetchResult {
   const nodes = new Map<number, OverpassNode>();
   const nodeCoords = new Map<number, LatLon>();
   const ways = new Map<number, OverpassWay>();
@@ -703,27 +734,37 @@ export async function fetchOsmLanduse(
     const tags = rel.tags || {};
     const layerId = matchOsmLayerId(tags);
 
-    const outerWayNodes: number[][] = [];
-    const innerWayNodes: number[][] = [];
+    const outerSegments: LatLon[][] = [];
+    const innerSegments: LatLon[][] = [];
 
     for (const member of rel.members) {
       if (member.type === 'way') {
+        let segLatLons: LatLon[] | null = null;
+        if (member.geometry && member.geometry.length >= 2) {
+          segLatLons = member.geometry;
+        }
         const way = ways.get(member.ref);
-        if (way && way.nodes.length >= 2) {
+        if (way) {
           if (tags.type === 'multipolygon' || tags.type === 'boundary') {
             processedWayIds.add(way.id);
           }
+          if (!segLatLons) {
+            segLatLons = extractLanduseWayLatLons(way, nodeCoords);
+          }
+        }
+
+        if (segLatLons && segLatLons.length >= 2) {
           if (member.role === 'inner') {
-            innerWayNodes.push(way.nodes);
+            innerSegments.push(segLatLons);
           } else {
-            outerWayNodes.push(way.nodes);
+            outerSegments.push(segLatLons);
           }
         }
       }
     }
 
-    const outerRings = assembleWaysIntoRings(outerWayNodes, nodeCoords);
-    const innerRings = assembleWaysIntoRings(innerWayNodes, nodeCoords);
+    const outerRings = assembleCoordinateSegmentsIntoRings(outerSegments);
+    const innerRings = assembleCoordinateSegmentsIntoRings(innerSegments);
 
     const holes: Point2D[][] = innerRings.map((ring) =>
       ring.map((ll) => wgs84ToCadPoint(ll, projectCrs, projectCenter))
@@ -756,7 +797,9 @@ export async function fetchOsmLanduse(
   for (const [wayId, way] of ways.entries()) {
     if (processedWayIds.has(wayId)) continue;
     if (!way.tags) continue;
-    if (way.nodes.length < 2) continue;
+
+    const wayLatLons = extractLanduseWayLatLons(way, nodeCoords);
+    if (!wayLatLons || wayLatLons.length < 2) continue;
 
     // A. Szpalery drzew (tree_row)
     if (way.tags.natural === 'tree_row') {
@@ -767,37 +810,35 @@ export async function fetchOsmLanduse(
       const trunkCircumference = parseOsmCircumference(way.tags.circumference);
       const isMonument = isOsmNaturalMonument(way.tags);
 
-      for (let i = 0; i < way.nodes.length; i++) {
-        const coord = nodeCoords.get(way.nodes[i]);
-        if (coord) {
-          const pos = wgs84ToCadPoint(coord, projectCrs, projectCenter);
-          const distFromCenter = Math.hypot(pos.x, pos.y);
-          if (distFromCenter > maxTreeDist) continue;
+      for (let i = 0; i < wayLatLons.length; i++) {
+        const coord = wayLatLons[i];
+        const pos = wgs84ToCadPoint(coord, projectCrs, projectCenter);
+        const distFromCenter = Math.hypot(pos.x, pos.y);
+        if (distFromCenter > maxTreeDist) continue;
 
-          const dims = estimateTreeDimensions(way.tags, genus, `${way.id}_${i}`);
+        const dims = estimateTreeDimensions(way.tags, genus, `${way.id}_${i}`);
 
-          trees.push({
-            id: `osm_treerow_${way.id}_${i}`,
-            position: pos,
-            nameLatin,
-            namePolish,
-            genus: genus || way.tags.genus,
-            height: dims.height,
-            trunkCircumference,
-            crownDiameter: dims.crownDiameter,
-            leafType,
-            leafCycle: way.tags.leaf_cycle,
-            isMonument,
-            source: 'osm',
-            tags: way.tags,
-          });
-        }
+        trees.push({
+          id: `osm_treerow_${way.id}_${i}`,
+          position: pos,
+          nameLatin,
+          namePolish,
+          genus: genus || way.tags.genus,
+          height: dims.height,
+          trunkCircumference,
+          crownDiameter: dims.crownDiameter,
+          leafType,
+          leafCycle: way.tags.leaf_cycle,
+          isMonument,
+          source: 'osm',
+          tags: way.tags,
+        });
       }
       continue;
     }
 
     const layerId = matchOsmLayerId(way.tags);
-    const isClosed = way.nodes[0] === way.nodes[way.nodes.length - 1];
+    const isClosed = coordsEqual(wayLatLons[0], wayLatLons[wayLatLons.length - 1]);
     const isAreaExplicit = way.tags.area === 'yes';
     const isHighway = !!way.tags.highway;
     const isRailway = !!way.tags.railway;
@@ -809,13 +850,9 @@ export async function fetchOsmLanduse(
       way.tags.amenity === 'parking_space' ||
       way.tags.amenity === 'bicycle_parking';
 
-    const pts: Point2D[] = [];
-    for (const nodeId of way.nodes) {
-      const coord = nodeCoords.get(nodeId);
-      if (coord) {
-        pts.push(wgs84ToCadPoint(coord, projectCrs, projectCenter));
-      }
-    }
+    const pts: Point2D[] = wayLatLons.map((coord) =>
+      wgs84ToCadPoint(coord, projectCrs, projectCenter)
+    );
     if (pts.length < 2) continue;
 
     // Linie: drogi, tory, cieki (chyba że oznaczono jawnie jako area=yes lub parking)

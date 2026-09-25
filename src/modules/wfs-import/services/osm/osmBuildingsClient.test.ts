@@ -13,6 +13,8 @@ import {
   buildOverpassBuildingsQuery,
   formatOverpassPolyFilter,
   assembleCoordinateSegmentsIntoRings,
+  sanitizeOsmBuildingTags,
+  ALLOWED_BUILDING_TAG_KEYS,
   OverpassResponse,
 } from './osmBuildingsClient';
 import { clearOsmBuildingsStorage } from './osmBuildingsStorage';
@@ -115,6 +117,82 @@ describe('osmBuildingsClient', () => {
       expect(merged.elements.length).toBe(5);
     });
   });
+
+  describe('sanitizeOsmBuildingTags', () => {
+    it('returns undefined for undefined tags', () => {
+      expect(sanitizeOsmBuildingTags(undefined)).toBeUndefined();
+    });
+
+    it('retains essential building, height, geometry and address tags', () => {
+      const rawTags: Record<string, string> = {
+        building: 'apartments',
+        'building:part': 'yes',
+        height: '45.5',
+        min_height: '10.0',
+        'building:levels': '14',
+        'building:min_level': '3',
+        'roof:shape': 'flat',
+        'roof:height': '1.5',
+        'roof:levels': '1',
+        name: 'Apartamenty Powiśle',
+        'name:pl': 'Apartamenty Powiśle',
+        'name:en': 'Powiśle Apartments',
+        'addr:street': 'Dobra',
+        'addr:housenumber': '22',
+        'addr:city': 'Warszawa',
+        amenity: 'bank',
+        shop: 'supermarket',
+        office: 'architect',
+        landuse: 'residential',
+        type: 'multipolygon',
+      };
+
+      const sanitized = sanitizeOsmBuildingTags(rawTags);
+      expect(sanitized).toBeDefined();
+      expect(sanitized).toEqual(rawTags);
+    });
+
+    it('strips bloated metadata, source, editor and external database tags', () => {
+      const bloatedTags: Record<string, string> = {
+        building: 'office',
+        height: '35',
+        name: 'Biurowiec',
+        wikidata: 'Q12345678',
+        wikipedia: 'pl:Biurowiec',
+        'source': 'geoportal.gov.pl',
+        'source:geometry': 'orthophoto 2024',
+        'source:date': '2024-01-15',
+        'survey:date': '2023-05-12',
+        'created_by': 'JOSM/1.5',
+        'fixme': 'check roof shape',
+        'osm:changeset': '998877',
+        'ref:bdot10k': 'OT_BUBD_A_12345',
+        'mapillary': 'photo_123',
+      };
+
+      const sanitized = sanitizeOsmBuildingTags(bloatedTags);
+      expect(sanitized).toBeDefined();
+      expect(sanitized).toEqual({
+        building: 'office',
+        height: '35',
+        name: 'Biurowiec',
+      });
+      expect(sanitized?.wikidata).toBeUndefined();
+      expect(sanitized?.wikipedia).toBeUndefined();
+      expect(sanitized?.source).toBeUndefined();
+      expect(sanitized?.['source:geometry']).toBeUndefined();
+      expect(sanitized?.['ref:bdot10k']).toBeUndefined();
+    });
+
+    it('preserves all ALLOWED_BUILDING_TAG_KEYS', () => {
+      for (const key of ALLOWED_BUILDING_TAG_KEYS) {
+        const input = { [key]: 'test_value' };
+        const result = sanitizeOsmBuildingTags(input);
+        expect(result?.[key]).toBe('test_value');
+      }
+    });
+  });
+
   describe('resolveBuildingType', () => {
     it('resolves residential types correctly', () => {
       expect(resolveBuildingType({ building: 'house' })).toBe('residential');

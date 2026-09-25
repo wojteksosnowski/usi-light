@@ -10,8 +10,19 @@ import {
   resolveLeafType,
   estimateTreeDimensions,
   getPseudoRandomSeed,
+  parseOsmLanduseResponse,
+  OverpassResponse,
 } from './osmLanduseClient';
 import { DEFAULT_OSM_LANDUSE_LAYERS } from '../../store/useOsmLanduseStore';
+import { CrsDetectionResult } from '../../../../utils/geoTransform';
+
+const LOCAL_CRS: CrsDetectionResult = {
+  crs: 'LOCAL',
+  description: 'lokalny',
+  geodeticLabel: 'lokalny',
+  isGeodetic: false,
+  isLocalReference: true,
+};
 
 describe('osmLanduseClient tag matching', () => {
   it('matches trees and tree rows correctly', () => {
@@ -220,6 +231,124 @@ describe('osmLanduseClient tag matching', () => {
     // Korony nie są identyczne
     const diameters = new Set([treeA1.crownDiameter, treeB.crownDiameter, treeC.crownDiameter]);
     expect(diameters.size).toBeGreaterThan(1);
+  });
+
+  describe('parseOsmLanduseResponse (embedded geometries)', () => {
+    const center = { lat: 52.2300, lon: 21.0100 };
+
+    it('parses polygon and polyline features directly from way.geometry', () => {
+      const response: OverpassResponse = {
+        elements: [
+          // Way with direct geometry (park polygon)
+          {
+            type: 'way',
+            id: 1001,
+            geometry: [
+              { lat: 52.2300, lon: 21.0100 },
+              { lat: 52.2300, lon: 21.0120 },
+              { lat: 52.2310, lon: 21.0120 },
+              { lat: 52.2310, lon: 21.0100 },
+              { lat: 52.2300, lon: 21.0100 },
+            ],
+            tags: { leisure: 'park', name: 'Park Miejski' },
+          },
+          // Way with direct geometry (road polyline)
+          {
+            type: 'way',
+            id: 1002,
+            geometry: [
+              { lat: 52.2300, lon: 21.0100 },
+              { lat: 52.2305, lon: 21.0115 },
+              { lat: 52.2310, lon: 21.0130 },
+            ],
+            tags: { highway: 'residential', name: 'Ulica Ogrodowa' },
+          },
+          // Tree node
+          {
+            type: 'node',
+            id: 2001,
+            lat: 52.2302,
+            lon: 21.0105,
+            tags: { natural: 'tree', species: 'Quercus robur', height: '18' },
+          },
+        ],
+      };
+
+      const result = parseOsmLanduseResponse(response, center, LOCAL_CRS, 500);
+      expect(result.features.length).toBe(2);
+      expect(result.trees.length).toBe(1);
+
+      const park = result.features.find((f) => f.id === 'osm_way_1001');
+      expect(park).toBeDefined();
+      expect(park!.geometryType).toBe('polygon');
+      expect(park!.layerId).toBe('osm_landuse_green');
+      expect(park!.name).toBe('Park Miejski');
+      expect(park!.polygon?.length).toBe(5);
+
+      const road = result.features.find((f) => f.id === 'osm_way_1002');
+      expect(road).toBeDefined();
+      expect(road!.geometryType).toBe('line');
+      expect(road!.layerId).toBe('osm_roads_local');
+      expect(road!.name).toBe('Ulica Ogrodowa');
+      expect(road!.points?.length).toBe(3);
+
+      const tree = result.trees[0];
+      expect(tree.id).toBe('osm_tree_2001');
+      expect(tree.height).toBe(18);
+      expect(tree.genus).toBe('Quercus');
+    });
+
+    it('parses multipolygon relation with outer and inner rings directly from member.geometry', () => {
+      const response: OverpassResponse = {
+        elements: [
+          {
+            type: 'relation',
+            id: 3001,
+            tags: {
+              type: 'multipolygon',
+              natural: 'water',
+              name: 'Jezioro z wyspą',
+            },
+            members: [
+              {
+                type: 'way' as const,
+                ref: 101,
+                role: 'outer',
+                geometry: [
+                  { lat: 52.2280, lon: 21.0080 },
+                  { lat: 52.2280, lon: 21.0140 },
+                  { lat: 52.2320, lon: 21.0140 },
+                  { lat: 52.2320, lon: 21.0080 },
+                  { lat: 52.2280, lon: 21.0080 },
+                ],
+              },
+              {
+                type: 'way' as const,
+                ref: 102,
+                role: 'inner',
+                geometry: [
+                  { lat: 52.2290, lon: 21.0100 },
+                  { lat: 52.2290, lon: 21.0120 },
+                  { lat: 52.2310, lon: 21.0120 },
+                  { lat: 52.2310, lon: 21.0100 },
+                  { lat: 52.2290, lon: 21.0100 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = parseOsmLanduseResponse(response, center, LOCAL_CRS, 1000);
+      expect(result.features.length).toBe(1);
+      const water = result.features[0];
+      expect(water.id).toBe('osm_rel_3001');
+      expect(water.layerId).toBe('osm_landuse_water');
+      expect(water.geometryType).toBe('polygon');
+      expect(water.polygon?.length).toBe(5);
+      expect(water.holes?.length).toBe(1);
+      expect(water.holes?.[0].length).toBe(5);
+    });
   });
 });
 

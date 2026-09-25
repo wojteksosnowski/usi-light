@@ -121,6 +121,52 @@ export interface OverpassResponse {
   remark?: string;
 }
 
+/** Dozwolone klucze tagów budynkowych — eliminują narzut pamięciowy metadanych (wikidata, wikipedia, source, itp.). */
+export const ALLOWED_BUILDING_TAG_KEYS = new Set([
+  'building',
+  'building:part',
+  'type',
+  'height',
+  'building:height',
+  'roof:height',
+  'min_height',
+  'building:min_height',
+  'building:levels',
+  'levels',
+  'roof:levels',
+  'building:min_level',
+  'min_level',
+  'roof:shape',
+  'roof:orientation',
+  'name',
+  'addr:housenumber',
+  'addr:street',
+  'addr:place',
+  'addr:conscriptionnumber',
+  'amenity',
+  'shop',
+  'office',
+  'landuse',
+]);
+
+/** Sanityzuje i filtruje słownik tagów OSM, zachowując wyłącznie klucze istotne dla geometrii i identyfikacji budynku. */
+export function sanitizeOsmBuildingTags(tags: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!tags) return undefined;
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(tags)) {
+    if (
+      ALLOWED_BUILDING_TAG_KEYS.has(key) ||
+      key.startsWith('building:') ||
+      key.startsWith('addr:') ||
+      key.startsWith('name:') ||
+      key.startsWith('roof:')
+    ) {
+      sanitized[key] = value;
+    }
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
 /**
  * Rozpoznaje typ budynku na podstawie tagów OSM
  */
@@ -360,7 +406,7 @@ export function mergeOverpassResponses(...responses: OverpassResponse[]): Overpa
         nodeMap.set(el.id, {
           ...existing,
           ...el,
-          tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
+          tags: sanitizeOsmBuildingTags(el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags),
         });
       } else if (el.type === 'way') {
         const existing = wayMap.get(el.id);
@@ -369,7 +415,7 @@ export function mergeOverpassResponses(...responses: OverpassResponse[]): Overpa
           ...el,
           nodes: el.nodes && el.nodes.length > 0 ? el.nodes : (existing?.nodes || []),
           geometry: el.geometry && el.geometry.length > 0 ? el.geometry : existing?.geometry,
-          tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
+          tags: sanitizeOsmBuildingTags(el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags),
         });
       } else if (el.type === 'relation') {
         const existing = relMap.get(el.id);
@@ -377,7 +423,7 @@ export function mergeOverpassResponses(...responses: OverpassResponse[]): Overpa
           ...existing,
           ...el,
           members: el.members && el.members.length > 0 ? el.members : (existing?.members || []),
-          tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
+          tags: sanitizeOsmBuildingTags(el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags),
         });
       }
     }
@@ -412,7 +458,7 @@ export function parseOverpassBuildingsResponse(
       nodes.set(el.id, {
         ...existing,
         ...el,
-        tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
+        tags: sanitizeOsmBuildingTags(el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags),
       });
       nodeCoords.set(el.id, { lat: el.lat, lon: el.lon });
     } else if (el.type === 'way') {
@@ -421,19 +467,22 @@ export function parseOverpassBuildingsResponse(
         ...existing,
         ...el,
         nodes: el.nodes && el.nodes.length > 0 ? el.nodes : (existing?.nodes || []),
-        tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
+        tags: sanitizeOsmBuildingTags(el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags),
       });
     } else if (el.type === 'relation') {
       const existingIndex = relations.findIndex((r) => r.id === el.id);
       if (existingIndex < 0) {
-        relations.push(el);
+        relations.push({
+          ...el,
+          tags: sanitizeOsmBuildingTags(el.tags),
+        });
       } else {
         const existing = relations[existingIndex];
         relations[existingIndex] = {
           ...existing,
           ...el,
           members: el.members && el.members.length > 0 ? el.members : (existing?.members || []),
-          tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
+          tags: sanitizeOsmBuildingTags(el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags),
         };
       }
     }
@@ -451,8 +500,9 @@ export function parseOverpassBuildingsResponse(
     const tags = rel.tags || {};
     if (tags.type === 'building' || (tags.building && tags.type !== 'multipolygon')) {
       const relName = formatOsmBuildingName(rel.id, tags);
-      const hasPartMembers = rel.members.some((m) => m.role === 'part' || m.role === '');
-      for (const member of rel.members) {
+      const members = rel.members || [];
+      const hasPartMembers = members.some((m) => m.role === 'part' || m.role === '');
+      for (const member of members) {
         if (member.type === 'way') {
           buildingRelationMemberMap.set(member.ref, { relId: rel.id, relName });
           // Jeśli relacja zawiera części (part), oznaczamy drogę nadrzędną (outline), aby nie tworzyć z niej zbędnej bryły
@@ -605,7 +655,7 @@ export function parseOverpassBuildingsResponse(
     const innerSegments: LatLon[][] = [];
     let outerWayTagsWithName: Record<string, string> | undefined;
 
-    for (const member of rel.members) {
+    for (const member of (rel.members || [])) {
       if (member.type === 'way') {
         let segLatLons: LatLon[] | null = null;
         if (member.geometry && member.geometry.length >= 2) {
@@ -912,7 +962,7 @@ export function parseOverpassBuildingsResponse(
     const relGroupId = `group-osm-bld-${rel.id}`;
     const hasGeneratedPart = buildings.some((b) => b.groupId === relGroupId);
     if (!hasGeneratedPart && outlineWayIdsWithParts.size > 0) {
-      for (const member of rel.members) {
+      for (const member of (rel.members || [])) {
         if (member.type === 'way' && member.role === 'outline' && outlineWayIdsWithParts.has(member.ref)) {
           const wayId = member.ref;
           const way = ways.get(wayId);
