@@ -1,4 +1,5 @@
 import type { Point2D, Vector2D } from './geometry';
+import type { CanonicalBuildingShadow } from './canonicalShadow';
 
 export interface Point3D {
   readonly x: number;
@@ -118,6 +119,7 @@ export interface CompiledObjectGeometry {
     readonly heightMax: number;
     readonly simplifiedEnvelope2D: Polygon2D;
     readonly shadowReachAABB?: CardinalAABB2D;
+    readonly shadowCanonical?: CanonicalBuildingShadow;
   };
 
   /** Zbuforowane metryki geometryczne */

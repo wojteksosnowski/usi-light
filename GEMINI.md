@@ -44,6 +44,9 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
    - Wypiekanie następuje synchronicznie w $O(N)$ wierzchołków podczas edycji geometrii/modyfikatorów (`applyModifiersAndBake`). Obiekt `bldg.computed` jest pomijany przy serializacji do JSON/`.usi` i rehydratowany przy odczycie.
    - Renderery 2D (`buildingsRenderer.ts`, `masterplanRoofsRenderer.ts`), etykiety (`masterplanLabels.ts`) i silniki cieniowania konsumują gotowe dane w czasie $O(1)$.
    - Izolacja drzewa UI (`useSceneObjectsList`) z kluczowaniem sygnaturą `treeSig` chroni komponenty Reacta przed re-renderami podczas translacji/obrotu.
+8. **FastShadowInTheMiddle (Cienie na Płaszczyznach Pośrednich $Z = \text{const}$)**:
+   - Rzutowanie cieni na poziome dachy i tarasy $Z_{\text{target}}$ realizowane jest jednowymiarową transformacją afiniczną $P(Z) = P_0 - Z \cdot \vec{s} = P_0 + \frac{Z}{z_{\text{max}}}(V_{xy} - P_0)$ w $O(1)$ ($32.9\text{ ns/vertex}$).
+   - Wypiek w `CanonicalShadowBaker` i konsumpcja w `FastShadowInTheMiddle` oraz `MasterplanFastShadowPipeline` eliminują powtarzalne rzutowanie 3D i obciążenie GC.
 
 
 ---

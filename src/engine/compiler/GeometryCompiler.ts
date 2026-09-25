@@ -24,6 +24,7 @@ import {
 import { calculateOutwardNormal } from '@/utils/math2d/vec2';
 import { clippingResultToPolygonsWithHoles, polygonsWithHolesToClipping, PolygonWithHoles } from '@/utils/math2d/polygons';
 import polygonClipping from 'polygon-clipping';
+import { CanonicalShadowBaker } from './CanonicalShadowBaker';
 
 function computePolygonNetArea(exterior: readonly Point2D[], holes?: readonly (readonly Point2D[])[]): number {
   const outer = Math.abs(calculateSignedArea(exterior as Point2D[]));
@@ -383,6 +384,17 @@ export class GeometryCompiler {
       maxY: bounds2D.max.y + heightMax * 1.5,
     } : undefined;
 
+    const shadowCanonical = CanonicalShadowBaker.bakeBuildingShadow(
+      building.id,
+      storySlices,
+      baseVertices,
+      baseHoles,
+      defaultHeight,
+      baseElevation,
+      'ref_unit',
+      { x: 0, y: 1 }
+    );
+
     return {
       geometryHash: hash,
       computedAt: Date.now(),
@@ -406,6 +418,7 @@ export class GeometryCompiler {
         heightMax,
         simplifiedEnvelope2D: footprintBase,
         shadowReachAABB,
+        shadowCanonical,
       },
       metrics,
     };
@@ -668,6 +681,29 @@ export class GeometryCompiler {
             })
       : undefined;
 
+    const transformedShadowCanonical = computed.analysis.shadowCanonical
+      ? {
+          ...computed.analysis.shadowCanonical,
+          components: computed.analysis.shadowCanonical.components.map((c) => ({
+            ...c,
+            rings: c.rings.map((r) => ({
+              ...r,
+              vertices: r.vertices.map((v) => {
+                const p0 = transformPoint2D({ x: v.x0, y: v.y0 });
+                const pv = transformPoint2D({ x: v.vx, y: v.vy });
+                return {
+                  x0: p0.x,
+                  y0: p0.y,
+                  vx: pv.x,
+                  vy: pv.y,
+                  zMax: v.zMax,
+                };
+              }),
+            })),
+          })),
+        }
+      : undefined;
+
     return {
       ...computed,
       geometryHash: updatedHash,
@@ -691,6 +727,7 @@ export class GeometryCompiler {
         castingEdges: transformedCastingEdges,
         simplifiedEnvelope2D: transformedBase,
         shadowReachAABB: transformedShadowReachAABB,
+        shadowCanonical: transformedShadowCanonical,
       },
     };
   }
