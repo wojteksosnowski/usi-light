@@ -168,12 +168,13 @@ Modułowy system przyciągania z hierarchią strategii (`SnapCoordinator.ts` koo
 - Culling obiektów poza viewportem przed próbą snapowania (world bounds).
 
 ### 4.3. Matematyka 2D (`src/utils/math2d/`)
-- `polygons.ts` — operacje geometryczne na wielokątach (pole, obwód, centroid, punkt-w-wielokącie, `rotatePointAroundPivot`, uchwyt obrotu).
+- `polygons.ts` — operacje geometryczne na wielokątach (pole, obwód, centroid, punkt-w-wielokącie, `rotatePointAroundPivot`, uchwyt obrotu, zoptymalizowane `intersectionPolygonLoops` i `intersectionPolygonsWithHoles`).
+- `fastIntersect.ts` (`fastIntersectTwoSimpleLoops`) — szybkie przecięcie dwóch prostych pętli ($A \cap B$) oparte na 4-fazowym potoku: AABB quick-reject $O(1)$, inkluzja $O(N+M)$, segment subdivision i Weiler-Atherton/Forward-Star graph traversal $O(N+M+k \log k)$ oraz bezpiecznik 1:1 `fallbackFn`.
+- `polygonBooleanTwo.ts` — zoptymalizowane operacje dwuwielokątowe (`fastUnionTwoSimpleLoops`, `fastDifferenceTwoSimpleLoops`, `fastIntersectTwoSimpleLoops`, `polygonIntersectionTwo`, `fastUnionTwoPolygonsWithHoles`), telemetria i fallback do `polygon-clipping`.
 - `affineMatrix.ts` (`AffineMatrix2D`) — macierze afiniczne 2D $3 \times 3$, transformacje Screen $\leftrightarrow$ World.
 - `vec2.ts` — prymitywy wektorowe 2D bez alokacji, zależność bazowa dla `segments.ts`.
 - `segments.ts` (dawniej `ringSegments.ts`) — generowanie `FacadeSegment[]` z pierścieni (obsługa `holes`, korekta odwrotnego nawijania, normalne skierowane do wewnątrz dla otworów); moduł bez zależności poza `vec2.ts`, współdzielony przez `segmentStatistics.ts` (`rebuildBuildingSegments`) i `polygons.ts` (`booleanUnionBuildings`), by uniknąć cyklicznego importu przez barrel `@/utils/math2d`.
-- `polygonBooleanTwo.ts` — operacje boolowskie (Union/Difference/Intersection), opakowuje `polygon-clipping`, hole-aware.
-- `shadowEnvelope.ts` — analityczne wyznaczanie obwiedni rzutu cienia dla zadanej godziny/wektora słońca.
+- `shadowEnvelope.ts` — analityczne wyznaczanie obwiedni rzutu cienia dla zadanej godziny/wektora słońca oraz apertur dziedzińców donut.
 - `groupEnvelope.ts` — obwiednia buforowa dla grupy budynków (`computeGroupEnvelope`).
 - `miterOffset.ts` — buforowanie/odsuwanie krawędzi (offset).
 - `sweep.ts` — generowanie geometrii wstęgi (Sweep) z polilinii i szerokości.

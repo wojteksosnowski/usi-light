@@ -2,6 +2,7 @@ import { Point2D, BuildingLoop } from '../../types/geometry';
 import polygonClipping from 'polygon-clipping';
 import { buildRingSegments } from '../ringSegments';
 import { fastUnionTwoPolygonsWithHoles, fastUnionTwoSimpleLoops, fastDifferenceTwoSimpleLoops } from './polygonBooleanTwo';
+import { fastIntersectTwoSimpleLoops } from './fastIntersect';
 
 /**
  * Calculates the signed area of a 2D polygon using the Shoelace formula / Green's theorem.
@@ -518,6 +519,21 @@ export function intersectionPolygonsWithHoles(
 ): PolygonWithHoles[] {
   if (listA.length === 0 || listB.length === 0) return [];
 
+  // Szybka ścieżka dla pojedynczych wielokątów bez otworów
+  if (
+    listA.length === 1 &&
+    listB.length === 1 &&
+    (!listA[0].holes || listA[0].holes.length === 0) &&
+    (!listB[0].holes || listB[0].holes.length === 0)
+  ) {
+    const interLoops = fastIntersectTwoSimpleLoops(
+      listA[0].outer,
+      listB[0].outer,
+      (a, b) => intersectionPolygonLoopsViaClipping([a], [b])
+    );
+    return interLoops.map((outer) => ({ outer, holes: [] }));
+  }
+
   const cA = polygonsWithHolesToClipping(listA);
   const cB = polygonsWithHolesToClipping(listB);
   if (cA.length === 0 || cB.length === 0) return [];
@@ -857,13 +873,7 @@ export function differencePolygonLoops(
   return result;
 }
 
-/**
- * Przecięcie dwóch zestawów poligonów (A ∩ B) za pomocą polygonClipping.intersection.
- * Używana m.in. do budowy umbry cienia z dwóch wariantów kątowych (masterplanGeometry.ts).
- */
-export function intersectionPolygonLoops(loopsA: Point2D[][], loopsB: Point2D[][]): Point2D[][] {
-  if (loopsA.length === 0 || loopsB.length === 0) return [];
-
+export function intersectionPolygonLoopsViaClipping(loopsA: Point2D[][], loopsB: Point2D[][]): Point2D[][] {
   const toClippingRings = (loops: Point2D[][]): polygonClipping.Polygon[] => {
     const list: polygonClipping.Polygon[] = [];
     for (const poly of loops) {
@@ -892,6 +902,25 @@ export function intersectionPolygonLoops(loopsA: Point2D[][], loopsB: Point2D[][
       return [];
     }
   }
+}
+
+/**
+ * Przecięcie dwóch zestawów poligonów (A ∩ B) za pomocą FastIntersect / polygonClipping.intersection.
+ * Używana m.in. do budowy umbry cienia z dwóch wariantów kątowych oraz apertur w dziedzińcach.
+ */
+export function intersectionPolygonLoops(loopsA: Point2D[][], loopsB: Point2D[][]): Point2D[][] {
+  if (loopsA.length === 0 || loopsB.length === 0) return [];
+
+  // Szybka ścieżka dla pary pojedynczych prostych pętli (np. aperatury dziedzińca)
+  if (loopsA.length === 1 && loopsB.length === 1) {
+    return fastIntersectTwoSimpleLoops(
+      loopsA[0],
+      loopsB[0],
+      (a, b) => intersectionPolygonLoopsViaClipping([a], [b])
+    );
+  }
+
+  return intersectionPolygonLoopsViaClipping(loopsA, loopsB);
 }
 
 export interface BooleanUnionResult {

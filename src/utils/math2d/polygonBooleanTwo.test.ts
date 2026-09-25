@@ -4,9 +4,13 @@ import {
   fastUnionTwoSimpleLoops,
   fastUnionTwoPolygonsWithHoles,
   fastDifferenceTwoSimpleLoops,
+  fastIntersectTwoSimpleLoops,
+  polygonIntersectionTwo,
   findSegmentIntersection,
   getFastDifferenceTelemetry,
   resetFastDifferenceTelemetry,
+  getFastIntersectionTelemetry,
+  resetFastIntersectionTelemetry,
 } from './polygonBooleanTwo';
 import { Point2D } from '../../types/geometry';
 import {
@@ -14,6 +18,7 @@ import {
   toNormalizedClippingRing,
   clippingResultToPolygonsWithHoles,
   differencePolygonLoops,
+  intersectionPolygonLoops,
   isPolygonCCW,
 } from './polygons';
 
@@ -29,6 +34,21 @@ function totalAbsArea(pieces: { outer: Point2D[]; holes: Point2D[][] }[]): numbe
 /** Ground truth via polygon-clipping.difference, for cross-checking fastDifferenceTwoSimpleLoops. */
 function groundTruthDifferenceArea(polyA: Point2D[], polyB: Point2D[]): number {
   return groundTruthDifferenceAreaMulti([polyA], [polyB]);
+}
+
+/** Ground truth via polygon-clipping.intersection, for cross-checking fastIntersectTwoSimpleLoops. */
+function groundTruthIntersectionArea(polyA: Point2D[], polyB: Point2D[]): number {
+  const ringA = toNormalizedClippingRing(polyA, 1000);
+  const ringB = toNormalizedClippingRing(polyB, 1000);
+  if (!ringA || !ringB) return 0;
+  const interRes = polygonClipping.intersection([[ringA]], [[ringB]]);
+  const pwhList = clippingResultToPolygonsWithHoles(interRes);
+  let sum = 0;
+  for (const p of pwhList) {
+    sum += Math.abs(calculateSignedArea(p.outer));
+    for (const h of p.holes || []) sum -= Math.abs(calculateSignedArea(h));
+  }
+  return sum;
 }
 
 /** Ground truth via polygon-clipping.difference for N positives \ M negatives, for cross-checking differencePolygonLoops. */
@@ -509,4 +529,147 @@ describe('polygonBooleanTwo - Fast 2-Polygon Boolean Union', () => {
       expect(untouched).toBe(farAway);
     });
   });
+
+  describe('fastIntersectTwoSimpleLoops & polygonIntersectionTwo - Fast 2-Polygon Boolean Intersection', () => {
+    const squareA: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ];
+
+    it('returns empty array when B is AABB-disjoint from A (O(1) quick reject)', () => {
+      const polyB: Point2D[] = [
+        { x: 20, y: 20 },
+        { x: 30, y: 20 },
+        { x: 30, y: 30 },
+        { x: 20, y: 30 },
+      ];
+      const res = polygonIntersectionTwo(squareA, polyB);
+      expect(res).toEqual([]);
+    });
+
+    it('returns empty array when B is disjoint from A despite overlapping AABBs', () => {
+      // Trójkąt A w lewym dolnym rogu, trójkąt B w prawym górnym rogu wewnątrz tego samego [0,10]x[0,10] AABB
+      const triA: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 4, y: 0 },
+        { x: 0, y: 4 },
+      ];
+      const triB: Point2D[] = [
+        { x: 10, y: 10 },
+        { x: 6, y: 10 },
+        { x: 10, y: 6 },
+      ];
+      const res = polygonIntersectionTwo(triA, triB);
+      expect(res).toEqual([]);
+    });
+
+    it('returns polyA when polyA is fully inside polyB', () => {
+      const innerA: Point2D[] = [
+        { x: 2, y: 2 },
+        { x: 6, y: 2 },
+        { x: 6, y: 6 },
+        { x: 2, y: 6 },
+      ];
+      const res = polygonIntersectionTwo(innerA, squareA);
+      expect(res.length).toBe(1);
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(16, 6);
+    });
+
+    it('returns polyB when polyB is fully inside polyA', () => {
+      const innerB: Point2D[] = [
+        { x: 3, y: 3 },
+        { x: 8, y: 3 },
+        { x: 8, y: 8 },
+        { x: 3, y: 8 },
+      ];
+      const res = polygonIntersectionTwo(squareA, innerB);
+      expect(res.length).toBe(1);
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(25, 6);
+    });
+
+    it('intersects two partially overlapping rectangles', () => {
+      const rectB: Point2D[] = [
+        { x: 5, y: 0 },
+        { x: 15, y: 0 },
+        { x: 15, y: 10 },
+        { x: 5, y: 10 },
+      ];
+      const res = polygonIntersectionTwo(squareA, rectB);
+      expect(res.length).toBe(1);
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(50, 6); // 5x10 = 50 m2
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(groundTruthIntersectionArea(squareA, rectB), 4);
+    });
+
+    it('intersects orthogonal crossing rectangles forming a central intersection rectangle', () => {
+      // Horizontal bar: [-5, 3] to [15, 7] (width 20, height 4)
+      const horizBar: Point2D[] = [
+        { x: -5, y: 3 },
+        { x: 15, y: 3 },
+        { x: 15, y: 7 },
+        { x: -5, y: 7 },
+      ];
+      const res = polygonIntersectionTwo(squareA, horizBar);
+      expect(res.length).toBe(1);
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(40, 6); // [0..10] x [3..7] = 10x4 = 40 m2
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(groundTruthIntersectionArea(squareA, horizBar), 4);
+    });
+
+    it('matches polygon-clipping ground truth on a batch of 50 randomized overlapping polygons', () => {
+      resetFastIntersectionTelemetry();
+      let seed = 12345;
+      const rand = () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x7fffffff;
+      };
+
+      for (let i = 0; i < 50; i++) {
+        const ax = rand() * 20, ay = rand() * 20;
+        const aw = 6 + rand() * 12, ah = 6 + rand() * 12;
+        const polyA: Point2D[] = [
+          { x: ax, y: ay }, { x: ax + aw, y: ay }, { x: ax + aw, y: ay + ah }, { x: ax, y: ay + ah },
+        ];
+        const bx = rand() * 20, by = rand() * 20;
+        const bw = 6 + rand() * 12, bh = 6 + rand() * 12;
+        const polyB: Point2D[] = [
+          { x: bx, y: by }, { x: bx + bw, y: by }, { x: bx + bw, y: by + bh }, { x: bx, y: by + bh },
+        ];
+
+        const res = polygonIntersectionTwo(polyA, polyB);
+        const fastArea = res.reduce((sum, p) => sum + Math.abs(calculateSignedArea(p)), 0);
+        const truthArea = groundTruthIntersectionArea(polyA, polyB);
+
+        const relTolerance = Math.max(0.01, truthArea * 0.001);
+        expect(Math.abs(fastArea - truthArea)).toBeLessThan(relTolerance);
+      }
+
+      const t = getFastIntersectionTelemetry();
+      console.log(
+        `\n[fastIntersectTwoSimpleLoops telemetry, 50 randomized pairs] totalCalls=${t.totalCalls} ` +
+        `fastPathSuccess=${t.fastPathSuccess} fallbackCalls=${t.fallbackCalls} ` +
+        `disjointExits=${t.disjointExits} containmentA=${t.containmentAExits} containmentB=${t.containmentBExits}\n`
+      );
+      expect(t.fastPathSuccess).toBeGreaterThan(0);
+    });
+
+    it('integrates with production intersectionPolygonLoops for 1:1 pair intersection', () => {
+      const polyA: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 20 },
+        { x: 0, y: 20 },
+      ];
+      const polyB: Point2D[] = [
+        { x: 10, y: 10 },
+        { x: 30, y: 10 },
+        { x: 30, y: 30 },
+        { x: 10, y: 30 },
+      ];
+      const res = intersectionPolygonLoops([polyA], [polyB]);
+      expect(res.length).toBe(1);
+      expect(Math.abs(calculateSignedArea(res[0]))).toBeCloseTo(100, 4); // [10..20] x [10..20] = 100 m2
+    });
+  });
 });
+

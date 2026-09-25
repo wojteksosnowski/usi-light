@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { computeFullShadowAnalysis, computeHourlyShadowsLive } from './shadowEnvelope';
-import { fastUnionTwoSimpleLoops } from './polygonBooleanTwo';
+import { fastUnionTwoSimpleLoops, fastIntersectTwoSimpleLoops, polygonIntersectionTwo } from './polygonBooleanTwo';
 import {
   calculateSignedArea,
   computePointsBoundingBox,
@@ -19,6 +19,25 @@ import polygonClipping from 'polygon-clipping';
 function ensureCCW(points: Point2D[]): Point2D[] {
   if (points.length < 3) return points;
   return isPolygonCCW(points) ? [...points] : [...points].reverse();
+}
+
+/**
+ * Poprzednia (Legacy) implementacja przecięcia dwóch pętli oparta o bibliotekę polygon-clipping.
+ */
+function legacyPolygonIntersection(polyA: Point2D[], polyB: Point2D[]): Point2D[][] {
+  if (!polyA || polyA.length < 3 || !polyB || polyB.length < 3) return [];
+  const ringA = toNormalizedClippingRing(polyA, 1000);
+  const ringB = toNormalizedClippingRing(polyB, 1000);
+  if (!ringA || !ringB) return [];
+
+  try {
+    const interRes = polygonClipping.intersection([[ringA]], [[ringB]]);
+    if (!interRes || interRes.length === 0) return [];
+    const pwhList = clippingResultToPolygonsWithHoles(interRes);
+    return pwhList.map((p) => p.outer);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -304,6 +323,110 @@ describe('polygonBooleanTwo & Shadow Analysis - Reference & Performance Benchmar
       console.log(`  - Geometric Parity:               100% MATCH`);
 
       expect(timeFastMs).toBeLessThanOrEqual(timeLegacyMs * 1.2);
+    }, 30000);
+
+    it('compares New vs Legacy Intersection per-pair on architectural polygons & real scene pairs', () => {
+      // Zbiór par reprezentatywnych dla analizy architektonicznej:
+      // 1. Rozłączne AABB
+      // 2. Rozłączne z zachodzącym AABB
+      // 3. Pełne zawieranie (A wewnątrz B / B wewnątrz A)
+      // 4. Częściowe nachodzenie prostokątów
+      // 5. Krzyżujące się pasma
+      // 6. Wieloboki L-kształtne
+      const testPairs: [Point2D[], Point2D[]][] = [
+        // 1. Disjoint AABB
+        [
+          [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+          [{ x: 20, y: 20 }, { x: 30, y: 20 }, { x: 30, y: 30 }, { x: 20, y: 30 }],
+        ],
+        // 2. Disjoint inside same AABB (opposite corners)
+        [
+          [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 4 }],
+          [{ x: 10, y: 10 }, { x: 6, y: 10 }, { x: 10, y: 6 }],
+        ],
+        // 3. Containment
+        [
+          [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }],
+          [{ x: 5, y: 5 }, { x: 15, y: 5 }, { x: 15, y: 15 }, { x: 5, y: 15 }],
+        ],
+        // 4. Partial overlap
+        [
+          [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }],
+          [{ x: 5, y: 0 }, { x: 15, y: 0 }, { x: 15, y: 10 }, { x: 5, y: 10 }],
+        ],
+        // 5. Crossing rectangles
+        [
+          [{ x: 0, y: 3 }, { x: 20, y: 3 }, { x: 20, y: 7 }, { x: 0, y: 7 }],
+          [{ x: 8, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 20 }, { x: 8, y: 20 }],
+        ],
+      ];
+
+      // Dodaj realne pary dachów / kondygnacji z warszawa.json jeśli dostępny
+      if (fs.existsSync(warszawaPath)) {
+        const rawData = JSON.parse(fs.readFileSync(warszawaPath, 'utf-8'));
+        const buildings: BuildingLoop[] = (rawData.buildings || []).filter(
+          (b: any) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && (b.defaultHeight || 0) > 0
+        );
+        for (let i = 0; i < Math.min(buildings.length - 1, 15); i++) {
+          const v1 = buildings[i].vertices;
+          const v2 = buildings[i + 1].vertices;
+          if (v1 && v2 && v1.length >= 3 && v2.length >= 3) {
+            testPairs.push([v1, v2]);
+          }
+        }
+      }
+
+      // 1. Weryfikacja tożsamości geometrycznej (Area Parity)
+      for (const [pA, pB] of testPairs) {
+        const resLegacy = legacyPolygonIntersection(pA, pB);
+        const resFast = polygonIntersectionTwo(pA, pB);
+
+        const areaLegacy = resLegacy.reduce((sum, p) => sum + Math.abs(calculateSignedArea(p)), 0);
+        const areaFast = resFast.reduce((sum, p) => sum + Math.abs(calculateSignedArea(p)), 0);
+
+        const relTolerance = Math.max(0.01, areaLegacy * 0.001);
+        expect(Math.abs(areaFast - areaLegacy)).toBeLessThan(relTolerance);
+      }
+
+      // 2. Porównanie wydajnościowe A/B (1000 iteracji na zestawie par)
+      const N = 1000;
+      // Warm-up
+      for (const [pA, pB] of testPairs) {
+        legacyPolygonIntersection(pA, pB);
+        polygonIntersectionTwo(pA, pB);
+      }
+
+      const t0Legacy = performance.now();
+      for (let r = 0; r < N; r++) {
+        for (const [pA, pB] of testPairs) {
+          legacyPolygonIntersection(pA, pB);
+        }
+      }
+      const timeLegacyMs = performance.now() - t0Legacy;
+
+      const t0Fast = performance.now();
+      for (let r = 0; r < N; r++) {
+        for (const [pA, pB] of testPairs) {
+          polygonIntersectionTwo(pA, pB);
+        }
+      }
+      const timeFastMs = performance.now() - t0Fast;
+
+      const totalOps = N * testPairs.length;
+      const speedup = (timeLegacyMs / timeFastMs).toFixed(2);
+
+      console.log(`\n================================================================================`);
+      console.log(`[A/B INTERSECTION BENCHMARK: New FastIntersect vs Legacy polygon-clipping]`);
+      console.log(`================================================================================`);
+      console.log(`  - Test dataset:                   ${testPairs.length} architectural & scene pairs`);
+      console.log(`  - Iterations:                     ${N} runs (${totalOps} total intersection operations)`);
+      console.log(`  - Legacy (polygon-clipping):      ${timeLegacyMs.toFixed(2).padStart(8)} ms (${(totalOps / (timeLegacyMs / 1000)).toFixed(0).padStart(7)} ops/sec)`);
+      console.log(`  - New fastIntersectTwoSimpleLoops:${timeFastMs.toFixed(2).padStart(8)} ms (${(totalOps / (timeFastMs / 1000)).toFixed(0).padStart(7)} ops/sec)`);
+      console.log(`  - Speedup Factor:                 ${speedup}x (${((1 - timeFastMs / timeLegacyMs) * 100).toFixed(1)}% faster)`);
+      console.log(`  - Geometric Area Parity:          100% MATCH across all test cases`);
+      console.log(`================================================================================\n`);
+
+      expect(timeFastMs).toBeLessThan(timeLegacyMs);
     }, 30000);
   });
 

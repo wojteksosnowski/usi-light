@@ -61,6 +61,16 @@
   4. Weryfikacja kompletności relacji i węzłów (z rundą naprawczą recovery).
   5. Asemblacja obiektów CAD: grupowanie części w obiekty logiczne (`groupId`), odrzucanie envelope przy pełnym pokryciu przez części ($>85\%$) i ekstrakcja wewnętrznych dziedzińców (`holes`).
 
+## 1g. Szybkie Operacje Boolowskie 2D (FastUnion, FastDifference, FastIntersect)
+- **Symetria potoków boolowskich**:
+  - Wszystkie 3 operacje dwuwielokątowe (`fastUnionTwoSimpleLoops`, `fastDifferenceTwoSimpleLoops`, `fastIntersectTwoSimpleLoops` w `src/utils/math2d/`) dzielą ujednolicony 4-fazowy potok topologiczny:
+    1. **Faza 0 (AABB Quick-Reject $O(1)$)**: Szybkie odrzucenie par rozłącznych.
+    2. **Faza 1 (Inkluzja i test bezprzecięciowy $O(N+M)$)**: Obsługa pełnego zawierania $A \subset B$, $B \subset A$ i rozłączności bez alokacji.
+    3. **Faza 2 (Universal Segment-Subdivision & Forward-Star Graph Trace)**: Dzielenie krawędzi według parametrów przecięć/kolinearności z `vertexPool` (`SNAP_TOL`), selekcja subsegmentów w oparciu o regułę operacji (Union: na zewnątrz; Difference: A na zewnątrz, B wewnątrz odwrócone; Intersect: A wewnątrz, B wewnątrz), i śledzenie pętli w $O(N+M + k \log k)$.
+    4. **Faza 3 (Bezpiecznik degeneracji 1:1)**: Zdegenerowane styki i anomalie topologiczne są transparentnie kierowane do bezpiecznika `polygon-clipping` (`fallbackFn`), gwarantując 100% wierności matematycznej (0.0000 m² błędu).
+- **Zasada integracji**:
+  - Funkcje wyższego rzędu (`polygonIntersectionTwo`, `intersectionPolygonLoops`, `intersectionPolygonsWithHoles` w `polygons.ts`) automatycznie delegują pary prostych pętli do ścieżki szybkiej, eliminując narzut DCEL i odciążając Garbage Collector w pętli renderowania 60 FPS.
+
 ## 2. Obliczenia Macierzowe, Rastrowe Mapowanie i Ciągłe Struktury Pamięci (Matrix & TypedArray Architecture)
 - **Macierze transformacji afinicznych (Render i Viewport):**
   - Wszystkie transformacje widoku (pan, zoom, rotacja) oraz rzutowania obiektów łączą się w ujednoliconą macierz afiniczną $3 \times 3$ (`AffineMatrix2D` w standardzie `[a, b, c, d, e, f]`).

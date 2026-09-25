@@ -10,3 +10,5 @@ export * from './sweep';
 export * from './affineMatrix';
 export * from './groupEnvelope';
 export * from './labelPlacement';
+export * from './fastIntersect';
+export * from './polygonBooleanTwo';
