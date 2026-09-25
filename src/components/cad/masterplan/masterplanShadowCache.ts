@@ -293,12 +293,19 @@ export function getCachedRoofShadowSamples(
     );
 
     if (roofPoly && roofBox) {
+      // Dla pojedynczego cienia na dachu docinanie CPU jest zbędne,
+      // bo renderer wykonuje sprzętowe ctx.clip('evenodd') do obrysu dachu
+      const singleShadow = higherTiers.length === 1 && shadowRoofPolys.length === 1;
       for (const sp of shadowRoofPolys) {
         const spBox = computePointsBoundingBox(sp.outer);
         if (!boundsOverlap(roofBox, spBox)) continue;
         if (arePolygonsDefinitelyDisjoint(sp.outer, roofPoly)) continue;
-        for (const c of polygonIntersectionTwo(sp.outer, roofPoly)) {
-          if (c.length >= 3) umbraPolys.push({ outer: c, holes: [] });
+        if (singleShadow) {
+          umbraPolys.push(sp);
+        } else {
+          for (const c of polygonIntersectionTwo(sp.outer, roofPoly)) {
+            if (c.length >= 3) umbraPolys.push({ outer: c, holes: [] });
+          }
         }
       }
     } else {

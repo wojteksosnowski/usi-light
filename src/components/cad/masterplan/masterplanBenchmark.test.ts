@@ -21,8 +21,10 @@ import {
   clusterTiersByShadowOverlap,
   unionPolygonsWithHolesHierarchical,
 } from './masterplanSpatial';
-import { BuildingLoop } from '../../../types/geometry';
+import { BuildingLoop, Point2D } from '../../../types/geometry';
 import { GeometryCompiler } from '../../../engine/compiler/GeometryCompiler';
+import { computePointsBoundingBox } from '../../../utils/math2d/polygons';
+import { polygonIntersectionTwo, arePolygonsDefinitelyDisjoint } from '../../../utils/math2d/polygonBooleanTwo';
 
 describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
   it('benchmarks A456 (single raw umbra) on real-world large scene', () => {
@@ -179,6 +181,119 @@ describe('Masterplan Shadow Performance Benchmark on warszawa.json', () => {
     console.log(`  1. Roof Hierarchy Construction (O(N^2) search):  ${hierarchyTime.toFixed(2)} ms`);
     console.log(`  2. Roof Shadows ΔH Calculation (${totalRoofShadowCalls} active tiers): ${roofsTime.toFixed(2)} ms`);
     console.log(`  3. Tier Fingerprint Signature String Hashing:    ${sigTime.toFixed(2)} ms`);
+    console.log(`================================================================================\n`);
+  }, 30000);
+
+  it('drills down 2 levels deep into Roof Shadows ΔH calculation on wro.json (405 buildings)', () => {
+    const filePath = path.resolve(__dirname, '../../../../reference/speed/wro.json');
+    if (!fs.existsSync(filePath)) return;
+
+    const rawData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    const buildings: BuildingLoop[] = (rawData.buildings || []).filter(
+      (b: any) => b.category !== 'boundary' && b.vertices && b.vertices.length >= 3 && (b.defaultHeight || 0) > 0
+    );
+
+    const bakedBuildings = buildings.map((b) => ({
+      ...b,
+      computed: GeometryCompiler.bakeBuilding(b),
+    }));
+
+    const allTiers: MasterplanStoryTier[] = [];
+    for (const bldg of bakedBuildings) {
+      allTiers.push(...extractBuildingStoryTiers(bldg));
+    }
+    const sortedTiers = allTiers.sort((a, b) => a.hTop - b.hTop);
+    const angles = getMasterplanSolarAngles(51.10, 17.03, 'spring', 12.0, 0, 'raycasting');
+    const sortedTierBounds = sortedTiers.map(tierFootprintBounds);
+
+    const higherTiersPerTier: MasterplanStoryTier[][] = new Array(sortedTiers.length);
+    for (let i = 0; i < sortedTiers.length; i++) {
+      const currentH = sortedTiers[i].hTop;
+      const currentTierBounds = sortedTierBounds[i];
+      const higher: MasterplanStoryTier[] = [];
+      for (let j = i + 1; j < sortedTiers.length; j++) {
+        const ht = sortedTiers[j];
+        const deltaHTop = ht.hTop - currentH;
+        if (deltaHTop <= 0.05) continue;
+        const htOffset = computeShadowOffsetVector(deltaHTop, angles);
+        const htReachBounds = extendBoundsByOffset(sortedTierBounds[j], htOffset.dx * 1.05, htOffset.dy * 1.05);
+        if (boundsOverlap(currentTierBounds, htReachBounds)) {
+          higher.push(ht);
+        }
+      }
+      higherTiersPerTier[i] = higher;
+    }
+
+    // Subprocess breakdown:
+    let tProjection = 0;
+    let tDisjointCheck = 0;
+    let tIntersect = 0;
+    let tUnion = 0;
+    let projCalls = 0;
+    let intersectCalls = 0;
+    let unionCalls = 0;
+
+    for (let i = 0; i < sortedTiers.length; i++) {
+      const tier = sortedTiers[i];
+      const higher = higherTiersPerTier[i];
+      if (!higher || higher.length === 0) continue;
+      const currentH = tier.hTop;
+      const roofPoly = tier.polygon;
+      const roofBox = sortedTierBounds[i];
+
+      const shadowRoofPolys: { outer: Point2D[]; holes: Point2D[][] }[] = [];
+      for (const ht of higher) {
+        const deltaHTop = ht.hTop - currentH;
+        const deltaHBase = Math.max(0, ht.hBottom - currentH);
+
+        projCalls++;
+        const t0 = performance.now();
+        const spList = computeStoryShadowPolygonWithHoles(
+          ht.polygon,
+          ht.holes,
+          angles,
+          deltaHTop,
+          deltaHBase,
+          ht.geomFingerprint,
+          ht.isConvex
+        );
+        tProjection += performance.now() - t0;
+
+        for (const sp of spList) {
+          const tDis = performance.now();
+          const disjoint =
+            !boundsOverlap(roofBox, computePointsBoundingBox(sp.outer)) ||
+            arePolygonsDefinitelyDisjoint(sp.outer, roofPoly);
+          tDisjointCheck += performance.now() - tDis;
+          if (disjoint) continue;
+
+          intersectCalls++;
+          const t1 = performance.now();
+          const inter = polygonIntersectionTwo(sp.outer, roofPoly);
+          tIntersect += performance.now() - t1;
+          for (const c of inter) {
+            if (c.length >= 3) shadowRoofPolys.push({ outer: c, holes: [] });
+          }
+        }
+      }
+
+      if (shadowRoofPolys.length > 0) {
+        unionCalls++;
+        const t2 = performance.now();
+        unionPolygonsWithHolesHierarchical(shadowRoofPolys);
+        tUnion += performance.now() - t2;
+      }
+    }
+
+    console.log(`\n================================================================================`);
+    console.log(`[LEVEL 2 DRILL-DOWN: ROOF SHADOWS ΔH SUBPROCESSES (wro.json, 405 buildings)]`);
+    console.log(`================================================================================`);
+    console.log(`  2a. Shadow Projections (computeStoryShadowPolygon): ${tProjection.toFixed(2)} ms (${projCalls} calls)`);
+    console.log(`  2b. AABB & Disjoint Pre-Filter:                    ${tDisjointCheck.toFixed(2)} ms`);
+    console.log(`  2c. 2D Intersect (polygonIntersectionTwo):          ${tIntersect.toFixed(2)} ms (${intersectCalls} calls)`);
+    console.log(`  2d. Hierarchical Union on Roof (unionPolygons):     ${tUnion.toFixed(2)} ms (${unionCalls} calls)`);
+    console.log(`--------------------------------------------------------------------------------`);
+    console.log(`  Total ΔH computation:                             ${(tProjection + tDisjointCheck + tIntersect + tUnion).toFixed(2)} ms`);
     console.log(`================================================================================\n`);
   }, 30000);
 
