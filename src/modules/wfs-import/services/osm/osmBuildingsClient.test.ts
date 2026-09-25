@@ -10,6 +10,9 @@ import {
   findMissingBuildingRelationIds,
   fetchOsmBuildings,
   mergeOverpassResponses,
+  buildOverpassBuildingsQuery,
+  formatOverpassPolyFilter,
+  assembleCoordinateSegmentsIntoRings,
   OverpassResponse,
 } from './osmBuildingsClient';
 import { clearOsmBuildingsStorage } from './osmBuildingsStorage';
@@ -1244,8 +1247,8 @@ describe('osmBuildingsClient', () => {
       vi.stubGlobal(
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
-          const body = String(init?.body || '');
-          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+          const body = decodeURIComponent(String(init?.body || ''));
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           const payload = baselineResponses[baselineCall] || { elements: [] };
@@ -1266,8 +1269,8 @@ describe('osmBuildingsClient', () => {
       vi.stubGlobal(
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
-          const body = String(init?.body || '');
-          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+          const body = decodeURIComponent(String(init?.body || ''));
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           fetchCount++;
@@ -1290,8 +1293,8 @@ describe('osmBuildingsClient', () => {
       vi.stubGlobal(
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
-          const body = String(init?.body || '');
-          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+          const body = decodeURIComponent(String(init?.body || ''));
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           return { ok: true, json: async () => buildOverpassPayload(10) } as Response;
@@ -1315,8 +1318,8 @@ describe('osmBuildingsClient', () => {
       vi.stubGlobal(
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
-          const body = String(init?.body || '');
-          if (body.includes('building%3Apart') || body.includes('building:part') || body.includes('relation')) {
+          const body = decodeURIComponent(String(init?.body || ''));
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           baselineCall++;
@@ -1428,5 +1431,218 @@ describe('osmBuildingsClient', () => {
       },
       300000
     );
+  });
+
+  describe('Overpass QL payload optimization (out tags geom qt)', () => {
+    const mockProjectCenter: LatLon = { lat: 52.2297, lon: 21.0122 };
+
+    it('buildOverpassBuildingsQuery formats bbox query with out tags geom qt', () => {
+      const bbox: WfsBbox = [20.995, 52.251, 20.998, 52.253];
+      const query = buildOverpassBuildingsQuery(bbox, 8);
+
+      expect(query).toContain('[out:json][timeout:8];');
+      expect(query).toContain('way["building"](52.251,20.995,52.253,20.998);');
+      expect(query).toContain('relation["building"]["type"="multipolygon"](52.251,20.995,52.253,20.998);');
+      expect(query).toContain('out tags geom qt;');
+      // Musi NIE zawierać kosztownej rekursji węzłów
+      expect(query).not.toContain('>;');
+      expect(query).not.toContain('out skel');
+    });
+
+    it('buildOverpassBuildingsQuery formats poly filter query with out tags geom qt', () => {
+      const poly: LatLon[] = [
+        { lat: 52.251, lon: 20.995 },
+        { lat: 52.253, lon: 20.995 },
+        { lat: 52.253, lon: 20.998 },
+        { lat: 52.251, lon: 20.998 },
+      ];
+      const query = buildOverpassBuildingsQuery(poly, 8);
+
+      expect(query).toContain('[out:json][timeout:8];');
+      expect(query).toContain('poly:"52.251000 20.995000 52.253000 20.995000 52.253000 20.998000 52.251000 20.998000"');
+      expect(query).toContain('out tags geom qt;');
+    });
+
+    it('parses single building from embedded geometry (zero node elements in payload)', () => {
+      const payload: OverpassResponse = {
+        elements: [
+          {
+            type: 'way',
+            id: 99001,
+            geometry: [
+              { lat: 52.2290, lon: 21.0120 },
+              { lat: 52.2290, lon: 21.0125 },
+              { lat: 52.2295, lon: 21.0125 },
+              { lat: 52.2295, lon: 21.0120 },
+              { lat: 52.2290, lon: 21.0120 },
+            ],
+            tags: {
+              building: 'apartments',
+              'addr:street': 'Marszałkowska',
+              'addr:housenumber': '10',
+              height: '24',
+              'building:levels': '8',
+            },
+          },
+        ],
+      };
+
+      const buildings = parseOverpassBuildingsResponse(payload, mockProjectCenter, EPSG_2180);
+      expect(buildings.length).toBe(1);
+      const b = buildings[0];
+      expect(b.id).toBe('osm-bld-99001');
+      expect(b.name).toBe('Marszałkowska 10');
+      expect(b.defaultHeight).toBe(24);
+      expect(b.storeysCount).toBe(8);
+      expect(b.vertices.length).toBeGreaterThanOrEqual(4);
+      expect(b.segments.length).toBeGreaterThanOrEqual(4);
+    });
+
+    it('parses multipolygon relation with inner courtyard hole directly from member geometry', () => {
+      const payload: OverpassResponse = {
+        elements: [
+          {
+            type: 'relation',
+            id: 88001,
+            tags: {
+              building: 'yes',
+              type: 'multipolygon',
+              name: 'Kamienica z dziedzińcem',
+              height: '18',
+            },
+            members: [
+              {
+                type: 'way',
+                ref: 101,
+                role: 'outer',
+                geometry: [
+                  { lat: 52.2280, lon: 21.0110 },
+                  { lat: 52.2280, lon: 21.0130 },
+                  { lat: 52.2300, lon: 21.0130 },
+                  { lat: 52.2300, lon: 21.0110 },
+                  { lat: 52.2280, lon: 21.0110 },
+                ],
+              },
+              {
+                type: 'way',
+                ref: 102,
+                role: 'inner',
+                geometry: [
+                  { lat: 52.2285, lon: 21.0115 },
+                  { lat: 52.2285, lon: 21.0125 },
+                  { lat: 52.2295, lon: 21.0125 },
+                  { lat: 52.2295, lon: 21.0115 },
+                  { lat: 52.2285, lon: 21.0115 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const buildings = parseOverpassBuildingsResponse(payload, mockProjectCenter, EPSG_2180);
+      expect(buildings.length).toBe(1);
+      const b = buildings[0];
+      expect(b.id).toBe('osm-bld-rel-88001');
+      expect(b.name).toBe('Kamienica z dziedzińcem');
+      expect(b.holes).toBeDefined();
+      expect(b.holes!.length).toBe(1);
+      expect(b.holes![0].length).toBeGreaterThanOrEqual(4);
+    });
+
+    it('verifies 1:1 geometrical identity between legacy node-based payload and embedded geometry payload', () => {
+      const coords = [
+        { lat: 52.2291, lon: 21.0118 },
+        { lat: 52.2291, lon: 21.0126 },
+        { lat: 52.2297, lon: 21.0126 },
+        { lat: 52.2297, lon: 21.0118 },
+        { lat: 52.2291, lon: 21.0118 },
+      ];
+      const tags = {
+        building: 'office',
+        name: 'Biurowiec Centrum',
+        height: '35',
+        'building:levels': '10',
+      };
+
+      // 1. Wersja legacy (węzły osobno w tablicy)
+      const legacyPayload: OverpassResponse = {
+        elements: [
+          { type: 'node', id: 1, lat: coords[0].lat, lon: coords[0].lon },
+          { type: 'node', id: 2, lat: coords[1].lat, lon: coords[1].lon },
+          { type: 'node', id: 3, lat: coords[2].lat, lon: coords[2].lon },
+          { type: 'node', id: 4, lat: coords[3].lat, lon: coords[3].lon },
+          {
+            type: 'way',
+            id: 77001,
+            nodes: [1, 2, 3, 4, 1],
+            tags,
+          },
+        ],
+      };
+
+      // 2. Wersja zoptymalizowana (out tags geom qt)
+      const optimizedPayload: OverpassResponse = {
+        elements: [
+          {
+            type: 'way',
+            id: 77001,
+            geometry: coords,
+            tags,
+          },
+        ],
+      };
+
+      const legacyBuildings = parseOverpassBuildingsResponse(legacyPayload, mockProjectCenter, EPSG_2180);
+      const optimizedBuildings = parseOverpassBuildingsResponse(optimizedPayload, mockProjectCenter, EPSG_2180);
+
+      expect(legacyBuildings.length).toBe(1);
+      expect(optimizedBuildings.length).toBe(1);
+
+      const bLegacy = legacyBuildings[0];
+      const bOpt = optimizedBuildings[0];
+
+      expect(bOpt.id).toBe(bLegacy.id);
+      expect(bOpt.name).toBe(bLegacy.name);
+      expect(bOpt.defaultHeight).toBe(bLegacy.defaultHeight);
+      expect(bOpt.elevation).toBe(bLegacy.elevation);
+      expect(bOpt.storeysCount).toBe(bLegacy.storeysCount);
+      expect(bOpt.vertices.length).toBe(bLegacy.vertices.length);
+
+      // Weryfikacja 1:1 współrzędnych wierzchołków
+      for (let i = 0; i < bOpt.vertices.length; i++) {
+        expect(bOpt.vertices[i].x).toBeCloseTo(bLegacy.vertices[i].x, 4);
+        expect(bOpt.vertices[i].y).toBeCloseTo(bLegacy.vertices[i].y, 4);
+      }
+    });
+
+    it('mergeOverpassResponses preserves geometry array on way elements', () => {
+      const resp1: OverpassResponse = {
+        elements: [
+          {
+            type: 'way',
+            id: 555,
+            geometry: [{ lat: 52.1, lon: 21.1 }, { lat: 52.2, lon: 21.2 }],
+            tags: { building: 'yes' },
+          },
+        ],
+      };
+      const resp2: OverpassResponse = {
+        elements: [
+          {
+            type: 'way',
+            id: 555,
+            tags: { building: 'yes', name: 'Zaktualizowana nazwa' },
+          },
+        ],
+      };
+
+      const merged = mergeOverpassResponses(resp1, resp2);
+      expect(merged.elements.length).toBe(1);
+      const way = merged.elements[0] as any;
+      expect(way.geometry).toBeDefined();
+      expect(way.geometry.length).toBe(2);
+      expect(way.tags.name).toBe('Zaktualizowana nazwa');
+    });
   });
 });

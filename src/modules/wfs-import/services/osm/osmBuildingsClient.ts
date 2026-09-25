@@ -73,6 +73,11 @@ const FIRST_FLOOR_HEIGHT = 3.5;
 const DEFAULT_HEIGHT = 15.0;
 const DEFAULT_STOREYS = 5;
 
+export interface OverpassGeometryPoint {
+  lat: number;
+  lon: number;
+}
+
 interface OverpassNode {
   type: 'node';
   id: number;
@@ -81,27 +86,30 @@ interface OverpassNode {
   tags?: Record<string, string>;
 }
 
-interface OverpassWay {
+export interface OverpassWay {
   type: 'way';
   id: number;
-  nodes: number[];
+  nodes?: number[];
+  geometry?: OverpassGeometryPoint[];
   tags?: Record<string, string>;
 }
 
-interface OverpassRelationMember {
+export interface OverpassRelationMember {
   type: 'way' | 'node' | 'relation';
   ref: number;
   role: 'outer' | 'inner' | string;
+  geometry?: OverpassGeometryPoint[];
+  nodes?: number[];
 }
 
-interface OverpassRelation {
+export interface OverpassRelation {
   type: 'relation';
   id: number;
   members: OverpassRelationMember[];
   tags?: Record<string, string>;
 }
 
-type OverpassElement = OverpassNode | OverpassWay | OverpassRelation;
+export type OverpassElement = OverpassNode | OverpassWay | OverpassRelation;
 
 export interface OverpassResponse {
   elements: OverpassElement[];
@@ -247,21 +255,25 @@ export function formatOsmBuildingName(id: number | string, tags: Record<string, 
   return `Budynek OSM #${id}`;
 }
 
-/** Łączy segmenty krawędzi (ways) w zamknięte pętle */
-function assembleWaysIntoRings(wayNodeIds: number[][], nodeMap: Map<number, LatLon>): LatLon[][] {
-  const segments = wayNodeIds.filter((ids) => ids.length >= 2);
+function coordsEqual(a: LatLon, b: LatLon, tol = 1e-7): boolean {
+  return Math.abs(a.lat - b.lat) <= tol && Math.abs(a.lon - b.lon) <= tol;
+}
+
+/** Łączy dowolne segmenty współrzędnych (LatLon[]) w zamknięte pętle */
+export function assembleCoordinateSegmentsIntoRings(segments: LatLon[][]): LatLon[][] {
+  const filtered = segments.filter((seg) => seg.length >= 2);
   const rings: LatLon[][] = [];
-  const remaining = [...segments];
+  const remaining = filtered.map((seg) => [...seg]);
 
   while (remaining.length > 0) {
     const current = [...remaining.shift()!];
     let changed = true;
     while (changed) {
       changed = false;
-      const startNode = current[0];
-      const endNode = current[current.length - 1];
+      const startPt = current[0];
+      const endPt = current[current.length - 1];
 
-      if (startNode === endNode && current.length >= 4) {
+      if (coordsEqual(startPt, endPt) && current.length >= 4) {
         break; // pętla domknięta
       }
 
@@ -270,22 +282,22 @@ function assembleWaysIntoRings(wayNodeIds: number[][], nodeMap: Map<number, LatL
         const segStart = seg[0];
         const segEnd = seg[seg.length - 1];
 
-        if (endNode === segStart) {
+        if (coordsEqual(endPt, segStart)) {
           current.push(...seg.slice(1));
           remaining.splice(i, 1);
           changed = true;
           break;
-        } else if (endNode === segEnd) {
+        } else if (coordsEqual(endPt, segEnd)) {
           current.push(...[...seg].reverse().slice(1));
           remaining.splice(i, 1);
           changed = true;
           break;
-        } else if (startNode === segEnd) {
+        } else if (coordsEqual(startPt, segEnd)) {
           current.unshift(...seg.slice(0, -1));
           remaining.splice(i, 1);
           changed = true;
           break;
-        } else if (startNode === segStart) {
+        } else if (coordsEqual(startPt, segStart)) {
           current.unshift(...[...seg].reverse().slice(0, -1));
           remaining.splice(i, 1);
           changed = true;
@@ -294,17 +306,33 @@ function assembleWaysIntoRings(wayNodeIds: number[][], nodeMap: Map<number, LatL
       }
     }
 
-    const ringCoords: LatLon[] = [];
-    for (const id of current) {
-      const coord = nodeMap.get(id);
-      if (coord) ringCoords.push(coord);
-    }
-    if (ringCoords.length >= 3) {
-      rings.push(ringCoords);
+    if (current.length >= 3) {
+      const startPt = current[0];
+      const endPt = current[current.length - 1];
+      if (!coordsEqual(startPt, endPt)) {
+        current.push({ ...startPt });
+      }
+      rings.push(current);
     }
   }
 
   return rings;
+}
+
+/** Łączy segmenty krawędzi (ways) w zamknięte pętle */
+export function assembleWaysIntoRings(wayNodeIds: number[][], nodeMap: Map<number, LatLon>): LatLon[][] {
+  const coordSegments: LatLon[][] = [];
+  for (const ids of wayNodeIds) {
+    const seg: LatLon[] = [];
+    for (const id of ids) {
+      const c = nodeMap.get(id);
+      if (c) seg.push(c);
+    }
+    if (seg.length >= 2) {
+      coordSegments.push(seg);
+    }
+  }
+  return assembleCoordinateSegmentsIntoRings(coordSegments);
 }
 
 export interface OsmProgressInfo {
@@ -316,7 +344,7 @@ export interface OsmProgressInfo {
 }
 
 /**
- * Bezpiecznie scala odpowiedzi Overpass, zachowując pełne tagi i węzły elementów
+ * Bezpiecznie scala odpowiedzi Overpass, zachowując pełne tagi, węzły oraz osadzoną geometrię
  * (zapobiega nadpisywaniu tagów przez wpisy szkieletowe `out skel qt`).
  */
 export function mergeOverpassResponses(...responses: OverpassResponse[]): OverpassResponse {
@@ -340,6 +368,7 @@ export function mergeOverpassResponses(...responses: OverpassResponse[]): Overpa
           ...existing,
           ...el,
           nodes: el.nodes && el.nodes.length > 0 ? el.nodes : (existing?.nodes || []),
+          geometry: el.geometry && el.geometry.length > 0 ? el.geometry : existing?.geometry,
           tags: el.tags && Object.keys(el.tags).length > 0 ? el.tags : existing?.tags,
         });
       } else if (el.type === 'relation') {
@@ -442,15 +471,27 @@ export function parseOverpassBuildingsResponse(
   const envelopePartNameMap = new Map<number, string>();
   const envelopeHolesByWayId = new Map<number, Point2D[][]>();
 
+  const extractWayLatLons = (way: OverpassWay): LatLon[] | null => {
+    if (way.geometry && way.geometry.length >= 3) {
+      return way.geometry;
+    }
+    if (way.nodes && way.nodes.length >= 3) {
+      const pts: LatLon[] = [];
+      for (const nodeId of way.nodes) {
+        const coord = nodeCoords.get(nodeId);
+        if (coord) pts.push(coord);
+      }
+      return pts.length >= 3 ? pts : null;
+    }
+    return null;
+  };
+
   const wayToCadPolygon = (wayId: number): Point2D[] | null => {
     const way = ways.get(wayId);
-    if (!way || !way.nodes) return null;
-    const pts: Point2D[] = [];
-    for (const nodeId of way.nodes) {
-      const coord = nodeCoords.get(nodeId);
-      if (coord) pts.push(wgs84ToCadPoint(coord, projectCrs, projectCenter));
-    }
-    return pts.length >= 3 ? pts : null;
+    if (!way) return null;
+    const latLons = extractWayLatLons(way);
+    if (!latLons || latLons.length < 3) return null;
+    return latLons.map((coord) => wgs84ToCadPoint(coord, projectCrs, projectCenter));
   };
 
   interface PolyBBox { minX: number; minY: number; maxX: number; maxY: number }
@@ -485,7 +526,6 @@ export function parseOverpassBuildingsResponse(
   for (const [wayId, way] of ways.entries()) {
     const tags = way.tags || {};
     if (!tags['building:part'] || tags['building:part'] === 'no') continue;
-    if (!way.nodes || way.nodes.length < 4) continue;
     const poly = wayToCadPolygon(wayId);
     if (poly) {
       partPolygons.set(wayId, poly);
@@ -532,7 +572,7 @@ export function parseOverpassBuildingsResponse(
     for (const [wayId, way] of ways.entries()) {
       if (processedWayIds.has(wayId)) continue;
       const tags = way.tags || {};
-      if (!tags.building || !way.nodes || way.nodes.length < 4) continue;
+      if (!tags.building) continue;
 
       const envelopePoly = wayToCadPolygon(wayId);
       if (!envelopePoly) continue;
@@ -561,32 +601,39 @@ export function parseOverpassBuildingsResponse(
     const tags = rel.tags || {};
     if (!tags.building && tags.type !== 'multipolygon') continue;
 
-    const outerWays: number[][] = [];
-    const innerWays: number[][] = [];
+    const outerSegments: LatLon[][] = [];
+    const innerSegments: LatLon[][] = [];
     let outerWayTagsWithName: Record<string, string> | undefined;
 
     for (const member of rel.members) {
       if (member.type === 'way') {
+        let segLatLons: LatLon[] | null = null;
+        if (member.geometry && member.geometry.length >= 2) {
+          segLatLons = member.geometry;
+        }
         const way = ways.get(member.ref);
-        if (way && way.nodes && way.nodes.length >= 2) {
+        if (way) {
           processedWayIds.add(member.ref);
+          if (!segLatLons) {
+            segLatLons = extractWayLatLons(way);
+          }
+          if (way.tags && (way.tags.name || way.tags['addr:housenumber'])) {
+            outerWayTagsWithName = way.tags;
+          }
+        }
+
+        if (segLatLons && segLatLons.length >= 2) {
           if (member.role === 'inner') {
-            innerWays.push(way.nodes);
+            innerSegments.push(segLatLons);
           } else {
-            outerWays.push(way.nodes);
-            // Relacje multipolygon (zwłaszcza building:part) często same nie mają tagu `name` -
-            // gdy dokładnie jeden way outer niesie nazwę/adres (np. pełny obrys budynku z osobnymi
-            // otworami dachowymi jako części), przejmujemy ją zamiast generycznej nazwy "Budynek OSM #".
-            if (way.tags && (way.tags.name || way.tags['addr:housenumber'])) {
-              outerWayTagsWithName = way.tags;
-            }
+            outerSegments.push(segLatLons);
           }
         }
       }
     }
 
-    const outerRings = assembleWaysIntoRings(outerWays, nodeCoords);
-    const innerRings = assembleWaysIntoRings(innerWays, nodeCoords);
+    const outerRings = assembleCoordinateSegmentsIntoRings(outerSegments);
+    const innerRings = assembleCoordinateSegmentsIntoRings(innerSegments);
     if (outerRings.length === 0) continue;
 
     const { defaultHeight, elevation, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
@@ -712,14 +759,9 @@ export function parseOverpassBuildingsResponse(
     if (processedWayIds.has(wayId)) continue;
     const tags = way.tags || {};
     if (!tags.building) continue;
-    if (!way.nodes || way.nodes.length < 4) continue;
 
-    const latLons: LatLon[] = [];
-    for (const nodeId of way.nodes) {
-      const coord = nodeCoords.get(nodeId);
-      if (coord) latLons.push(coord);
-    }
-    if (latLons.length < 3) continue;
+    const latLons = extractWayLatLons(way);
+    if (!latLons || latLons.length < 3) continue;
 
     const rawCadPoints: Point2D[] = latLons.map((coord) =>
       wgs84ToCadPoint(coord, projectCrs, projectCenter)
@@ -799,14 +841,9 @@ export function parseOverpassBuildingsResponse(
     if (processedWayIds.has(wayId)) continue;
     const tags = way.tags || {};
     if (!tags['building:part'] || tags['building:part'] === 'no') continue;
-    if (!way.nodes || way.nodes.length < 4) continue;
 
-    const latLons: LatLon[] = [];
-    for (const nodeId of way.nodes) {
-      const coord = nodeCoords.get(nodeId);
-      if (coord) latLons.push(coord);
-    }
-    if (latLons.length < 3) continue;
+    const latLons = extractWayLatLons(way);
+    if (!latLons || latLons.length < 3) continue;
 
     const rawCadPoints: Point2D[] = latLons.map((coord) =>
       wgs84ToCadPoint(coord, projectCrs, projectCenter)
@@ -1005,10 +1042,16 @@ export function findIncompleteBuildingPartsAndRelations(elements: OverpassElemen
     let hasIncompleteMember = false;
     for (const member of rel.members) {
       if (member.type === 'way') {
+        if (member.geometry && member.geometry.length >= 2) {
+          continue;
+        }
         const way = ways.get(member.ref);
         if (!way) {
           hasIncompleteMember = true;
           break;
+        }
+        if (way.geometry && way.geometry.length >= 2) {
+          continue;
         }
         if (!way.nodes || way.nodes.length < 2 || way.nodes.some((nodeId) => !nodeIds.has(nodeId))) {
           hasIncompleteMember = true;
@@ -1025,6 +1068,9 @@ export function findIncompleteBuildingPartsAndRelations(elements: OverpassElemen
   for (const [wayId, way] of ways.entries()) {
     const tags = way.tags || {};
     if (tags.building && tags.building !== 'no') {
+      if (way.geometry && way.geometry.length >= 4) {
+        continue;
+      }
       const isMissingNodes = !way.nodes || way.nodes.length < 4 || way.nodes.some((nId) => !nodeIds.has(nId));
       if (isMissingNodes) {
         incompleteWayBuildingIds.push(wayId);
@@ -1081,14 +1127,43 @@ export function findMissingBuildingRelationIds(
 }
 
 /**
- * Krok 4: Celowany dociąg pełnej geometrii relacji (po ID) z podwójną rekursją.
+ * Formatuje tablicę punktów WGS84 do ciągu współrzędnych Overpass QL poly: "lat1 lon1 lat2 lon2 ..."
+ */
+export function formatOverpassPolyFilter(points: LatLon[]): string {
+  return points.map((p) => `${p.lat.toFixed(6)} ${p.lon.toFixed(6)}`).join(' ');
+}
+
+/**
+ * Buduje zoptymalizowane zapytanie Overpass QL minimalizujące payload (out tags geom qt;)
+ * z wycięciem zbędnych węzłów i metadanych.
+ */
+export function buildOverpassBuildingsQuery(
+  area: WfsBbox | LatLon[],
+  timeoutSec = 25
+): string {
+  const isPoly = Array.isArray(area) && area.length >= 3 && typeof area[0] === 'object' && 'lat' in area[0];
+  const filter = isPoly
+    ? `(poly:"${formatOverpassPolyFilter(area as LatLon[])}")`
+    : `(${(area as WfsBbox)[1]},${(area as WfsBbox)[0]},${(area as WfsBbox)[3]},${(area as WfsBbox)[2]})`;
+
+  return `
+[out:json][timeout:${timeoutSec}];
+(
+  way["building"]${filter};
+  relation["building"]["type"="multipolygon"]${filter};
+);
+out tags geom qt;
+  `.trim();
+}
+
+/**
+ * Krok 4: Celowany dociąg pełnej geometrii relacji (po ID).
  */
 export async function fetchRelationFull(relId: number, timeoutMs = 25000): Promise<OverpassResponse> {
   const query = `
     [out:json][timeout:25];
     relation(${relId});
-    (._;>;>;);
-    out body;
+    out tags geom qt;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
 }
@@ -1102,8 +1177,7 @@ export async function fetchRelationsBatch(relIds: number[], timeoutMs = 30000): 
   const query = `
     [out:json][timeout:30];
     relation(id:${idsStr});
-    (._;>;>;);
-    out body;
+    out tags geom qt;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
 }
@@ -1118,8 +1192,7 @@ export async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 2500
       way(${wayId});
       nwr(around:10)["building:part"];
     );
-    (._;>;);
-    out body;
+    out tags geom qt;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
 }
@@ -1145,11 +1218,10 @@ export async function fetchBuildingPartsBatch(
   const query = `
     [out:json][timeout:30];
     (
-      ${relIds.length > 0 ? `relation(id:${relIds.join(',')}); (._;>;>;);` : ''}
+      ${relIds.length > 0 ? `relation(id:${relIds.join(',')});` : ''}
       ${wayIds.length > 0 ? `way(id:${wayIds.join(',')}); nwr(around:10)["building:part"];` : ''}
     );
-    (._;>;);
-    out body;
+    out tags geom qt;
   `.trim();
   const resp = await postOverpassQuery(query, timeoutMs);
   if (resp && resp.elements && resp.elements.length > 0) {
@@ -1214,7 +1286,7 @@ export function splitBboxIntoQuadrants(
 
 /**
  * Krok 1: Pobranie pojedynczego kwadrantu z automatycznym retry przy błędzie sieci lub timeout serwera.
- * Pobiera WYŁĄCZNIE nwr["building"].
+ * Pobiera budynki (way i multipolygon) z bezpośrednio osadzoną geometrią bez zbędnych węzłów.
  */
 async function fetchQuadrantWithRetry(
   quadrantBbox: WfsBbox,
@@ -1233,11 +1305,10 @@ async function fetchQuadrantWithRetry(
   const query = `
     [out:json][timeout:60];
     (
-      nwr["building"](${south},${west},${north},${east});
+      way["building"](${south},${west},${north},${east});
+      relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
     );
-    out body;
-    >;
-    out skel qt;
+    out tags geom qt;
   `.trim();
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

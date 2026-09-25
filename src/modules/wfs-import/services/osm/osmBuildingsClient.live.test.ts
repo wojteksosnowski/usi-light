@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { fetchOsmBuildings } from './osmBuildingsClient';
+import { fetchOsmBuildings, parseOverpassBuildingsResponse } from './osmBuildingsClient';
 import { latLonToBbox } from '../shared/geocoding';
 import type { WfsBbox } from '../city/wfsWarsawClient';
 import type { CrsDetectionResult } from '../../../../utils/geoTransform';
@@ -95,6 +95,55 @@ describe.skipIf(!LIVE)('testy live OSM/Overpass (budynki) — prawdziwy serwer, 
       }
     }, 65000);
   }
+
+  it('weryfikacja redukcji payloadu i identyczności z baseline: out tags geom qt vs out body >; out skel qt', async () => {
+    const testCenter = { lat: 52.2285, lon: 21.01 };
+    const bbox: WfsBbox = [21.005, 52.225, 21.015, 52.232];
+    const [west, south, east, north] = bbox;
+
+    const optQuery = `
+      [out:json][timeout:30];
+      (
+        way["building"](${south},${west},${north},${east});
+        relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
+      );
+      out tags geom qt;
+    `.trim();
+
+    const legacyQuery = `
+      [out:json][timeout:30];
+      (
+        nwr["building"](${south},${west},${north},${east});
+      );
+      out body;
+      >;
+      out skel qt;
+    `.trim();
+
+    const optRes = await global.fetch('/api/osm-overpass', {
+      method: 'POST',
+      body: `data=${encodeURIComponent(optQuery)}`,
+    });
+    const optText = await optRes.text();
+    const optJson = JSON.parse(optText);
+
+    const legacyRes = await global.fetch('/api/osm-overpass', {
+      method: 'POST',
+      body: `data=${encodeURIComponent(legacyQuery)}`,
+    });
+    const legacyText = await legacyRes.text();
+    const legacyJson = JSON.parse(legacyText);
+
+    // Spadek wielkości odpowiedzi o co najmniej 30-50%
+    expect(optText.length).toBeLessThan(legacyText.length * 0.7);
+
+    const optBuildings = parseOverpassBuildingsResponse(optJson, testCenter, localCrs);
+    const legacyBuildings = parseOverpassBuildingsResponse(legacyJson, testCenter, localCrs);
+
+    expect(optBuildings.length).toBeGreaterThan(0);
+    expect(legacyBuildings.length).toBeGreaterThan(0);
+    expect(Math.abs(optBuildings.length - legacyBuildings.length)).toBeLessThanOrEqual(2);
+  }, 90000);
 
   // Regresja dla zgłoszenia: import przy 500m całkowicie się nie udawał, przy 300m dawał
   // niekompletny wynik, a po "poprawce" osm-error2.json zwrócił dokładnie te same 53 budynki

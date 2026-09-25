@@ -8,17 +8,16 @@ Kod:
 
 1. Podzielić obszar na kwadranty po 300x300 lub 400x400m każdy ze 100m zakładem
 2. Sprawdzic kompletnosc, deduplikowac, pobrac ponownie kwadranty ktore sie nie pobrały, ewentualnie fallback na mirror
-3. Wysłać proste zapytanie na serwer overpass odpytujace o same tylko budynki:
+3. Wysłać zoptymalizowane zapytanie na serwer overpass odpytujące o budynki z minimalizacją payloadu (`out tags geom qt;`):
 
 ```
-[out:json][timeout:180];
+[out:json][timeout:25];
 // Zastąp współrzędne własnymi: (min_lat, min_lon, max_lat, max_lon)
 (
-  nwr["building"](52.251,20.995,52.256,20.999);
+  way["building"](52.251,20.995,52.256,20.999);
+  relation["building"]["type"="multipolygon"](52.251,20.995,52.256,20.999);
 );
-out body;
->;
-out skel qt;
+out tags geom qt;
 ```
 
 4. Dla każdego odebranego budynku odpytać serwer overpass o `building:part` według jego ID z buforem `nwr(around:10)["building:part"]`, aby nie gubić wież, kopuł i wycofanych kondygnacji.
