@@ -1,5 +1,6 @@
 import React, { useMemo, useCallback, useEffect } from 'react';
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { CadTopHud } from '@/components/layout/CadTopHud';
 import { ControlPointButton } from '@/components/layout/ControlPointButton';
@@ -312,6 +313,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   return (
     <div className="app-container">
       <Analytics />
+      <SpeedInsights />
 
       {/* Collapsible Left Sidebar */}
       <AppSidebar />

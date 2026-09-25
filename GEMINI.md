@@ -284,6 +284,10 @@ Silnik realizuje wieloetapowy, odporny na awarie i zoptymalizowany pod kątem li
 - `wfs-import/` — integracja z Geoportalem (Krajowa Integracja Miejscowych Planów Zagospodarowania Przestrzennego, EGiB działki ewidencyjne, NMT), BDOT, NMT/WCS oraz Overture Maps.
 - `action-recorder/` — rejestrator sesji użytkownika do generowania interaktywnych prezentacji i testów regresyjnych.
 
+### 6.3. Telemetria i Analityka Wydajności
+- [`@vercel/analytics`](https://vercel.com/docs/analytics) (`<Analytics />`) — zbieranie anonimowych metryk ruchu i wyświetleń.
+- [`@vercel/speed-insights`](https://vercel.com/docs/speed-insights) (`<SpeedInsights />`) — ciągły monitoring wskaźników Core Web Vitals (LCP, FID, CLS, INP) w aplikacji w czasie rzeczywistym. Komponenty są osadzone na poziomie root kontenera w [`AppLayout.tsx`](file:///Volumes/Samsam/py/usi-light/src/app/AppLayout.tsx).
+
 ---
 
 ## 7. Struktura Katalogów (Indeks Szybkiego Wyszukiwania)
