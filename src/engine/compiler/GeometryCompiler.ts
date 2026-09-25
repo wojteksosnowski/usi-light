@@ -192,15 +192,13 @@ export class GeometryCompiler {
         ? storySlices[storySlices.length - 1].footprint
         : { exterior: baseVertices, holes: baseHoles };
 
-    const all2DRings: Point2D[][] = [];
-    if (footprintBase.exterior.length > 0) all2DRings.push([...footprintBase.exterior]);
-    for (const h of footprintBase.holes) all2DRings.push([...h]);
-    for (const slice of storySlices) {
-      all2DRings.push([...slice.footprint.exterior]);
-      for (const h of slice.footprint.holes) all2DRings.push([...h]);
+    const exteriorRings: (readonly Point2D[])[] = [];
+    if (footprintBase.exterior.length > 0) exteriorRings.push(footprintBase.exterior);
+    for (let sIdx = 0; sIdx < storySlices.length; sIdx++) {
+      exteriorRings.push(storySlices[sIdx].footprint.exterior);
     }
 
-    const bounds2D = computeBounds2DFromRings(all2DRings);
+    const bounds2D = computeBounds2DFromRings(exteriorRings);
 
     // 3. Budowa siatki 3D (faces)
     const faces: Face3D[] = [];

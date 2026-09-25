@@ -274,11 +274,12 @@ export const CadCanvas: React.FC<CadCanvasProps> = (props) => {
     circleAnimRef.current = requestAnimationFrame(animate);
   }, []);
 
+  const fitRequestNonce = fitRequest?.nonce;
   useEffect(() => {
-    if (fitRequest?.nonce) {
+    if (fitRequestNonce) {
       triggerProjectCirclePulse(projectRadius);
     }
-  }, [fitRequest, projectRadius, triggerProjectCirclePulse]);
+  }, [fitRequestNonce, projectRadius, triggerProjectCirclePulse]);
 
   const prevProjectRadiusRef = useRef(projectRadius);
   useEffect(() => {

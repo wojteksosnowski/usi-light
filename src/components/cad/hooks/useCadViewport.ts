@@ -5,6 +5,7 @@ import { useUiStore } from '../../../store/useUiStore';
 import { createViewportMatrix, invertAffineMatrix, transformPoint, AffineMatrix2D } from '@/utils/math2d';
 import { getCanvasWorkingWidth, getKioskLayoutFlags } from '../../../hooks/useIsMobile';
 import { FitRequestOptions as FitToExtentsOptions } from '../../../store/useCadToolStore';
+import { GeometryCompiler } from '@/engine/compiler/GeometryCompiler';
 
 export function useCadViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -118,18 +119,22 @@ export function useCadViewport(
     [invViewportMatrix]
   );
 
+  const fitRequestRef = useRef(fitRequest);
+  fitRequestRef.current = fitRequest;
+
   const fitToExtents = useCallback((options?: boolean | FitToExtentsOptions) => {
     const container = containerRef.current;
     if (!container) return;
 
+    const currentFitRequest = fitRequestRef.current;
     const opts: FitToExtentsOptions =
       typeof options === 'boolean'
         ? { ignoreSelection: options }
         : (options ?? {});
 
-    const ignoreSelection = opts.ignoreSelection ?? fitRequest?.ignoreSelection ?? false;
-    const fitMode = opts.fitMode ?? fitRequest?.fitMode ?? 'contain';
-    const preferTested = opts.preferTested ?? fitRequest?.preferTested ?? false;
+    const ignoreSelection = opts.ignoreSelection ?? currentFitRequest?.ignoreSelection ?? false;
+    const fitMode = opts.fitMode ?? currentFitRequest?.fitMode ?? 'contain';
+    const preferTested = opts.preferTested ?? currentFitRequest?.preferTested ?? false;
     const effectiveSelectedBuildingId = ignoreSelection ? null : selectedBuildingId;
 
     const rect = container.getBoundingClientRect();
@@ -194,14 +199,20 @@ export function useCadViewport(
       const cubature = candidates.filter((b) => b.category !== 'boundary');
       const basePool = cubature.length > 0 ? cubature : candidates;
 
-      // Ograniczamy do obiektów w promieniu zasięgu projektu
+      // Ograniczamy do obiektów w promieniu zasięgu projektu (O(1) z Canonical Precomputed Geometry)
       const inProjectRadius = basePool.filter((b) => {
+        const bounds = b.computed?.representation2D?.bounds2D;
+        if (bounds) {
+          const cx = (bounds.min.x + bounds.max.x) * 0.5;
+          const cy = (bounds.min.y + bounds.max.y) * 0.5;
+          return Math.hypot(cx, cy) <= r * 1.25;
+        }
         if (!b.vertices || b.vertices.length === 0) return false;
         let cx = 0;
         let cy = 0;
-        for (const v of b.vertices) {
-          cx += v.x;
-          cy += v.y;
+        for (let i = 0; i < b.vertices.length; i++) {
+          cx += b.vertices[i].x;
+          cy += b.vertices[i].y;
         }
         cx /= b.vertices.length;
         cy /= b.vertices.length;
@@ -211,43 +222,108 @@ export function useCadViewport(
       targetBuildings = inProjectRadius.length > 0 ? inProjectRadius : basePool;
     }
 
-    const allPoints: Point2D[] = [];
-    for (const bldg of targetBuildings) {
-      if (Array.isArray(bldg.vertices)) {
-        for (const v of bldg.vertices) {
-          if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+    let rMinU = Infinity;
+    let rMaxU = -Infinity;
+    let rMinV = Infinity;
+    let rMaxV = -Infinity;
+    let hasPoints = false;
+
+    const isRotated = Math.abs(viewRotationDeg) > 1e-4;
+
+    if (!isRotated) {
+      // Szybka ścieżka O(1) Canonical Precomputed Geometry dla nieobróconego widoku
+      for (let i = 0; i < targetBuildings.length; i++) {
+        const b = targetBuildings[i];
+        const bounds = b.computed?.representation2D?.bounds2D ?? GeometryCompiler.getBuildingBounds2D(b);
+        if (bounds && Number.isFinite(bounds.min.x) && Number.isFinite(bounds.max.x)) {
+          if (bounds.min.x < rMinU) rMinU = bounds.min.x;
+          if (bounds.max.x > rMaxU) rMaxU = bounds.max.x;
+          if (bounds.min.y < rMinV) rMinV = bounds.min.y;
+          if (bounds.max.y > rMaxV) rMaxV = bounds.max.y;
+          hasPoints = true;
         }
       }
-      if (Array.isArray(bldg.holes)) {
-        for (const hole of bldg.holes) {
-          if (Array.isArray(hole)) {
-            for (const v of hole) {
-              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+    }
+
+    if (!hasPoints) {
+      // Strumieniowe rzutowanie dla widoku obróconego lub gdy brak zbuforowanych bounds2D (zero allPoints alokacji, pominięcie holes/zones)
+      const rot = (viewRotationDeg * Math.PI) / 180;
+      const cos = Math.cos(rot);
+      const sin = Math.sin(rot);
+
+      for (let bIdx = 0; bIdx < targetBuildings.length; bIdx++) {
+        const bldg = targetBuildings[bIdx];
+        if (bldg.computed) {
+          const rep2D = bldg.computed.representation2D;
+          const ext = rep2D.footprintBase.exterior;
+          for (let i = 0; i < ext.length; i++) {
+            const v = ext[i];
+            if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
+              const u = v.x * cos + v.y * sin;
+              const w = -v.x * sin + v.y * cos;
+              if (u < rMinU) rMinU = u;
+              if (u > rMaxU) rMaxU = u;
+              if (w < rMinV) rMinV = w;
+              if (w > rMaxV) rMaxV = w;
+              hasPoints = true;
             }
           }
-        }
-      }
-      if (Array.isArray(bldg.storyPolygons)) {
-        for (const sp of bldg.storyPolygons) {
-          if (Array.isArray(sp.polygon)) {
-            for (const v of sp.polygon) {
-              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+          if (rep2D.storySlices) {
+            for (let sIdx = 0; sIdx < rep2D.storySlices.length; sIdx++) {
+              const sliceExt = rep2D.storySlices[sIdx].footprint.exterior;
+              for (let i = 0; i < sliceExt.length; i++) {
+                const v = sliceExt[i];
+                if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
+                  const u = v.x * cos + v.y * sin;
+                  const w = -v.x * sin + v.y * cos;
+                  if (u < rMinU) rMinU = u;
+                  if (u > rMaxU) rMaxU = u;
+                  if (w < rMinV) rMinV = w;
+                  if (w > rMaxV) rMaxV = w;
+                  hasPoints = true;
+                }
+              }
             }
           }
-        }
-      }
-      if (Array.isArray(bldg.zonePolygons)) {
-        for (const zp of bldg.zonePolygons) {
-          if (Array.isArray(zp.polygon)) {
-            for (const v of zp.polygon) {
-              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) allPoints.push(v);
+        } else {
+          if (Array.isArray(bldg.vertices)) {
+            for (let i = 0; i < bldg.vertices.length; i++) {
+              const v = bldg.vertices[i];
+              if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
+                const u = v.x * cos + v.y * sin;
+                const w = -v.x * sin + v.y * cos;
+                if (u < rMinU) rMinU = u;
+                if (u > rMaxU) rMaxU = u;
+                if (w < rMinV) rMinV = w;
+                if (w > rMaxV) rMaxV = w;
+                hasPoints = true;
+              }
+            }
+          }
+          if (Array.isArray(bldg.storyPolygons)) {
+            for (let sIdx = 0; sIdx < bldg.storyPolygons.length; sIdx++) {
+              const poly = bldg.storyPolygons[sIdx].polygon;
+              if (Array.isArray(poly)) {
+                for (let i = 0; i < poly.length; i++) {
+                  const v = poly[i];
+                  if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
+                    const u = v.x * cos + v.y * sin;
+                    const w = -v.x * sin + v.y * cos;
+                    if (u < rMinU) rMinU = u;
+                    if (u > rMaxU) rMaxU = u;
+                    if (w < rMinV) rMinV = w;
+                    if (w > rMaxV) rMaxV = w;
+                    hasPoints = true;
+                  }
+                }
+              }
             }
           }
         }
       }
     }
 
-    if (allPoints.length === 0) {
+    if (!hasPoints) {
       // Brak prawidłowych wierzchołków — fallback do widoku okręgu
       const diameter = r * 2;
       const scale = Math.min(width, height) * 0.80 / diameter;
@@ -259,29 +335,13 @@ export function useCadViewport(
       return;
     }
 
-    const rot = (viewRotationDeg * Math.PI) / 180;
-    const cos = Math.cos(rot);
-    const sin = Math.sin(rot);
-
-    let rMinU = Infinity;
-    let rMaxU = -Infinity;
-    let rMinV = Infinity;
-    let rMaxV = -Infinity;
-    for (const p of allPoints) {
-      const u = p.x * cos + p.y * sin;
-      const v = -p.x * sin + p.y * cos;
-      if (u < rMinU) rMinU = u;
-      if (u > rMaxU) rMaxU = u;
-      if (v < rMinV) rMinV = v;
-      if (v > rMaxV) rMaxV = v;
-    }
     const rBboxWidth = Math.max(5, rMaxU - rMinU);
     const rBboxHeight = Math.max(5, rMaxV - rMinV);
     const rotatedCenterU = (rMinU + rMaxU) / 2;
     const rotatedCenterV = (rMinV + rMaxV) / 2;
 
     const defaultScaleFactor = fitMode === 'cover' ? 1.0 : (effectiveSelectedBuildingId ? 0.80 : 0.92);
-    const scaleFactor = opts.scaleFactor ?? fitRequest?.scaleFactor ?? defaultScaleFactor;
+    const scaleFactor = opts.scaleFactor ?? currentFitRequest?.scaleFactor ?? defaultScaleFactor;
     const scaleX = (width * scaleFactor) / rBboxWidth;
     const scaleY = (height * scaleFactor) / rBboxHeight;
     const newScale = Math.max(
@@ -297,25 +357,28 @@ export function useCadViewport(
       panY,
       scale: newScale,
     });
-  }, [buildings, viewRotationDeg, containerRef, selectedBuildingId, layerSettings, projectRadius, fitRequest]);
+  }, [buildings, viewRotationDeg, containerRef, selectedBuildingId, layerSettings, projectRadius]);
+
+  const fitToExtentsRef = useRef(fitToExtents);
+  fitToExtentsRef.current = fitToExtents;
+
+  const lastHandledNonceRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!fitRequest?.nonce) return;
+    const nonce = fitRequest?.nonce;
+    if (!nonce || nonce === lastHandledNonceRef.current) return;
+    lastHandledNonceRef.current = nonce;
+
     const opts: FitToExtentsOptions = {
       ignoreSelection: fitRequest.ignoreSelection,
       fitMode: fitRequest.fitMode,
       preferTested: fitRequest.preferTested,
       scaleFactor: fitRequest.scaleFactor,
     };
-    fitToExtents(opts);
-    const t = setTimeout(() => fitToExtents(opts), 100);
+    fitToExtentsRef.current(opts);
+    const t = setTimeout(() => fitToExtentsRef.current(opts), 100);
     return () => clearTimeout(t);
-  }, [
-    // fitRequest is replaced as a single object whenever nonce changes (see triggerFit in
-    // useCadToolStore), so nonce alone is a sufficient dependency for the other fields.
-    fitRequest?.nonce,
-    fitToExtents,
-  ]);
+  }, [fitRequest?.nonce]);
 
   return {
     viewState,

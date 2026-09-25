@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useSolarAnalysisStore } from '../../store/useSolarAnalysisStore';
 import { useCadToolStore } from '../../store/useCadToolStore';
 import { useUiStore } from '../../store/useUiStore';
@@ -97,18 +97,18 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
   stepMinutes = 1,
   intervalMs = 1000 / 30,
 }) => {
-  const viewMode2D = useUiStore((s) => s.viewMode2D);
   const setViewMode2D = useUiStore((s) => s.setViewMode2D);
   const setMobileShowcasePreview = useUiStore((s) => s.setMobileShowcasePreview);
   const triggerFit = useCadToolStore((s) => s.triggerFit);
 
   const setMasterplanHourFraction = useSolarAnalysisStore((s) => s.setMasterplanHourFraction);
+  const initialViewModeRef = useRef(useUiStore.getState().viewMode2D);
 
   // 1. Całkowite wyłączenie WSZYSTKICH warstw analitycznych, podkładowych i geodezyjnych ze snapshotem
   useEffect(() => {
     const restoreStores = applyStoreOverrides(getKioskStoreOverrides());
 
-    const prevMode = viewMode2D;
+    const prevMode = initialViewModeRef.current;
     setViewMode2D('masterplan_white');
     triggerFit(KIOSK_FIT_OPTS);
     const fitTimer1 = setTimeout(() => triggerFit(KIOSK_FIT_OPTS), 60);
@@ -166,7 +166,7 @@ export const MobileKioskOverlay: React.FC<MobileKioskOverlayProps> = ({
       }
       triggerFit();
     };
-  }, [setMobileShowcasePreview, setViewMode2D, triggerFit, viewMode2D]);
+  }, [setMobileShowcasePreview, setViewMode2D, triggerFit]);
 
   // 2. Automatyczna animacja słońca w tle od 7:00 do 17:00 (-5h do +5h od południa)
   useEffect(() => {
