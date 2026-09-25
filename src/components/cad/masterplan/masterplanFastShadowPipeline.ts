@@ -1,10 +1,7 @@
 import type { Point2D, BuildingLoop } from '@/types/geometry';
 import type { CanonicalBuildingShadow } from '@/types/canonicalShadow';
 import { FastShadowInTheMiddle } from '@/engine/solar/FastShadowInTheMiddle';
-import {
-  polygonIntersectionTwo,
-  fastIntersectTwoSimpleLoops,
-} from '@/utils/math2d/polygonBooleanTwo';
+import { fastIntersectTwoSimpleLoops } from '@/utils/math2d/polygonBooleanTwo';
 import { unionPolygonLoops, differencePolygonLoops } from '@/utils/math2d/polygons';
 
 export interface RoofTargetPlane {
@@ -48,7 +45,7 @@ export class MasterplanFastShadowPipeline {
         const projected = FastShadowInTheMiddle.projectComponentToPlane(comp, zTarget);
         if (projected && projected.outer.length >= 3) {
           // 2. Szybkie przycięcie cienia do obrysu dachu docelowego (Cień ∩ Dach)
-          const clippedToRoof = polygonIntersectionTwo(projected.outer, roofPoly);
+          const clippedToRoof = fastIntersectTwoSimpleLoops(projected.outer, roofPoly);
           if (clippedToRoof && clippedToRoof.length > 0) {
             for (let k = 0; k < clippedToRoof.length; k++) {
               if (clippedToRoof[k].length >= 3) {

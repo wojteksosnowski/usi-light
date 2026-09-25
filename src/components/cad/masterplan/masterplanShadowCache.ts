@@ -3,7 +3,7 @@ import {
   PolygonWithHoles,
   computePointsBoundingBox,
 } from '@/utils/math2d/polygons';
-import { polygonIntersectionTwo, arePolygonsDefinitelyDisjoint } from '@/utils/math2d/polygonBooleanTwo';
+import { fastIntersectTwoSimpleLoops, arePolygonsDefinitelyDisjoint } from '@/utils/math2d/polygonBooleanTwo';
 import {
   getMasterplanSolarAngles,
   computeStoryShadowPolygonWithHoles,
@@ -327,7 +327,7 @@ export function getCachedRoofShadowSamples(
         if (singleShadow) {
           umbraPolys.push(sp);
         } else {
-          for (const c of polygonIntersectionTwo(sp.outer, roofPoly)) {
+          for (const c of fastIntersectTwoSimpleLoops(sp.outer, roofPoly)) {
             if (c.length >= 3) umbraPolys.push({ outer: c, holes: [] });
           }
         }

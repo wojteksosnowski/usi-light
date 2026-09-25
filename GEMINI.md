@@ -49,7 +49,8 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
    - Wypiek w `CanonicalShadowBaker` i konsumpcja w `FastShadowInTheMiddle` oraz `MasterplanFastShadowPipeline` eliminują powtarzalne rzutowanie 3D i obciążenie GC.
 9. **Morton Spatial Sorting i Culling Cieni Dachowych Masterplan**:
    - Sortowanie poligonów 32-bitowym kodem Mortona (Z-order) `sortPolygonsSpatially` w `unionPolygonsWithHolesHierarchical` grupuje sąsiednie bryły i eliminuje rozrost AABB na wyższych poziomach unii hierarchicznej.
-   - Culling i docinanie łat cieni dachowych $\Delta H$ za pomocą `polygonIntersectionTwo` (`fastIntersectTwoSimpleLoops`) w `masterplanRoofsRenderer.ts` / `masterplanShadowCache.ts` wraz z wczesnym testem rozłączności AABB par w `accumulatePolygons`.
+   - 32-bitowe kody Mortona są prekompilowane w `PrecomputedMasterplanTier.mortonCode` w `GeometryCompiler.ts` (`computeMorton2D`) w fazie *Bake on Edit* oraz aktualizowane w $O(1)$ podczas translacji/rotacji.
+   - Culling i docinanie łat cieni dachowych $\Delta H$ za pomocą `fastIntersectTwoSimpleLoops` (z domyślnym fallbackiem `robustPolygonIntersectionFallback`) w `masterplanRoofsRenderer.ts` / `masterplanShadowCache.ts` wraz z wczesnym testem rozłączności AABB par w `accumulatePolygons`.
 10. **Analityczny Cień Wypukły $O(N)$ i Bypass Alokacji Stringów w Potoku Cieni Dachowych Masterplan**:
     - Analityczne wyznaczanie cienia wielokątów wypukłych ($N \le 4$: trójkąty, czworokąty) `fastConvexPolygonShadow` w $O(N)$ (~64 ns) bez otoczki wypukłej Graham scan z zachowaniem 100% wierności geometrycznej ($0.0000\text{ m}^2$ błędu).
     - Bypass alokacji kluczy string w V8 dla prekompilowanych wielokątów wypukłych w `computeStoryShadowPolygon`.

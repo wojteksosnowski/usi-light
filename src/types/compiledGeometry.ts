@@ -76,6 +76,7 @@ export interface PrecomputedMasterplanTier {
   readonly geomFingerprint: string;
   readonly holesFingerprint?: string;
   readonly isConvex: boolean;
+  readonly mortonCode?: number;
   readonly buildingType?: string;
   readonly bounds2D?: {
     readonly min: Point2D;

@@ -1318,6 +1318,7 @@ import {
   resetFastIntersectionTelemetry,
   type FastIntersectionTelemetry,
   isPointInsideSimpleLoop,
+  robustPolygonIntersectionFallback,
 } from './fastIntersect';
 
 export {
@@ -1326,49 +1327,12 @@ export {
   resetFastIntersectionTelemetry,
   type FastIntersectionTelemetry,
   isPointInsideSimpleLoop,
+  robustPolygonIntersectionFallback,
 };
-
-function robustPolygonIntersectionFallback(a: Point2D[], b: Point2D[]): Point2D[][] {
-  const geomA: [number, number][] = a.map((p) => [p.x, p.y]);
-  const geomB: [number, number][] = b.map((p) => [p.x, p.y]);
-
-  if (geomA[0][0] !== geomA[geomA.length - 1][0] || geomA[0][1] !== geomA[geomA.length - 1][1]) {
-    geomA.push([geomA[0][0], geomA[0][1]]);
-  }
-  if (geomB[0][0] !== geomB[geomB.length - 1][0] || geomB[0][1] !== geomB[geomB.length - 1][1]) {
-    geomB.push([geomB[0][0], geomB[0][1]]);
-  }
-
-  try {
-    const result = polygonClipping.intersection([[geomA]], [[geomB]]);
-    if (!result || result.length === 0) return [];
-
-    const outPolygons: Point2D[][] = [];
-    for (const multi of result) {
-      for (const ring of multi) {
-        if (ring.length >= 3) {
-          outPolygons.push(ring.map(([x, y]) => ({ x, y })));
-        }
-      }
-    }
-    return outPolygons;
-  } catch {
-    return [];
-  }
-}
 
 /**
  * High-performance Boolean Intersection (A ∩ B) of two simple polygon loops.
- * Employs FastIntersect with robust polygon-clipping fallback.
+ * Alias for `fastIntersectTwoSimpleLoops` with built-in robust polygon-clipping fallback.
  */
-export function polygonIntersectionTwo(
-  polyA: Point2D[],
-  polyB: Point2D[]
-): Point2D[][] {
-  return fastIntersectTwoSimpleLoops(
-    polyA,
-    polyB,
-    (a: Point2D[], b: Point2D[]) => robustPolygonIntersectionFallback(a, b)
-  );
-}
+export const polygonIntersectionTwo = fastIntersectTwoSimpleLoops;
 

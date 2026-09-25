@@ -90,6 +90,25 @@ function computeBounds3DFromFaces(faces: readonly Face3D[]): { min: Point3D; max
   return { min: { x: minX, y: minY, z: minZ }, max: { x: maxX, y: maxY, z: maxZ } };
 }
 
+export function computeMorton2D(cx: number, cy: number, minX = -100000, minY = -100000, span = 200000): number {
+  const normX = Math.min(65535, Math.max(0, Math.floor(((cx - minX) / span) * 65535)));
+  const normY = Math.min(65535, Math.max(0, Math.floor(((cy - minY) / span) * 65535)));
+
+  let x = normX;
+  x = (x | (x << 8)) & 0x00ff00ff;
+  x = (x | (x << 4)) & 0x0f0f0f0f;
+  x = (x | (x << 2)) & 0x33333333;
+  x = (x | (x << 1)) & 0x55555555;
+
+  let y = normY;
+  y = (y | (y << 8)) & 0x00ff00ff;
+  y = (y | (y << 4)) & 0x0f0f0f0f;
+  y = (y | (y << 2)) & 0x33333333;
+  y = (y | (y << 1)) & 0x55555555;
+
+  return (x | (y << 1)) >>> 0;
+}
+
 export class GeometryCompiler {
   /**
    * Generuje deterministyczny hash stanu wejściowego obiektu.
@@ -333,6 +352,11 @@ export class GeometryCompiler {
         const poly = s.footprint.exterior as Point2D[];
         const holes = (s.footprint.holes as Point2D[][]) || [];
         const tierRings: Point2D[][] = [poly, ...holes];
+        const bounds2D = computeBounds2DFromRings(tierRings);
+        const cx = (bounds2D.min.x + bounds2D.max.x) * 0.5;
+        const cy = (bounds2D.min.y + bounds2D.max.y) * 0.5;
+        const mortonCode = computeMorton2D(cx, cy);
+
         rawTiers.push({
           storyIndex: s.storyIndex,
           polygon: poly,
@@ -342,12 +366,18 @@ export class GeometryCompiler {
           geomFingerprint: polygonFingerprint(poly),
           holesFingerprint: holes.length > 0 ? holes.map((h) => polygonFingerprint(h as Point2D[])).join(';') : undefined,
           isConvex: isPolygonConvex(poly),
+          mortonCode,
           buildingType: defaultBldgType,
-          bounds2D: computeBounds2DFromRings(tierRings),
+          bounds2D,
         });
       }
     } else if (baseVertices.length >= 3 && defaultHeight > 0) {
       const baseRings: Point2D[][] = [baseVertices, ...baseHoles];
+      const bounds2D = computeBounds2DFromRings(baseRings);
+      const cx = (bounds2D.min.x + bounds2D.max.x) * 0.5;
+      const cy = (bounds2D.min.y + bounds2D.max.y) * 0.5;
+      const mortonCode = computeMorton2D(cx, cy);
+
       rawTiers.push({
         storyIndex: 0,
         polygon: baseVertices,
@@ -357,8 +387,9 @@ export class GeometryCompiler {
         geomFingerprint: polygonFingerprint(baseVertices),
         holesFingerprint: baseHoles.length > 0 ? baseHoles.map((h) => polygonFingerprint(h as Point2D[])).join(';') : undefined,
         isConvex: isPolygonConvex(baseVertices),
+        mortonCode,
         buildingType: defaultBldgType,
-        bounds2D: computeBounds2DFromRings(baseRings),
+        bounds2D,
       });
     }
 
@@ -654,6 +685,11 @@ export class GeometryCompiler {
       const transformedPoly = t.polygon.map(transformPoint2D);
       const transformedHoles = t.holes.map((h) => h.map(transformPoint2D));
       const tierRings: Point2D[][] = [transformedPoly, ...transformedHoles];
+      const bounds2D = computeBounds2DFromRings(tierRings);
+      const cx = (bounds2D.min.x + bounds2D.max.x) * 0.5;
+      const cy = (bounds2D.min.y + bounds2D.max.y) * 0.5;
+      const mortonCode = computeMorton2D(cx, cy);
+
       return {
         ...t,
         polygon: transformedPoly,
@@ -661,7 +697,8 @@ export class GeometryCompiler {
         geomFingerprint: polygonFingerprint(transformedPoly as Point2D[]),
         holesFingerprint: transformedHoles.length > 0 ? transformedHoles.map((h) => polygonFingerprint(h as Point2D[])).join(';') : undefined,
         isConvex: t.isConvex,
-        bounds2D: computeBounds2DFromRings(tierRings),
+        mortonCode,
+        bounds2D,
       };
     });
 
