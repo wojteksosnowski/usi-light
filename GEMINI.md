@@ -54,6 +54,8 @@ Zgodnie z [`AGENTS.md`](file:///Volumes/Samsam/py/usi-light/AGENTS.md) oraz wyty
     - Analityczne wyznaczanie cienia wielokątów wypukłych ($N \le 4$: trójkąty, czworokąty) `fastConvexPolygonShadow` w $O(N)$ (~64 ns) bez otoczki wypukłej Graham scan z zachowaniem 100% wierności geometrycznej ($0.0000\text{ m}^2$ błędu).
     - Bypass alokacji kluczy string w V8 dla prekompilowanych wielokątów wypukłych w `computeStoryShadowPolygon`.
     - Bypass CPU docięcia dachem `polygonIntersectionTwo` dla pojedynczych cieni wyższych brył pod maską sprzętową GPU `ctx.clip('evenodd')` w Canvas 2D.
+11. **Tłumienie Krycia Cieni z Wysokością Płaszczyzny Odbiorczej (Elevation-Adjusted Shadow Transparency)**:
+    - Cienie rzucane na dachy i tarasy wyższych kondygnacji ($H > 0$) otrzymują łagodne tłumienie krycia w `getElevationAdjustedShadowColor` (`masterplanShadowCache.ts`): $\alpha(H) = \alpha_0 \cdot \max(0.60, 1 - \frac{0.40 \cdot H}{H + 30})$, dając subtelny efekt rozproszenia światła z wysokością przy pełnym buforowaniu w `roofCache`.
 
 ---
 

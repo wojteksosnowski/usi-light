@@ -102,6 +102,14 @@
 - **Bypass Nadmiarowego Docięcia Dachem dla Pojedynczego Cienia**:
   - Gdy dach otrzymuje cień od pojedynczej bryły wyższej (`higherTiers.length === 1`), docięcie przez `polygonIntersectionTwo` na CPU jest pomijane — sprzętowa maska `ctx.clip('evenodd')` Canvas 2D wykonuje docięcie z akceleracją GPU bez ryzyka podwójnego nakładania przezroczystości $\alpha$.
 
+## 1k. Tłumienie Krycia Cieni z Wysokością Płaszczyzny Odbiorczej (Elevation-Adjusted Shadow Transparency)
+- **Model rozproszenia światła nieboskłonu (Ambient Skylight Scatter)**:
+  - Cienie rzucane na dachy i tarasy wyższych kondygnacji ($H > 0$) otrzymują łagodne, asymptotyczne tłumienie krycia w `getElevationAdjustedShadowColor` (`masterplanShadowCache.ts`):
+    $$\alpha(H) = \alpha_0 \cdot \max\left(0.60,\, 1.0 - \frac{0.40 \cdot H}{H + 30}\right)$$
+  - Na poziomie gruntu ($H \le 0$) zachowywane jest 100% bazowego krycia ($\alpha_0 = 0.14$), natomiast wraz ze wzrostem wysokości $H$ cień staje się delikatnie bardziej przezierny (np. $\alpha \approx 0.121$ przy $15\text{ m}$, $\alpha \approx 0.112$ przy $30\text{ m}$), z bezpieczną dolną granicą $\ge 0.084$ dla bardzo wysokich budynków.
+- **Buforowanie deterministyczne w `roofCache`**:
+  - Wyliczenie koloru odbywa się wewnątrz `getCachedRoofShadowSamples` i jest zbuforowane w `roofCache` kluczowanym wysokością kondygnacji `${currentH.toFixed(2)}`, gwarantując zero alokacji i 60 FPS podczas pan/zoom.
+
 ## 2. Obliczenia Macierzowe, Rastrowe Mapowanie i Ciągłe Struktury Pamięci (Matrix & TypedArray Architecture)
 - **Macierze transformacji afinicznych (Render i Viewport):**
   - Wszystkie transformacje widoku (pan, zoom, rotacja) oraz rzutowania obiektów łączą się w ujednoliconą macierz afiniczną $3 \times 3$ (`AffineMatrix2D` w standardzie `[a, b, c, d, e, f]`).

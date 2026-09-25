@@ -9,7 +9,11 @@ import {
   computeStoryShadowPolygonWithHoles,
   MasterplanStoryTier,
 } from './masterplanGeometry';
-import { getCachedGroundShadowSamples } from './masterplanShadowCache';
+import {
+  getCachedGroundShadowSamples,
+  getCachedRoofShadowSamples,
+  getElevationAdjustedShadowColor,
+} from './masterplanShadowCache';
 import { BuildingLoop, Point2D } from '../../../types/geometry';
 import {
   isPointInPolygon,
@@ -415,6 +419,102 @@ describe('masterplanGeometry', () => {
       // Północna część dziedzińca (y=34 > 27.2m) jest bezpośrednio oświetlona promieniami słońca:
       const northCourtyardPt = { x: midX, y: 34.0 };
       expect(isCoveredByShadow(northCourtyardPt)).toBe(false);
+    });
+  });
+
+  describe('elevation-adjusted shadow transparency', () => {
+    it('preserves base color for ground level (H <= 0)', () => {
+      const baseColor = 'rgba(30, 41, 59, 0.14)';
+      expect(getElevationAdjustedShadowColor(baseColor, 0)).toBe(baseColor);
+      expect(getElevationAdjustedShadowColor(baseColor, -5)).toBe(baseColor);
+    });
+
+    it('smoothly reduces alpha (increases transparency) with increasing roof elevation', () => {
+      const baseColor = 'rgba(30, 41, 59, 0.14)';
+      const colorH6 = getElevationAdjustedShadowColor(baseColor, 6);
+      const colorH15 = getElevationAdjustedShadowColor(baseColor, 15);
+      const colorH30 = getElevationAdjustedShadowColor(baseColor, 30);
+      const colorH60 = getElevationAdjustedShadowColor(baseColor, 60);
+
+      const parseAlpha = (c: string) => parseFloat(c.match(/rgba\(\d+,\s*\d+,\s*\d+,\s*([\d.]+)\)/)![1]);
+
+      const a0 = 0.14;
+      const a6 = parseAlpha(colorH6);
+      const a15 = parseAlpha(colorH15);
+      const a30 = parseAlpha(colorH30);
+      const a60 = parseAlpha(colorH60);
+
+      // Monotonic decreasing alpha (increasing transparency)
+      expect(a6).toBeLessThan(a0);
+      expect(a15).toBeLessThan(a6);
+      expect(a30).toBeLessThan(a15);
+      expect(a60).toBeLessThan(a30);
+
+      // Check values match formula closely:
+      // a6 ≈ 0.14 * (1 - 0.40 * 6 / 36) = 0.14 * 0.9333 ≈ 0.1307
+      expect(a6).toBeCloseTo(0.1307, 3);
+      // a30 ≈ 0.14 * (1 - 0.40 * 30 / 60) = 0.14 * 0.8000 = 0.1120
+      expect(a30).toBeCloseTo(0.112, 3);
+      // a60 ≈ 0.14 * (1 - 0.40 * 60 / 90) = 0.14 * 0.7333 ≈ 0.1027
+      expect(a60).toBeCloseTo(0.1027, 3);
+    });
+
+    it('enforces safe lower opacity bound for very tall buildings', () => {
+      const baseColor = 'rgba(30, 41, 59, 0.14)';
+      const colorH300 = getElevationAdjustedShadowColor(baseColor, 300);
+      const parseAlpha = (c: string) => parseFloat(c.match(/rgba\(\d+,\s*\d+,\s*\d+,\s*([\d.]+)\)/)![1]);
+
+      const a300 = parseAlpha(colorH300);
+      // At H -> infinity, attenuation factor is clamped at 0.60 => alpha >= 0.14 * 0.60 = 0.084
+      expect(a300).toBeGreaterThanOrEqual(0.084);
+      expect(a300).toBeLessThanOrEqual(0.09);
+    });
+
+    it('applies elevation-adjusted color in getCachedRoofShadowSamples', () => {
+      const lowerRoof: MasterplanStoryTier = {
+        buildingId: 'b_lower',
+        storyIndex: 0,
+        polygon: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }],
+        hBottom: 0,
+        hTop: 20,
+        isProposed: true,
+        isSelected: false,
+        isHovered: false,
+        isConvex: true,
+      };
+
+      const tower: MasterplanStoryTier = {
+        buildingId: 'b_tower',
+        storyIndex: 1,
+        polygon: [{ x: 5, y: -10 }, { x: 15, y: -10 }, { x: 15, y: 10 }, { x: 5, y: 10 }],
+        hBottom: 0,
+        hTop: 50,
+        isProposed: true,
+        isSelected: false,
+        isHovered: false,
+        isConvex: true,
+      };
+
+      const baseSamples = [{ color: 'rgba(30, 41, 59, 0.14)', offsetMin: 0 }];
+
+      const result = getCachedRoofShadowSamples(
+        'b_lower:0',
+        20,
+        [tower],
+        baseSamples,
+        52.23,
+        21.01,
+        'spring',
+        12.0,
+        'raycasting',
+        lowerRoof.polygon
+      );
+
+      expect(result.samples.length).toBeGreaterThan(0);
+      const shadowColor = result.samples[0].color;
+      // Shadow receiving elevation is H=20 => alpha should be ~ 0.14 * (1 - 0.4 * 20 / 50) = 0.14 * 0.84 = 0.1176
+      const alpha = parseFloat(shadowColor.match(/rgba\(\d+,\s*\d+,\s*\d+,\s*([\d.]+)\)/)![1]);
+      expect(alpha).toBeCloseTo(0.1176, 3);
     });
   });
 });

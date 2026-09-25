@@ -243,6 +243,30 @@ export function getCachedGroundShadowSamples(
 }
 
 /**
+ * Oblicza kolor cienia z delikatnym wzrostem przeźroczystości (spadkiem alpha)
+ * wraz z wysokością płaszczyzny odbiorczej (H).
+ * Na poziomie gruntu (H <= 0): pełne krycie bazowe (np. alpha = 0.14).
+ * Dla wyższych dachów (np. H = 15m, 30m, 60m): delikatne, płynne rozjaśnienie cienia,
+ * oddające zjawisko większego rozproszenia światła nieboskłonu (ambient skylight scatter).
+ */
+export function getElevationAdjustedShadowColor(baseColor: string, receivingElevation: number): string {
+  if (receivingElevation <= 0) return baseColor;
+  const rgbaMatch = baseColor.match(/^rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i);
+  if (!rgbaMatch) return baseColor;
+
+  const r = parseInt(rgbaMatch[1], 10);
+  const g = parseInt(rgbaMatch[2], 10);
+  const b = parseInt(rgbaMatch[3], 10);
+  const baseAlpha = parseFloat(rgbaMatch[4]);
+
+  // Łagodny współczynnik tłumienia z bezpieczną dolną granicą 60% bazowego krycia
+  const attenuationFactor = Math.max(0.60, 1 - (0.40 * receivingElevation) / (receivingElevation + 30));
+  const adjustedAlpha = Number((baseAlpha * attenuationFactor).toFixed(4));
+
+  return `rgba(${r}, ${g}, ${b}, ${adjustedAlpha})`;
+}
+
+/**
  * Cache cieni dachowych (ΔH) Masterplanu, per kondygnacja odbierająca cień (currentTierKey).
  */
 const roofCache = new Map<string, { key: string; result: MasterplanShadowRenderResult }>();
@@ -313,7 +337,8 @@ export function getCachedRoofShadowSamples(
     }
   }
 
-  const umbraColor = samples.find((s) => s.offsetMin === 0)?.color ?? DEFAULT_UMBRA_SAMPLE.color;
+  const rawUmbraColor = samples.find((s) => s.offsetMin === 0)?.color ?? DEFAULT_UMBRA_SAMPLE.color;
+  const umbraColor = getElevationAdjustedShadowColor(rawUmbraColor, currentH);
   const mergedUmbra: PolygonWithHoles[] = [];
   accumulatePolygons(mergedUmbra, umbraPolys);
 
