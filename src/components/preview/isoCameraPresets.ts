@@ -23,8 +23,12 @@ const AZIMUTH_DEG: Record<IsoOrientation, number> = {
 /**
  * Camera position (offset from the framed target) for a given isometric
  * corner orientation, at unit distance. Multiply by the desired distance
- * to place the camera. Scene convention: X = east, Z = north (ground plane),
- * Y = up (three.js Y-up), matching a CAD scene rotated once onto Y-up.
+ * to place the camera.
+ *
+ * Scene coordinate convention (after solidGroup.rotation.x = -PI/2):
+ * +X = East (CAD +X), -X = West
+ * +Y = Height (Up)
+ * -Z = North (CAD +Y), +Z = South (CAD -Y)
  */
 export function getIsoCameraOffset(orientation: IsoOrientation, distance: number): Vec3Like {
   const azimuthRad = (AZIMUTH_DEG[orientation] * Math.PI) / 180;
@@ -33,15 +37,17 @@ export function getIsoCameraOffset(orientation: IsoOrientation, distance: number
   return {
     x: horizontal * Math.sin(azimuthRad),
     y: vertical,
-    z: horizontal * Math.cos(azimuthRad),
+    z: -horizontal * Math.cos(azimuthRad),
   };
 }
 
 /**
- * Jednostkowy wektor w kierunku słońca (Y-up, X=wschód, Z=północ — konwencja tego pliku), z
- * azymutu/elewacji (konwencja: 0°=Północ, 90°=Wschód, jak w masterplanGeometry.ts/utils/solar.ts).
- * Używany do ustawienia DirectionalLight tak, by cień w podglądzie 3D odpowiadał rzeczywistej
- * pozycji słońca, a nie zahardkodowanemu kierunkowi.
+ * Jednostkowy wektor w kierunku słońca (Y-up, +X=wschód, -Z=północ, +Z=południe), z
+ * azymutu/elewacji (konwencja astronomiczna: 0°=Północ, 90°=Wschód, 180°=Południe, 270°=Zachód).
+ *
+ * Dla słońca w zenicie/południu (azymut 180°): wektor ma +Z (znajduje się na południu),
+ * dzięki czemu promienie directional light świecą w stronę -Z (północ), a rzucany cień
+ * pada na północ od bryły (CAD +Y), w 100% zgodnie z fizyką i rzutem 2D Masterplanu.
  */
 export function getSunDirection3D(azimuthDeg: number, elevationDeg: number): Vec3Like {
   const azimuthRad = (azimuthDeg * Math.PI) / 180;
@@ -50,6 +56,6 @@ export function getSunDirection3D(azimuthDeg: number, elevationDeg: number): Vec
   return {
     x: horizontal * Math.sin(azimuthRad),
     y: Math.sin(elevationRad),
-    z: horizontal * Math.cos(azimuthRad),
+    z: -horizontal * Math.cos(azimuthRad),
   };
 }

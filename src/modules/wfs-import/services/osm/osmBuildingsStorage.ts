@@ -2,12 +2,11 @@
  * osmBuildingsStorage.ts
  *
  * Magazyn tymczasowy dla danych OSM (Overpass API) w IndexedDB (z fallbackiem w pamięci RAM).
- * Zapobiega utracie pobranych danych przy przerwaniu połączenia, umożliwia wznawianie
- * od miejsca przerwania oraz eliminuje powtarzanie kosztownych zapytań o kwadranty
- * i części 3D (building:part po ID).
+ * Przechowuje wyłącznie surowe odpowiedzi z pierwszego kroku odpytywania po kwadrantach,
+ * zapobiegając powtarzaniu kosztownych zapytań sieciowych o siatkę terenu przy zachowaniu
+ * pełnej świeżości kolejnych etapów asemblacji i dociągu części 3D.
  */
 
-import { BuildingLoop } from '../../../../types/geometry';
 import { OverpassResponse } from './osmBuildingsClient';
 import { WfsBbox } from '../city/wfsWarsawClient';
 
@@ -15,8 +14,6 @@ const DB_NAME = 'usi-light-osm-cache';
 const DB_VERSION = 1;
 
 const STORE_QUADRANTS = 'osm_raw_quadrants';
-const STORE_PARTS = 'osm_building_parts';
-const STORE_ASSEMBLED = 'osm_assembled_buildings';
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 dni
 
@@ -28,8 +25,6 @@ interface CachedRecord<T> {
 
 // Fallback in-memory (np. gdy IndexedDB jest wyłączone lub w środowisku Node/testowym)
 const memoryQuadrants = new Map<string, CachedRecord<OverpassResponse>>();
-const memoryParts = new Map<string, CachedRecord<OverpassResponse>>();
-const memoryAssembled = new Map<string, CachedRecord<BuildingLoop[]>>();
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 let warnedUnavailable = false;
@@ -56,12 +51,6 @@ function openOsmDb(): Promise<IDBDatabase | null> {
         if (!db.objectStoreNames.contains(STORE_QUADRANTS)) {
           db.createObjectStore(STORE_QUADRANTS, { keyPath: 'key' });
         }
-        if (!db.objectStoreNames.contains(STORE_PARTS)) {
-          db.createObjectStore(STORE_PARTS, { keyPath: 'key' });
-        }
-        if (!db.objectStoreNames.contains(STORE_ASSEMBLED)) {
-          db.createObjectStore(STORE_ASSEMBLED, { keyPath: 'key' });
-        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => {
@@ -79,16 +68,6 @@ function openOsmDb(): Promise<IDBDatabase | null> {
 
 export function formatQuadrantKey(bbox: WfsBbox): string {
   return bbox.map((coord) => coord.toFixed(5)).join(',');
-}
-
-export function formatPartsBatchKey(wayIds: number[], relIds: number[]): string {
-  const sortedWays = [...wayIds].sort((a, b) => a - b).join(',');
-  const sortedRels = [...relIds].sort((a, b) => a - b).join(',');
-  return `w:[${sortedWays}]_r:[${sortedRels}]`;
-}
-
-export function formatAssembledKey(centerLat: number, centerLon: number, radiusMeters: number, crs: string): string {
-  return `${centerLat.toFixed(5)}_${centerLon.toFixed(5)}_r${Math.round(radiusMeters)}_${crs}`;
 }
 
 async function getFromStore<T>(
@@ -170,59 +149,15 @@ export async function setQuadrantCache(quadrantBbox: WfsBbox, response: Overpass
   return saveToStore(STORE_QUADRANTS, key, response, memoryQuadrants);
 }
 
-export async function getBuildingPartsBatchCache(
-  wayIds: number[],
-  relIds: number[],
-  ttlMs?: number
-): Promise<OverpassResponse | null> {
-  const key = formatPartsBatchKey(wayIds, relIds);
-  return getFromStore(STORE_PARTS, key, memoryParts, ttlMs);
-}
-
-export async function setBuildingPartsBatchCache(
-  wayIds: number[],
-  relIds: number[],
-  response: OverpassResponse
-): Promise<void> {
-  const key = formatPartsBatchKey(wayIds, relIds);
-  return saveToStore(STORE_PARTS, key, response, memoryParts);
-}
-
-export async function getAssembledBuildingsCache(
-  centerLat: number,
-  centerLon: number,
-  radiusMeters: number,
-  crs: string,
-  ttlMs?: number
-): Promise<BuildingLoop[] | null> {
-  const key = formatAssembledKey(centerLat, centerLon, radiusMeters, crs);
-  return getFromStore(STORE_ASSEMBLED, key, memoryAssembled, ttlMs);
-}
-
-export async function setAssembledBuildingsCache(
-  centerLat: number,
-  centerLon: number,
-  radiusMeters: number,
-  crs: string,
-  buildings: BuildingLoop[]
-): Promise<void> {
-  const key = formatAssembledKey(centerLat, centerLon, radiusMeters, crs);
-  return saveToStore(STORE_ASSEMBLED, key, buildings, memoryAssembled);
-}
-
 export async function clearOsmBuildingsStorage(): Promise<void> {
   memoryQuadrants.clear();
-  memoryParts.clear();
-  memoryAssembled.clear();
 
   const db = await openOsmDb();
   if (!db) return;
 
   try {
-    const tx = db.transaction([STORE_QUADRANTS, STORE_PARTS, STORE_ASSEMBLED], 'readwrite');
+    const tx = db.transaction(STORE_QUADRANTS, 'readwrite');
     tx.objectStore(STORE_QUADRANTS).clear();
-    tx.objectStore(STORE_PARTS).clear();
-    tx.objectStore(STORE_ASSEMBLED).clear();
   } catch (err) {
     console.warn('[osmBuildingsStorage] Błąd czyszczenia IndexedDB:', err);
   }

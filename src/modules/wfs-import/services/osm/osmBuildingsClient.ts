@@ -13,22 +13,18 @@ import { sanitizePolygon } from '../../../../utils/importers/geometrySanitizer';
 import { rebuildBuildingSegments } from '../../../../utils/segmentStatistics';
 import { ensureOppositeWinding } from '../../../../utils/ringSegments';
 import {
-  polygonCircleIntersectionRatio,
   isPolygonCCW,
   computePolygonArea,
   getPolygonCentroid,
   intersectionPolygonLoops,
   isPointInPolygon,
+  isPolygonEntirelyOutsideCircle,
 } from '../../../../utils/math2d/polygons';
 import { parseOsmHeight } from './osmLanduseClient';
 import { WfsBbox } from '../city/wfsWarsawClient';
 import {
   getQuadrantCache,
   setQuadrantCache,
-  getBuildingPartsBatchCache,
-  setBuildingPartsBatchCache,
-  getAssembledBuildingsCache,
-  setAssembledBuildingsCache,
 } from './osmBuildingsStorage';
 
 // Zapytanie idzie przez serverless proxy `/api/osm-overpass` (api/osm-overpass.ts) zamiast
@@ -72,6 +68,8 @@ const DEFAULT_FLOOR_HEIGHT = 3.0;
 const FIRST_FLOOR_HEIGHT = 3.5;
 const DEFAULT_HEIGHT = 15.0;
 const DEFAULT_STOREYS = 5;
+
+export const LAYER_OSM_BUILDINGS = 'OSM_BUDYNKI';
 
 export interface OverpassGeometryPoint {
   lat: number;
@@ -649,11 +647,13 @@ export function parseOverpassBuildingsResponse(
   // 1. Przetwarzanie relacji multipolygon (budynki z dziedzińcami / złożone bryły)
   for (const rel of relations) {
     const tags = rel.tags || {};
+    if (tags.type === 'building') continue; // Relacje Simple 3D Buildings (kontenery części) są obsługiwane w Blokach 0 i 3
     if (!tags.building && tags.type !== 'multipolygon') continue;
 
     const outerSegments: LatLon[][] = [];
     const innerSegments: LatLon[][] = [];
     let outerWayTagsWithName: Record<string, string> | undefined;
+    const currentRelMemberWayIds: number[] = [];
 
     for (const member of (rel.members || [])) {
       if (member.type === 'way') {
@@ -663,7 +663,7 @@ export function parseOverpassBuildingsResponse(
         }
         const way = ways.get(member.ref);
         if (way) {
-          processedWayIds.add(member.ref);
+          currentRelMemberWayIds.push(member.ref);
           if (!segLatLons) {
             segLatLons = extractWayLatLons(way);
           }
@@ -685,6 +685,11 @@ export function parseOverpassBuildingsResponse(
     const outerRings = assembleCoordinateSegmentsIntoRings(outerSegments);
     const innerRings = assembleCoordinateSegmentsIntoRings(innerSegments);
     if (outerRings.length === 0) continue;
+
+    // Relacja poprawnie utworzyła obrysy multipolygon — oznaczamy jej składowe way'e jako przetworzone
+    for (const wId of currentRelMemberWayIds) {
+      processedWayIds.add(wId);
+    }
 
     const { defaultHeight, elevation, storeysCount, heightSource } = extractOsmBuildingElevation(tags);
     const buildingType = resolveBuildingType(tags);
@@ -748,12 +753,6 @@ export function parseOverpassBuildingsResponse(
         }
       }
 
-      // Filtr zasięgu promienia
-      if (radiusMeters != null && radiusMeters > 0) {
-        const ratio = polygonCircleIntersectionRatio(sanitized.vertices, centerCad.x, centerCad.y, radiusMeters);
-        if (ratio < 0.1) continue;
-      }
-
       const outerIsCCW = isPolygonCCW(sanitized.vertices);
       const holes: Point2D[][] = [];
 
@@ -778,7 +777,7 @@ export function parseOverpassBuildingsResponse(
       const loop: BuildingLoop = {
         id: bldgId,
         name: nameWithPart,
-        layer: 'WFS_BUDYNKI',
+        layer: LAYER_OSM_BUILDINGS,
         category: 'building',
         groupId: relGroupId,
         isTested: false,
@@ -832,11 +831,6 @@ export function parseOverpassBuildingsResponse(
 
     if (!sanitized.valid || sanitized.vertices.length < 3) continue;
 
-    if (radiusMeters != null && radiusMeters > 0) {
-      const ratio = polygonCircleIntersectionRatio(sanitized.vertices, centerCad.x, centerCad.y, radiusMeters);
-      if (ratio < 0.1) continue;
-    }
-
     const wayGroupId = relInfo
       ? `group-osm-bld-${relInfo.relId}`
       : (geometricEnvelopeGroupByWayId.get(wayId) || undefined);
@@ -861,7 +855,7 @@ export function parseOverpassBuildingsResponse(
     const loop: BuildingLoop = {
       id: bldgId,
       name: buildingName,
-      layer: 'WFS_BUDYNKI',
+      layer: LAYER_OSM_BUILDINGS,
       category: 'building',
       groupId: wayGroupId,
       isTested: false,
@@ -917,11 +911,6 @@ export function parseOverpassBuildingsResponse(
 
     if (!sanitized.valid || sanitized.vertices.length < 3) continue;
 
-    if (radiusMeters != null && radiusMeters > 0) {
-      const ratio = polygonCircleIntersectionRatio(sanitized.vertices, centerCad.x, centerCad.y, radiusMeters);
-      if (ratio < 0.1) continue;
-    }
-
     const partGroupId = relInfo
       ? `group-osm-bld-${relInfo.relId}`
       : geometricEnvelopeGroupByPartWayId.get(wayId);
@@ -929,7 +918,7 @@ export function parseOverpassBuildingsResponse(
     const loop: BuildingLoop = {
       id: bldgId,
       name: buildingName,
-      layer: 'WFS_BUDYNKI',
+      layer: LAYER_OSM_BUILDINGS,
       category: 'building',
       groupId: partGroupId,
       isTested: false,
@@ -989,14 +978,10 @@ export function parseOverpassBuildingsResponse(
             isCityCentre: false,
           });
           if (!sanitized.valid || sanitized.vertices.length < 3) continue;
-          if (radiusMeters != null && radiusMeters > 0) {
-            const ratio = polygonCircleIntersectionRatio(sanitized.vertices, centerCad.x, centerCad.y, radiusMeters);
-            if (ratio < 0.1) continue;
-          }
           const loop: BuildingLoop = {
             id: bldgId,
             name: buildingName,
-            layer: 'WFS_BUDYNKI',
+            layer: LAYER_OSM_BUILDINGS,
             category: 'building',
             isTested: false,
             isIncluded: true,
@@ -1200,9 +1185,11 @@ export function buildOverpassBuildingsQuery(
 [out:json][timeout:${timeoutSec}];
 (
   way["building"]${filter};
-  relation["building"]["type"="multipolygon"]${filter};
+  relation["building"]${filter};
+  relation["building:part"]${filter};
+  relation["type"="building"]${filter};
 );
-out tags geom qt;
+out geom qt;
   `.trim();
 }
 
@@ -1213,7 +1200,7 @@ export async function fetchRelationFull(relId: number, timeoutMs = 25000): Promi
   const query = `
     [out:json][timeout:25];
     relation(${relId});
-    out tags geom qt;
+    out geom qt;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
 }
@@ -1227,22 +1214,22 @@ export async function fetchRelationsBatch(relIds: number[], timeoutMs = 30000): 
   const query = `
     [out:json][timeout:30];
     relation(id:${idsStr});
-    out tags geom qt;
+    out geom qt;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
 }
 
 /**
- * Krok 3: Celowany dociąg budynku wraz z częściami building:part wokół niego.
+ * Krok 3: Celowany dociąg budynku wraz z częściami building:part wokół niego i wewnątrz obrysu.
  */
 export async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 25000): Promise<OverpassResponse> {
   const query = `
     [out:json][timeout:25];
     (
       way(${wayId});
-      nwr(around:10)["building:part"];
+      nwr(around:50)["building:part"];
     );
-    out tags geom qt;
+    out geom qt;
   `.trim();
   return postOverpassQuery(query, timeoutMs);
 }
@@ -1253,30 +1240,20 @@ export async function fetchBuildingWithPartsById(wayId: number, timeoutMs = 2500
 export async function fetchBuildingPartsBatch(
   wayIds: number[],
   relIds: number[],
-  timeoutMs = 30000,
-  bypassCache = false
+  timeoutMs = 30000
 ): Promise<OverpassResponse> {
   if (wayIds.length === 0 && relIds.length === 0) return { elements: [] };
-
-  if (!bypassCache) {
-    const cached = await getBuildingPartsBatchCache(wayIds, relIds);
-    if (cached) {
-      return cached;
-    }
-  }
 
   const query = `
     [out:json][timeout:30];
     (
+      ${relIds.length > 0 ? `relation(id:${relIds.join(',')}); nwr(around:50)["building:part"];` : ''}
       ${relIds.length > 0 ? `relation(id:${relIds.join(',')});` : ''}
-      ${wayIds.length > 0 ? `way(id:${wayIds.join(',')}); nwr(around:10)["building:part"];` : ''}
+      ${wayIds.length > 0 ? `way(id:${wayIds.join(',')}); nwr(around:50)["building:part"];` : ''}
     );
-    out tags geom qt;
+    out geom qt;
   `.trim();
   const resp = await postOverpassQuery(query, timeoutMs);
-  if (resp && resp.elements && resp.elements.length > 0) {
-    await setBuildingPartsBatchCache(wayIds, relIds, resp);
-  }
   return resp;
 }
 
@@ -1336,7 +1313,7 @@ export function splitBboxIntoQuadrants(
 
 /**
  * Krok 1: Pobranie pojedynczego kwadrantu z automatycznym retry przy błędzie sieci lub timeout serwera.
- * Pobiera budynki (way i multipolygon) z bezpośrednio osadzoną geometrią bez zbędnych węzłów.
+ * Pobiera budynki (way i relacje) z bezpośrednio osadzoną geometrią bez zbędnych węzłów.
  */
 async function fetchQuadrantWithRetry(
   quadrantBbox: WfsBbox,
@@ -1356,9 +1333,10 @@ async function fetchQuadrantWithRetry(
     [out:json][timeout:60];
     (
       way["building"](${south},${west},${north},${east});
-      relation["building"]["type"="multipolygon"](${south},${west},${north},${east});
+      relation["building"](${south},${west},${north},${east});
+      relation["type"="building"](${south},${west},${north},${east});
     );
-    out tags geom qt;
+    out geom qt;
   `.trim();
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1384,7 +1362,7 @@ async function fetchQuadrantWithRetry(
 /**
  * Główna procedura pobierania budynków z OpenStreetMap przez Overpass API:
  * Krok 1: Podział na kwadranty 350x350m z zakładem >= 100m.
- * Krok 2: Pobranie bazowych budynków (TYLKO nwr["building"]) per kwadrant z retry i ich połączenie.
+ * Krok 2: Pobranie bazowych budynków per kwadrant z retry i ich połączenie.
  * Krok 3: Precyzyjny dociąg building:part oraz relacji 3D po ID budynków z Kroku 2.
  * Krok 4: Weryfikacja kompletności geometrii (relacje, węzły, części 3D).
  * Krok 5: Asemblacja i sanityzacja geometrii CAD (odrzucenie envelope, grupowanie części, holes).
@@ -1397,27 +1375,10 @@ export async function fetchOsmBuildings(
   onProgress?: (progress: OsmProgressInfo) => void,
   bypassCache = false
 ): Promise<BuildingLoop[]> {
-  if (!bypassCache) {
-    const cachedAssembled = await getAssembledBuildingsCache(
-      projectCenter.lat,
-      projectCenter.lon,
-      radiusMeters || 0,
-      projectCrs.crs
-    );
-    if (cachedAssembled && cachedAssembled.length > 0) {
-      onProgress?.({
-        stage: 'assembling',
-        message: `Wczytano ${cachedAssembled.length} budynków z lokalnego magazynu...`,
-        foundBuildingsCount: cachedAssembled.length,
-      });
-      return cachedAssembled;
-    }
-  }
-
   const queryBbox = radiusMeters ? padBbox(bbox, Math.max(50, radiusMeters * 0.2)) : bbox;
   const quadrants = splitBboxIntoQuadrants(queryBbox, 350, 100);
 
-  // KROK 1: Szybki scan bazowy kwadrantami (TYLKO nwr["building"]) z obsługą retry
+  // KROK 1: Szybki scan bazowy kwadrantami z obsługą retry
   onProgress?.({
     stage: 'baseline',
     message: `Pobieranie budynków OSM (kwadranty: 1/${quadrants.length})...`,
@@ -1453,16 +1414,76 @@ export async function fetchOsmBuildings(
     throw new Error('Żaden kwadrant Overpass API nie zwrócił danych. Sprawdź połączenie z siecią.');
   }
 
-  // KROK 2: Połączenie odpowiedzi, deduplikacja i wyodrębnienie ID obiektów
+  // KROK 2: Połączenie odpowiedzi, deduplikacja i wstępne odrzucenie obiektów w całości poza zasięgiem projektu
   let combinedResponse = mergeOverpassResponses(...quadrantResponses);
   const baseQuadrantCombinedResponse = combinedResponse;
 
+  const projectCenterCad = wgs84ToCadPoint(projectCenter, projectCrs, projectCenter);
+  const nodeCoordsMap = new Map<number, LatLon>();
+  for (const el of combinedResponse.elements) {
+    if (el.type === 'node') {
+      nodeCoordsMap.set(el.id, { lat: el.lat, lon: el.lon });
+    }
+  }
+
+  const isWayEntirelyOutside = (way: OverpassWay): boolean => {
+    if (!radiusMeters || radiusMeters <= 0) return false;
+    let latLons: LatLon[] | null = null;
+    if (way.geometry && way.geometry.length > 0) {
+      latLons = way.geometry;
+    } else if (way.nodes && way.nodes.length > 0) {
+      const pts: LatLon[] = [];
+      for (const nId of way.nodes) {
+        const c = nodeCoordsMap.get(nId);
+        if (c) pts.push(c);
+      }
+      if (pts.length > 0) latLons = pts;
+    }
+    if (!latLons || latLons.length === 0) return false;
+    const cadPts: Point2D[] = latLons.map((c) => wgs84ToCadPoint(c, projectCrs, projectCenter));
+    return isPolygonEntirelyOutsideCircle(cadPts, projectCenterCad.x, projectCenterCad.y, radiusMeters);
+  };
+
+  const isRelEntirelyOutside = (rel: OverpassRelation): boolean => {
+    if (!radiusMeters || radiusMeters <= 0) return false;
+    let hasCheckedMember = false;
+    for (const member of rel.members || []) {
+      let latLons: LatLon[] | null = null;
+      if (member.geometry && member.geometry.length > 0) {
+        latLons = member.geometry;
+      } else if (member.nodes && member.nodes.length > 0) {
+        const pts: LatLon[] = [];
+        for (const nId of member.nodes) {
+          const c = nodeCoordsMap.get(nId);
+          if (c) pts.push(c);
+        }
+        if (pts.length > 0) latLons = pts;
+      }
+      if (latLons && latLons.length > 0) {
+        hasCheckedMember = true;
+        const cadPts: Point2D[] = latLons.map((c) => wgs84ToCadPoint(c, projectCrs, projectCenter));
+        // Jeśli choć jeden członek nie jest w całości poza okręgiem -> relacja jest w zasięgu projektu
+        if (!isPolygonEntirelyOutsideCircle(cadPts, projectCenterCad.x, projectCenterCad.y, radiusMeters)) {
+          return false;
+        }
+      }
+    }
+    return hasCheckedMember;
+  };
+
   const baseWays = (combinedResponse?.elements || []).filter(
-    (e): e is OverpassWay => e.type === 'way' && !!e.tags && (!!e.tags.building || !!e.tags['building:part'])
+    (e): e is OverpassWay =>
+      e.type === 'way' &&
+      !!e.tags &&
+      (!!e.tags.building || !!e.tags['building:part']) &&
+      !isWayEntirelyOutside(e)
   );
   const baseRels = (combinedResponse?.elements || []).filter(
     (e): e is OverpassRelation =>
-      e.type === 'relation' && !!e.tags && (!!e.tags.building || e.tags.type === 'building' || e.tags.type === 'multipolygon')
+      e.type === 'relation' &&
+      !!e.tags &&
+      (!!e.tags.building || !!e.tags['building:part'] || e.tags.type === 'building' || e.tags.type === 'multipolygon') &&
+      !isRelEntirelyOutside(e)
   );
   const foundCount = baseWays.length + baseRels.length;
 
@@ -1477,12 +1498,20 @@ export async function fetchOsmBuildings(
   const relIds = Array.from(new Set(baseRels.map((r) => r.id)));
 
   const detailResponses: OverpassResponse[] = [];
-  const BATCH_SIZE = 30;
-  const totalBatches = Math.max(1, Math.ceil(wayIds.length / BATCH_SIZE));
+  const BATCH_SIZE_WAYS = 30;
+  const BATCH_SIZE_RELS = 15;
+  const totalBatches = Math.max(
+    1,
+    Math.max(
+      Math.ceil(wayIds.length / BATCH_SIZE_WAYS),
+      Math.ceil(relIds.length / BATCH_SIZE_RELS)
+    )
+  );
 
   for (let bIdx = 0; bIdx < totalBatches; bIdx++) {
-    const chunkWays = wayIds.slice(bIdx * BATCH_SIZE, (bIdx + 1) * BATCH_SIZE);
-    const chunkRels = bIdx === 0 ? relIds : [];
+    const chunkWays = wayIds.slice(bIdx * BATCH_SIZE_WAYS, (bIdx + 1) * BATCH_SIZE_WAYS);
+    const chunkRels = relIds.slice(bIdx * BATCH_SIZE_RELS, (bIdx + 1) * BATCH_SIZE_RELS);
+    if (chunkWays.length === 0 && chunkRels.length === 0) continue;
 
     onProgress?.({
       stage: 'details',
@@ -1493,7 +1522,7 @@ export async function fetchOsmBuildings(
     });
 
     try {
-      const batchResp = await fetchBuildingPartsBatch(chunkWays, chunkRels, 35000, bypassCache);
+      const batchResp = await fetchBuildingPartsBatch(chunkWays, chunkRels, 35000);
       if (batchResp && batchResp.elements.length > 0) {
         detailResponses.push(batchResp);
       }
@@ -1532,7 +1561,7 @@ export async function fetchOsmBuildings(
       const fallbackWayIds = incomplete.incompleteWayBuildingIds.slice(0, 4);
       if (fallbackRelIds.length > 0 || fallbackWayIds.length > 0) {
         try {
-          const recoveryResp = await fetchBuildingPartsBatch(fallbackWayIds, fallbackRelIds, 30000, bypassCache);
+          const recoveryResp = await fetchBuildingPartsBatch(fallbackWayIds, fallbackRelIds, 30000);
           if (recoveryResp && recoveryResp.elements.length > 0) {
             combinedResponse = mergeOverpassResponses(combinedResponse, recoveryResp);
           }
@@ -1558,16 +1587,6 @@ export async function fetchOsmBuildings(
   } catch (parseErr) {
     console.warn('Błąd asemblacji z częściami 3D, uruchamianie awaryjnej asemblacji budynków bazowych:', parseErr);
     assembledBuildings = parseOverpassBuildingsResponse(baseQuadrantCombinedResponse, projectCenter, projectCrs, radiusMeters);
-  }
-
-  if (assembledBuildings.length > 0) {
-    await setAssembledBuildingsCache(
-      projectCenter.lat,
-      projectCenter.lon,
-      radiusMeters || 0,
-      projectCrs.crs,
-      assembledBuildings
-    );
   }
 
   return assembledBuildings;

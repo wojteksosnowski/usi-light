@@ -133,9 +133,9 @@ describe('buildDxfLines — DXF structural integrity', () => {
     const layerEntrySection = tablesSection.slice(layerTableIdx, endtabIdx);
     const actualCount = layerEntrySection.filter((v, i) => v === 'LAYER' && layerEntrySection[i - 1] === '0').length;
 
-    // Default "0" layer (added automatically by the DXF writer) + our 7: BUDYNKI, GRANICE,
-    // PUNKTY_POMIARU, RZEZBA_TERENU, ZAKRES_CIENIA_GODZINOWY, ANALIZA_S12, ANALIZA_S56
-    expect(actualCount).toBe(8);
+    // Default "0" layer (added automatically by the DXF writer) + our 8: BUDYNKI, BUDYNKI_BADANE,
+    // GRANICE_DZIALEK, PUNKTY_POMIARU, RZEZBA_TERENU, ZAKRES_CIENIA_GODZINOWY, ANALIZA_S12, ANALIZA_S56
+    expect(actualCount).toBe(9);
   });
 
   it('ends with exactly one EOF as the final record', () => {

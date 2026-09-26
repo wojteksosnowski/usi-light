@@ -1247,6 +1247,55 @@ export function polygonCircleIntersectionRatio(
   return inside / total;
 }
 
+/**
+ * Sprawdza, czy poligon/geometria 2D jest w całości poza okręgiem o środku (cx, cy) i promieniu radius.
+ * Zwraca false jeśli poligon zawiera się w okręgu, przecina go lub zawiera środek okręgu.
+ */
+export function isPolygonEntirelyOutsideCircle(
+  vertices: Point2D[],
+  cx: number,
+  cy: number,
+  radius: number
+): boolean {
+  if (!vertices || vertices.length === 0 || radius <= 0) return true;
+  const r2 = radius * radius;
+
+  // 1. Sprawdź czy którykolwiek wierzchołek leży wewnątrz lub na brzegu okręgu
+  for (const v of vertices) {
+    const dx = v.x - cx;
+    const dy = v.y - cy;
+    if (dx * dx + dy * dy <= r2) {
+      return false; // Wierzchołek wewnątrz okręgu
+    }
+  }
+
+  // 2. Sprawdź czy środek okręgu leży wewnątrz poligonu (wielki budynek obejmujący środek)
+  if (vertices.length >= 3 && isPointInPolygon({ x: cx, y: cy }, vertices)) {
+    return false;
+  }
+
+  // 3. Sprawdź czy jakakolwiek krawędź przecina okrąg (najbliższy punkt odcinka do środka)
+  const n = vertices.length;
+  for (let i = 0; i < n; i++) {
+    const p1 = vertices[i];
+    const p2 = vertices[(i + 1) % n];
+    const segDx = p2.x - p1.x;
+    const segDy = p2.y - p1.y;
+    const segLenSq = segDx * segDx + segDy * segDy;
+    if (segLenSq > 0) {
+      const t = Math.max(0, Math.min(1, ((cx - p1.x) * segDx + (cy - p1.y) * segDy) / segLenSq));
+      const projX = p1.x + t * segDx;
+      const projY = p1.y + t * segDy;
+      const distSq = (cx - projX) * (cx - projX) + (cy - projY) * (cy - projY);
+      if (distSq <= r2) {
+        return false; // Krawędź przecina okrąg
+      }
+    }
+  }
+
+  return true; // W całości poza zasięgiem
+}
+
 function ringFingerprint(ring: Point2D[]): string {
   let s = String(ring.length);
   for (const p of ring) {

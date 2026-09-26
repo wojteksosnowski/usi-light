@@ -56,8 +56,8 @@
 ## 1f. Import OSM Overpass (Kompletność 3D, building:part, Selektywna Geometria i Sanityzacja Tagów)
 - **5-etapowy potok importu OSM**:
   1. Podział zadanego obszaru na kwadranty $350 \times 350\text{ m}$ z zakładem $\ge 100\text{ m}$.
-  2. Pobranie bazowych obrysów (`way["building"]` + `relation["building"]["type"="multipolygon"]`) z minimalizacją payloadu (`out tags geom qt;`) eliminującą tysiące zbędnych elementów `node` i przyspieszającą streaming dzięki indeksacji quadtile `qt`.
-  3. Precyzyjny dociąg części 3D (`building:part`) po ID budynków z buforem `nwr(around:10)["building:part"]` (promień $10\text{ m}$ jest krytyczny, aby nie gubić wież, kopuł i wycofanych kondygnacji w głębi bryły).
+  2. Pobranie bazowych obrysów (`way["building"]`, `relation["building"]`, `relation["building:part"]`, `relation["type"="building"]`) z minimalizacją payloadu (`out tags geom qt;`) eliminującą tysiące zbędnych elementów `node` i przyspieszającą streaming dzięki indeksacji quadtile `qt`.
+  3. Precyzyjny dociąg części 3D (`building:part`) po ID budynków i relacji z buforem `nwr(around:50)["building:part"]` (promień $50\text{ m}$ jest krytyczny, aby nie gubić wież, kopuł, wycofanych kondygnacji oraz wewnętrznych części głęboko w bryle dużych obiektów, np. galerii handlowych).
   4. Weryfikacja kompletności relacji i geometrii (z rundą naprawczą recovery).
   5. Asemblacja obiektów CAD: składanie pierścieni zewnętrznych i wewnętrznych (`assembleCoordinateSegmentsIntoRings`), grupowanie części w obiekty logiczne (`groupId`), odrzucanie envelope przy pełnym pokryciu przez części ($>85\%$) i ekstrakcja wewnętrznych dziedzińców (`holes`).
 - **Sanityzacja tagów OSM (`sanitizeOsmBuildingTags`)**:

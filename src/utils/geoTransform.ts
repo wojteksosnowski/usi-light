@@ -377,3 +377,230 @@ export function pixelToTileCoords(pixel: WebMercatorPixel, zoom: number): TileCo
     z: zoom,
   };
 }
+
+/**
+ * Oblicza odległość ortodromiczną (po kuli ziemskiej) w kilometrach między dwoma punktami WGS84.
+ */
+export function calculateHaversineDistanceKm(p1: LatLon, p2: LatLon): number {
+  const R = 6371.0; // Średni promień Ziemi w km
+  const dLat = ((p2.lat - p1.lat) * Math.PI) / 180;
+  const dLon = ((p2.lon - p1.lon) * Math.PI) / 180;
+  const lat1 = (p1.lat * Math.PI) / 180;
+  const lat2 = (p2.lat * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+const POLISH_MAJOR_CITIES: { name: string; lat: number; lon: number }[] = [
+  { name: 'Warszawa', lat: 52.2297, lon: 21.0122 },
+  { name: 'Kraków',   lat: 50.0647, lon: 19.9450 },
+  { name: 'Wrocław',  lat: 51.1079, lon: 17.0385 },
+  { name: 'Łódź',     lat: 51.7592, lon: 19.4560 },
+  { name: 'Poznań',   lat: 52.4064, lon: 16.9252 },
+  { name: 'Gdańsk',   lat: 54.3520, lon: 18.6466 },
+  { name: 'Szczecin', lat: 53.4285, lon: 14.5528 },
+  { name: 'Bydgoszcz',lat: 53.1235, lon: 18.0084 },
+  { name: 'Lublin',   lat: 51.2465, lon: 22.5684 },
+  { name: 'Katowice', lat: 50.2649, lon: 19.0238 },
+  { name: 'Białystok',lat: 53.1325, lon: 23.1688 },
+  { name: 'Rzeszów',  lat: 50.0412, lon: 21.9991 },
+  { name: 'Toruń',    lat: 53.0138, lon: 18.5984 },
+  { name: 'Kielce',   lat: 50.8661, lon: 20.6286 },
+  { name: 'Olsztyn',  lat: 53.7784, lon: 20.4801 },
+  { name: 'Opole',    lat: 50.6751, lon: 17.9213 },
+  { name: 'Zielona Góra', lat: 51.9356, lon: 15.5062 },
+];
+
+export function findNearestPolishCity(latLon: LatLon): { name: string; distanceKm: number } {
+  let best = POLISH_MAJOR_CITIES[0];
+  let bestDist = calculateHaversineDistanceKm(latLon, best);
+  for (let i = 1; i < POLISH_MAJOR_CITIES.length; i++) {
+    const d = calculateHaversineDistanceKm(latLon, POLISH_MAJOR_CITIES[i]);
+    if (d < bestDist) {
+      bestDist = d;
+      best = POLISH_MAJOR_CITIES[i];
+    }
+  }
+  return { name: best.name, distanceKm: bestDist };
+}
+
+export interface GeoContext {
+  crsInfo: CrsDetectionResult;
+  centerWgs84: LatLon;
+  bounds2D: { minX: number; maxX: number; minY: number; maxY: number };
+  isGeodetic: boolean;
+  count: number;
+  nearestCity?: string;
+  nearestCityDistanceKm?: number;
+}
+
+export function computePointsGeoContext(
+  points: Point2D[],
+  fallbackCenter?: LatLon
+): GeoContext {
+  const crsInfo = detectCoordinateSystem(points, fallbackCenter);
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+
+  for (const p of points) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  const hasPoints = points.length > 0 && Number.isFinite(minX);
+  const centerX = hasPoints ? (minX + maxX) / 2 : 0;
+  const centerY = hasPoints ? (minY + maxY) / 2 : 0;
+
+  const centerWgs84 = hasPoints
+    ? cadPointToWgs84({ x: centerX, y: centerY }, crsInfo, fallbackCenter)
+    : fallbackCenter || { lat: 52.2297, lon: 21.0122 };
+
+  const city = findNearestPolishCity(centerWgs84);
+
+  return {
+    crsInfo,
+    centerWgs84,
+    bounds2D: {
+      minX: hasPoints ? minX : 0,
+      maxX: hasPoints ? maxX : 0,
+      minY: hasPoints ? minY : 0,
+      maxY: hasPoints ? maxY : 0,
+    },
+    isGeodetic: crsInfo.isGeodetic && !crsInfo.isLocalReference,
+    count: points.length,
+    nearestCity: city.name,
+    nearestCityDistanceKm: city.distanceKm,
+  };
+}
+
+export type GeoCompatibilityStatus =
+  | 'COMPATIBLE_EXACT'
+  | 'COMPATIBLE_NEARBY'
+  | 'LOCATION_MISMATCH'
+  | 'CRS_MISMATCH'
+  | 'GEODETIC_INTO_LOCAL'
+  | 'LOCAL_INTO_GEODETIC'
+  | 'BOTH_LOCAL';
+
+export interface GeoCompatibilityResult {
+  status: GeoCompatibilityStatus;
+  isCompatible: boolean;
+  distanceKm: number;
+  description: string;
+  warningLevel: 'none' | 'info' | 'warning' | 'error';
+  sceneContext: GeoContext;
+  dxfContext: GeoContext;
+  recommendedAction: 'merge' | 'replace' | 'ask';
+}
+
+/**
+ * Weryfikuje zgodność geograficzną między istniejącą sceną a nowo importowanym plikiem DXF.
+ */
+export function validateGeoCompatibility(
+  sceneContext: GeoContext,
+  dxfContext: GeoContext
+): GeoCompatibilityResult {
+  const distKm = calculateHaversineDistanceKm(
+    sceneContext.centerWgs84,
+    dxfContext.centerWgs84
+  );
+
+  // 1. Obydwa obiekty w państwowym układzie geodezyjnym
+  if (sceneContext.isGeodetic && dxfContext.isGeodetic) {
+    if (sceneContext.crsInfo.crs === dxfContext.crsInfo.crs) {
+      if (distKm <= 2.0) {
+        return {
+          status: 'COMPATIBLE_EXACT',
+          isCompatible: true,
+          distanceKm: distKm,
+          warningLevel: 'none',
+          description: `Pełna zgodność geograficzna (${sceneContext.crsInfo.description}). Odległość: ${(distKm * 1000).toFixed(0)} m.`,
+          sceneContext,
+          dxfContext,
+          recommendedAction: 'merge',
+        };
+      } else if (distKm <= 15.0) {
+        return {
+          status: 'COMPATIBLE_NEARBY',
+          isCompatible: true,
+          distanceKm: distKm,
+          warningLevel: 'info',
+          description: `Zgodny układ współrzędnych (${sceneContext.crsInfo.description}). Obiekty w odległości ${distKm.toFixed(1)} km w tym samym rejonie.`,
+          sceneContext,
+          dxfContext,
+          recommendedAction: 'merge',
+        };
+      } else {
+        return {
+          status: 'LOCATION_MISMATCH',
+          isCompatible: false,
+          distanceKm: distKm,
+          warningLevel: 'warning',
+          description: `Wykryto rozbieżność lokalizacji: Scena znajduje się w rejonie ${sceneContext.nearestCity || 'lokalizacji A'}, a plik DXF w ${dxfContext.nearestCity || 'lokalizacji B'} (odległość ${distKm.toFixed(0)} km). Dołączenie umieści obiekty daleko od centrum projektu.`,
+          sceneContext,
+          dxfContext,
+          recommendedAction: 'replace',
+        };
+      }
+    } else {
+      return {
+        status: 'CRS_MISMATCH',
+        isCompatible: false,
+        distanceKm: distKm,
+        warningLevel: 'error',
+        description: `Niezgodność państwowych układów współrzędnych: Scena korzysta z ${sceneContext.crsInfo.geodeticLabel}, natomiast plik DXF z ${dxfContext.crsInfo.geodeticLabel} (odległość ${distKm.toFixed(0)} km).`,
+        sceneContext,
+        dxfContext,
+        recommendedAction: 'replace',
+      };
+    }
+  }
+
+  // 2. DXF geodezyjny, ale scena w lokalnym CAD (0, 0)
+  if (!sceneContext.isGeodetic && dxfContext.isGeodetic) {
+    return {
+      status: 'GEODETIC_INTO_LOCAL',
+      isCompatible: false,
+      distanceKm: distKm,
+      warningLevel: 'warning',
+      description: `Wczytywany plik DXF jest w państwowym układzie geodezyjnym (${dxfContext.crsInfo.description}, rejon ${dxfContext.nearestCity}), podczas gdy obecna scena korzysta z lokalnego układu CAD (0,0).`,
+      sceneContext,
+      dxfContext,
+      recommendedAction: 'replace',
+    };
+  }
+
+  // 3. DXF w lokalnym CAD (0, 0), ale scena w geodezji
+  if (sceneContext.isGeodetic && !dxfContext.isGeodetic) {
+    return {
+      status: 'LOCAL_INTO_GEODETIC',
+      isCompatible: false,
+      distanceKm: distKm,
+      warningLevel: 'warning',
+      description: `Obecna scena jest osadzona w układzie geodezyjnym (${sceneContext.crsInfo.description}), natomiast wczytywany plik DXF to rysunek lokalny bez współrzędnych państwowych.`,
+      sceneContext,
+      dxfContext,
+      recommendedAction: 'replace',
+    };
+  }
+
+  // 4. Obydwa lokalne
+  return {
+    status: 'BOTH_LOCAL',
+    isCompatible: true,
+    distanceKm: distKm,
+    warningLevel: 'none',
+    description: 'Oba rysunki korzystają z lokalnego układu CAD.',
+    sceneContext,
+    dxfContext,
+    recommendedAction: 'merge',
+  };
+}
+

@@ -5,6 +5,7 @@ import { PricingModal } from '../license/PricingModal';
 import { LicenseManagementModal } from '../license/LicenseManagementModal';
 import { PaymentSuccessModal } from '../license/PaymentSuccessModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { DxfImportModal } from '../dxf/DxfImportModal';
 
 export const ModalRoot: React.FC = () => {
   const isShareModalOpen = useUiStore((s) => s.isShareModalOpen);
@@ -24,6 +25,7 @@ export const ModalRoot: React.FC = () => {
       <LicenseManagementModal />
       <PaymentSuccessModal />
       <ConfirmDeleteModal />
+      <DxfImportModal />
     </>
   );
 };

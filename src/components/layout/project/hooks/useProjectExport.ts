@@ -13,6 +13,8 @@ export const useProjectExport = () => {
   const pinnedPointResults = useSolarAnalysisStore((s) => s.pinnedPointResults);
   const analysisResults = useSolarAnalysisStore((s) => s.analysisOutput.results);
   const shadowAnalysis = useSolarAnalysisStore((s) => s.analysisOutput.shadowAnalysis);
+  const projectName = useSolarAnalysisStore((s) => s.projectName);
+  const settings = useSolarAnalysisStore((s) => s.settings);
   const isPro = useLicenseStore((s) => s.isPro);
   const openModal = useUiStore((s) => s.openModal);
 
@@ -34,6 +36,7 @@ export const useProjectExport = () => {
         hourlyShadows: shadowAnalysis?.hourlyShadows,
         pinnedPointResults,
         analysisResults,
+        projectName,
       });
     } finally {
       setTerrainExportBusy(false);

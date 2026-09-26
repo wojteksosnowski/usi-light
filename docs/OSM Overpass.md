@@ -6,6 +6,14 @@ działający commit na GitHub: 5dfec89e
 
 ---
 
+Wymagany test automatyczny dla `osmBuildingsClient.ts`:
+
+1. Pobranie budynków z promienia 300m wokół `51.1079° N, 17.0385° E`
+2. Porównanie do @/Volumes/Samsam/py/usi-light/reference/wro.json
+3. Identyfikacja braków i nadmiarów
+
+---
+
 # Algorytm usi-light
 
 1. Podzielić obszar na kwadranty po 300x300 lub 400x400m każdy ze 100m zakładem

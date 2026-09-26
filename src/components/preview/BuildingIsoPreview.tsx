@@ -90,7 +90,7 @@ function buildGeometryGroup(
     // Wstęga podświetlenia krawędzi ma się pojawić tylko na najniższej kondygnacji budynku.
     const minHBottomForBuilding = solids.length > 0 ? Math.min(...solids.map((s) => s.hBottom)) : 0;
 
-    // Materiał powłoki zewnętrznej
+    // Materiał powłoki zewnętrznej ze sprzętowym wsparciem bufora głębokości i polygonOffset
     const outerMaterial = new THREE.MeshStandardMaterial({
       color: isXRay ? '#ffffff' : (bldg.isTested ? ISO_COLORS.proposed : ISO_COLORS.existing),
       roughness: isXRay ? 0.3 : 0.85,
@@ -98,7 +98,11 @@ function buildGeometryGroup(
       transparent: isXRay,
       opacity: isXRay ? 0.5 : 1.0,
       depthWrite: !isXRay,
+      depthTest: true,
       side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
     });
     createdMaterials.push(outerMaterial);
 
@@ -670,16 +674,16 @@ const IsoScene: React.FC<{
         <hemisphereLight
           color={ISO_COLORS.hemisphereSky}
           groundColor={ISO_COLORS.hemisphereGround}
-          intensity={1.4}
+          intensity={1.35}
         />
         <ambientLight intensity={0.65} />
         <directionalLight
           ref={dirLightRef}
-          position={[8, 12, 5]}
-          intensity={1.2}
+          position={[0, 15, 10]}
+          intensity={1.25}
           castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
         />
         <primitive object={group} />
 
@@ -795,6 +799,7 @@ export const BuildingIsoPreview: React.FC<BuildingIsoPreviewProps> = ({
             preserveDrawingBuffer: true,
             antialias: true,
             toneMapping: THREE.NoToneMapping,
+            powerPreference: 'high-performance',
           }}
         >
           <DreiOrthographicCamera makeDefault position={[10, 10, 10]} near={0.1} far={1000} />

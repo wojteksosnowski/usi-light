@@ -3,8 +3,10 @@ import {
   useSceneStore,
   useSolarAnalysisStore,
   useCadToolStore,
+  useUiStore,
 } from '../../../../store';
 import { parseDxfWithMetadata, DxfUnitOption, createSampleBuildings } from '../../../../utils/dxfParser';
+import { computePointsGeoContext, validateGeoCompatibility } from '../../../../utils/geoTransform';
 import { PinnedFacadePoint } from '../../../../types/geometry';
 
 export const useProjectIO = () => {
@@ -54,6 +56,10 @@ export const useProjectIO = () => {
   const activePointMode = useSolarAnalysisStore((s) => s.activePointMode);
   const setActivePointMode = useSolarAnalysisStore((s) => s.setActivePointMode);
 
+  // UI Store
+  const openModal = useUiStore((s) => s.openModal);
+  const setProjectName = useSolarAnalysisStore((s) => s.setProjectName);
+
   // CAD Tool Store
   const drawingMode = useCadToolStore((s) => s.drawingMode);
   const setDrawingMode = useCadToolStore((s) => s.setDrawingMode);
@@ -71,6 +77,43 @@ export const useProjectIO = () => {
   const setSavedViewRotationDeg = useCadToolStore((s) => s.setSavedViewRotationDeg);
   const triggerFit = useCadToolStore((s) => s.triggerFit);
 
+  const isSceneInitialOrEmpty = (currentBuildings: typeof buildings) => {
+    if (!currentBuildings || currentBuildings.length === 0) return true;
+    if (
+      currentBuildings.length === 3 &&
+      currentBuildings[0]?.id === 'bldg-1' &&
+      currentBuildings[1]?.id === 'bldg-2' &&
+      currentBuildings[2]?.id === 'bldg-3' &&
+      pinnedPoints.length === 0
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const applyDxfDirectly = (result: ReturnType<typeof parseDxfWithMetadata>, fileName?: string) => {
+    setBuildings(result.buildings);
+    setSelectedBuildingId(result.buildings[0]?.id ?? null);
+    setPinnedPoints([]);
+    setActivePinnedPointId(null);
+    setDxfImportInfo(result.unitInfo);
+
+    if (result.report.geoContext.isGeodetic) {
+      const { lat, lon } = result.report.geoContext.centerWgs84;
+      setSettings({
+        ...settings,
+        latitude: lat,
+        longitude: lon,
+      });
+      if (result.report.geoContext.nearestCity) {
+        setSelectedCity(result.report.geoContext.nearestCity);
+        const nameCandidate = fileName ? fileName.replace(/\.[^/.]+$/, '') : result.report.geoContext.nearestCity;
+        setProjectName(nameCandidate);
+      }
+    }
+    triggerFit();
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -81,17 +124,47 @@ export const useProjectIO = () => {
         const text = event.target?.result as string;
         setLastDxfText(text);
         const result = parseDxfWithMetadata(text, dxfUnit);
-        if (result.buildings.length > 0) {
-          setBuildings(result.buildings);
-          setSelectedBuildingId(result.buildings[0].id);
-          setPinnedPoints([]);
-          setActivePinnedPointId(null);
-          setDxfImportInfo(result.unitInfo);
-          triggerFit();
-        } else {
-          alert('Nie znaleziono zamkniętych polilinii w pliku DXF.');
+
+        if (result.buildings.length === 0) {
+          alert('Nie znaleziono zamkniętych polilinii ani obiektów w pliku DXF.');
+          return;
         }
-      } catch {
+
+        // Jeśli scena jest pusta lub zawiera tylko domyślne budynki startowe -> wczytaj bezpośrednio
+        if (isSceneInitialOrEmpty(buildings)) {
+          applyDxfDirectly(result, file.name);
+          return;
+        }
+
+        // Jeśli scena zawiera już obiekty -> przeprowadź analizę zgodności geograficznej i otwórz modal
+        const allScenePts = buildings.flatMap((b) => b.vertices || []);
+        const sceneContext = computePointsGeoContext(allScenePts, {
+          lat: settings.latitude,
+          lon: settings.longitude,
+        });
+        const geoCompatibility = validateGeoCompatibility(sceneContext, result.report.geoContext);
+
+        openModal('dxfImport', {
+          fileName: file.name,
+          parsedResult: result,
+          geoCompatibility,
+          onMerge: () => {
+            const timestamp = Date.now();
+            const mergedBuildings = result.buildings.map((b, idx) => ({
+              ...b,
+              id: `dxf-${timestamp}-${idx + 1}-${b.id}`,
+              name: b.name || `Budynek DXF ${idx + 1}`,
+            }));
+            setBuildings([...buildings, ...mergedBuildings]);
+            setDxfImportInfo(result.unitInfo);
+            triggerFit();
+          },
+          onReplace: () => {
+            applyDxfDirectly(result, file.name);
+          },
+        });
+      } catch (err) {
+        console.error('Błąd podczas parsowania pliku DXF:', err);
         alert('Błąd podczas parsowania pliku DXF.');
       }
     };

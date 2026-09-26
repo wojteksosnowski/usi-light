@@ -635,6 +635,8 @@ describe('osmBuildingsClient', () => {
       const part2 = buildings.find((b) => b.id === 'osm-part-3002')!;
       expect(part1).toBeDefined();
       expect(part2).toBeDefined();
+      expect(part1.layer).toBe('OSM_BUDYNKI');
+      expect(part2.layer).toBe('OSM_BUDYNKI');
       expect(part1.groupId).toBeDefined();
       expect(part1.groupId).toBe(part2.groupId);
     });
@@ -1326,7 +1328,7 @@ describe('osmBuildingsClient', () => {
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
           const body = decodeURIComponent(String(init?.body || ''));
-          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('way(id:')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           const payload = baselineResponses[baselineCall] || { elements: [] };
@@ -1348,7 +1350,7 @@ describe('osmBuildingsClient', () => {
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
           const body = decodeURIComponent(String(init?.body || ''));
-          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('way(id:')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           fetchCount++;
@@ -1372,7 +1374,7 @@ describe('osmBuildingsClient', () => {
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
           const body = decodeURIComponent(String(init?.body || ''));
-          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('way(id:')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           return { ok: true, json: async () => buildOverpassPayload(10) } as Response;
@@ -1397,7 +1399,7 @@ describe('osmBuildingsClient', () => {
         'fetch',
         vi.fn(async (_url: string, init?: RequestInit) => {
           const body = decodeURIComponent(String(init?.body || ''));
-          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('building:part')) {
+          if (body.includes('around:10') || body.includes('relation(id:') || body.includes('way(id:')) {
             return { ok: true, json: async () => ({ elements: [] }) } as Response;
           }
           baselineCall++;
@@ -1511,23 +1513,25 @@ describe('osmBuildingsClient', () => {
     );
   });
 
-  describe('Overpass QL payload optimization (out tags geom qt)', () => {
+  describe('Overpass QL payload optimization (out geom qt)', () => {
     const mockProjectCenter: LatLon = { lat: 52.2297, lon: 21.0122 };
 
-    it('buildOverpassBuildingsQuery formats bbox query with out tags geom qt', () => {
+    it('buildOverpassBuildingsQuery formats bbox query with out geom qt', () => {
       const bbox: WfsBbox = [20.995, 52.251, 20.998, 52.253];
       const query = buildOverpassBuildingsQuery(bbox, 8);
 
       expect(query).toContain('[out:json][timeout:8];');
       expect(query).toContain('way["building"](52.251,20.995,52.253,20.998);');
-      expect(query).toContain('relation["building"]["type"="multipolygon"](52.251,20.995,52.253,20.998);');
-      expect(query).toContain('out tags geom qt;');
+      expect(query).toContain('relation["building"](52.251,20.995,52.253,20.998);');
+      expect(query).toContain('relation["building:part"](52.251,20.995,52.253,20.998);');
+      expect(query).toContain('relation["type"="building"](52.251,20.995,52.253,20.998);');
+      expect(query).toContain('out geom qt;');
       // Musi NIE zawierać kosztownej rekursji węzłów
       expect(query).not.toContain('>;');
       expect(query).not.toContain('out skel');
     });
 
-    it('buildOverpassBuildingsQuery formats poly filter query with out tags geom qt', () => {
+    it('buildOverpassBuildingsQuery formats poly filter query with out geom qt', () => {
       const poly: LatLon[] = [
         { lat: 52.251, lon: 20.995 },
         { lat: 52.253, lon: 20.995 },
@@ -1538,7 +1542,7 @@ describe('osmBuildingsClient', () => {
 
       expect(query).toContain('[out:json][timeout:8];');
       expect(query).toContain('poly:"52.251000 20.995000 52.253000 20.995000 52.253000 20.998000 52.251000 20.998000"');
-      expect(query).toContain('out tags geom qt;');
+      expect(query).toContain('out geom qt;');
     });
 
     it('parses single building from embedded geometry (zero node elements in payload)', () => {
@@ -1722,5 +1726,366 @@ describe('osmBuildingsClient', () => {
       expect(way.geometry.length).toBe(2);
       expect(way.tags.name).toBe('Zaktualizowana nazwa');
     });
+
+    it('parses type=building relation and suppresses outline way while grouping parts (Katedra Marii Magdaleny pattern)', () => {
+      const payload: OverpassResponse = {
+        elements: [
+          // Relacja type=building łącząca outline i części
+          {
+            type: 'relation',
+            id: 5484256,
+            tags: {
+              type: 'building',
+              building: 'cathedral',
+              name: 'Katedra Świętej Marii Magdaleny',
+            },
+            members: [
+              { type: 'way', ref: 369149647, role: 'outline' },
+              { type: 'way', ref: 101144787, role: 'part' },
+              { type: 'way', ref: 369149633, role: 'part' },
+            ],
+          },
+          // Outline way
+          {
+            type: 'way',
+            id: 369149647,
+            geometry: [
+              { lat: 51.1088, lon: 17.0345 },
+              { lat: 51.1088, lon: 17.0355 },
+              { lat: 51.1095, lon: 17.0355 },
+              { lat: 51.1095, lon: 17.0345 },
+              { lat: 51.1088, lon: 17.0345 },
+            ],
+            tags: { building: 'cathedral', name: 'Katedra Świętej Marii Magdaleny' },
+          },
+          // Część 1
+          {
+            type: 'way',
+            id: 101144787,
+            geometry: [
+              { lat: 51.1088, lon: 17.0345 },
+              { lat: 51.1088, lon: 17.0350 },
+              { lat: 51.1095, lon: 17.0350 },
+              { lat: 51.1095, lon: 17.0345 },
+              { lat: 51.1088, lon: 17.0345 },
+            ],
+            tags: { 'building:part': 'yes', height: '40' },
+          },
+          // Część 2
+          {
+            type: 'way',
+            id: 369149633,
+            geometry: [
+              { lat: 51.1088, lon: 17.0350 },
+              { lat: 51.1088, lon: 17.0355 },
+              { lat: 51.1095, lon: 17.0355 },
+              { lat: 51.1095, lon: 17.0350 },
+              { lat: 51.1088, lon: 17.0350 },
+            ],
+            tags: { 'building:part': 'yes', height: '72' },
+          },
+        ],
+      };
+
+      const result = parseOverpassBuildingsResponse(payload, { lat: 51.109, lon: 17.035 }, EPSG_2180);
+      expect(result.length).toBe(2);
+      expect(result.some((b) => b.id === 'osm-bld-369149647')).toBe(false); // Outline way suppressed
+      expect(result.every((b) => b.groupId === 'group-osm-bld-5484256')).toBe(true);
+      expect(result.every((b) => b.name === 'Katedra Świętej Marii Magdaleny')).toBe(true);
+    });
+
+    it('parses multipolygon building:part relation with inner courtyard hole', () => {
+      const payload: OverpassResponse = {
+        elements: [
+          {
+            type: 'relation',
+            id: 7046787,
+            tags: {
+              type: 'multipolygon',
+              'building:part': 'yes',
+              height: '29.5',
+              min_height: '28.2',
+            },
+            members: [
+              {
+                type: 'way',
+                ref: 101,
+                role: 'outer',
+                geometry: [
+                  { lat: 51.105, lon: 17.038 },
+                  { lat: 51.105, lon: 17.039 },
+                  { lat: 51.106, lon: 17.039 },
+                  { lat: 51.106, lon: 17.038 },
+                  { lat: 51.105, lon: 17.038 },
+                ],
+              },
+              {
+                type: 'way',
+                ref: 102,
+                role: 'inner',
+                geometry: [
+                  { lat: 51.1052, lon: 17.0382 },
+                  { lat: 51.1058, lon: 17.0382 },
+                  { lat: 51.1058, lon: 17.0388 },
+                  { lat: 51.1052, lon: 17.0388 },
+                  { lat: 51.1052, lon: 17.0382 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = parseOverpassBuildingsResponse(payload, { lat: 51.1055, lon: 17.0385 }, EPSG_2180);
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe('osm-part-rel-7046787');
+      expect(result[0].defaultHeight).toBe(1.3); // 29.5 - 28.2 = 1.3m
+      expect(result[0].elevation).toBe(28.2);
+      expect(result[0].holes).toBeDefined();
+      expect(result[0].holes?.length).toBe(1);
+    });
+  });
+
+  describe('Wrocław center — Galeria Dominikańska & 300m radius comparison with reference/wro.json', () => {
+    it('fetches only building footprints in Step 1 quadrant query with out geom qt', () => {
+      // Weryfikacja, że zapytanie kwadrantowe w Kroku 1 pobiera tylko obrysy budynków (bez building:part)
+      // minimalizując payload zgodnie z docs/OSM Overpass.md
+      const mockQuadrant: WfsBbox = [17.035, 51.105, 17.042, 51.110];
+      const [west, south, east, north] = mockQuadrant;
+
+      const query = `
+        [out:json][timeout:60];
+        (
+          way["building"](${south},${west},${north},${east});
+          relation["building"](${south},${west},${north},${east});
+          relation["type"="building"](${south},${west},${north},${east});
+        );
+        out geom qt;
+      `.trim();
+
+      expect(query).toContain(`way["building"](${south},${west},${north},${east});`);
+      expect(query).toContain(`relation["building"](${south},${west},${north},${east});`);
+      expect(query).toContain(`relation["type"="building"](${south},${west},${north},${east});`);
+      expect(query).not.toContain('building:part');
+      expect(query).toContain('out geom qt;');
+    });
+
+    it('parses multipolygon relation building with multiple inner courtyard holes directly from out geom qt (Biurowiec Dominikański pattern)', () => {
+      const payload: OverpassResponse = {
+        elements: [
+          {
+            type: 'relation',
+            id: 13061643,
+            tags: {
+              type: 'multipolygon',
+              building: 'commercial',
+              'building:levels': '7',
+              name: 'Biurowiec Dominikański',
+            },
+            members: [
+              {
+                type: 'way',
+                ref: 315427505,
+                role: 'inner',
+                geometry: [
+                  { lat: 51.1068, lon: 17.0375 },
+                  { lat: 51.1070, lon: 17.0375 },
+                  { lat: 51.1070, lon: 17.0378 },
+                  { lat: 51.1068, lon: 17.0378 },
+                  { lat: 51.1068, lon: 17.0375 },
+                ],
+              },
+              {
+                type: 'way',
+                ref: 315427504,
+                role: 'inner',
+                geometry: [
+                  { lat: 51.1064, lon: 17.0375 },
+                  { lat: 51.1066, lon: 17.0375 },
+                  { lat: 51.1066, lon: 17.0378 },
+                  { lat: 51.1064, lon: 17.0378 },
+                  { lat: 51.1064, lon: 17.0375 },
+                ],
+              },
+              {
+                type: 'way',
+                ref: 310644394,
+                role: 'outer',
+                geometry: [
+                  { lat: 51.1062, lon: 17.0372 },
+                  { lat: 51.1074, lon: 17.0372 },
+                  { lat: 51.1074, lon: 17.0382 },
+                  { lat: 51.1062, lon: 17.0382 },
+                  { lat: 51.1062, lon: 17.0372 },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = parseOverpassBuildingsResponse(payload, { lat: 51.107, lon: 17.0377 }, EPSG_2180);
+      expect(result.length).toBe(1);
+      const bldg = result[0];
+      expect(bldg.id).toBe('osm-bld-rel-13061643');
+      expect(bldg.name).toBe('Biurowiec Dominikański');
+      expect(bldg.defaultHeight).toBeCloseTo(21.5, 0.5);
+      expect(bldg.holes).toBeDefined();
+      expect(bldg.holes?.length).toBe(2);
+      expect(bldg.layer).toBe('OSM_BUDYNKI');
+    });
+
+    it('assembles all parts of Galeria Dominikańska when parts and envelope are present in payload', () => {
+      // Test syntetyczny reprezentujący geometrię Galerii Dominikańskiej (envelope + części wewnętrzne)
+      const galeriaEnvelopeWayId = 1100641724;
+      const partWayIds = [
+        101132787, 101137947, 101140846, 101145034,
+        1095202225, 1095454975, 1095460166, 1095460167,
+        1096404391, 1096404392, 1096407150, 1096998904,
+        1096998905, 1096998906, 1096998907, 1096998908,
+        1099425574
+      ];
+
+      const elements: OverpassResponse['elements'] = [];
+
+      // Envelope way obejmujący obszar [17.037, 51.107] do [17.041, 51.109]
+      elements.push({
+        type: 'way',
+        id: galeriaEnvelopeWayId,
+        nodes: [1, 2, 3, 4, 1],
+        geometry: [
+          { lat: 51.1070, lon: 17.0370 },
+          { lat: 51.1070, lon: 17.0410 },
+          { lat: 51.1090, lon: 17.0410 },
+          { lat: 51.1090, lon: 17.0370 },
+          { lat: 51.1070, lon: 17.0370 },
+        ],
+        tags: {
+          building: 'retail',
+          name: 'Galeria Dominikańska',
+        },
+      });
+
+      // 17 podłużnych pasów (każdy dotyka zewnętrznej krawędzi envelope, sumarycznie pokrywając 100% powierzchni)
+      const latCount = 17;
+      const latDelta = 0.0020 / latCount;
+      for (let i = 0; i < latCount; i++) {
+        const pId = partWayIds[i];
+        const sLat = 51.1070 + i * latDelta;
+        const eLat = 51.1070 + (i + 1) * latDelta;
+        elements.push({
+          type: 'way',
+          id: pId,
+          nodes: [pId * 10 + 1, pId * 10 + 2, pId * 10 + 3, pId * 10 + 4, pId * 10 + 1],
+          geometry: [
+            { lat: sLat, lon: 17.0370 },
+            { lat: sLat, lon: 17.0410 },
+            { lat: eLat, lon: 17.0410 },
+            { lat: eLat, lon: 17.0370 },
+            { lat: sLat, lon: 17.0370 },
+          ],
+          tags: {
+            'building:part': 'yes',
+            height: '19.3',
+          },
+        });
+      }
+
+      const parsed = parseOverpassBuildingsResponse(
+        { elements },
+        { lat: 51.1079, lon: 17.0385 },
+        EPSG_2180,
+        300
+      );
+
+      // Wszystkie 17 części zostały wygenerowane
+      expect(parsed.length).toBe(17);
+      // Envelope został odrzucony jako pokryty duplikat
+      expect(parsed.some((b) => b.id === `osm-bld-${galeriaEnvelopeWayId}`)).toBe(false);
+
+      // Wszystkie części mają grupę geometryczną powiązaną z Galerią Dominikańską
+      const expectedGroupId = `group-osm-geo-${galeriaEnvelopeWayId}`;
+      for (const pId of partWayIds) {
+        const partBldg = parsed.find((b) => b.id === `osm-part-${pId}`);
+        expect(partBldg).toBeDefined();
+        expect(partBldg?.name).toBe('Galeria Dominikańska');
+        expect(partBldg?.groupId).toBe(expectedGroupId);
+        expect(partBldg?.layer).toBe('OSM_BUDYNKI');
+      }
+    });
+
+    const RUN_LIVE = process.env.OSM_LIVE_TEST === '1';
+    (RUN_LIVE ? it : it.skip)('live integration test: fetches 300m radius around Wrocław center (51.1079° N, 17.0385° E) and compares with reference/wro.json', async () => {
+      const fs = await import('fs');
+      const path = await import('path');
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+        if (typeof input === 'string' && input.startsWith('/')) {
+          return originalFetch(`http://localhost:3000${input}`, init);
+        }
+        return originalFetch(input, init);
+      }) as typeof fetch;
+
+      try {
+        const wroCenter = { lat: 51.1079, lon: 17.0385 };
+        const radiusMeters = 300;
+        const bbox = latLonToBbox(wroCenter.lat, wroCenter.lon, radiusMeters);
+
+        const fetchedBuildings = await fetchOsmBuildings(
+          bbox,
+          wroCenter,
+          EPSG_2180,
+          radiusMeters,
+          (progress) => {
+            console.log(`[LIVE TEST PROGRESS] ${progress.stage}: ${progress.message || ''}`);
+          },
+          true // bypassCache
+        );
+
+        console.log(`[LIVE TEST RESULT] Pobrano łącznie ${fetchedBuildings.length} budynków ze środowiska live`);
+        expect(fetchedBuildings.length).toBeGreaterThan(0);
+
+        // Porównanie ze sceną referencyjną reference/wro.json
+        const refPath = path.resolve(process.cwd(), 'reference/wro.json');
+        if (fs.existsSync(refPath)) {
+          const refData = JSON.parse(fs.readFileSync(refPath, 'utf8'));
+          const refOsm = (refData.buildings || []).filter((b: any) => b.id.startsWith('osm-'));
+          const refIds = new Set(refOsm.map((b: any) => b.id));
+          const fetchedIds = new Set(fetchedBuildings.map((b: any) => b.id));
+
+          const missingInFetched = refOsm.filter((b: any) => !fetchedIds.has(b.id));
+          const extraInFetched = fetchedBuildings.filter((b: any) => !refIds.has(b.id));
+
+          console.log(`[LIVE TEST COMPARISON] Ref OSM: ${refOsm.length}, Fetched OSM: ${fetchedBuildings.length}`);
+          console.log(`[LIVE TEST COMPARISON] Brakujące względem ref (${missingInFetched.length}):`, missingInFetched.map((b: any) => b.id));
+          console.log(`[LIVE TEST COMPARISON] Nadmiarowe względem ref (${extraInFetched.length}):`, extraInFetched.map((b: any) => b.id));
+        }
+
+        // Sprawdź kompletność Galerii Dominikańskiej
+        const galeriaParts = fetchedBuildings.filter(
+          (b) => b.groupId === 'group-osm-geo-1100641724' || b.name?.includes('Galeria Dominikańska')
+        );
+        console.log(`[LIVE TEST GALERIA] Znaleziono ${galeriaParts.length} części Galerii Dominikańskiej`);
+        expect(galeriaParts.length).toBeGreaterThanOrEqual(16);
+
+        // Sprawdź Biurowiec Dominikański (relacja 13061643 z dwoma dziedzińcami wewnętrznymi / otworami)
+        const biurowiec = fetchedBuildings.find(
+          (b) => b.id === 'osm-bld-rel-13061643' || b.name === 'Biurowiec Dominikański'
+        );
+        console.log(`[LIVE TEST BIUROWIEC] Biurowiec Dominikański:`, biurowiec ? {
+          id: biurowiec.id,
+          name: biurowiec.name,
+          vertices: biurowiec.vertices.length,
+          holes: biurowiec.holes?.length,
+          height: biurowiec.defaultHeight,
+        } : 'NOT FOUND');
+        expect(biurowiec).toBeDefined();
+        expect(biurowiec?.holes?.length).toBe(2);
+        expect(biurowiec?.defaultHeight).toBeCloseTo(21.5, 0.5);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }, 180000);
   });
 });

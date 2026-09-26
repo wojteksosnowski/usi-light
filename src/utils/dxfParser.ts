@@ -1,11 +1,16 @@
 import DxfParser from 'dxf-parser';
-import { BuildingLoop, FacadeSegment, Point2D } from '../types/geometry';
+import { BuildingLoop, FacadeSegment, Point2D, ObjectCategory, AreaType } from '../types/geometry';
 import {
   calculateOutwardNormal,
   isPolygonCCW,
 } from '@/utils/math2d';
 import { computeLineEquation } from './segmentStatistics';
-import { CrsDetectionResult, detectCoordinateSystem } from './geoTransform';
+import {
+  CrsDetectionResult,
+  detectCoordinateSystem,
+  computePointsGeoContext,
+  GeoContext,
+} from './geoTransform';
 
 interface DxfEntity {
   type: string;
@@ -24,10 +29,132 @@ export interface DxfUnitInfo {
   insunits?: number;
 }
 
+export interface DxfLayerStats {
+  layer: string;
+  category: ObjectCategory;
+  areaType?: AreaType;
+  entityCount: number;
+  polygonCount: number;
+}
+
+export interface DxfInspectionReport {
+  totalEntities: number;
+  totalPolygons: number;
+  buildingCount: number;
+  boundaryCount: number;
+  layers: DxfLayerStats[];
+  unitInfo: DxfUnitInfo;
+  crs?: CrsDetectionResult;
+  geoContext: GeoContext;
+}
+
 export interface DxfParseResult {
   buildings: BuildingLoop[];
   unitInfo: DxfUnitInfo;
   crs?: CrsDetectionResult;
+  report: DxfInspectionReport;
+}
+
+/**
+ * Automatycznie klasyfikuje warstwę DXF na podstawie nazewnictwa stosowanego w polskich mapach (EGiB, BDOT500, CAD).
+ */
+export function classifyDxfLayer(layerName: string): { category: ObjectCategory; areaType?: AreaType } {
+  const norm = (layerName || '').toUpperCase().trim();
+
+  // Granice działek / kontury / strefy
+  if (
+    norm.includes('DZIA') ||
+    norm.includes('PARCEL') ||
+    norm.includes('EGDB') ||
+    norm.includes('GRANIC') ||
+    norm.startsWith('D-') ||
+    norm.startsWith('DZ_') ||
+    norm.includes('EGB_DZIA') ||
+    norm.includes('BOUNDARY') ||
+    norm.includes('PLOT')
+  ) {
+    return { category: 'boundary', areaType: 'plot' };
+  }
+
+  // Place zabaw
+  if (norm.includes('PLAYGROUND') || norm.includes('PLAC_ZABAW') || norm.includes('ZABAW')) {
+    return { category: 'boundary', areaType: 'playground' };
+  }
+
+  // Balkony / tarasy
+  if (norm.includes('BALCONY') || norm.includes('BALKON') || norm.includes('TARAS') || norm.includes('TERRACE')) {
+    return { category: 'balcony' };
+  }
+
+  // Domyślnie budynek
+  return { category: 'building' };
+}
+
+/**
+ * Łączy odcinki linii (LINE) o wspólnych wierzchołkach w zamknięte pętle poligonowe.
+ */
+export function assembleDxfLinesIntoLoops(
+  lines: { p1: Point2D; p2: Point2D; layer: string }[],
+  tolerance = 0.05
+): { layer: string; vertices: Point2D[] }[] {
+  if (!lines || lines.length === 0) return [];
+
+  // Grupuj po warstwie
+  const byLayer = new Map<string, { p1: Point2D; p2: Point2D }[]>();
+  for (const l of lines) {
+    const arr = byLayer.get(l.layer) || [];
+    arr.push({ p1: l.p1, p2: l.p2 });
+    byLayer.set(l.layer, arr);
+  }
+
+  const result: { layer: string; vertices: Point2D[] }[] = [];
+
+  for (const [layer, layerLines] of byLayer.entries()) {
+    const unused = [...layerLines];
+
+    while (unused.length > 0) {
+      const firstSeg = unused.shift()!;
+      const currentChain: Point2D[] = [firstSeg.p1, firstSeg.p2];
+
+      let extended = true;
+      while (extended && unused.length > 0) {
+        extended = false;
+        const tail = currentChain[currentChain.length - 1];
+
+        for (let i = 0; i < unused.length; i++) {
+          const seg = unused[i];
+          const d1 = Math.hypot(seg.p1.x - tail.x, seg.p1.y - tail.y);
+          const d2 = Math.hypot(seg.p2.x - tail.x, seg.p2.y - tail.y);
+
+          if (d1 <= tolerance) {
+            currentChain.push(seg.p2);
+            unused.splice(i, 1);
+            extended = true;
+            break;
+          } else if (d2 <= tolerance) {
+            currentChain.push(seg.p1);
+            unused.splice(i, 1);
+            extended = true;
+            break;
+          }
+        }
+      }
+
+      if (currentChain.length >= 4) {
+        const head = currentChain[0];
+        const tail = currentChain[currentChain.length - 1];
+        if (Math.hypot(head.x - tail.x, head.y - tail.y) <= tolerance * 2) {
+          // Zamknięta pętla
+          currentChain.pop(); // Usuń powtórzony koniec
+          if (currentChain.length >= 3) {
+            result.push({ layer, vertices: currentChain });
+          }
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -177,16 +304,27 @@ export function resolveDxfScale(
 }
 
 /**
- * Parses raw DXF string into 2.5D BuildingLoops with unit metadata.
+ * Parses raw DXF string into 2.5D BuildingLoops with rich unit and geodetic metadata.
  */
 export function parseDxfWithMetadata(
   dxfText: string,
   unitOption: DxfUnitOption = 'auto'
 ): DxfParseResult {
+  const emptyReport: DxfInspectionReport = {
+    totalEntities: 0,
+    totalPolygons: 0,
+    buildingCount: 0,
+    boundaryCount: 0,
+    layers: [],
+    unitInfo: resolveDxfScale({}, 0, unitOption),
+    geoContext: computePointsGeoContext([]),
+  };
+
   if (!dxfText || typeof dxfText !== 'string' || dxfText.trim().length === 0) {
     return {
       buildings: [],
-      unitInfo: resolveDxfScale({}, 0, unitOption),
+      unitInfo: emptyReport.unitInfo,
+      report: emptyReport,
     };
   }
 
@@ -204,46 +342,57 @@ export function parseDxfWithMetadata(
         unitName: 'Błąd pliku DXF',
         source: err?.message || 'Nieprawidłowy format pliku DXF',
       },
+      report: emptyReport,
     };
   }
 
-  if (!parsed || !Array.isArray(parsed.entities)) {
-    return {
-      buildings: [],
-      unitInfo: resolveDxfScale(parsed?.header, 0, unitOption),
-    };
-  }
-
-  // Find max coordinate in entities to assist heuristic auto-detection
-  let maxCoord = 0;
-  for (const entity of parsed.entities) {
-    if (entity && Array.isArray(entity.vertices)) {
-      for (const v of entity.vertices) {
-        if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) {
-          if (Math.abs(v.x) > maxCoord) maxCoord = Math.abs(v.x);
-          if (Math.abs(v.y) > maxCoord) maxCoord = Math.abs(v.y);
-        }
-      }
-    }
-  }
-
-  // Wzbogacenie parsera o bezpośrednią ekstrakcję encji HATCH (częstych w mapach geodezyjnych)
   const rawEntities: { type: string; layer: string; vertices: Point2D[] }[] = [];
+  const rawLines: { p1: Point2D; p2: Point2D; layer: string }[] = [];
 
-  // 1. Zwykłe encje z dxf-parser (LWPOLYLINE, POLYLINE)
-  for (const entity of parsed.entities) {
-    if (!entity) continue;
-    if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
-      if (Array.isArray(entity.vertices) && entity.vertices.length >= 3) {
-        const valid = entity.vertices.filter(
-          (v: any) => v && Number.isFinite(v.x) && Number.isFinite(v.y)
-        );
-        if (valid.length >= 3) {
-          rawEntities.push({
-            type: entity.type,
-            layer: entity.layer || '0',
-            vertices: valid.map((v: any) => ({ x: v.x, y: v.y })),
+  // 1. Zwykłe encje z dxf-parser (LWPOLYLINE, POLYLINE, LINE, 3DFACE)
+  if (parsed && Array.isArray(parsed.entities)) {
+    for (const entity of parsed.entities) {
+      if (!entity) continue;
+      const layer = entity.layer || '0';
+
+      if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
+        if (Array.isArray(entity.vertices) && entity.vertices.length >= 3) {
+          const valid = entity.vertices.filter(
+            (v: any) => v && Number.isFinite(v.x) && Number.isFinite(v.y)
+          );
+          if (valid.length >= 3) {
+            rawEntities.push({
+              type: entity.type,
+              layer,
+              vertices: valid.map((v: any) => ({ x: v.x, y: v.y })),
+            });
+          }
+        }
+      } else if (entity.type === 'LINE') {
+        if (
+          Array.isArray(entity.vertices) &&
+          entity.vertices.length >= 2 &&
+          Number.isFinite(entity.vertices[0]?.x) &&
+          Number.isFinite(entity.vertices[1]?.x)
+        ) {
+          rawLines.push({
+            p1: { x: entity.vertices[0].x, y: entity.vertices[0].y },
+            p2: { x: entity.vertices[1].x, y: entity.vertices[1].y },
+            layer,
           });
+        }
+      } else if (entity.type === '3DFACE') {
+        if (Array.isArray(entity.vertices) && entity.vertices.length >= 3) {
+          const valid = entity.vertices.filter(
+            (v: any) => v && Number.isFinite(v.x) && Number.isFinite(v.y)
+          );
+          if (valid.length >= 3) {
+            rawEntities.push({
+              type: '3DFACE',
+              layer,
+              vertices: valid.map((v: any) => ({ x: v.x, y: v.y })),
+            });
+          }
         }
       }
     }
@@ -303,19 +452,40 @@ export function parseDxfWithMetadata(
     rawEntities.push({ type: 'HATCH', layer: currentHatch.layer, vertices: currentHatch.vertices });
   }
 
-  // Oblicz maxCoord również uwzględniając HATCH
+  // 3. Połącz linie (LINE) w pętle poligonowe
+  if (rawLines.length > 0) {
+    const assembled = assembleDxfLinesIntoLoops(rawLines);
+    for (const loop of assembled) {
+      rawEntities.push({
+        type: 'LINE_LOOP',
+        layer: loop.layer,
+        vertices: loop.vertices,
+      });
+    }
+  }
+
+  // Oblicz maxCoord
+  let maxCoord = 0;
   for (const ent of rawEntities) {
     for (const v of ent.vertices) {
       if (Math.abs(v.x) > maxCoord) maxCoord = Math.abs(v.x);
       if (Math.abs(v.y) > maxCoord) maxCoord = Math.abs(v.y);
     }
   }
+  for (const l of rawLines) {
+    if (Math.abs(l.p1.x) > maxCoord) maxCoord = Math.abs(l.p1.x);
+    if (Math.abs(l.p1.y) > maxCoord) maxCoord = Math.abs(l.p1.y);
+    if (Math.abs(l.p2.x) > maxCoord) maxCoord = Math.abs(l.p2.x);
+    if (Math.abs(l.p2.y) > maxCoord) maxCoord = Math.abs(l.p2.y);
+  }
 
-  const unitInfo = resolveDxfScale(parsed.header, maxCoord, unitOption);
+  const unitInfo = resolveDxfScale(parsed?.header, maxCoord, unitOption);
   const scaleUnit = unitInfo.scale || 1.0;
 
   const loops: BuildingLoop[] = [];
+  const layerStatsMap = new Map<string, DxfLayerStats>();
   let buildingCount = 1;
+  let boundaryCount = 1;
 
   for (const entity of rawEntities) {
     const rawPoints: Point2D[] = entity.vertices.map((v) => ({
@@ -335,8 +505,13 @@ export function parseDxfWithMetadata(
 
     if (rawPoints.length < 3) continue;
 
+    const layerName = entity.layer || '0';
+    const classification = classifyDxfLayer(layerName);
+    const isBoundary = classification.category === 'boundary';
     const isCCW = isPolygonCCW(rawPoints);
     const segments: FacadeSegment[] = [];
+
+    const defaultH = isBoundary ? 0.0 : 15.0;
 
     for (let i = 0; i < rawPoints.length; i++) {
       const p1 = rawPoints[i];
@@ -345,35 +520,38 @@ export function parseDxfWithMetadata(
       const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
 
       segments.push({
-        id: `bldg-${buildingCount}-seg-${i + 1}`,
+        id: isBoundary ? `bound-${boundaryCount}-seg-${i + 1}` : `bldg-${buildingCount}-seg-${i + 1}`,
         p1,
         p2,
         normal,
         length: len,
         angleRad: Math.atan2(p2.y - p1.y, p2.x - p1.x),
-        hTop: 15.0, // Default 15m
-        hWindowBottom: 0.85, // Default 0.85m
+        hTop: defaultH,
+        hWindowBottom: 0.85,
         isCityCentre: false,
         buildingType: 'residential',
         lineEquation: computeLineEquation(p1, p2, normal),
       });
     }
 
-    const layerName = entity.layer || '0';
-    const isTestedDefault = buildingCount === 1;
+    const objId = isBoundary ? `bound-${boundaryCount}` : `bldg-${buildingCount}`;
+    const objName = isBoundary
+      ? `Działka ${boundaryCount} (${layerName})`
+      : `Budynek ${buildingCount} (${layerName})`;
 
     loops.push({
-      id: `bldg-${buildingCount}`,
-      name: `Budynek ${buildingCount} (${layerName})`,
+      id: objId,
+      name: objName,
       layer: layerName,
-      isTested: isTestedDefault,
+      isTested: !isBoundary && buildingCount === 1,
       isCityCentre: false,
       buildingType: 'residential',
-      category: 'building',
+      category: classification.category,
+      areaType: classification.areaType,
       firstFloorHeight: 3.0,
       typicalFloorHeight: 3.0,
-      storeysCount: 5,
-      defaultHeight: 15.0,
+      storeysCount: isBoundary ? 0 : 5,
+      defaultHeight: defaultH,
       heightSource: 'default',
       hWindowBottom: 0.85,
       vertices: rawPoints,
@@ -386,17 +564,46 @@ export function parseDxfWithMetadata(
       },
     });
 
-    buildingCount++;
+    if (isBoundary) {
+      boundaryCount++;
+    } else {
+      buildingCount++;
+    }
+
+    // Aktualizuj statystyki warstw
+    const existingStats = layerStatsMap.get(layerName) || {
+      layer: layerName,
+      category: classification.category,
+      areaType: classification.areaType,
+      entityCount: 0,
+      polygonCount: 0,
+    };
+    existingStats.entityCount++;
+    existingStats.polygonCount++;
+    layerStatsMap.set(layerName, existingStats);
   }
 
-  // Wykryj układ geodezyjny na podstawie zaimportowanych wierzchołków
+  // Wykryj układ geodezyjny i wyznacz geoContext
   const allVertices: Point2D[] = loops.flatMap((l) => l.vertices);
-  const crs = detectCoordinateSystem(allVertices);
+  const geoContext = computePointsGeoContext(allVertices);
+  const crs = geoContext.crsInfo;
+
+  const report: DxfInspectionReport = {
+    totalEntities: rawEntities.length + rawLines.length,
+    totalPolygons: loops.length,
+    buildingCount: loops.filter((l) => l.category === 'building').length,
+    boundaryCount: loops.filter((l) => l.category === 'boundary').length,
+    layers: Array.from(layerStatsMap.values()),
+    unitInfo,
+    crs,
+    geoContext,
+  };
 
   return {
     buildings: loops,
     unitInfo,
     crs,
+    report,
   };
 }
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useWfsStore } from '../modules/wfs-import/store/useWfsStore';
 
-export type ActiveModalType = 'share' | 'pricing' | 'license' | 'paymentSuccess' | 'confirmDelete' | null;
+export type ActiveModalType = 'share' | 'pricing' | 'license' | 'paymentSuccess' | 'confirmDelete' | 'dxfImport' | null;
 
 export type SidebarGroupType = 'project' | 'analyses' | 'layers' | 'tools';
 
@@ -25,6 +25,7 @@ interface UiState {
   isLicenseModalOpen: boolean;
   isPaymentSuccessModalOpen: boolean;
   isConfirmDeleteModalOpen: boolean;
+  isDxfImportModalOpen: boolean;
   paymentSuccessSessionId: string | null;
   viewportScale: number;
   viewMode2D: ViewportMode2D;
@@ -51,6 +52,7 @@ interface UiState {
   setPricingModalOpen: (open: boolean) => void;
   setLicenseModalOpen: (open: boolean) => void;
   setPaymentSuccessModalOpen: (open: boolean) => void;
+  setDxfImportModalOpen: (open: boolean) => void;
   setPaymentSuccessSessionId: (sessionId: string | null) => void;
   setViewportScale: (scale: number) => void;
   setViewMode2D: (mode: ViewportMode2D) => void;
@@ -74,6 +76,7 @@ export const useUiStore = create<UiState>((set) => ({
   isLicenseModalOpen: false,
   isPaymentSuccessModalOpen: false,
   isConfirmDeleteModalOpen: false,
+  isDxfImportModalOpen: false,
   paymentSuccessSessionId: null,
   viewportScale: 14,
   viewMode2D: 'cad',
@@ -131,6 +134,7 @@ export const useUiStore = create<UiState>((set) => ({
       isLicenseModalOpen: modal === 'license',
       isPaymentSuccessModalOpen: modal === 'paymentSuccess',
       isConfirmDeleteModalOpen: modal === 'confirmDelete',
+      isDxfImportModalOpen: modal === 'dxfImport',
     }),
 
   closeModal: () =>
@@ -142,6 +146,7 @@ export const useUiStore = create<UiState>((set) => ({
       isLicenseModalOpen: false,
       isPaymentSuccessModalOpen: false,
       isConfirmDeleteModalOpen: false,
+      isDxfImportModalOpen: false,
     }),
 
   setShareModalOpen: (open) =>
@@ -163,6 +168,11 @@ export const useUiStore = create<UiState>((set) => ({
     set({
       isPaymentSuccessModalOpen: open,
       activeModal: open ? 'paymentSuccess' : null,
+    }),
+  setDxfImportModalOpen: (open) =>
+    set({
+      isDxfImportModalOpen: open,
+      activeModal: open ? 'dxfImport' : null,
     }),
   setPaymentSuccessSessionId: (sessionId) => set({ paymentSuccessSessionId: sessionId }),
 }));

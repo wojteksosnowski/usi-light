@@ -1,6 +1,7 @@
-import { DxfWriter, LWPolylineFlags } from '@tarikjabiri/dxf';
+import { DxfWriter, LWPolylineFlags, Units } from '@tarikjabiri/dxf';
 import { AnalysisPointResult, BuildingLoop, HourlyShadowLoop, PinnedFacadePoint } from '../types/geometry';
 import { buildFacadeComplianceBands, buildFacadePointAnalysisEntities, DXF_ANALYSIS_LAYERS } from './dxf/analysisGeometryBuilder';
+import { CrsDetectionResult, detectCoordinateSystem } from './geoTransform';
 
 interface DxfExportParams {
   buildings: BuildingLoop[];
@@ -14,6 +15,10 @@ interface DxfExportParams {
    * wzdłuż każdej fasady) — źródło kolorowych obwiedni (bands) wzdłuż całego obrysu budynku,
    * niezależne od przypiętych punktów fasady. */
   analysisResults?: AnalysisPointResult[];
+  /** Opcjonalne metadane CRS */
+  crsInfo?: CrsDetectionResult;
+  /** Opcjonalna nazwa projektu dla pliku */
+  projectName?: string;
 }
 
 const SHADOW_RANGE_LAYER = 'ZAKRES_CIENIA_GODZINOWY';
@@ -30,10 +35,15 @@ export function buildDxfLines({
   hourlyShadows,
   pinnedPointResults,
   analysisResults,
+  crsInfo,
   dxf = new DxfWriter(),
 }: DxfExportParams & { dxf?: DxfWriter }): string[] {
+  // Wymuś jednostkę METRY ($INSUNITS = 6)
+  dxf.setUnits(Units.Meters);
+
   dxf.addLayer('BUDYNKI', 7, 'CONTINUOUS');
-  dxf.addLayer('GRANICE', 1, 'CONTINUOUS');
+  dxf.addLayer('BUDYNKI_BADANE', 4, 'CONTINUOUS');
+  dxf.addLayer('GRANICE_DZIALEK', 1, 'CONTINUOUS');
   dxf.addLayer('PUNKTY_POMIARU', 3, 'CONTINUOUS');
   dxf.addLayer('RZEZBA_TERENU', 8, 'CONTINUOUS');
   dxf.addLayer(SHADOW_RANGE_LAYER, 5, 'CONTINUOUS');
@@ -41,7 +51,13 @@ export function buildDxfLines({
   dxf.addLayer(DXF_ANALYSIS_LAYERS.sunlight, 1, 'CONTINUOUS');
 
   buildings.forEach((b) => {
-    const layer = b.category === 'boundary' ? 'GRANICE' : 'BUDYNKI';
+    let layer = 'BUDYNKI';
+    if (b.category === 'boundary') {
+      layer = 'GRANICE_DZIALEK';
+    } else if (b.isTested) {
+      layer = 'BUDYNKI_BADANE';
+    }
+
     if (b.vertices.length >= 2) {
       dxf.addLWPolyline(
         b.vertices.map((v) => ({ point: v })),
@@ -113,8 +129,12 @@ export async function exportSceneToDxf({
   hourlyShadows,
   pinnedPointResults,
   analysisResults,
+  crsInfo,
+  projectName,
 }: DxfExportParams): Promise<void> {
   const dxf = new DxfWriter();
+
+  const detectedCrs = crsInfo || detectCoordinateSystem(buildings.flatMap((b) => b.vertices || []));
 
   const lines = buildDxfLines({
     buildings,
@@ -122,6 +142,7 @@ export async function exportSceneToDxf({
     hourlyShadows,
     pinnedPointResults,
     analysisResults,
+    crsInfo: detectedCrs,
     dxf,
   });
 
@@ -130,7 +151,11 @@ export async function exportSceneToDxf({
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `usi-light-export-${new Date().toISOString().slice(0, 10)}.dxf`;
+
+  const crsSuffix = detectedCrs.isGeodetic ? `-${detectedCrs.crs.replace(':', '_')}` : '';
+  const projNameSafe = projectName ? `-${projectName.replace(/[^a-zA-Z0-9_\u00C0-\u017F-]/g, '_')}` : '';
+  link.download = `usi-light${projNameSafe}${crsSuffix}-${new Date().toISOString().slice(0, 10)}.dxf`;
   link.click();
   URL.revokeObjectURL(url);
 }
+

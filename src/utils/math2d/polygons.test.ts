@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { booleanUnionBuildings, getPolygonCentroid, collapseIdenticalConsecutiveHeightRuns, computePolygonDominantAngle } from './polygons';
+import {
+  booleanUnionBuildings,
+  getPolygonCentroid,
+  collapseIdenticalConsecutiveHeightRuns,
+  computePolygonDominantAngle,
+  isPolygonEntirelyOutsideCircle,
+} from './polygons';
 import { BuildingLoop, Point2D } from '../../types/geometry';
 
 
@@ -302,6 +308,44 @@ describe('computePolygonDominantAngle', () => {
     const angle = computePolygonDominantAngle(square);
     // Powinien być idealnie zorientowany wzdłuż osi (0 lub pi/2 znormalizowane)
     expect(Math.abs(angle) === 0 || Math.abs(angle) === Math.PI / 2 || Math.abs(angle) < 0.01).toBe(true);
+  });
+});
+
+describe('isPolygonEntirelyOutsideCircle', () => {
+  it('returns false for polygon fully inside circle', () => {
+    const poly = rect(-10, -10, 10, 10);
+    expect(isPolygonEntirelyOutsideCircle(poly, 0, 0, 50)).toBe(false);
+  });
+
+  it('returns false for polygon intersecting circle boundary', () => {
+    const poly = rect(40, -10, 60, 10);
+    // Circle at (0,0) radius 50 crosses x=40..60
+    expect(isPolygonEntirelyOutsideCircle(poly, 0, 0, 50)).toBe(false);
+  });
+
+  it('returns false for polygon enclosing circle center with all vertices outside', () => {
+    const hugePoly = rect(-100, -100, 100, 100);
+    expect(isPolygonEntirelyOutsideCircle(hugePoly, 0, 0, 50)).toBe(false);
+  });
+
+  it('returns false for polygon whose edge intersects circle even if vertices are outside', () => {
+    // Odcinek od (0, 60) do (60, 0) ma najbliższy punkt do (0,0) w odległości 60/sqrt(2) ≈ 42.42 <= 50
+    const edgeCutPoly = [
+      { x: 0, y: 60 },
+      { x: 60, y: 0 },
+      { x: 70, y: 70 },
+    ];
+    expect(isPolygonEntirelyOutsideCircle(edgeCutPoly, 0, 0, 50)).toBe(false);
+  });
+
+  it('returns true for polygon completely outside circle', () => {
+    const farPoly = rect(100, 100, 120, 120);
+    expect(isPolygonEntirelyOutsideCircle(farPoly, 0, 0, 50)).toBe(true);
+  });
+
+  it('returns true for empty or degenerate inputs', () => {
+    expect(isPolygonEntirelyOutsideCircle([], 0, 0, 50)).toBe(true);
+    expect(isPolygonEntirelyOutsideCircle(rect(0, 0, 10, 10), 0, 0, 0)).toBe(true);
   });
 });
 
