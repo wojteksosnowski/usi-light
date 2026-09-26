@@ -260,6 +260,70 @@ describe('UMBRA A456 - Armored Performance Benchmark & Bottleneck Drill-Down', (
     expect(tGeo.totalCalls).toBeGreaterThan(0);
   });
 
+  it('Telemetry (large real scenes): fastUnionTwoSimpleLoops fallback rate on wro.json / poz.json (676+ buildings)', { timeout: 60000 }, () => {
+    // wro-Trace-20260926T222014.json.gz (CPU profile captured against reference/speed/wro.json,
+    // 676 buildings — over 2x the 318-building warszawa.json the MAX_MASTERPLAN_UNION_FALLBACK_RATE
+    // budget above was calibrated against) showed polygon-clipping.js consuming ~41% of all "hot" JS
+    // self-time in that trace, ~7x the combined cost of our own fast-path code (fastIntersect.ts +
+    // polygonBooleanTwo.ts). This test quantifies whether the fallback rate on real large scenes is
+    // actually higher than the calibrated budget, before any fix is attempted (measure before fixing).
+    const wroPath = path.resolve(__dirname, '../../../reference/speed/wro.json');
+    const pozPath = path.resolve(__dirname, '../../../reference/speed/poz.json');
+
+    const { allTiers: wroTiers, buildings: wroBuildings } = loadBuildingsAndTiers(wroPath);
+    const { allTiers: pozTiers, buildings: pozBuildings } = loadBuildingsAndTiers(pozPath);
+
+    if (wroBuildings.length === 0 && pozBuildings.length === 0) {
+      console.log('[SKIP] reference/speed/wro.json and reference/speed/poz.json not found — skipping large-scene fallback telemetry.');
+      return;
+    }
+
+    const latitude = 52.23;
+    const longitude = 21.01;
+    const equinox = 'spring';
+    const hour = 12.0;
+
+    const rows: { dataset: string; buildings: number; t: ReturnType<typeof runFallbackTelemetry> }[] = [];
+    if (wroBuildings.length > 0) rows.push({ dataset: 'wro.json', buildings: wroBuildings.length, t: runFallbackTelemetry(latitude, longitude, equinox, hour, wroTiers) });
+    if (pozBuildings.length > 0) rows.push({ dataset: 'poz.json', buildings: pozBuildings.length, t: runFallbackTelemetry(latitude, longitude, equinox, hour, pozTiers) });
+
+    console.log('\n================================================================================');
+    console.log('[LARGE-SCENE fastUnionTwoSimpleLoops TELEMETRY: 5x MasterPlan hierarchical union]');
+    console.log('================================================================================');
+    console.table(
+      rows.map((r) => ({
+        dataset: `${r.dataset} (${r.buildings} bldg)`,
+        totalCalls: r.t.totalCalls,
+        fastPath: r.t.fastPathSuccess,
+        fallback: r.t.fallbackCalls,
+        fallbackRate: (r.t.totalCalls > 0 ? (r.t.fallbackCalls / r.t.totalCalls) * 100 : 0).toFixed(1) + '%',
+      }))
+    );
+    console.log('[Fallback cause breakdown]');
+    console.table(
+      rows.map((r) => ({
+        dataset: r.dataset,
+        disjoint: r.t.disjointExits,
+        containment: r.t.containmentExits,
+        insufficientSegments: r.t.insufficientSegmentsExits,
+        multipleOuterComponents: r.t.multipleOuterComponentsExits,
+        emptyLoops: r.t.emptyLoopsExits,
+        caughtException: r.t.caughtExceptionExits,
+      }))
+    );
+    for (const r of rows) {
+      const rate = r.t.totalCalls > 0 ? r.t.fallbackCalls / r.t.totalCalls : 0;
+      console.log(`  ${r.dataset}: fallbackRate=${rate.toFixed(3)} vs. calibrated MAX_MASTERPLAN_UNION_FALLBACK_RATE=${MAX_MASTERPLAN_UNION_FALLBACK_RATE} (warszawa.json-calibrated budget) → ${rate > MAX_MASTERPLAN_UNION_FALLBACK_RATE ? 'EXCEEDS budget, needs root-cause + fix' : 'within budget'}`);
+    }
+    console.log('================================================================================\n');
+
+    // Measurement-only: no strict pass/fail on fallbackRate yet — this test exists to quantify the
+    // hypothesis (see plan step 1/2) before any fast-path fix is attempted on large real scenes.
+    for (const r of rows) {
+      expect(r.t.totalCalls).toBeGreaterThan(0);
+    }
+  });
+
   it('drills down 1 level deeper into the largest bottleneck (Hierarchical Boolean Union)', () => {
     const solarAngles = getMasterplanSolarAngles(52.23, 21.01, 'spring', 12.0, 0, 'raycasting');
     const validTiers = allTiers.filter((t) => t.polygon && t.polygon.length >= 3 && t.hTop > 0);

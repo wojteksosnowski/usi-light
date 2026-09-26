@@ -39,6 +39,39 @@ export function getBuildingAABB(bldg: BuildingLoop): BuildingAABB | null {
  * pozycji słońca koduje wszystkie parametry wpływające na wynik, z `hourFraction`
  * zaokrąglonym do 5-minutowych kroków (dobry balans trafień cache vs. płynność
  * przy interaktywnym przeciąganiu suwaka godziny).
+ *
+ * ZNANY PROBLEM (2026-09-26, zgłoszenie użytkownika — flicker na dachu WFS
+ * "146510_8.0501.115_BUD" w Canvas Masterplan, `reference/speed/war-geo.json`):
+ * to 5-minutowe kwantowanie jest DYSKRETNE — kształt cienia na dachu (Δ-wysokość,
+ * `masterplanShadowCache.getCachedRoofShadowSamples`) potrafi "skoczyć" o dziesiątki
+ * punktów procentowych pokrycia dachu między dwoma SĄSIEDNIMI kubełkami, jeśli
+ * krawędź cienia sąsiedniego, wyższego budynku przemiata dany dach wystarczająco
+ * szybko względem tempa zmiany azymutu słońca. Potwierdzone empirycznie oboma
+ * metodami słonecznymi (`raycasting` i `segments`/Linijka — zjawisko nie zależy
+ * od konkretnego modelu słonecznego, tylko od tej wspólnej warstwy cache'u) —
+ * zmierzone skoki do ~50 punktów procentowych pokrycia dachu w jednym 5-minutowym
+ * kroku (patrz `masterplanRoofFlicker.test.ts`, blok "targeted repro on
+ * 146510_8.0501.115_BUD", detektor "BUCKET-TO-BUCKET JUMP DETECTION" — obecnie
+ * celowo failing test dokumentujący ten błąd, dopóki nie zostanie naprawiony).
+ *
+ * To NIE jest błąd geometrii/boolowskich operacji — każdy pojedynczy kubełek jest
+ * wewnętrznie spójny i policzony bez fallbacku do polygon-clipping. To jest realna
+ * luka między ziarnistością kwantowania a czułością krawędzi cienia dla niektórych
+ * (małych, blisko sąsiadującego wyższego budynku) dachów.
+ *
+ * Właściwe miejsce naprawy: warstwa renderująca (`masterplanRoofsRenderer.ts`),
+ * NIE ta funkcja cache'u. Próba dodania cross-fade (alpha blend dwóch sąsiednich
+ * kubełków) bezpośrednio tutaj / w `masterplanShadowCache.ts`, sterowana
+ * `performance.now()`, została wypróbowana i COFNIĘTA (2026-09-26) — złamała
+ * dane dla dowolnego wywołującego szybszego niż okno przejścia (w tym testy:
+ * `poz.json` regression 0→58 fałszywych anomalii), bo stan czasu rzeczywistego
+ * nie powinien żyć w współdzielonej funkcji cache'u czytanej też programowo/wsadowo.
+ * Renderer ma już prawdziwą pętlę klatek (realne delty czasu) — to on powinien
+ * przechowywać "narysowałem kubełek N w zeszłej klatce, teraz jest N+1, blenduj
+ * przez kolejne kilka klatek" jako stan lokalny, podczas gdy ta funkcja cache'u
+ * powinna nadal zwracać dokładną, niezblendowaną geometrię kubełka — żeby żaden
+ * konsument odczytujący pole powierzchni z cienia nigdy nie dostał podwójnie
+ * zliczonego wyniku.
  */
 export type SunBucketKey = string;
 
